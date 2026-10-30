@@ -1,0 +1,9 @@
+node_modules/
+.npm-cache/
+.env
+.env.*
+!.env.example
+secrets.local.md
+project.private.config.json
+*.log
+.DS_Store

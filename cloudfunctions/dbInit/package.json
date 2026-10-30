@@ -1,0 +1,9 @@
+{
+  "name": "dbInit",
+  "version": "1.0.0",
+  "description": "数据库初始化 — 创建集合 + 安全规则 + TTLock 配置 + 种子数据",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

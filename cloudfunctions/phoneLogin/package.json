@@ -1,0 +1,9 @@
+{
+  "name": "phoneLogin",
+  "version": "1.0.0",
+  "description": "手机号快捷登录 — getPhoneNumber code 换手机号 + 回填房产",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

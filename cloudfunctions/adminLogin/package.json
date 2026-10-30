@@ -1,0 +1,9 @@
+{
+  "name": "adminLogin",
+  "version": "1.0.0",
+  "description": "管理员登录 — 账号密码校验 + 改密（pbkdf2）",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

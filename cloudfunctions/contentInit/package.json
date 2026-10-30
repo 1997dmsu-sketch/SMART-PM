@@ -1,0 +1,9 @@
+{
+  "name": "contentInit",
+  "version": "1.0.0",
+  "description": "内容初始化：迁移全站硬编码内容到 content 集合",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

@@ -1,0 +1,42 @@
+[
+  {
+    "file": "design/screens/一键开门.png",
+    "sha256": "7651bdfe8d8b6fd075587fb9472f82f8b07c3bdcde2332cc531180686b48a6f5"
+  },
+  {
+    "file": "design/screens/家庭成员弹窗.png",
+    "sha256": "d814b1ebc7ef91d7091aa05afb23ff09d4951d471b4fe11d39d99e54f77e5837"
+  },
+  {
+    "file": "design/screens/我的.png",
+    "sha256": "907be2dd154a39a085f46e3acc93d34935e828a6f5cb971921d100d85902eb59"
+  },
+  {
+    "file": "design/screens/房源信息.png",
+    "sha256": "9fb845f05d8d6b564947a9c0d34d9ff27367b32b51fc3a51b1b9701df7731043"
+  },
+  {
+    "file": "design/screens/消息.png",
+    "sha256": "256b8a9ecc2c1e3c86bacb4707a4e35283a8038d75c9c4813b187cbdd25cd072"
+  },
+  {
+    "file": "design/screens/生活.png",
+    "sha256": "6f74e778875b01acc1a04a2fd4afab0dcf9fe1d619ed7940273e9953c6d6fed3"
+  },
+  {
+    "file": "design/screens/租房.png",
+    "sha256": "77f5d6c7c73e5465f50ee3207923936abe97d606e54696d1efc648388e4410a3"
+  },
+  {
+    "file": "design/screens/租房简介.png",
+    "sha256": "f2736c8ee273f64b5466396bfd134325162f4ce7be1d02b1b208874389a6272b"
+  },
+  {
+    "file": "design/screens/租房简介2.png",
+    "sha256": "196912f1e608bd859269b5b1f77d6be1d8f5efbf173eeb1df097e80ee7cf7f22"
+  },
+  {
+    "file": "design/screens/首页.png",
+    "sha256": "0146bdd7bd3dc4892ca0c009e9b864dc25b654503a383639240e173a190c18ff"
+  }
+]

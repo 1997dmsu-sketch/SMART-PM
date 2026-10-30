@@ -1,0 +1,9 @@
+{
+  "name": "getTuyaDynamicPassword",
+  "version": "1.0.0",
+  "description": "获取涂鸦门锁动态密码",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

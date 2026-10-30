@@ -1,0 +1,10 @@
+{
+  "name": "listLocks",
+  "version": "1.0.0",
+  "description": "获取通通锁账号下的所有门锁列表",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0",
+    "node-fetch": "^2.7.0"
+  }
+}

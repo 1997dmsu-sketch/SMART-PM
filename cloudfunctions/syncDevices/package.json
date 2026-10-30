@@ -1,0 +1,9 @@
+{
+  "name": "syncDevices",
+  "version": "1.0.0",
+  "description": "同步 TTLock 设备到数据库",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

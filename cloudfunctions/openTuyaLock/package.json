@@ -1,0 +1,9 @@
+{
+  "name": "openTuyaLock",
+  "version": "1.0.0",
+  "description": "涂鸦门锁免密开门",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

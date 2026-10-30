@@ -1,0 +1,65 @@
+<view class="unlock-page">
+  <view class="page-top" style="padding-top: {{statusBarHeight}}px;">
+    <view class="navigation">
+      <text class="navigation-title">一键开门</text>
+      <button class="refresh-button" bindtap="refresh" aria-label="刷新门锁" disabled="{{loading}}"><image src="/assets/unlock-refresh.png" /></button>
+    </view>
+    <view class="residence" bindtap="openFamily" role="button" aria-label="查看家庭成员">
+      <view class="residence-name"><image src="/assets/unlock-location.png" /><text>{{community}}</text><text class="family-chevron">›</text></view>
+      <view class="resident-tags"><text>{{demo ? '住户 · 业主用户' : '云端房屋授权'}}</text><text>{{demo ? '设计演示' : '查看家庭成员'}}</text></view>
+    </view>
+    <view class="hero-wrap">
+      <button class="unlock-hero" bindtap="primaryUnlock" disabled="{{loading || !!pendingId}}">
+        <view class="hero-icon"><image src="/assets/unlock-hero.png" /></view>
+        <view class="hero-copy"><text class="hero-title">一键开门</text><text class="hero-subtitle">{{demo ? '演示模式 · 不操作真实门锁' : '选择已授权门锁，远程开门'}}</text></view>
+        <text class="hero-arrow">›</text>
+      </button>
+      <view class="hero-base"></view>
+    </view>
+  </view>
+
+  <view class="unlock-content">
+    <view class="section-heading"><text>我的门锁</text><text class="connection-state"><text class="connection-dot">•</text>{{demo ? '演示设备' : '远程开门'}}</text></view>
+    <view wx:if="{{loading && !locks.length}}" class="status-card">正在加载门锁…</view>
+    <view wx:elif="{{error}}" class="status-card"><text>{{error}}</text><button class="retry-button" bindtap="refresh">重新加载</button></view>
+    <view wx:elif="{{!locks.length}}" class="status-card">暂无已授权门锁，请联系物业绑定房屋。</view>
+    <view wx:else class="lock-card">
+      <view class="lock-row" wx:for="{{locks}}" wx:key="id">
+        <image class="lock-icon" src="/assets/unlock-lock.png" />
+        <view class="lock-info"><view class="lock-name"><text>{{item.name}}</text><text wx:if="{{item.nfc}}" class="lock-tag">NFC</text></view><text class="lock-address">{{item.address || '房屋地址待完善'}}</text></view>
+        <button class="open-button" bindtap="onUnlock" data-id="{{item.id}}" loading="{{pendingId === '' + item.id}}" disabled="{{!!pendingId || confirming}}">{{pendingId === '' + item.id ? '' : '开门'}}</button>
+      </view>
+    </view>
+
+    <view class="section-heading recent-heading"><text>最近开门</text><button class="view-all" bindtap="showRecords">{{showAllRecords ? '收起记录' : '查看全部'}} ›</button></view>
+    <view wx:if="{{recordsError}}" class="status-card">{{recordsError}}</view>
+    <view wx:elif="{{loading && !records.length}}" class="status-card">正在加载记录…</view>
+    <view wx:elif="{{!records.length}}" class="status-card">暂无开门记录</view>
+    <block wx:else wx:for="{{records}}" wx:key="id">
+      <view wx:if="{{showAllRecords || index < 4}}" class="record-card">
+        <view><text class="record-name">{{item.name}}</text><text class="record-time">{{item.time}}</text></view>
+        <text class="record-status {{item.successful ? 'is-success' : ''}}">{{item.status === 'success' ? '成功' : item.status}}</text>
+      </view>
+    </block>
+    <text wx:if="{{demo}}" class="demo-caption">以上为设计演示数据，非真实开门记录</text>
+  </view>
+
+  <view wx:if="{{familyOpen}}" class="family-mask" bindtap="closeFamily" catchtouchmove="stopBubble">
+    <view class="family-dialog" catchtap="stopBubble">
+      <text class="family-title">家庭成员</text>
+      <view wx:if="{{familyLoading}}" class="family-empty">正在加载成员…</view>
+      <view wx:elif="{{familyError}}" class="family-empty">{{familyError}}</view>
+      <view wx:elif="{{!family.length}}" class="family-empty">暂无家庭成员</view>
+      <scroll-view wx:else class="family-list" scroll-y>
+        <view class="member-row" wx:for="{{family}}" wx:key="id">
+          <image wx:if="{{item.avatar}}" class="member-avatar" src="{{item.avatar}}" mode="aspectFill" />
+          <view wx:else class="member-avatar avatar-fallback">{{item.name}}</view>
+          <view class="member-info"><text class="member-name">{{item.name}}</text><text class="member-meta">{{item.relationship}}{{item.phone ? ' | ' + item.phone : ''}}</text></view>
+          <text class="member-badge {{item.authorized ? 'authorized' : ''}}">{{item.authorized ? '已授权' : '未授权'}}</text>
+        </view>
+      </scroll-view>
+      <button class="add-member" bindtap="addFamily"><text class="add-symbol">＋</text>添加家庭成员</button>
+      <button class="cancel-family" bindtap="closeFamily">取消</button>
+    </view>
+  </view>
+</view>

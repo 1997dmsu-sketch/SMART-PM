@@ -1,0 +1,9 @@
+{
+  "name": "getHouses",
+  "version": "1.0.0",
+  "description": "房源列表查询 + 筛选",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

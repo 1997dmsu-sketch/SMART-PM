@@ -1,0 +1,9 @@
+{
+  "name": "messageList",
+  "version": "1.0.0",
+  "description": "消息读取：会话列表（含未读总数）与单会话消息分页",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

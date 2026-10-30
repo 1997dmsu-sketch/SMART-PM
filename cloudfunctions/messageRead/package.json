@@ -1,0 +1,9 @@
+{
+  "name": "messageRead",
+  "version": "1.0.0",
+  "description": "标记已读：清零会话未读并回填 tabBar 红点总数",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

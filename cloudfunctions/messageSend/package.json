@@ -1,0 +1,9 @@
+{
+  "name": "messageSend",
+  "version": "1.0.0",
+  "description": "消息发送：内容安全唯一入口，msgSecCheck 通过后才落库",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

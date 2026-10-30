@@ -1,0 +1,10 @@
+{
+  "name": "unlock",
+  "version": "1.0.0",
+  "description": "通通锁一键开门云函数 — 权限校验 + TTLock Cloud API V3 + 开门日志",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0",
+    "node-fetch": "^2.7.0"
+  }
+}

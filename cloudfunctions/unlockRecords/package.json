@@ -1,0 +1,9 @@
+{
+  "name": "unlockRecords",
+  "version": "1.0.0",
+  "description": "查询开门历史记录",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

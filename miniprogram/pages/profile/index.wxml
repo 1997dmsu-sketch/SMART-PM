@@ -1,0 +1,37 @@
+<view class="profile-page" style="padding-top: {{statusBarHeight}}px;">
+  <view class="profile-nav"><text>我的</text><button aria-label="账号设置" bindtap="settings"><image src="/assets/profile-settings.png" /></button></view>
+  <view wx:if="{{demo}}" class="demo-label">设计演示 · 账户信息为示例数据</view>
+  <view class="identity">
+    <image class="avatar" src="{{profile.avatar}}" mode="aspectFill" />
+    <view class="identity-copy">
+      <view class="identity-name"><text>{{profile.nickname}}</text><text wx:if="{{demo || profile.isOwner}}" class="owner-badge">✦ 业主</text></view>
+      <text class="property-id">物业ID: {{profile.propertyId}}</text>
+      <view wx:if="{{profile.community || profile.house}}" class="identity-address"><text wx:if="{{profile.community}}" class="community-label">{{profile.community}}</text><text>{{profile.house}}</text></view>
+      <text wx:elif="{{!authenticated}}" class="login-hint">登录后查看您的房屋与服务</text>
+    </view>
+    <button wx:if="{{authenticated}}" class="edit-profile" bindtap="editProfile">编辑资料 ›</button>
+  </view>
+  <button wx:if="{{!authenticated && !demo}}" class="login-button" open-type="getPhoneNumber" bindgetphonenumber="login" loading="{{loggingIn}}" disabled="{{loggingIn}}">手机号快捷登录</button>
+  <view wx:if="{{error}}" class="error-panel"><text>{{error}}</text><button bindtap="loadProfile">重新加载</button></view>
+  <view class="profile-stats">
+    <button bindtap="openService" data-name="我的积分"><text class="stat-value">{{profile.points}}</text><text>我的积分</text></button>
+    <button bindtap="openService" data-name="优惠券"><text class="stat-value">{{profile.coupons}}</text><text>优惠券</text></button>
+    <button bindtap="openService" data-name="我的工单"><text class="stat-value">{{profile.orders}}</text><text>我的工单</text></button>
+  </view>
+  <view class="service-card">
+    <text class="section-heading">常用服务</text>
+    <view class="service-grid"><button wx:for="{{services}}" wx:key="id" data-name="{{item.name}}" bindtap="openService"><image src="/assets/profile-{{item.icon}}.png" /><text>{{item.name}}</text></button></view>
+  </view>
+  <view class="menu-card">
+    <text class="section-heading">更多服务</text>
+    <button wx:for="{{menus}}" wx:key="id" class="menu-row" data-id="{{item.id}}" bindtap="openMenu"><image src="/assets/profile-{{item.id}}.png" /><text>{{item.name}}</text><text class="chevron">›</text></button>
+  </view>
+  <view wx:if="{{showFavorites}}" class="modal-mask" bindtap="closeFavorites">
+    <view class="favorites-sheet" catchtap="stopTap">
+      <view class="favorites-title"><text>我的收藏</text><button bindtap="closeFavorites" aria-label="关闭收藏">×</button></view>
+      <text wx:if="{{!favorites.length}}" class="empty-favorites">还没有收藏房源，喜欢的房源可在详情页收藏。</text>
+      <scroll-view wx:else scroll-y class="favorites-list"><button wx:for="{{favorites}}" wx:key="id" data-id="{{item.id}}" bindtap="openFavorite">{{item.title}}<text>›</text></button></scroll-view>
+      <text class="local-note">收藏仅保存在当前设备</text>
+    </view>
+  </view>
+</view>

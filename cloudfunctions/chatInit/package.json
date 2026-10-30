@@ -1,0 +1,9 @@
+{
+  "name": "chatInit",
+  "version": "1.0.0",
+  "description": "聊天初始化：播种物业侧账号（staff）并为当前住户建会话（conversations）",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

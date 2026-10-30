@@ -1,0 +1,10 @@
+{
+  "name": "addTuyaDevice",
+  "version": "1.0.0",
+  "description": "涂鸦诊断 + 设备管理",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0",
+    "node-fetch": "^2.7.0"
+  }
+}

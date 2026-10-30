@@ -1,0 +1,10 @@
+{
+  "name": "getLockKey",
+  "version": "1.0.0",
+  "description": "获取指定锁的蓝牙开门钥匙（lockData）",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0",
+    "node-fetch": "^2.7.0"
+  }
+}

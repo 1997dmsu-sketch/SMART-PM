@@ -1,0 +1,28 @@
+<view class="messages-page" style="padding-top: {{statusBarHeight}}px;">
+  <view class="messages-nav">
+    <button class="community" bindtap="selectCommunity"><text class="pin">●</text>宇宙智联智慧物业<text class="dropdown">▾</text></button>
+    <text class="nav-title">消息</text>
+  </view>
+  <view wx:if="{{demo}}" class="demo-label">设计演示 · 消息为示例数据</view>
+  <view class="message-tools"><button class="mark-read" bindtap="markAllRead" disabled="{{markingRead}}">{{markingRead ? '处理中' : '全部已读'}}</button></view>
+  <view class="notification-categories">
+    <image class="notification-art" src="/assets/message-notifications.png" mode="widthFix" />
+    <view class="notification-targets">
+      <button wx:for="{{categories}}" wx:key="*this" class="category-target" aria-label="{{item}}" data-title="{{item}}" bindtap="openCategory"></button>
+    </view>
+  </view>
+  <view wx:if="{{loading && !conversations.length}}" class="state-panel">正在加载消息…</view>
+  <view wx:if="{{error}}" class="state-panel error-panel">
+    <text>{{error}}</text><button bindtap="loadConversations">重新加载</button>
+  </view>
+  <view wx:elif="{{!loading && !conversations.length}}" class="state-panel">
+    <text class="empty-title">暂无会话</text><text>新的物业消息会显示在这里</text>
+  </view>
+  <view class="conversations">
+    <button wx:for="{{conversations}}" wx:key="key" class="conversation" data-id="{{item.id}}" bindtap="openConversation">
+      <image class="conversation-avatar" src="{{item.avatar}}" mode="aspectFill" />
+      <view class="conversation-copy"><text class="conversation-name">{{item.name}}</text><text class="conversation-last">{{item.lastMessage}}</text></view>
+      <view class="conversation-meta"><text class="conversation-time">{{item.time}}</text><text wx:if="{{item.unread}}" class="unread-badge">{{item.unread > 99 ? '99+' : item.unread}}</text></view>
+    </button>
+  </view>
+</view>

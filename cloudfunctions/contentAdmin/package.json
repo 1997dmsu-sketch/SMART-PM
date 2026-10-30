@@ -1,0 +1,9 @@
+{
+  "name": "contentAdmin",
+  "version": "1.0.0",
+  "description": "内容管理：增删改查 + 上下架（管理页使用）",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

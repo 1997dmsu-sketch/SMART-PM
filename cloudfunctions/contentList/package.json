@@ -1,0 +1,9 @@
+{
+  "name": "contentList",
+  "version": "1.0.0",
+  "description": "内容读取：返回已上架内容，按 sortOrder 排序",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

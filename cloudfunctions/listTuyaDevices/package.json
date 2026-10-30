@@ -1,0 +1,9 @@
+{
+  "name": "listTuyaDevices",
+  "version": "1.0.0",
+  "description": "获取涂鸦门锁设备列表",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "meterService",
+  "version": "1.0.0",
+  "description": "智能水电表 —— 通通锁水表/电表云 API（列设备/读数/历史用量）",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0",
+    "node-fetch": "^2.6.7"
+  }
+}

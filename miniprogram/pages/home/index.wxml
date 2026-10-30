@@ -1,0 +1,24 @@
+<view class="home-page">
+  <view class="home-header" style="padding-top: {{statusBarHeight}}px;">
+    <view class="top-row">
+      <view wx:if="{{!searching}}" class="community-chip" bindtap="showCommunity"><view class="pin"></view><text>{{community}}</text><text class="chevron">▾</text></view>
+      <input wx:else class="search-input" value="{{keyword}}" placeholder="搜索社区生活" focus="{{searching}}" bindinput="onSearch" confirm-type="search" />
+      <view class="search-button" bindtap="toggleSearch" aria-label="{{searching ? '关闭搜索' : '搜索'}}"><text wx:if="{{searching}}" class="search-close">取消</text><view wx:else class="search-icon"></view></view>
+    </view>
+    <view class="feed-tabs"><view class="feed-tab {{activeTab === 'follow' ? 'selected' : ''}}" data-tab="follow" bindtap="switchTab">关注<view wx:if="{{activeTab === 'follow'}}" class="tab-line"></view></view><view class="feed-tab {{activeTab === 'discover' ? 'selected' : ''}}" data-tab="discover" bindtap="switchTab">发现<view wx:if="{{activeTab === 'discover'}}" class="tab-line"></view></view></view>
+  </view>
+  <view wx:if="{{isDemo}}" class="mode-hint">设计演示 · 内容仅供预览</view>
+  <view wx:if="{{loading}}" class="state"><view class="loading-dot"></view><text>正在发现社区好生活…</text></view>
+  <view wx:elif="{{error}}" class="state"><text>{{error}}</text><button class="retry" bindtap="loadContent">重新加载</button></view>
+  <view wx:elif="{{empty}}" class="state"><text class="empty-symbol">♡</text><text>{{keyword ? '没有找到相关内容' : activeTab === 'follow' ? '还没有关注的内容' : '社区新鲜事即将上线'}}</text><text class="state-note" wx:if="{{activeTab === 'follow'}}">在发现页点亮爱心，将喜欢的内容留在这里</text></view>
+  <view wx:else class="waterfall">
+    <view class="waterfall-column" wx:for="{{columns}}" wx:key="index" wx:for-item="column">
+      <view class="post-card" wx:for="{{column}}" wx:key="id" wx:for-item="post" data-id="{{post.id}}" bindtap="openPost">
+        <image wx:if="{{post.cover}}" class="post-image" src="{{post.cover}}" mode="aspectFill" style="height: {{post.imageHeight}}rpx;" lazy-load />
+        <view wx:else class="image-placeholder" style="height: {{post.imageHeight}}rpx;"><view class="placeholder-house">⌂</view><text>美好社区生活</text></view>
+        <view class="post-body"><view class="post-title">{{post.title}}</view><view class="tags" wx:if="{{post.tags.length}}"><text wx:for="{{post.tags}}" wx:key="*this" class="tag">{{item}}</text></view><view class="post-footer"><image class="avatar" src="{{post.avatar}}" mode="aspectFill"/><text class="author">{{post.author}}</text><view class="like-button {{post.followed ? 'liked' : ''}}" data-id="{{post.id}}" catchtap="toggleFollow" aria-label="{{post.followed ? '取消关注' : '关注内容'}}"><text class="heart">{{post.followed ? '♥' : '♡'}}</text><text class="like-count">{{post.displayLikes}}</text></view></view></view>
+      </view>
+    </view>
+  </view>
+  <view wx:if="{{selectedPost}}" class="post-mask" bindtap="closePost"><view class="post-detail" catchtap="stopTap"><view class="detail-close" bindtap="closePost">×</view><image wx:if="{{selectedPost.cover}}" class="detail-image" src="{{selectedPost.cover}}" mode="aspectFill" bindtap="previewPostImage"/><view class="detail-title">{{selectedPost.title}}</view><text class="detail-author">{{selectedPost.author}}</text><text class="detail-description">{{selectedPost.description || '一同发现社区里的美好日常。'}}</text><button class="detail-button" bindtap="closePost">继续发现</button></view></view>
+</view>

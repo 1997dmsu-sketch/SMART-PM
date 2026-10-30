@@ -1,0 +1,6 @@
+{
+  "navigationStyle": "custom",
+  "enablePullDownRefresh": true,
+  "backgroundColor": "#fff0f2",
+  "navigationBarTitleText": "一键开门"
+}

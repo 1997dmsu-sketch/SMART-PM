@@ -1,0 +1,9 @@
+{
+  "name": "houseAdmin",
+  "version": "1.0.0",
+  "description": "门锁授权管理 — 住户/房屋/门锁绑定与撤销",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

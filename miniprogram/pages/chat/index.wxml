@@ -1,0 +1,11 @@
+<view class="chat" style="padding-top:{{statusBarHeight}}px">
+ <view class="nav"><button bindtap="back" aria-label="返回">‹</button><text>{{title}}</text></view>
+ <view wx:if="{{demo}}" class="demo-notice">设计演示 · 不会发送真实消息</view>
+ <view wx:if="{{error}}" class="error-state">{{error}}<button bindtap="load">重新加载</button></view>
+ <view wx:if="{{loading}}" class="empty-state">正在加载消息…</view>
+ <button wx:if="{{hasMore}}" class="more" bindtap="more" disabled="{{loading}}">加载更早消息</button>
+ <text wx:if="{{loadMoreError}}" class="error-state">{{loadMoreError}}</text>
+ <view wx:if="{{!loading && !error && !messages.length}}" class="empty-state">暂无消息</view>
+ <view wx:for="{{messages}}" wx:key="_id" class="message {{item.from === 'owner' ? 'mine' : ''}}"><text class="time">{{item.timeText}}</text><view class="bubble"><text selectable>{{item.content}}</text></view></view>
+ <view class="composer"><input value="{{text}}" bindinput="input" placeholder="输入咨询内容" maxlength="500" confirm-type="send" bindconfirm="send"/><button bindtap="send" disabled="{{sending || !text}}">{{sending ? '发送中' : '发送'}}</button></view>
+</view>

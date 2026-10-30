@@ -1,0 +1,128 @@
+<view class="rental-page">
+  <view class="rental-nav {{scrolled || !house ? 'solid' : ''}}" style="padding-top:{{statusBarHeight}}px;">
+    <view class="nav-row">
+      <button class="nav-icon back" bindtap="goBack" aria-label="返回">‹</button>
+      <text wx:if="{{scrolled}}" class="nav-title">{{house.title}}</text>
+      <view class="nav-actions">
+        <button class="nav-icon" bindtap="consult" aria-label="消息"><image src="/assets/rental-chat.png" /></button>
+        <button class="nav-icon share" open-type="share" aria-label="分享房源">↗</button>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading}}" class="page-state" style="padding-top:{{navHeight + 90}}px;">正在加载房源…</view>
+  <view wx:elif="{{error}}" class="page-state" style="padding-top:{{navHeight + 90}}px;">
+    <text>{{error}}</text><button class="retry" bindtap="load">重新加载</button>
+  </view>
+  <view wx:elif="{{!house}}" class="page-state" style="padding-top:{{navHeight + 90}}px;">
+    <text>暂未找到该房源</text><text class="state-note">房源可能已下架，请查看其他在租房源。</text><button class="retry" bindtap="seeMore">浏览房源</button>
+  </view>
+  <block wx:else>
+    <view class="gallery">
+      <swiper wx:if="{{galleryImages.length}}" class="gallery-swiper" current="{{imageIndex}}" bindchange="imageChanged">
+        <swiper-item wx:for="{{galleryImages}}" wx:key="*this"><image class="gallery-photo" src="{{item}}" mode="aspectFill" bindtap="previewImage" /></swiper-item>
+      </swiper>
+      <view wx:else class="gallery-empty">{{galleryMode === 'community' ? '暂无小区照片' : '房源照片待补充'}}</view>
+      <view class="gallery-bottom">
+        <view class="gallery-tabs">
+          <button class="gallery-tab {{galleryMode === 'room' ? 'selected' : ''}}" data-mode="room" bindtap="changeGallery">房间</button>
+          <button class="gallery-tab {{galleryMode === 'community' ? 'selected' : ''}}" data-mode="community" bindtap="changeGallery">小区</button>
+        </view>
+        <text wx:if="{{galleryImages.length}}" class="image-count">{{imageIndex + 1}}/{{galleryImages.length}}</text>
+      </view>
+    </view>
+    <view class="summary" id="section-overview">
+      <view wx:if="{{demo}}" class="demo-label">设计演示 · 房源信息仅用于预览</view>
+      <view class="price-row"><text class="price">{{house.priceText}}</text><text class="price-unit">元/月</text><text class="payment">（{{house.payment}}）</text></view>
+      <view class="facts">
+        <view class="fact"><text class="fact-value">{{house.rooms}}</text><text class="fact-label">{{house.rentType || '租赁方式待补充'}}</text></view>
+        <view class="fact"><text class="fact-value">{{house.areaText}}</text><text class="fact-label">建筑面积</text></view>
+        <view class="fact"><text class="fact-value">{{house.orientation}}</text><text class="fact-label">朝向</text></view>
+        <view class="fact"><text class="fact-value">{{house.floorText}}</text><text class="fact-label">楼层</text></view>
+      </view>
+      <view class="tags"><text wx:for="{{house.tags}}" wx:key="*this" class="tag">{{item}}</text></view>
+      <view class="community-card" data-section="community" bindtap="jumpTo">
+        <text class="community-name">{{house.community}} <text class="circle-arrow">›</text></text>
+        <text class="community-address">{{house.nearby}}</text>
+        <view class="community-bottom"><text>了解小区与周边配套</text><text class="green">查看详情 ›</text></view>
+      </view>
+    </view>
+
+    <view class="section-tabs" style="top:{{navHeight}}px;">
+      <view wx:for="{{tabs}}" wx:key="id" class="section-tab {{activeSection === item.id ? 'active' : ''}}" data-section="{{item.id}}" bindtap="jumpTo">{{item.label}}</view>
+    </view>
+    <view class="detail-content">
+      <view class="detail-card" id="section-lease">
+        <view class="card-title">租住详情</view>
+        <view class="availability">{{house.availableFrom}}</view>
+        <view class="lease-row"><text>{{house.leaseTerm}}</text><text class="green" bindtap="openAppointment">◷ 预约看房 ›</text></view>
+        <view class="subheading">费用明细</view>
+        <view class="fee-table">
+          <view><text class="fee-label">付款方式</text><text class="fee-value">{{house.payment}}</text></view>
+          <view><text class="fee-label">租金</text><text class="fee-value">{{house.priceText}}元/月</text></view>
+          <view><text class="fee-label">中介费 ⓘ</text><text class="fee-value">{{house.agencyFee}}</text></view>
+          <view><text class="fee-label">押金 ⓘ</text><text class="fee-value">{{house.depositText}}</text></view>
+        </view>
+        <button class="soft-button" bindtap="consult">咨询租金详情</button>
+      </view>
+
+      <view class="detail-card" id="section-facilities">
+        <view class="card-title">房源简介</view>
+        <view class="facilities">
+          <view wx:for="{{house.facilityItems}}" wx:key="key" class="facility {{item.available ? '' : 'unavailable'}}">
+            <image src="{{item.icon}}" mode="aspectFit" /><text>{{item.name}}</text>
+          </view>
+        </view>
+        <text class="facility-note">灰色设施表示暂未确认配备</text>
+        <view class="questions">
+          <button wx:for="{{questions}}" wx:key="*this" bindtap="consult"><text class="question-icon">☏</text>{{item}}</button>
+        </view>
+      </view>
+
+      <view class="detail-card" id="section-community">
+        <view class="card-title">小区详情</view>
+        <view class="community-detail-name">{{house.community}}</view>
+        <text class="detail-description">{{house.communityDescription || house.address || house.nearby}}</text>
+        <view wx:if="{{house.communityImages.length}}" class="community-thumbnails">
+          <image wx:for="{{house.communityImages}}" wx:key="*this" src="{{item}}" mode="aspectFill" data-src="{{item}}" bindtap="previewCommunity" />
+        </view>
+      </view>
+
+      <view class="detail-card recommendations">
+        <view class="card-title">附近好房推荐<text class="see-more" bindtap="seeMore">查看更多 ›</text></view>
+        <scroll-view wx:if="{{recommendations.length}}" scroll-x class="recommendation-scroll">
+          <view wx:for="{{recommendations}}" wx:key="id" class="recommendation" data-id="{{item.id}}" bindtap="openRecommendation">
+            <view class="recommendation-cover"><image wx:if="{{item.images.length}}" src="{{item.images[0]}}" mode="aspectFill" /><text wx:else class="no-photo">暂无图片</text><text class="cover-badge">在租房源</text></view>
+            <text class="recommendation-title">{{item.title}}</text>
+            <text class="recommendation-desc">{{item.areaText}}/{{item.rooms}}</text>
+            <text class="recommendation-price">{{item.priceText}}<text>元/月</text></text>
+          </view>
+        </scroll-view>
+        <view wx:else class="no-recommendations">暂无其他推荐房源</view>
+      </view>
+    </view>
+
+    <view class="bottom-actions">
+      <button class="minor-action {{favorite ? 'is-favorite' : ''}}" bindtap="toggleFavorite"><image src="/assets/rental-follow.png" /><text>{{favorite ? '已关注' : '关注'}}</text></button>
+      <button class="minor-action" bindtap="openAppointment"><image src="/assets/rental-appointment.png" /><text>预约</text></button>
+      <button class="contact-action phone" bindtap="contactPhone"><image src="/assets/rental-phone.png" />电话联系</button>
+      <button class="contact-action chat" bindtap="consult"><text class="chat-bubble">•••</text>在线咨询</button>
+    </view>
+  </block>
+
+  <view wx:if="{{appointmentOpen}}" class="modal-mask" bindtap="closeAppointment" catchtouchmove="stopPropagation">
+    <view class="appointment-sheet" catchtap="stopPropagation">
+      <view class="sheet-heading">预约看房<button bindtap="closeAppointment" aria-label="关闭">×</button></view>
+      <text class="draft-note">仅保存本机草稿，尚未向物业提交预约。</text>
+      <form bindsubmit="saveAppointment">
+        <label class="field"><text>联系人</text><input name="name" placeholder="请输入姓名" maxlength="30" /></label>
+        <label class="field"><text>手机号</text><input name="phone" type="number" placeholder="用于看房联系" maxlength="11" /></label>
+        <picker mode="date" start="{{minimumDate}}" value="{{appointmentDate}}" bindchange="changeDate"><view class="field"><text>看房日期</text><text class="picker-value">{{appointmentDate || '请选择日期'}} ›</text></view></picker>
+        <picker mode="time" value="{{appointmentTime}}" bindchange="changeTime"><view class="field"><text>看房时间</text><text class="picker-value">{{appointmentTime || '请选择时间'}} ›</text></view></picker>
+        <label class="field"><text>备注</text><input name="note" placeholder="选填" maxlength="200" /></label>
+        <text wx:if="{{formError}}" class="form-error">{{formError}}</text>
+        <button class="submit-draft" form-type="submit">保存预约草稿</button>
+      </form>
+    </view>
+  </view>
+</view>

@@ -1,1 +1,16 @@
-{"name":"smart-pm","version":"0.1.0","private":true,"description":"宇宙物业智联小程序","scripts":{"test":"node --test tests/*.test.cjs","check":"node scripts/check-miniprogram.mjs","verify:backend":"node scripts/verify-import.mjs","setup:backend":"node scripts/install-backend.mjs"},"engines":{"node":">=20"}}
+{
+  "name": "smart-pm",
+  "version": "0.1.0-beta.1",
+  "private": true,
+  "description": "宇宙物业智联小程序",
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "check": "node scripts/check-miniprogram.mjs",
+    "verify:backend": "node scripts/verify-import.mjs",
+    "setup:backend": "node scripts/install-backend.mjs",
+    "release:package": "python3 scripts/package-release.py"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -7,3 +7,4 @@ secrets.local.md
 project.private.config.json
 *.log
 .DS_Store
+dist/

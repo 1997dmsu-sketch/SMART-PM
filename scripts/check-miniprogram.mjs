@@ -7,6 +7,9 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 const root=fileURLToPath(new URL('../miniprogram/',import.meta.url));
 function walk(dir){return readdirSync(dir).flatMap(n=>statSync(resolve(dir,n)).isDirectory()?walk(resolve(dir,n)):[resolve(dir,n)]);}
+const version=JSON.parse(readFileSync(resolve(root,'config/version.json')));
+const pkg=JSON.parse(readFileSync(resolve(root,'../package.json')));
+assert.equal(version.version,pkg.version,'Product and package versions differ');
 const files=walk(root);const app=JSON.parse(readFileSync(resolve(root,'app.json')));
 for(const route of [...app.pages,'custom-tab-bar/index']){
  for(const ext of ['js','json','wxml','wxss'])assert(existsSync(resolve(root,route+'.'+ext)),`${route}.${ext} missing`);

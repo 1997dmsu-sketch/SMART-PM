@@ -26,6 +26,7 @@
     <text class="section-heading">更多服务</text>
     <button wx:for="{{menus}}" wx:key="id" class="menu-row" data-id="{{item.id}}" bindtap="openMenu"><image src="/assets/profile-{{item.id}}.png" /><text>{{item.name}}</text><text class="chevron">›</text></button>
   </view>
+  <view class="release-info">v{{release.version}} · {{release.channel}}</view>
   <view wx:if="{{showFavorites}}" class="modal-mask" bindtap="closeFavorites">
     <view class="favorites-sheet" catchtap="stopTap">
       <view class="favorites-title"><text>我的收藏</text><button bindtap="closeFavorites" aria-label="关闭收藏">×</button></view>

@@ -1,9 +1,10 @@
 const api = require('../../services/api');
+const release = require('../../config/version.json');
 const EMPTY_PROFILE = { nickname: '未登录', avatar: '/assets/profile-avatar.png', propertyId: '—', community: '', house: '', points: '—', coupons: '—', orders: '—' };
 
 Page({
   data: {
-    statusBarHeight: 20, demo: false, loading: false, error: '', authenticated: false,
+    release, statusBarHeight: 20, demo: false, loading: false, error: '', authenticated: false,
     profile: EMPTY_PROFILE, loggingIn: false,
     services: [
       { id: 'pending', name: '待处理', icon: 'pending' },
@@ -64,7 +65,7 @@ Page({
       this.setData({ showFavorites: true, favorites }); return;
     }
     if (id === 'about') {
-      wx.showModal({ title: '宇宙物业智联', content: '连接社区生活与物业服务。\n当前版本按新设计搭建，演示内容不代表真实房源、账户或设备状态。', showCancel: false, confirmColor: '#ff2450' }); return;
+      wx.showModal({ title: '宇宙物业智联', content: `版本 v${release.version} · ${release.channel}\n连接社区生活与物业服务。\n演示内容不代表真实房源、账户或设备状态。`, showCancel: false, confirmColor: '#ff2450' }); return;
     }
     this.unavailable('优惠券');
   },

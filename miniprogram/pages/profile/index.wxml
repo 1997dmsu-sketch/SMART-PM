@@ -1,12 +1,12 @@
 <view class="profile-page" style="padding-top: {{statusBarHeight}}px;">
-  <view class="profile-nav"><text>我的</text><button aria-label="账号设置" bindtap="settings"><image src="/assets/profile-settings.png" /></button></view>
+  <view class="profile-nav" style="height:{{navHeight}}px;"><text class="nav-title" style="left:{{navSideWidth}}px;right:{{navSideWidth}}px;">我的</text><button aria-label="账号设置" bindtap="settings"><image src="/assets/profile-settings.png" /></button></view>
   <view wx:if="{{demo}}" class="demo-label">设计演示 · 账户信息为示例数据</view>
   <view class="identity">
     <image class="avatar" src="{{profile.avatar}}" mode="aspectFill" />
     <view class="identity-copy">
-      <view class="identity-name"><text>{{profile.nickname}}</text><text wx:if="{{demo || profile.isOwner}}" class="owner-badge">✦ 业主</text></view>
+      <view class="identity-name"><text class="nickname">{{profile.nickname}}</text><text wx:if="{{demo || profile.isOwner}}" class="owner-badge">✦ 业主</text></view>
       <text class="property-id">物业ID: {{profile.propertyId}}</text>
-      <view wx:if="{{profile.community || profile.house}}" class="identity-address"><text wx:if="{{profile.community}}" class="community-label">{{profile.community}}</text><text>{{profile.house}}</text></view>
+      <view wx:if="{{profile.community || profile.house}}" class="identity-address"><text wx:if="{{profile.community}}" class="community-label">{{profile.community}}</text><text class="house-address">{{profile.house}}</text></view>
       <text wx:elif="{{!authenticated}}" class="login-hint">登录后查看您的房屋与服务</text>
     </view>
     <button wx:if="{{authenticated}}" class="edit-profile" bindtap="editProfile">编辑资料 ›</button>
@@ -31,7 +31,7 @@
     <view class="favorites-sheet" catchtap="stopTap">
       <view class="favorites-title"><text>我的收藏</text><button bindtap="closeFavorites" aria-label="关闭收藏">×</button></view>
       <text wx:if="{{!favorites.length}}" class="empty-favorites">还没有收藏房源，喜欢的房源可在详情页收藏。</text>
-      <scroll-view wx:else scroll-y class="favorites-list"><button wx:for="{{favorites}}" wx:key="id" data-id="{{item.id}}" bindtap="openFavorite">{{item.title}}<text>›</text></button></scroll-view>
+      <scroll-view wx:else scroll-y class="favorites-list"><button wx:for="{{favorites}}" wx:key="id" data-id="{{item.id}}" bindtap="openFavorite"><text class="favorite-name">{{item.title}}</text><text class="favorite-arrow">›</text></button></scroll-view>
       <text class="local-note">收藏仅保存在当前设备</text>
     </view>
   </view>

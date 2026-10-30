@@ -1,4 +1,5 @@
 const api = require('../../services/api');
+const { getNavigationLayout } = require('../../utils/layout');
 
 const roleAvatars = { property: 0, support: 1, repair: 2, security: 3 };
 function normalizeConversation(row, index) {
@@ -18,15 +19,16 @@ function normalizeConversation(row, index) {
 
 Page({
   data: {
-    statusBarHeight: 20, demo: false, loading: false, error: '',
+    statusBarHeight: 20, navHeight: 44, navSideWidth: 104, demo: false, loading: false, error: '',
     conversations: [], markingRead: false,
     categories: ['物业通知', '工单提醒', '缴费提醒', '访客申请'],
   },
   onLoad() {
-    const app = getApp();
-    this.setData({ statusBarHeight: app.globalData.statusBarHeight || 20, demo: api.isDemo() });
+    this.setData({ ...getNavigationLayout(), demo: api.isDemo() });
   },
+  onResize() { this.setData(getNavigationLayout()); },
   onShow() {
+    this.setData(getNavigationLayout());
     if (this.getTabBar && this.getTabBar()) this.getTabBar().setData({ selected: 'messages' });
     return this.loadConversations();
   },

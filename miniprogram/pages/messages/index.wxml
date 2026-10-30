@@ -1,10 +1,9 @@
 <view class="messages-page" style="padding-top: {{statusBarHeight}}px;">
-  <view class="messages-nav">
-    <button class="community" bindtap="selectCommunity"><text class="pin">●</text>宇宙智联智慧物业<text class="dropdown">▾</text></button>
-    <text class="nav-title">消息</text>
+  <view class="messages-nav" style="height:{{navHeight}}px;">
+    <text class="nav-title" style="left:{{navSideWidth}}px;right:{{navSideWidth}}px;">消息</text>
   </view>
   <view wx:if="{{demo}}" class="demo-label">设计演示 · 消息为示例数据</view>
-  <view class="message-tools"><button class="mark-read" bindtap="markAllRead" disabled="{{markingRead}}">{{markingRead ? '处理中' : '全部已读'}}</button></view>
+  <view class="message-tools"><button class="community" bindtap="selectCommunity"><text class="pin">●</text><text class="community-name">宇宙智联智慧物业</text><text class="dropdown">▾</text></button><button class="mark-read" bindtap="markAllRead" disabled="{{markingRead}}">{{markingRead ? '处理中' : '全部已读'}}</button></view>
   <view class="notification-categories">
     <image class="notification-art" src="/assets/message-notifications.png" mode="widthFix" />
     <view class="notification-targets">

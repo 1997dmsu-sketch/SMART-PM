@@ -1,10 +1,11 @@
 const api = require('../../services/api');
+const { getNavigationLayout } = require('../../utils/layout');
 const release = require('../../config/version.json');
 const EMPTY_PROFILE = { nickname: '未登录', avatar: '/assets/profile-avatar.png', propertyId: '—', community: '', house: '', points: '—', coupons: '—', orders: '—' };
 
 Page({
   data: {
-    release, statusBarHeight: 20, demo: false, loading: false, error: '', authenticated: false,
+    release, statusBarHeight: 20, navHeight: 44, navSideWidth: 104, demo: false, loading: false, error: '', authenticated: false,
     profile: EMPTY_PROFILE, loggingIn: false,
     services: [
       { id: 'pending', name: '待处理', icon: 'pending' },
@@ -20,9 +21,11 @@ Page({
     showFavorites: false, favorites: [],
   },
   onLoad() {
-    this.setData({ statusBarHeight: getApp().globalData.statusBarHeight || 20, demo: api.isDemo() });
+    this.setData({ ...getNavigationLayout(), demo: api.isDemo() });
   },
+  onResize() { this.setData(getNavigationLayout()); },
   onShow() {
+    this.setData(getNavigationLayout());
     if (this.getTabBar && this.getTabBar()) this.getTabBar().setData({ selected: 'profile' });
     return this.loadProfile();
   },

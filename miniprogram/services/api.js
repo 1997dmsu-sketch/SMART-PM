@@ -13,7 +13,11 @@ async function call(name, data = {}) {
   if (!wx.cloud || !wx.cloud.callFunction) throw new Error('当前环境不支持微信云开发');
   let response;
   try { response = await wx.cloud.callFunction({ name, data, config: {env:config.cloudEnv} }); }
-  catch (_) { throw new Error('服务连接失败，请检查网络或云函数部署后重试'); }
+  catch (error) {
+    const code = error && (error.errCode || error.code);
+    const hint = typeof code === 'number' || (typeof code === 'string' && /^-?\d+$/.test(code)) ? `，错误码 ${code}` : '';
+    throw new Error(`[${name}] 服务连接失败${hint}，请检查云环境及该函数是否已部署`);
+  }
   const result = response && response.result;
   if (!result || result.code !== 0) throw new Error(result && result.msg || '服务返回异常');
   return result;

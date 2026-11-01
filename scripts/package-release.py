@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build a tested source delivery from a clean Git commit; never include local caches."""
 from pathlib import Path
+import argparse
 import hashlib
 import io
 import json
@@ -15,6 +16,9 @@ def git(*args):
     return subprocess.check_output(['git', *args], cwd=ROOT).decode().strip()
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--live', action='store_true', help='Explicitly package the configured live integration build')
+    args = parser.parse_args()
     if git('status', '--porcelain', '--untracked-files=normal'):
         raise SystemExit('Commit all release inputs first; working tree must be clean.')
     package = json.loads((ROOT / 'package.json').read_text())
@@ -35,11 +39,16 @@ def main():
                 raise SystemExit(f'Forbidden delivery file: {entry.filename}')
         archive.extractall(tmp)
         checkout = Path(tmp) / 'SMART-PM'
-        runtime = (checkout / 'miniprogram/config/runtime.js').read_text()
-        # Evaluate the actual CommonJS config rather than searching comments.
-        validation = subprocess.run(['node', '-e', "const c=require('./miniprogram/config/runtime');if(c.mode!=='demo'||c.cloudEnv||c.allowDeviceOperations)process.exit(1)"], cwd=checkout)
-        if validation.returncode:
-            raise SystemExit('This delivery must keep demo mode and device operations disabled.')
+        runtime = json.loads(subprocess.check_output(['node', '-e', "process.stdout.write(JSON.stringify(require('./miniprogram/config/runtime')))"], cwd=checkout))
+        project = json.loads((checkout / 'project.config.json').read_text())
+        expected_mode = 'live' if args.live else 'demo'
+        if runtime.get('mode') != expected_mode or runtime.get('allowDeviceOperations') is not False:
+            raise SystemExit('Release mode must match the explicit package command and device operations must stay disabled.')
+        if args.live:
+            if not re.fullmatch(r'wx[0-9a-f]{16}', project.get('appid', '')) or not re.fullmatch(r'[A-Za-z0-9_-]+', runtime.get('cloudEnv', '')):
+                raise SystemExit('Live integration requires a valid AppID and confirmed cloud environment.')
+        elif runtime.get('cloudEnv'):
+            raise SystemExit('Demo delivery must not select a live cloud environment.')
         for command in (['npm', 'test'], ['npm', 'run', 'check']):
             result = subprocess.run(command, cwd=checkout, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             report.append('$ ' + ' '.join(command) + '\n' + result.stdout)
@@ -55,7 +64,9 @@ def main():
     (output / 'test-report.txt').write_text(f'Version: {version}\nCommit: {commit}\nValidation: extracted source archive, mocked WeChat APIs\n\n' + '\n'.join(report))
     (output / 'release-manifest.json').write_text(json.dumps({
         'version': version, 'tag': 'v' + version, 'commit': commit,
-        'channel': 'interaction-test', 'mode': 'demo',
+        'channel': 'backend-integration' if args.live else 'interaction-test', 'mode': expected_mode,
+        'appid': project.get('appid'), 'cloudEnv': runtime.get('cloudEnv'),
+        'platform_upload': 'not_performed',
         'artifact': archive_path.name, 'bytes': len(payload), 'sha256': checksum,
         'validated': ['extracted-source behavior tests', 'static miniprogram checks'],
         'not_validated': ['WeChat compilation', 'device rendering', 'live cloud services', 'hardware'],

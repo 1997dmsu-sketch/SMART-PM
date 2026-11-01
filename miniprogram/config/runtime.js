@@ -1,4 +1,7 @@
-// Preview is local and never calls the old cloud environment.
-// For live integration set mode to 'live', cloudEnv to your selected environment,
-// and configure the matching AppID in project.config.json.
-module.exports = { mode: 'demo', cloudEnv: '', allowDeviceOperations: false };
+// Confirmed existing WeChat environment for backend integration.
+// Real device commands remain disabled until authorization/hardware validation.
+module.exports = {
+  mode: 'live',
+  cloudEnv: 'cloud1-d6gs08jbb8aa7a138',
+  allowDeviceOperations: false
+};

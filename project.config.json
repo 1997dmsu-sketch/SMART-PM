@@ -1,7 +1,19 @@
 {
- "description":"宇宙物业智联 · 按本次设计重建",
- "miniprogramRoot":"miniprogram/", "cloudfunctionRoot":"cloudfunctions/",
- "projectname":"SMART-PM", "appid":"touristappid", "compileType":"miniprogram", "libVersion":"3.16.3",
- "setting":{"es6":true,"postcss":true,"minified":true,"urlCheck":true},
- "packOptions":{"ignore":[],"include":[]}
+  "description": "宇宙物业智联 · 按本次设计重建",
+  "miniprogramRoot": "miniprogram/",
+  "cloudfunctionRoot": "cloudfunctions/",
+  "projectname": "SMART-PM",
+  "appid": "wxd83b20cbba2a0b24",
+  "compileType": "miniprogram",
+  "libVersion": "3.16.3",
+  "setting": {
+    "es6": true,
+    "postcss": true,
+    "minified": true,
+    "urlCheck": true
+  },
+  "packOptions": {
+    "ignore": [],
+    "include": []
+  }
 }

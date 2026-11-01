@@ -145,7 +145,11 @@ export class PropertyService {
   }
   async autoRooms(data, audit) {
     const catalog = await this.store.list("property_catalog");
-    const plan = roomPlan(data, catalog);
+    const fullPlan = roomPlan(data, catalog);
+    const offset = data.offset ?? 0;
+    if (!Number.isInteger(offset) || offset < 0 || offset >= fullPlan.length)
+      fail("批次位置无效");
+    const plan = fullPlan.slice(offset, offset + 25);
     const building = catalog.find(
       (c) => c._id === data.buildingId && c.kind === "building",
     );
@@ -189,7 +193,7 @@ export class PropertyService {
               roomNo: p.number,
               name: `${fields.buildingName} ${fields.floorName} ${p.number}室`,
               address: `${fields.community} ${fields.buildingName} ${fields.floorName} ${p.number}室`,
-              sortOrder: i,
+              sortOrder: offset + i,
             },
           });
           count++;
@@ -200,7 +204,12 @@ export class PropertyService {
       },
       audit,
     );
-    return { count, skipped: plan.length - count };
+    return {
+      count,
+      skipped: plan.length - count,
+      total: fullPlan.length,
+      nextOffset: offset + plan.length,
+    };
   }
   async createRooms(data, audit) {
     if (

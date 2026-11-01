@@ -177,6 +177,20 @@ const assert = require("node:assert/strict");
   await page.locator("#auto-save").click();
   await page.locator("#editor").waitFor({ state: "hidden" });
   await page.getByRole("cell", { name: "3层", exact: false }).first().waitFor();
+  await page.locator("#new-floor").click();
+  await page.locator('#auto-form [name="end"]').fill("20");
+  await page.locator("#auto-save").click();
+  await page.locator("#editor").waitFor({ state: "hidden" });
+  await page.locator("#new-rooms").click();
+  await page.locator('#auto-form [name="end"]').fill("20");
+  await page.locator('#auto-form [name="count"]').fill("50");
+  await page
+    .getByText("将新增 994 间，跳过已存在 6 间", { exact: true })
+    .waitFor();
+  await page.locator("#auto-save").click();
+  await page.locator("#editor").waitFor({ state: "hidden", timeout: 60000 });
+  const allRooms = await app.store.list("rooms");
+  assert.equal(allRooms.filter((r) => r.buildingId).length, 1000);
   for (const width of [1024, 1280, 1920]) {
     await page.setViewportSize({ width, height: 900 });
     await page.locator('[data-nav="dashboard"]').click();

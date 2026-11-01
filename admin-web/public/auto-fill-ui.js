@@ -1,3 +1,4 @@
+import { runRoomBatches } from "./room-batches.js";
 import { floorPlan, roomPlan } from "./auto-fill.js";
 export function openAutoFill(
   kind,
@@ -49,14 +50,15 @@ export function openAutoFill(
       });
   else
     fields +=
-      number("count", "每层生成数量", 8, 1, 50) +
-      number("first", "房间起始序号", 1, 0, 999) +
+      number("count", "每层生成数量", 8, 1, 1000) +
+      number("first", "房间起始序号", 1, 0, 9999) +
       '<details class="auto-advanced"><summary>更多编号规则（前缀、位数、跳过房号）</summary><div class="form-grid">' +
       field("digits", "序号位数", 2, {
         choices: [
           [1, "1 位：11、12"],
           [2, "2 位：101、102"],
           [3, "3 位：1001、1002"],
+          [4, "4 位：10001、10002"],
         ],
       }) +
       field("prefix", "房号前缀（可选）", "", {
@@ -74,7 +76,7 @@ export function openAutoFill(
   openDialog(
     kind === "floors" ? "自动添加楼层" : "自动添加房间",
     "① 设置规则　→　② 自动预览　→　③ 确认添加",
-    `<form id="auto-form" class="editor-body"><div class="form-grid">${fields}</div><div class="notice autofill-note">${kind === "floors" ? "每次最多 50 层。已存在的楼层自动跳过，不更改名称。" : "房号 = 前缀 + 楼层号 + 房间序号。地下层使用 B1、B2。每次最多 50 间，需先建好对应楼层。"}<br>只新增，不覆盖已有房间或自动上架。</div><section class="auto-preview" aria-live="polite"><h3>自动填充预览</h3><div id="auto-summary"></div><div id="auto-list"></div></section><div class="form-error" role="alert"></div></form>`,
+    `<form id="auto-form" class="editor-body"><div class="form-grid">${fields}</div><div class="notice autofill-note">${kind === "floors" ? "每次最多 50 层。已存在的楼层自动跳过，不更改名称。" : "房号 = 前缀 + 楼层号 + 房间序号。地下层使用 B1、B2。每次最多 1000 间，需先建好对应楼层。分批保存并显示进度，中断后按原规则重试。"}<br>只新增，不覆盖已有房间或自动上架。</div><section class="auto-preview" aria-live="polite"><h3>自动填充预览</h3><div id="auto-summary"></div><div id="auto-list"></div></section><div id="auto-progress" role="status" aria-live="polite"></div><div class="form-error" role="alert"></div></form>`,
     `<button class="btn" id="manual-fill">${kind === "floors" ? "单层添加" : "手动输入房号"}</button><button class="btn" data-close>取消</button><button class="btn primary" form="auto-form" id="auto-save">确认添加</button>`,
   );
   let pending = false;
@@ -149,24 +151,51 @@ export function openAutoFill(
     const d = preview();
     if (!d) return;
     pending = true;
-    const buttons = [...$("#editor").querySelectorAll("button")];
+    const dialog = $("#editor");
+    const cancel = (e) => {
+      if (pending) e.preventDefault();
+    };
+    dialog.addEventListener("cancel", cancel);
+    const leaving = (e) => {
+      if (pending) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", leaving);
+    const buttons = [
+      ...dialog.querySelectorAll("button,input,select,textarea"),
+    ];
     buttons.forEach((b) => (b.disabled = true));
     try {
-      const result = await api("property/auto-" + kind, {
-        method: "POST",
-        data: d,
-      });
+      if ($("#auto-progress"))
+        $("#auto-progress").textContent = "正在保存，请保持此页面打开…";
+      if ($("#auto-save")) $("#auto-save").textContent = "正在保存…";
+      const result =
+        kind === "rooms"
+          ? await runRoomBatches(api, d, (p) => {
+              if ($("#auto-save"))
+                $("#auto-save").textContent =
+                  `已处理 ${p.processed} / ${p.total} 间`;
+              const progress = $("#auto-progress");
+              if (progress)
+                progress.textContent = `已处理 ${p.processed} / ${p.total} 间，新增 ${p.count}，跳过已有 ${p.skipped}`;
+            })
+          : await api("property/auto-" + kind, { method: "POST", data: d });
       $("#editor").close();
       toast(
         `新增 ${result.count} ${kind === "floors" ? "层" : "间"}，跳过已有 ${result.skipped}`,
       );
       await refresh();
     } catch (error) {
+      if ($("#auto-save")) $("#auto-save").textContent = "重试（自动跳过已有）";
       if ($("#auto-form .form-error"))
         $("#auto-form .form-error").textContent = error.message;
       else toast(error.message);
     } finally {
       pending = false;
+      dialog.removeEventListener("cancel", cancel);
+      window.removeEventListener("beforeunload", leaving);
       buttons.forEach((b) => (b.disabled = false));
     }
   };

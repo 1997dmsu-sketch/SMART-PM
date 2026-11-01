@@ -39,10 +39,10 @@ export function floorPlan(input) {
 export function roomPlan(input, floors) {
   const start = integer(input.start, "起始楼层", -10, 200),
     end = integer(input.end, "结束楼层", -10, 200);
-  if (end < start || end - start >= 20) bad("每次最多选择 20 层");
-  const count = integer(input.count, "每层生成数量", 1, 50),
-    first = integer(input.first, "房号起始序号", 0, 999),
-    digits = integer(input.digits, "房号序号位数", 1, 3);
+  if (end < start || end - start >= 100) bad("每次最多选择 100 层");
+  const count = integer(input.count, "每层生成数量", 1, 1000),
+    first = integer(input.first, "房号起始序号", 0, 9999),
+    digits = integer(input.digits, "房号序号位数", 1, 4);
   if (first + count - 1 >= 10 ** digits)
     bad("房间序号超出位数，请增加序号位数");
   const prefix = String(input.prefix || "").trim();
@@ -65,11 +65,14 @@ export function roomPlan(input, floors) {
     const label = level < 0 ? "B" + Math.abs(level) : String(level);
     for (let i = first; i < first + count; i++) {
       const number = prefix + label + String(i).padStart(digits, "0");
-      if (!skip.has(number))
+      if (!skip.has(number)) {
         result.push({ floorId: floor._id, floorName: floor.name, number });
+        if (result.length > 1000)
+          bad("每次最多生成 1000 间，请缩小楼层范围或每层数量");
+      }
     }
   }
   if (!result.length) bad("没有可生成的房间");
-  if (result.length > 50) bad("每次最多生成 50 间，请缩小楼层范围或每层数量");
+
   return result;
 }

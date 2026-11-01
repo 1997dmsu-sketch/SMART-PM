@@ -5,6 +5,7 @@ import {spawnSync} from 'node:child_process';
 import {createRequire} from 'node:module';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
+import wxmlValidator from './validate-wxml.cjs';
 const root=fileURLToPath(new URL('../miniprogram/',import.meta.url));
 function walk(dir){return readdirSync(dir).flatMap(n=>statSync(resolve(dir,n)).isDirectory()?walk(resolve(dir,n)):[resolve(dir,n)]);}
 const version=JSON.parse(readFileSync(resolve(root,'config/version.json')));
@@ -18,12 +19,7 @@ for(const route of [...app.pages,'custom-tab-bar/index']){
  vm.runInNewContext(readFileSync(script,'utf8'),{require:createRequire(script),Page:d=>definition=d,Component:d=>definition=d,console});
  const handlers=definition.methods||definition;
  const template=readFileSync(resolve(root,route+'.wxml'),'utf8');
- const stack=[];
- for(const tag of template.matchAll(/<(\/?)([\w:-]+)\b((?:"[^"]*"|'[^']*'|[^'">])*)>/g)){
-  if(tag[1])assert.equal(stack.pop(),tag[2],`${route}: unbalanced tag ${tag[0]}`);
-  else if(!tag[3].trimEnd().endsWith('/'))stack.push(tag[2]);
- }
- assert.equal(stack.length,0,`${route}: unclosed tags ${stack}`);
+ wxmlValidator.validateWxml(template, route);
  for(const match of template.matchAll(/(?:bind|catch)(?::)?[a-zA-Z]+="([A-Za-z_$][\w$]*)"/g))assert.equal(typeof handlers[match[1]],'function',`${route}: missing handler ${match[1]}`);
  for(const match of template.matchAll(/wx:(?:if|elif|for)="([^"]*)"/g))assert(match[1].includes('{{'),`${route}: literal directive ${match[0]}`);
  for(const match of template.matchAll(/src="(\/[^"{]+)"/g))assert(existsSync(resolve(root,'.'+match[1])),`asset missing ${match[1]}`);

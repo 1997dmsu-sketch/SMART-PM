@@ -35,11 +35,13 @@
     <view wx:if="{{recordsError}}" class="status-card">{{recordsError}}</view>
     <view wx:elif="{{loading && !records.length}}" class="status-card">正在加载记录…</view>
     <view wx:elif="{{!records.length}}" class="status-card">暂无开门记录</view>
-    <block wx:else wx:for="{{records}}" wx:key="id">
-      <view wx:if="{{showAllRecords || index < 4}}" class="record-card">
-        <view><text class="record-name">{{item.name}}</text><text class="record-time">{{item.time}}</text></view>
-        <text class="record-status {{item.successful ? 'is-success' : ''}}">{{item.status === 'success' ? '成功' : item.status}}</text>
-      </view>
+    <block wx:else>
+      <block wx:for="{{records}}" wx:key="id">
+        <view wx:if="{{showAllRecords || index < 4}}" class="record-card">
+          <view><text class="record-name">{{item.name}}</text><text class="record-time">{{item.time}}</text></view>
+          <text class="record-status {{item.successful ? 'is-success' : ''}}">{{item.status === 'success' ? '成功' : item.status}}</text>
+        </view>
+      </block>
     </block>
     <text wx:if="{{demo}}" class="demo-caption">以上为设计演示数据，非真实开门记录</text>
   </view>

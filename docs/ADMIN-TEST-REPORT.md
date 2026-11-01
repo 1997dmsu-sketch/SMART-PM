@@ -1,5 +1,11 @@
 # 电脑端后台测试记录
 
+## beta.10 Windows 路径修复
+
+用户在 Windows 启动成功后首页返回“文件不存在”。原因是静态目录检查将 Windows 路径与硬编码 `/` 拼接比较。已改为 path.relative / path.isAbsolute 校验，并使用 Node 的 path.win32 与 path.posix 验证首页、脚本、样式和图片路径及目录越界。新增 6 项路径测试，后台共 24 项测试通过。该验证运行在 Linux，模拟 Windows 路径规则；仍需用户 Windows 实际启动复验。
+
+## beta.9 首次交付记录
+
 版本：项目 v0.1.0-beta.9 / 后台 0.1.0-beta.1。日期：2026-11-01。
 
 ## 已验证

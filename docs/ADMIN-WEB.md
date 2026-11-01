@@ -1,6 +1,6 @@
 # 第一期电脑端管理后台部署与验收
 
-交付：项目 **v0.1.0-beta.9** / 后台 **0.1.0-beta.1**。第二期手机管理页面复用本期 HTTP API 和权限逻辑。
+交付：项目 **v0.1.0-beta.10** / 后台 **0.1.0-beta.2**。第二期手机管理页面复用本期 HTTP API 和权限逻辑。
 
 ## 1. 本地打开
 
@@ -9,7 +9,7 @@ Windows 安装 Node.js 20+，解压后双击 `admin-web/start-demo.cmd`，保持
 终端方式：
 
 ```powershell
-cd "C:\你的解压目录\SMART-PM-0.1.0-beta.9\admin-web"
+cd "C:\你的解压目录\SMART-PM-0.1.0-beta.10\admin-web"
 npm start
 ```
 

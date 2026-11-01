@@ -4,6 +4,7 @@ import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve, extname } from "node:path";
 import { LocalStore, CloudStore } from "./lib/store.mjs";
+import { resolvePublicFile } from "./lib/static-path.mjs";
 import { Accounts, publicAccount } from "./lib/auth.mjs";
 import {
   authorize,
@@ -97,7 +98,7 @@ export async function createApp({
           return send({
             mode,
             environment: mode === "live" ? process.env.CLOUDBASE_ENV_ID : null,
-            version: "0.1.0-beta.1",
+            version: "0.1.0-beta.2",
           });
         const token = (req.headers.cookie || "")
           .split(";")
@@ -409,11 +410,7 @@ export async function createApp({
           fail("文件不存在", 404);
         file = join(directory, path);
       } else {
-        const relative =
-          path === "/" ? "index.html" : decodeURIComponent(path.slice(1));
-        file = resolve(root, "public", relative);
-        if (!file.startsWith(resolve(root, "public") + "/"))
-          fail("文件不存在", 404);
+        file = resolvePublicFile(root, path);
       }
       let bytes;
       try {

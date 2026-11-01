@@ -1,0 +1,26 @@
+{
+  "name": "smart-pm-admin",
+  "version": "0.1.0-beta.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "create-admin": "node create-admin.mjs",
+    "test:sdk": "node scripts/check-sdk.mjs",
+    "test:browser": "node scripts/check-browser.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@cloudbase/node-sdk": "3.18.7"
+  },
+  "overrides": {
+    "axios": "0.34.0",
+    "@cloudbase/database": "2.0.0"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

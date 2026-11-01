@@ -1,6 +1,6 @@
 # 宇宙物业智联小程序
 
-当前版本：**v0.1.0-beta.7 · 后端联调版**。
+当前版本：**v0.1.0-beta.9 · 后端联调版**。
 本版本连接已确认的真实微信云环境，部署步骤见 [真实后端联调](docs/LIVE-DEPLOYMENT.md)。
 需要离线设计演示时，请下载标签 `v0.1.0-beta.2`。
 交付范围、导入步骤与验收用例见 [测试交付说明](docs/TESTING.md)，变更见 [版本记录](CHANGELOG.md)。
@@ -11,7 +11,8 @@
 ## 当前内容
 
 - `miniprogram/`：首页、广场、开门、消息、我的、租房详情、房源信息及补充咨询页。
-- `cloudfunctions/`：原样复制的旧后端；来源提交与文件校验在 `docs/backend-provenance.json`。
+- `cloudfunctions/`：复用旧后端；原始来源校验在 `docs/backend-provenance.json`，后续修复独立记录在 `docs/backend-changes.json`。
+- `admin-web/`：独立电脑端网页管理后台，双击 `start-demo.cmd` 后打开 http://127.0.0.1:4173；部署见 [后台说明](docs/ADMIN-WEB.md)。
 - `design/screens/` 与 `design/slices/`：本次完整设计图和原始切图，不打入运行包。
 - `tests/`：本地服务隔离、筛选、收藏、消息和开门调用守卫的行为测试。
 
@@ -47,7 +48,7 @@ node scripts/verify-import.mjs
 缓存默认 `/workspace/.smart-pm-npm-cache`，可通过 `npm_config_cache` 覆盖。
 
 `npm run check` 检查模板和引用结构，不等价于微信编译器验证。
-`verify-import` 验证原样迁入的后端和切图；后续有意修改后端时应单独记录差异。
+`verify-import` 根据原始来源与独立变更记录验证后端和切图。
 
 ## 真实环境对接
 

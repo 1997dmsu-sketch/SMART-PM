@@ -72,7 +72,8 @@ exports.main = async (event) => {
     let bound = Array.isArray(userInfo.houses) && userInfo.houses.length > 0;
     try {
       const owners = await db.collection('owners').where({ phone }).limit(1).get();
-      if (owners.data.length > 0) {
+      // 管理后台手动维护的房产优先，不再被旧 owners 记录覆盖。
+      if (owners.data.length > 0 && !userInfo.housesManaged) {
         const owner = owners.data[0];
         const houseIds = (owner.houses || []).map(h => h.houseId).filter(Boolean);
         const patch = { houses: houseIds };

@@ -8,3 +8,6 @@ project.private.config.json
 *.log
 .DS_Store
 dist/
+
+admin-web/.data/
+admin-web/test-results/

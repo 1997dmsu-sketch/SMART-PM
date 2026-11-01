@@ -49,7 +49,7 @@ def main():
                 raise SystemExit('Live integration requires a valid AppID and confirmed cloud environment.')
         elif runtime.get('cloudEnv'):
             raise SystemExit('Demo delivery must not select a live cloud environment.')
-        for command in (['npm', 'test'], ['npm', 'run', 'check']):
+        for command in (['npm', 'test'], ['npm', 'run', 'check'], ['npm', 'run', 'test:admin']):
             result = subprocess.run(command, cwd=checkout, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             report.append('$ ' + ' '.join(command) + '\n' + result.stdout)
             print(result.stdout, end='')
@@ -68,8 +68,8 @@ def main():
         'appid': project.get('appid'), 'cloudEnv': runtime.get('cloudEnv'),
         'platform_upload': 'not_performed',
         'artifact': archive_path.name, 'bytes': len(payload), 'sha256': checksum,
-        'validated': ['extracted-source behavior tests', 'static miniprogram checks'],
-        'not_validated': ['WeChat compilation', 'device rendering', 'live cloud services', 'hardware'],
+        'validated': ['extracted-source behavior tests', 'static miniprogram checks', 'admin HTTP permissions and workflow tests'],
+        'not_validated': ['WeChat compilation', 'device rendering', 'live cloud services', 'admin live cloud integration and deployment', 'hardware'],
     }, indent=2) + '\n')
     print(f'Delivery: {archive_path}\nSHA256: {checksum}')
 

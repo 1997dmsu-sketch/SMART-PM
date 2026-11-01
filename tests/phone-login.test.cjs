@@ -32,3 +32,6 @@ test('phone exchange errors cannot create an account',async()=>{
  for(const options of [{phoneError:{errMsg:'授权已过期'}},{phoneError:{errno:1400001}},{phoneResult:{}}]){const h=harness(options);assert.equal((await h.run({code:'code'})).code,500);assert.equal(h.writes.length,0);}
 });
 test('user database failure returns login failure',async()=>{const h=harness({usersError:true});assert.equal((await h.run({code:'code'})).code,500);assert.equal(h.writes.length,0);});
+test('manual admin binding is not overwritten by legacy owner data on login',async()=>{
+ for(const houses of [[],['manually-bound']]){const h=harness({users:[{_id:'existing',houses,housesManaged:true}],owners:[{houses:[{houseId:'legacy-house'}]}]});const r=await h.run({code:'code'});assert.equal(r.code,0);assert.equal(r.userInfo.houses.join(','),houses.join(','));assert.equal(r.bound,houses.length>0);assert.equal(h.writes.length,1);}
+});

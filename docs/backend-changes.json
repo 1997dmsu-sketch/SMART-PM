@@ -1,7 +1,7 @@
 {
   "cloudfunctions/phoneLogin/index.js": {
     "originalSha256": "b3a2f8ac9fee3472a3110d061c6f0fc050fe28005c4c9aa68a6ff2c3cb67a371",
-    "sha256": "69fa84e2dec00da4f630b539ebb1a2caf109eaf332bd2800f299779cfcf87a95",
-    "reason": "修复手机号登录房产绑定状态：使用 houseIds，并保留已有绑定状态。"
+    "sha256": "3ca1634f5b8d23603366850fab754334edab2df21be574bddb6546d5a7cad2a1",
+    "reason": "修复房产绑定状态；保留网页管理后台手动维护的 housesManaged 绑定，不被旧 owners 覆盖。"
   }
 }

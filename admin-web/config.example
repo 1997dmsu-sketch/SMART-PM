@@ -1,0 +1,14 @@
+# Copy to .env.local. Never commit .env.local or share secret values.
+ADMIN_MODE=live
+HOST=127.0.0.1
+PORT=4173
+ADMIN_ORIGIN=http://127.0.0.1:4173
+CLOUDBASE_ENV_ID=cloud1-d6gs08jbb8aa7a138
+TENCENTCLOUD_SECRETID=
+TENCENTCLOUD_SECRETKEY=
+# Optional absolute persistent directory; default is admin-web/.data/live
+# ADMIN_DATA_DIR=C:\smart-pm-admin-data
+# Used only once by create-admin.mjs; remove password after creation.
+ADMIN_USERNAME=
+ADMIN_NAME=系统管理员
+ADMIN_PASSWORD=

@@ -69,7 +69,7 @@ exports.main = async (event) => {
     }
 
     // 3. 按 phone 回填房产（owners 集合）
-    let bound = false;
+    let bound = Array.isArray(userInfo.houses) && userInfo.houses.length > 0;
     try {
       const owners = await db.collection('owners').where({ phone }).limit(1).get();
       if (owners.data.length > 0) {
@@ -79,7 +79,7 @@ exports.main = async (event) => {
         if (owner.name) patch.name = owner.name;
         await db.collection('users').doc(userId).update({ data: patch });
         userInfo = Object.assign({}, userInfo, patch);
-        bound = houses.length > 0;
+        bound = houseIds.length > 0;
       }
     } catch (e) {
       // owners 集合可能尚未初始化，回填失败不影响登录本身

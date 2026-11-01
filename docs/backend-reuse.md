@@ -5,7 +5,7 @@
 - 来源：https://github.com/1997dmsu-sketch/mini-shop
 - 分支：`main`（仓库默认分支；用户未指定其他分支）。
 - 提交：`b4c9370b62548492a6dc167c6aba98890a5df91e`。
-- 迁入 `cloudfunctions/` 下全部 61 个跟踪文件，业务代码未改写。
+- 最初原样迁入 `cloudfunctions/` 下全部 61 个跟踪文件。原始哈希保留在 backend-provenance.json；后续登录修复记录在 backend-changes.json，校验同时核对两份记录。
 - 旧前端、旧设计目录、H5 测试页面及旧页面需求未迁入。
 - 旧仓库说明只用于理解后端实现，不作为新页面需求来源。
 

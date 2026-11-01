@@ -56,3 +56,15 @@ test('life rental filter reaches adapter and only matching houses display',async
 test('chat preserves draft and displays failed send in demo',async()=>{
  const chat=page('chat');chat.id='demo-chat-0';chat.data.text='你好';await chat.send();assert.equal(chat.data.text,'你好');assert.equal(chat.data.messages.length,0);assert.equal(calls[0][0],'modal');
 });
+test('phone login cancellation never calls backend',async()=>{
+ config.mode='live';config.cloudEnv='test-env';const p=page('profile');await p.login({detail:{errMsg:'getPhoneNumber:fail user deny'}});assert.equal(p.data.authenticated,false);assert.equal(p.data.loggingIn,false);assert.equal(calls.length,1);assert.equal(calls[0][0],'toast');
+});
+test('phone login suppresses duplicates, authenticates and logs out',async()=>{
+ config.mode='live';config.cloudEnv='test-env';let finish;wx.cloud.callFunction=r=>{calls.push(r);return new Promise(resolve=>finish=resolve);};
+ const p=page('profile');const pending=p.login({detail:{code:'temporary-code'}});await p.login({detail:{code:'second-code'}});assert.equal(calls.length,1);assert.equal(calls[0].name,'phoneLogin');assert.equal(calls[0].config.env,'test-env');assert.equal(p.data.loggingIn,true);
+ finish({result:{code:0,userInfo:{name:'测试用户',phone:'test-phone',houses:[]}}});await pending;assert.equal(p.data.authenticated,true);assert.equal(p.data.loggingIn,false);
+ await api.logout();await p.loadProfile();assert.equal(p.data.authenticated,false);
+});
+test('phone login backend rejection clears busy state and permits retry',async()=>{
+ config.mode='live';config.cloudEnv='test-env';wx.cloud.callFunction=async()=>({result:{code:500,msg:'授权已过期'}});const p=page('profile');await p.login({detail:{code:'expired'}});assert.equal(p.data.authenticated,false);assert.equal(p.data.loggingIn,false);assert.equal(calls[0][1].title,'授权已过期');
+});

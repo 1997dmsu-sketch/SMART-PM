@@ -1,5 +1,13 @@
 # 版本记录
 
+## v0.1.0-beta.5 — 2026-11-01
+
+- 修复“我的”页直接require JSON引起 `config/version.json.js is not defined` 的运行时错误。
+- 版本元数据保留JSON用于工具检查，生成version.js供小程序加载；增加 `version:sync` 与一致性校验。
+- 修复custom-tab-bar使用 `.door image` 标签选择器的组件WXSS警告，改用 `.door-icon`。
+- 增加JS模块加载限制模拟，验证全部页面注册，防止Node测试误接受微信不支持的JSON导入。
+- 36项本地测试与独立wcc/wcsc编译通过；真实微信运行及云端业务仍需复验。
+
 ## v0.1.0-beta.4 — 2026-11-01
 
 - 修复开门页 wx:else 与 wx:for 共用节点导致微信 WXML 编译失败的问题，改为两层 block。

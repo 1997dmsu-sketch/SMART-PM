@@ -1,6 +1,6 @@
 const api = require('../../services/api');
 const { getNavigationLayout } = require('../../utils/layout');
-const release = require('../../config/version.json');
+const release = require('../../config/version');
 const EMPTY_PROFILE = { nickname: '未登录', avatar: '/assets/profile-avatar.png', propertyId: '—', community: '', house: '', points: '—', coupons: '—', orders: '—' };
 
 Page({

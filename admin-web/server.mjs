@@ -99,7 +99,7 @@ export async function createApp({
           return send({
             mode,
             environment: mode === "live" ? process.env.CLOUDBASE_ENV_ID : null,
-            version: "0.2.0-beta.1",
+            version: "0.2.0-beta.2",
           });
         const token = (req.headers.cookie || "")
           .split(";")
@@ -203,6 +203,16 @@ export async function createApp({
             return send(await service.snapshot());
           if (method === "POST") {
             const data = await body(req);
+            if (path === "/api/property/auto-floors")
+              return send(
+                await service.autoFloors(data, audit("自动填充楼层")),
+                201,
+              );
+            if (path === "/api/property/auto-rooms")
+              return send(
+                await service.autoRooms(data, audit("自动填充房间")),
+                201,
+              );
             if (path === "/api/property/catalog")
               return send(
                 await service.createCatalog(data, audit("新增物业目录")),

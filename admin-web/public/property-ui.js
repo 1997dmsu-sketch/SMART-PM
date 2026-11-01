@@ -1,3 +1,4 @@
+import { openAutoFill } from "./auto-fill-ui.js";
 // Property inventory is separate from rental marketing records.
 export function mountProperties(snapshot, helpers) {
   const {
@@ -65,6 +66,21 @@ export function mountProperties(snapshot, helpers) {
         button.disabled = false;
       }
     };
+  }
+  function autoFill(kind) {
+    openAutoFill(kind, {
+      catalog,
+      rooms,
+      buildingId,
+      floorId,
+      api,
+      esc,
+      field,
+      openDialog,
+      toast,
+      refresh,
+      manual: () => (kind === "floors" ? createCatalog("floor") : addRooms()),
+    });
   }
   function createCatalog(kind) {
     const names = {
@@ -417,8 +433,10 @@ export function mountProperties(snapshot, helpers) {
     $("#property-refresh").onclick = () =>
       refresh().catch((e) => toast(e.message));
     for (const kind of ["community", "building", "floor"])
-      $("#new-" + kind)?.addEventListener("click", () => createCatalog(kind));
-    $("#new-rooms")?.addEventListener("click", addRooms);
+      $("#new-" + kind)?.addEventListener("click", () =>
+        kind === "floor" ? autoFill("floors") : createCatalog(kind),
+      );
+    $("#new-rooms")?.addEventListener("click", () => autoFill("rooms"));
     $("#batch-layout")?.addEventListener("click", batch);
     const update = () => {
       $("#selection-count").textContent =

@@ -92,6 +92,7 @@ const assert = require("node:assert/strict");
   await page.locator('[form="property-form"]').click();
   await page.locator("#editor").waitFor({ state: "hidden" });
   await page.locator("#new-floor").click();
+  await page.locator("#manual-fill").click();
   await page
     .locator('[name="parentId"]')
     .selectOption({ label: "星河公寓 / 1栋" });
@@ -109,6 +110,7 @@ const assert = require("node:assert/strict");
   await page.locator('[form="property-form"]').click();
   await page.locator("#editor").waitFor({ state: "hidden" });
   await page.locator("#new-rooms").click();
+  await page.locator("#manual-fill").click();
   await page
     .locator('[name="floorId"]')
     .selectOption({ label: "星河公寓 / 1栋 / 1层" });
@@ -150,6 +152,31 @@ const assert = require("node:assert/strict");
   await page.locator('[name="area"]').fill("40");
   await page.getByRole("button", { name: "保存更改" }).click();
   await page.locator("#editor").waitFor({ state: "hidden" });
+  await page.locator('[data-nav="rooms"]').click();
+  await page.locator("#new-floor").click();
+  await page.locator('#auto-form [name="end"]').fill("3");
+  await page
+    .getByText("将新增 2 层，跳过已存在 1 层", { exact: true })
+    .waitFor();
+  await page.locator("#auto-save").click();
+  await page.locator("#editor").waitFor({ state: "hidden" });
+  await page.locator("#new-rooms").click();
+  await page.locator('#auto-form [name="start"]').fill("2");
+  await page.locator('#auto-form [name="end"]').fill("3");
+  await page.locator('#auto-form [name="count"]').fill("2");
+  await page.locator(".auto-advanced summary").click();
+  await page.locator('#auto-form [name="skip"]').fill("202");
+  await page.locator(".auto-advanced summary").click();
+  await page
+    .getByText("将新增 3 间，跳过已存在 0 间", { exact: true })
+    .waitFor();
+  await page.screenshot({
+    path: path.join(output, "auto-fill.png"),
+    fullPage: true,
+  });
+  await page.locator("#auto-save").click();
+  await page.locator("#editor").waitFor({ state: "hidden" });
+  await page.getByRole("cell", { name: "3层", exact: false }).first().waitFor();
   for (const width of [1024, 1280, 1920]) {
     await page.setViewportSize({ width, height: 900 });
     await page.locator('[data-nav="dashboard"]').click();

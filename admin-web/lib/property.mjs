@@ -1,3 +1,4 @@
+import { floorPlan, roomPlan } from "../public/auto-fill.js";
 import { createHash } from "node:crypto";
 import { fail } from "./model.mjs";
 const ref = (collection, id) => ({ collection, id });
@@ -112,6 +113,94 @@ export class PropertyService {
     ];
     if (layoutId) refs.push(ref("property_catalog", layoutId));
     return refs;
+  }
+  async autoFloors(data, audit) {
+    const buildingId = text(data.buildingId, "楼栋编号");
+    const plan = floorPlan(data);
+    const ids = plan.map((f) => "cat-" + stable("floor", buildingId, f.level));
+    let count = 0;
+    await this.store.transact(
+      [
+        ref("property_catalog", buildingId),
+        ...ids.map((id) => ref("property_catalog", id)),
+      ],
+      (state) => {
+        cat(state, buildingId, "building");
+        count = 0;
+        return plan.flatMap((f, i) => {
+          if (state[`property_catalog/${ids[i]}`]) return [];
+          count++;
+          return [
+            {
+              collection: "property_catalog",
+              id: ids[i],
+              data: { kind: "floor", parentId: buildingId, ...f, slots: [] },
+            },
+          ];
+        });
+      },
+      audit,
+    );
+    return { count, skipped: plan.length - count };
+  }
+  async autoRooms(data, audit) {
+    const catalog = await this.store.list("property_catalog");
+    const plan = roomPlan(data, catalog);
+    const building = catalog.find(
+      (c) => c._id === data.buildingId && c.kind === "building",
+    );
+    if (!building) fail("楼栋不存在");
+    const ids = plan.map((p) => "room-" + stable(p.floorId, p.number));
+    const refs = [
+      ref("property_catalog", building._id),
+      ref("property_catalog", building.parentId),
+      ...new Set(plan.map((p) => p.floorId)),
+    ].map((r) => (typeof r === "string" ? ref("property_catalog", r) : r));
+    if (data.layoutId) refs.push(ref("property_catalog", data.layoutId));
+    refs.push(...ids.map((id) => ref("rooms", id)));
+    let count = 0;
+    await this.store.transact(
+      refs,
+      (state) => {
+        count = 0;
+        const floors = new Map();
+        const writes = [];
+        for (let i = 0; i < plan.length; i++) {
+          const p = plan[i],
+            floor = cat(state, p.floorId, "floor");
+          if (floor.parentId !== data.buildingId)
+            fail("楼栋已改变，请刷新重试", 409);
+          const fields = roomFields(state, p.floorId, data.layoutId);
+          let slots = floors.get(floor._id) || [...(floor.slots || [])];
+          if (
+            slots.some((s) => s.number === p.number) ||
+            state[`rooms/${ids[i]}`]
+          )
+            continue;
+          if (slots.length >= 1000) fail("单层最多 1000 间");
+          slots.push({ number: p.number, id: ids[i] });
+          floors.set(floor._id, slots);
+          writes.push({
+            collection: "rooms",
+            id: ids[i],
+            data: {
+              ...fields,
+              houseId: "PROP-" + stable(p.floorId, p.number),
+              roomNo: p.number,
+              name: `${fields.buildingName} ${fields.floorName} ${p.number}室`,
+              address: `${fields.community} ${fields.buildingName} ${fields.floorName} ${p.number}室`,
+              sortOrder: i,
+            },
+          });
+          count++;
+        }
+        for (const [id, slots] of floors)
+          writes.push({ collection: "property_catalog", id, data: { slots } });
+        return writes;
+      },
+      audit,
+    );
+    return { count, skipped: plan.length - count };
   }
   async createRooms(data, audit) {
     if (

@@ -81,6 +81,75 @@ const assert = require("node:assert/strict");
   await page.locator('[name="password"]').fill("local-test-only-12345");
   await page.getByRole("button", { name: "保存账号" }).click();
   await page.locator("#editor").waitFor({ state: "hidden" });
+  await page.locator('[data-nav="rooms"]').click();
+  await page.locator("#new-community").click();
+  await page.locator('#property-form [name="name"]').fill("星河公寓");
+  await page.locator('[form="property-form"]').click();
+  await page.locator("#editor").waitFor({ state: "hidden" });
+  await page.locator("#new-building").click();
+  await page.locator('[name="parentId"]').selectOption({ label: "星河公寓" });
+  await page.locator('#property-form [name="name"]').fill("1栋");
+  await page.locator('[form="property-form"]').click();
+  await page.locator("#editor").waitFor({ state: "hidden" });
+  await page.locator("#new-floor").click();
+  await page
+    .locator('[name="parentId"]')
+    .selectOption({ label: "星河公寓 / 1栋" });
+  await page.locator('#property-form [name="name"]').fill("1层");
+  await page.locator('[name="level"]').fill("1");
+  await page.locator('[form="property-form"]').click();
+  await page.locator("#editor").waitFor({ state: "hidden" });
+  await page.locator("#layouts").click();
+  await page.locator("#add-layout").click();
+  await page
+    .locator('[name="parentId"]')
+    .selectOption({ label: "星河公寓 / 1栋" });
+  await page.locator('#property-form [name="name"]').fill("一房一厅");
+  await page.locator('[name="code"]').fill("A1");
+  await page.locator('[form="property-form"]').click();
+  await page.locator("#editor").waitFor({ state: "hidden" });
+  await page.locator("#new-rooms").click();
+  await page
+    .locator('[name="floorId"]')
+    .selectOption({ label: "星河公寓 / 1栋 / 1层" });
+  await page.locator('[name="numbers"]').fill("101-103");
+  await page.locator('[form="property-form"]').click();
+  await page.locator("#editor").waitFor({ state: "hidden" });
+  await page.locator("#property-community").selectOption({ label: "星河公寓" });
+  await page.locator("#property-building").selectOption({ label: "1栋" });
+  await page.locator("#select-page").check();
+  await page.locator("#batch-layout").click();
+  await page
+    .locator('[name="layoutId"]')
+    .selectOption({ label: "A1 · 一房一厅（1室1厅）" });
+  await page.locator('[form="property-form"]').click();
+  await page.getByRole("button", { name: "确认操作" }).click();
+  await page.locator("#editor").waitFor({ state: "hidden" });
+  await page
+    .getByRole("cell", { name: "一房一厅", exact: true })
+    .first()
+    .waitFor();
+  assert.equal(
+    await page.getByRole("cell", { name: "A1", exact: true }).count(),
+    3,
+  );
+  await page.screenshot({
+    path: path.join(output, "property.png"),
+    fullPage: true,
+  });
+  await page.locator('[data-nav="houses"]').click();
+  await page.getByRole("button", { name: "新增房源" }).click();
+  await page.locator('[name="propertyRoomId"]').selectOption({ index: 1 });
+  assert.equal(await page.locator('[name="rooms"]').inputValue(), "1室1厅");
+  assert.equal(
+    await page.locator('[name="community"]').inputValue(),
+    "星河公寓",
+  );
+  await page.locator('[name="title"]').fill("已关联的公寓房源");
+  await page.locator('[name="price"]').fill("2100");
+  await page.locator('[name="area"]').fill("40");
+  await page.getByRole("button", { name: "保存更改" }).click();
+  await page.locator("#editor").waitFor({ state: "hidden" });
   for (const width of [1024, 1280, 1920]) {
     await page.setViewportSize({ width, height: 900 });
     await page.locator('[data-nav="dashboard"]').click();
@@ -104,9 +173,13 @@ const assert = require("node:assert/strict");
     .waitFor();
   assert.equal(await page.getByRole("button", { name: "新增房源" }).count(), 0);
   assert.equal(await page.locator('[data-nav="accounts"]').count(), 0);
+  await page.locator('[data-nav="rooms"]').click();
+  await page.getByRole("heading", { name: "整栋物业 · 房源管理" }).waitFor();
+  assert.equal(await page.locator("#new-rooms").count(), 0);
+  assert.equal(await page.locator("#batch-layout").count(), 0);
   assert.deepEqual(errors, []);
   console.log(
-    "Browser checks passed: dashboard, CRUD, publish, preview, binding, accounts; 1024/1280/1920 widths; no JS errors",
+    "Browser checks passed: existing workflows plus community/building/floor/layout creation, batch rooms, batch layout, linked listing and read-only permissions; 1024/1280/1920 widths; no JS errors",
   );
   await browser.close();
   await new Promise((r) => app.server.close(r));

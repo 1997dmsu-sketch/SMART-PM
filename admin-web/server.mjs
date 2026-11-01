@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve, extname } from "node:path";
+import { PropertyService } from "./lib/property.mjs";
 import { LocalStore, CloudStore } from "./lib/store.mjs";
 import { resolvePublicFile } from "./lib/static-path.mjs";
 import { Accounts, publicAccount } from "./lib/auth.mjs";
@@ -98,7 +99,7 @@ export async function createApp({
           return send({
             mode,
             environment: mode === "live" ? process.env.CLOUDBASE_ENV_ID : null,
-            version: "0.1.0-beta.2",
+            version: "0.2.0-beta.1",
           });
         const token = (req.headers.cookie || "")
           .split(";")
@@ -195,6 +196,34 @@ export async function createApp({
           actorId: account._id,
           action,
         });
+        if (path.startsWith("/api/property/")) {
+          authorize(account.role, "rooms", method !== "GET");
+          const service = new PropertyService(store);
+          if (path === "/api/property/snapshot" && method === "GET")
+            return send(await service.snapshot());
+          if (method === "POST") {
+            const data = await body(req);
+            if (path === "/api/property/catalog")
+              return send(
+                await service.createCatalog(data, audit("新增物业目录")),
+                201,
+              );
+            if (path === "/api/property/rooms")
+              return send(
+                await service.createRooms(data, audit("批量新增房间")),
+                201,
+              );
+            if (path === "/api/property/layout")
+              return send(
+                await service.batchLayout(data, audit("批量设置户型")),
+              );
+            if (path === "/api/property/assign")
+              return send(
+                await service.assignRoom(data.id, data, audit("归档房间")),
+              );
+          }
+          fail("接口不存在", 404);
+        }
         if (path === "/api/dashboard" && method === "GET") {
           const [houses, content, users, rooms] = await Promise.all(
             resources.map((n) => store.list(n)),
@@ -372,7 +401,8 @@ export async function createApp({
         }
         if ((method === "POST" && !id) || (method === "PUT" && id)) {
           if (resource === "users" && !id) fail("用户由小程序授权登录创建");
-          const data = validate(resource, await body(req));
+          const input = await body(req);
+          const data = validate(resource, input);
           if (
             mode === "live" &&
             [data.cover, data.image, ...(data.images || [])].some((v) =>
@@ -380,8 +410,33 @@ export async function createApp({
             )
           )
             fail("真实环境图片需上传至云存储或使用 HTTPS 地址");
+          if (resource === "houses") {
+            const old = id
+              ? (await store.list("houses")).find((r) => r._id === id)
+              : null;
+            if (id && !old) fail("记录不存在", 404);
+            const roomId = old?.propertyRoomId || input.propertyRoomId;
+            if (
+              old?.propertyRoomId &&
+              input.propertyRoomId &&
+              old.propertyRoomId !== input.propertyRoomId
+            )
+              fail("已关联房源不可更换房间");
+            if (roomId)
+              return send(
+                await new PropertyService(store).saveListing(
+                  id,
+                  data,
+                  roomId,
+                  audit(id ? "编辑关联房源" : "新增关联房源"),
+                ),
+                id ? 200 : 201,
+              );
+          }
           if (resource === "rooms") {
             const rows = await store.list("rooms");
+            if (id && rows.find((r) => r._id === id)?.floorId)
+              fail("已归档房间请从整栋物业页面维护");
             if (rows.some((r) => r.houseId === data.houseId && r._id !== id))
               fail("房产编号已存在", 409);
             if (id && rows.find((r) => r._id === id)?.houseId !== data.houseId)

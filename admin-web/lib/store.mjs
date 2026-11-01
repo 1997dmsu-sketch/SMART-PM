@@ -2,7 +2,14 @@ import { readFile, mkdir, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { HttpError } from "./model.mjs";
-const collections = ["houses", "content", "users", "rooms", "admin_audit"];
+const collections = [
+  "houses",
+  "content",
+  "users",
+  "rooms",
+  "admin_audit",
+  "property_catalog",
+];
 export function seed() {
   return {
     houses: Array.from({ length: 16 }, (_, i) => ({
@@ -87,6 +94,7 @@ export function seed() {
         sortOrder: 2,
       },
     ],
+    property_catalog: [],
     admin_audit: [],
   };
 }
@@ -106,6 +114,7 @@ export class LocalStore {
       this.data = seed();
       await this.persist(this.data);
     }
+    this.data.property_catalog ||= [];
     return this;
   }
   async persist(data) {
@@ -115,6 +124,45 @@ export class LocalStore {
   }
   async list(name) {
     return structuredClone(this.data[name] || []);
+  }
+  async transact(refs, build, audit) {
+    const task = this.queue.then(async () => {
+      const next = structuredClone(this.data);
+      const state = Object.fromEntries(
+        refs.map(({ collection, id }) => [
+          `${collection}/${id}`,
+          structuredClone(
+            (next[collection] || []).find((r) => r._id === id) || null,
+          ),
+        ]),
+      );
+      const writes = await build(state);
+      const allowed = new Set(refs.map((r) => `${r.collection}/${r.id}`));
+      for (const w of writes) {
+        if (!allowed.has(`${w.collection}/${w.id}`))
+          throw Error("Undeclared transaction write");
+        const rows = (next[w.collection] ||= []);
+        const index = rows.findIndex((r) => r._id === w.id);
+        const record = {
+          ...(index < 0 ? {} : rows[index]),
+          ...w.data,
+          _id: w.id,
+          updatedAt: Date.now(),
+        };
+        if (index < 0) rows.push(record);
+        else rows[index] = record;
+      }
+      next.admin_audit.unshift({
+        ...audit,
+        _id: randomUUID(),
+        target: writes.map((w) => `${w.collection}/${w.id}`).join(", "),
+        createdAt: Date.now(),
+      });
+      await this.persist(next);
+      this.data = next;
+    });
+    this.queue = task.catch(() => {});
+    return task;
   }
   async change(name, id, build, audit) {
     const task = this.queue.then(async () => {
@@ -176,6 +224,42 @@ export class CloudStore {
         throw new HttpError(503, "集合超出本期查询容量，请升级服务端分页查询");
     }
     return result;
+  }
+  async transact(refs, build, audit) {
+    const unique = [
+      ...new Map(refs.map((r) => [`${r.collection}/${r.id}`, r])).values(),
+    ];
+    if (unique.length > 90)
+      throw new HttpError(400, "一次操作涉及记录过多，请缩小选择范围");
+    return this.db.runTransaction(async (tx) => {
+      const state = {};
+      for (const r of unique) {
+        const result = await tx.collection(r.collection).doc(r.id).get();
+        if (result.code) throw new HttpError(503, "云数据库读取失败");
+        state[`${r.collection}/${r.id}`] = Array.isArray(result.data)
+          ? result.data[0]
+          : result.data;
+      }
+      const writes = await build(state);
+      const allowed = new Set(unique.map((r) => `${r.collection}/${r.id}`));
+      for (const w of writes) {
+        const k = `${w.collection}/${w.id}`;
+        if (!allowed.has(k)) throw Error("Undeclared transaction write");
+        const data = { ...state[k], ...w.data, updatedAt: Date.now() };
+        delete data._id;
+        const result = await tx.collection(w.collection).doc(w.id).set(data);
+        if (result.code) throw new HttpError(503, "批量写入失败，整批回滚");
+      }
+      const logged = await tx
+        .collection("admin_audit")
+        .doc(randomUUID())
+        .set({
+          ...audit,
+          target: writes.map((w) => `${w.collection}/${w.id}`).join(", "),
+          createdAt: Date.now(),
+        });
+      if (logged.code) throw new HttpError(503, "日志保存失败，整批回滚");
+    });
   }
   async change(name, id, build, audit) {
     const isNew = !id;

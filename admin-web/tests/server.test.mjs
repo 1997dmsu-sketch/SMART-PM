@@ -395,3 +395,62 @@ test("repeated invalid login requests are throttled", async () => {
     429,
   );
 });
+test("property HTTP endpoints enforce admin writes and listing snapshots come from the room", async () => {
+  const before = (await app.store.list("property_catalog")).length;
+  assert.equal(
+    (
+      await request("property/catalog", {
+        method: "POST",
+        auth: editor,
+        data: { kind: "community", name: "denied" },
+      })
+    ).status,
+    403,
+  );
+  assert.equal((await app.store.list("property_catalog")).length, before);
+  const make = async (data) => {
+    const r = await request("property/catalog", { method: "POST", data });
+    assert.equal(r.status, 201);
+    return r.data;
+  };
+  const c = await make({ kind: "community", name: "接口测试小区" }),
+    b = await make({ kind: "building", name: "1栋", parentId: c._id }),
+    f = await make({ kind: "floor", name: "1层", level: 1, parentId: b._id }),
+    l = await make({
+      kind: "layout",
+      name: "一房一厅",
+      code: "A1",
+      bedrooms: 1,
+      livingRooms: 1,
+      parentId: b._id,
+    });
+  const added = await request("property/rooms", {
+    method: "POST",
+    data: { floorId: f._id, layoutId: l._id, numbers: ["101"] },
+  });
+  assert.equal(added.status, 201);
+  const listing = await request("houses", {
+    method: "POST",
+    auth: editor,
+    data: {
+      ...house,
+      community: "forged",
+      rooms: "9室9厅",
+      propertyRoomId: added.data.ids[0],
+    },
+  });
+  assert.equal(listing.status, 201);
+  assert.equal(listing.data.community, "接口测试小区");
+  assert.equal(listing.data.rooms, "1室1厅");
+  assert.equal(listing.data.layoutCode, "A1");
+  assert.equal(
+    (
+      await request("property/layout", {
+        method: "POST",
+        auth: editor,
+        data: { ids: added.data.ids, layoutId: l._id },
+      })
+    ).status,
+    403,
+  );
+});

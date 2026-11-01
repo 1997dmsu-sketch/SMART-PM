@@ -69,3 +69,20 @@ assert.equal(requests.at(-1).action, "database.abortTransaction");
 console.log(
   "Installed CloudBase SDK: document serialization, list and atomic audit transaction passed with fake transport. Live cloud not invoked.",
 );
+
+failWrite = false;
+await store.transact(
+  [
+    { collection: "rooms", id: "r1" },
+    { collection: "houses", id: "h1" },
+  ],
+  () => [
+    { collection: "rooms", id: "r1", data: { layoutCode: "A1" } },
+    { collection: "houses", id: "h1", data: { layoutCode: "A1" } },
+  ],
+  { actor: "test", action: "batch-layout" },
+);
+assert.equal(requests.at(-1).action, "database.commitTransaction");
+console.log(
+  "Multi-document property transaction serializer passed with fake transport.",
+);

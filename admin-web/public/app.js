@@ -1,3 +1,4 @@
+import { mountProperties } from "./property-ui.js";
 const $ = (s) => document.querySelector(s);
 const esc = (v) =>
   String(v ?? "").replace(
@@ -31,10 +32,10 @@ const icon = (n) =>
   `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[n] || paths.grid}"/></svg>`;
 const labels = {
   dashboard: "工作台",
-  houses: "房源管理",
+  houses: "出租房源",
   content: "内容管理",
   users: "用户管理",
-  rooms: "房产管理",
+  rooms: "房源管理",
   audit: "操作日志",
   accounts: "管理员设置",
 };
@@ -203,6 +204,22 @@ async function loadRoute(reset = true) {
       const data = await api("dashboard");
       if (version !== renderVersion) return;
       dashboard(data);
+    } else if (route === "rooms") {
+      const snapshot = await api("property/snapshot");
+      if (version !== renderVersion) return;
+      mountProperties(snapshot, {
+        api,
+        esc,
+        icon,
+        head,
+        footer,
+        openDialog,
+        field,
+        toast,
+        confirmAction,
+        writable: canWrite("rooms"),
+        isActive: () => route === "rooms" && version === renderVersion,
+      });
     } else if (route === "accounts") {
       const data = await api("accounts");
       if (version !== renderVersion) return;
@@ -266,7 +283,7 @@ function dashboard(data) {
   );
 }
 function houseTable(items, compact = false) {
-  return `<div class="table-wrap"><table><thead><tr><th>房源信息</th>${compact ? "" : "<th>户型 / 面积</th>"}<th>月租金</th><th>状态</th>${compact ? "" : "<th>操作</th>"}</tr></thead><tbody>${items.map((r) => `<tr><td><div class="house-cell">${image(r.cover || r.images?.[0])}<div><strong>${esc(r.title)}</strong><small>${esc(r.community)} · ${esc(r.address)}</small></div></div></td>${compact ? "" : `<td>${esc(r.rooms)}<br><small>${esc(r.area)} ㎡ · ${esc(r.rentType)}</small></td>`}<td class="price">¥ ${Number(r.price || 0).toLocaleString()}<small>/月</small></td><td>${badge(r.status)}</td>${compact ? "" : `<td><div class="actions"><button data-edit="${esc(r._id)}">${canWrite("houses") ? "编辑" : "查看"}</button>${canWrite("houses") ? `<button data-toggle="${esc(r._id)}">${r.status === "在租" ? "下架" : "上架"}</button>` : ""}</div></td>`}</tr>`).join("")}</tbody></table></div>`;
+  return `<div class="table-wrap"><table><thead><tr><th>房源信息</th>${compact ? "" : "<th>户型 / 面积</th>"}<th>月租金</th><th>状态</th>${compact ? "" : "<th>操作</th>"}</tr></thead><tbody>${items.map((r) => `<tr><td><div class="house-cell">${image(r.cover || r.images?.[0])}<div><strong>${esc(r.title)}</strong><small>${esc(r.community)} · ${esc(r.address)}</small></div></div></td>${compact ? "" : `<td>${esc(r.layoutName || r.rooms)} ${r.layoutCode ? `<span class="badge blue">${esc(r.layoutCode)}</span>` : ""}<br><small>${esc(r.area)} ㎡ · ${esc(r.rentType)}</small></td>`}<td class="price">¥ ${Number(r.price || 0).toLocaleString()}<small>/月</small></td><td>${badge(r.status)}</td>${compact ? "" : `<td><div class="actions"><button data-edit="${esc(r._id)}">${canWrite("houses") ? "编辑" : "查看"}</button>${canWrite("houses") ? `<button data-toggle="${esc(r._id)}">${r.status === "在租" ? "下架" : "上架"}</button>` : ""}</div></td>`}</tr>`).join("")}</tbody></table></div>`;
 }
 const descriptions = {
   houses: "维护房源信息、租金与展示状态，让好房源被看见。",
@@ -381,6 +398,14 @@ async function edit(resource, record) {
   const r = record || {},
     writable = canWrite(resource);
   let fields = "";
+  let inventory = [];
+  if (resource === "houses") {
+    try {
+      inventory = (await api("property/snapshot")).rooms;
+    } catch (error) {
+      toast("物业目录暂不可用，现有出租房源仍可编辑");
+    }
+  }
   if (resource === "houses")
     fields =
       field("title", "房源标题 *", r.title, { full: true, required: true }) +
@@ -464,6 +489,24 @@ async function edit(resource, record) {
         readonly: true,
         help: "手机号通过微信授权获得，不能在此直接修改。",
       });
+  if (resource === "houses")
+    fields =
+      field("propertyRoomId", "关联物业房间（可选）", r.propertyRoomId || "", {
+        full: true,
+        choices: [
+          ["", "暂不关联（历史或独立房源）"],
+          ...inventory
+            .filter(
+              (room) =>
+                room.layoutId && (!room.listingId || room.listingId === r._id),
+            )
+            .map((room) => [
+              room._id,
+              `${room.community} / ${room.buildingName} / ${room.floorName} / ${room.roomNo} · ${room.layoutCode} ${room.layoutName}`,
+            ]),
+        ],
+        help: "关联后，小区和户型以房间档案为准；批量更改户型会同步到此房源。",
+      }) + fields;
   const picture =
     resource === "houses" ? "cover" : resource === "content" ? "image" : null;
   if (picture)
@@ -479,6 +522,21 @@ async function edit(resource, record) {
     `<form id="record-form" class="editor-body"><fieldset ${writable ? "" : "disabled"} class="form-fields"><div class="form-grid">${fields}</div></fieldset><div class="form-error" role="alert"></div></form>`,
     `<button class="btn" data-close>取消</button>${writable ? '<button class="btn primary" form="record-form" id="save">保存更改</button>' : ""}`,
   );
+  if (resource === "houses") {
+    const select = $('[name="propertyRoomId"]');
+    if (r.propertyRoomId) select.disabled = true;
+    const sync = () => {
+      const room = inventory.find((room) => room._id === select.value);
+      for (const name of ["community", "rooms"]) {
+        const input = $(`[name="${name}"]`);
+        input.readOnly = Boolean(room);
+        if (room) input.value = room[name];
+      }
+      if (room && !r._id) $('[name="address"]').value = room.address || "";
+    };
+    select.onchange = sync;
+    sync();
+  }
   if (picture && writable) {
     $("#upload").onchange = async (e) => {
       const file = e.target.files[0];

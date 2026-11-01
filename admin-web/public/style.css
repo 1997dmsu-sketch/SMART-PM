@@ -1131,3 +1131,68 @@ dialog::backdrop {
 .panel-head h2 {
   white-space: nowrap;
 }
+.property-summary {
+  display: flex;
+  gap: 28px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0 0 24px;
+  color: #828b9e;
+  font-size: 12px;
+}
+.property-summary b {
+  font-size: 24px;
+  color: #424a5d;
+  margin-right: 6px;
+}
+.property-tools {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.property-filter {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 0 24px 24px;
+}
+.property-filter label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #818b9d;
+  font-size: 12px;
+}
+.property-filter input,
+.property-filter select {
+  border: 1px solid #e3e7ef;
+  border-radius: 6px;
+  padding: 10px;
+  min-width: 145px;
+  background: white;
+  font: inherit;
+}
+.property-filter form {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+}
+.property-batch {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  padding: 16px 24px;
+  background: #fff8fa;
+  border-top: 1px solid #f4e8ec;
+  font-size: 12px;
+  color: #8a7982;
+  flex-wrap: wrap;
+}
+.property-batch .btn {
+  margin-left: auto;
+}
+.property-batch input,
+td input[type="checkbox"],
+th input[type="checkbox"] {
+  accent-color: var(--accent);
+}

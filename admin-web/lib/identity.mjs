@@ -55,17 +55,27 @@ export class IdentityService {
   get domainId() {
     return `identity-domain-${this.loginRealm}`;
   }
-  get keyFingerprint() {
+  fingerprintFor(realm) {
     return createHmac("sha256", this.hmacKey)
-      .update(`identity-domain-fingerprint|${this.loginRealm}|${this.keyVersion}`)
+      .update(`identity-domain-fingerprint|${realm}|${this.keyVersion}`)
       .digest("hex");
   }
-  domainWrite(state) {
-    const domain = state[`identity_domains/${this.domainId}`];
+  get keyFingerprint() {
+    return this.fingerprintFor(this.loginRealm);
+  }
+  // Generic digest-domain guard, shared by login (DB-03) and real-name
+  // document digests (DB-04 review F02). Persists keyVersion + fingerprint
+  // under a fixed per-realm document; a changed key or version is refused.
+  // When no domain document exists yet, initialization is only allowed with
+  // allowInit (i.e. no previously digested records) — existing data must
+  // never silently adopt an arbitrary new configuration.
+  guardDomain(state, realm, { allowInit = true } = {}) {
+    const id = `identity-domain-${realm}`;
+    const domain = state[`identity_domains/${id}`];
     if (domain) {
       if (
         domain.keyVersion !== this.keyVersion ||
-        domain.keyFingerprint !== this.keyFingerprint
+        domain.keyFingerprint !== this.fingerprintFor(realm)
       )
         failCode(
           "IDENTITY_CONFIG_CHANGED",
@@ -74,18 +84,27 @@ export class IdentityService {
         );
       return [];
     }
+    if (!allowInit)
+      failCode(
+        "IDENTITY_CONFIG_CHANGED",
+        "身份摘要配置文档缺失，须受控初始化，不能直接采用新配置",
+        503,
+      );
     return [
       {
         collection: "identity_domains",
-        id: this.domainId,
+        id,
         data: {
-          loginRealm: this.loginRealm,
+          loginRealm: realm,
           keyVersion: this.keyVersion,
-          keyFingerprint: this.keyFingerprint,
+          keyFingerprint: this.fingerprintFor(realm),
           ...base(),
         },
       },
     ];
+  }
+  domainWrite(state) {
+    return this.guardDomain(state, this.loginRealm);
   }
   phoneIdentity(phone) {
     const subjectDigest = this.digest("phone", this.loginRealm, phone);

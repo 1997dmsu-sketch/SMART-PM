@@ -129,3 +129,29 @@ test("reviewers cannot approve their own submission over HTTP", async () => {
   assert.equal(selfReview.status, 403);
   assert.match(selfReview.data.error.message, /提交人/);
 });
+test("F03: HTTP review queue traverses multiple pages without losses or duplicates", async () => {
+  const person = await post("persons", { name: "分页住户" });
+  const expected = [];
+  for (let i = 0; i < 22; i++) {
+    const created = await post("identity-applications", {
+      personId: person.data.data.personId, documentType: "id-card",
+    });
+    assert.equal(created.status, 201);
+    expected.push(created.data.data.applicationId);
+  }
+  const first = await request("identity-applications?state=draft&limit=20", { auth: reviewer });
+  assert.equal(first.status, 200);
+  assert.equal(first.data.data.length, 20);
+  assert.ok(first.data.nextCursor);
+  const second = await request(
+    `identity-applications?state=draft&limit=20&cursor=${encodeURIComponent(first.data.nextCursor)}`,
+    { auth: reviewer },
+  );
+  assert.equal(second.status, 200);
+  assert.equal(second.data.data.length, 2);
+  assert.equal(second.data.nextCursor, undefined);
+  const actual = [...first.data.data, ...second.data.data].map((a) => a.applicationId);
+  assert.equal(new Set(actual).size, 22);
+  assert.deepEqual(new Set(actual), new Set(expected));
+  assert.ok(actual.every((id) => expected.includes(id)));
+});

@@ -177,16 +177,27 @@ export class VerificationService {
       this.orgId,
       `${app.documentType}|${normalizedNumber}`,
     );
+    // F02: the real-name digest realm has its own persisted config guard;
+    // F04: private data is appended per documentVersion, never overwritten.
+    const digestRealm = `verification:${this.orgId}`;
+    const hasDigested = (await this.store.list("identity_applications", this.orgId))
+      .some((a) => a.identityDigest);
+    const nextVersion = supplement ? app.documentVersion + 1 : app.documentVersion;
+    const snapshotId = `${id}-v${nextVersion}`;
     await this.store.transact(
       [
         ref("identity_applications", id),
-        ref("identity_private", id),
+        ref("identity_private", snapshotId),
+        ref("identity_domains", `identity-domain-${digestRealm}`),
         ref("persons", app.personId),
         ...this.authRefs(),
         ...(op ? [ref("operation_keys", op.id)] : []),
       ],
       (state) => {
         this.adminCheck(state);
+        const domainWrites = this.identity.guardDomain(state, digestRealm, {
+          allowInit: !hasDigested,
+        });
         const current = state[`identity_applications/${id}`];
         if (!current) failCode("NOT_FOUND", "实名申请不存在或不可见", 404);
         this.subjectCheck(state[`persons/${current.personId}`] || {}, audit);
@@ -197,13 +208,15 @@ export class VerificationService {
           failCode("REVISION_CONFLICT", "申请版本不一致，请刷新后重试", 409);
         const documentVersion = supplement ? current.documentVersion + 1 : current.documentVersion;
         return [
+          ...domainWrites,
           {
             collection: "identity_private",
-            id,
+            id: snapshotId,
             data: {
               applicationId: id,
               orgId: this.orgId,
               documentVersion,
+              fileIds: [...fileIds], // immutable evidence snapshot (F04)
               nameCiphertext: encrypt(this.encryptionKey, name),
               documentNumberCiphertext: encrypt(this.encryptionKey, normalizedNumber),
               encryptionKeyVersion: this.encryptionKeyVersion,
@@ -218,7 +231,7 @@ export class VerificationService {
               documentVersion,
               identityDigest,
               keyVersion: this.identity.keyVersion,
-              privateDataRef: id,
+              privateDataRef: snapshotId,
               fileIds: [...fileIds],
               submittedAt: Date.now(),
               revision: (current.revision ?? 0) + 1,
@@ -244,16 +257,21 @@ export class VerificationService {
       decision === "approve" && app.identityDigest
         ? claimId("verified-person", `${this.orgId}|${app.documentType}`, app.identityDigest)
         : null;
+    const digestRealm = `verification:${this.orgId}`;
     await this.store.transact(
       [
         ref("identity_applications", id),
         ref("identity_reviews", reviewId),
+        ref("identity_domains", `identity-domain-${digestRealm}`),
         ...(claim ? [ref("unique_claims", claim)] : []),
         ...this.authRefs(),
         ...(op ? [ref("operation_keys", op.id)] : []),
       ],
       (txState) => {
         this.adminCheck(txState, "identity.review");
+        // F02: a pending application may never be approved under a changed
+        // digest configuration; existing digests require an exact match.
+        this.identity.guardDomain(txState, digestRealm, { allowInit: false });
         const current = txState[`identity_applications/${id}`];
         if (!current) failCode("NOT_FOUND", "实名申请不存在或不可见", 404);
         // The reviewer must never be the applicant (self-approval), and an
@@ -345,8 +363,13 @@ export class VerificationService {
     await this.readCheck("identity.review");
     const { cursor, limit } = pageParams(query);
     const rows = (await this.store.list("identity_applications", this.orgId))
-      .filter((a) => !query.state || a.state === query.state)
-      .map((a) => ({
+      .filter((a) => !query.state || a.state === query.state);
+    // F03: page() sorts and resolves cursors by _id. Keep the stored rows
+    // intact until after pagination, then expose only the masked DTO.
+    const result = page(rows, { cursor, limit });
+    return {
+      ...result,
+      data: result.data.map((a) => ({
         applicationId: a._id,
         personId: a.personId,
         state: a.state,
@@ -355,22 +378,30 @@ export class VerificationService {
         submittedBy: a.submittedBy,
         submittedAt: a.submittedAt ?? null,
         revision: a.revision,
-      }));
-    return page(rows, { cursor, limit });
+      })),
+    };
   }
   // Sensitive read: explicit permission point + mandatory audit record.
-  async readPrivate(id, audit) {
-    await this.application(id);
+  // By default the application's current pointer is followed; a reviewer can
+  // instead reconstruct the exact evidence used by an older review (F04).
+  async readPrivate(id, audit, { documentVersion } = {}) {
+    if (documentVersion !== undefined && (!Number.isInteger(documentVersion) || documentVersion < 1))
+      failCode("PARAM_ERROR", "documentVersion 需为正整数");
+    const app = await this.application(id);
+    const snapshotId = documentVersion === undefined
+      ? app.privateDataRef || id // compatibility with pre-F04 snapshots
+      : `${id}-v${documentVersion}`;
     let result = null;
     await this.store.transact(
-      [ref("identity_private", id), ...this.authRefs()],
+      [ref("identity_private", snapshotId), ...this.authRefs()],
       (state) => {
         this.adminCheck(state, "identity.readPrivate");
-        const record = state[`identity_private/${id}`];
+        const record = state[`identity_private/${snapshotId}`];
         if (!record) failCode("NOT_FOUND", "私有资料不存在", 404);
         result = {
           applicationId: id,
           documentVersion: record.documentVersion,
+          fileIds: [...(record.fileIds || [])],
           name: decrypt(this.encryptionKey, record.nameCiphertext),
           documentNumber: decrypt(this.encryptionKey, record.documentNumberCiphertext),
         };

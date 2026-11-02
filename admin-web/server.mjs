@@ -50,6 +50,33 @@ async function body(req, limit = 65536, raw = false) {
     fail("JSON 格式错误");
   }
 }
+// DB-04 review F01: public demonstration keys are confined to demo mode.
+// Live startup fails closed before opening a store or creating an HTTP server.
+// Error messages deliberately identify only the setting, never its value.
+export function identityKeyConfig(mode, env = process.env) {
+  const live = mode === "live";
+  let hmacKey = env.IDENTITY_HMAC_KEY;
+  if (!hmacKey) {
+    if (live) throw Error("Live mode requires IDENTITY_HMAC_KEY");
+    hmacKey = "demo-identity-hmac-key-not-for-production";
+  }
+  if (typeof hmacKey !== "string" || hmacKey.length < 16)
+    throw Error("IDENTITY_HMAC_KEY must contain at least 16 characters");
+  const configuredEncryptionKey = env.IDENTITY_ENCRYPTION_KEY;
+  if (!configuredEncryptionKey) {
+    if (live) throw Error("Live mode requires IDENTITY_ENCRYPTION_KEY");
+    return { hmacKey, encryptionKey: Buffer.alloc(32, 7) };
+  }
+  if (
+    typeof configuredEncryptionKey !== "string" ||
+    !/^[0-9a-fA-F]{64}$/.test(configuredEncryptionKey)
+  )
+    throw Error("IDENTITY_ENCRYPTION_KEY must be exactly 64 hexadecimal characters");
+  const encryptionKey = Buffer.from(configuredEncryptionKey, "hex");
+  if (encryptionKey.length !== 32)
+    throw Error("IDENTITY_ENCRYPTION_KEY must decode to exactly 32 bytes");
+  return { hmacKey, encryptionKey };
+}
 export async function createApp({
   mode = "demo",
   directory = join(root, ".data", mode),
@@ -67,6 +94,7 @@ export async function createApp({
     throw Error("Live mode requires ADMIN_ORIGIN");
   if (mode === "live" && !store)
     throw Error("Live mode requires a configured cloud store");
+  const { hmacKey: identityHmacKey, encryptionKey } = identityKeyConfig(mode);
   store = store || (await new LocalStore(directory).init());
   accounts = accounts || (await new Accounts(directory).init());
   if (
@@ -93,19 +121,12 @@ export async function createApp({
     );
   const sessions = new Map(),
     attempts = new Map();
-  // DB-03/04: identity digest + private-document encryption keys come from
-  // deployment configuration; the demo values below are development-only and
-  // must never be used in production. fileValidator is the DB-07 interface
-  // hook — unconfigured means private submissions fail closed (503).
-  const identityHmacKey =
-    process.env.IDENTITY_HMAC_KEY || "demo-identity-hmac-key-not-for-production";
+  // fileValidator is the DB-07 interface hook — unconfigured means private
+  // submissions fail closed (503).
   const identityService = new IdentityService(store, {
     hmacKey: identityHmacKey,
     gateway: identityGateway,
   });
-  const encryptionKey = process.env.IDENTITY_ENCRYPTION_KEY
-    ? Buffer.from(process.env.IDENTITY_ENCRYPTION_KEY, "hex")
-    : Buffer.alloc(32, 7); // demo-only fixed key
   const sessionAge = 8 * 60 * 60 * 1000;
   const server = http.createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");

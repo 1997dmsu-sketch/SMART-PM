@@ -20,6 +20,9 @@ const collections = [
   "identity_applications",
   "identity_reviews",
   "identity_private",
+  "blacklist_entries",
+  "blacklist_decisions",
+  "eligibility_guards",
 ];
 export function seed() {
   return {

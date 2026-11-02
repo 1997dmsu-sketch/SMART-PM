@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve, extname } from "node:path";
 import { PropertyService } from "./lib/property.mjs";
 import { OrgService } from "./lib/org.mjs";
-import { OrgPropertyService, OpReplay } from "./lib/property-v2.mjs";
+import { OrgPropertyService, OpReplay, pageParams } from "./lib/property-v2.mjs";
 import { operationKeyId } from "./lib/claims.mjs";
 import { LocalStore, CloudStore } from "./lib/store.mjs";
 import { resolvePublicFile } from "./lib/static-path.mjs";
@@ -21,6 +21,12 @@ import {
   fail,
   failCode,
 } from "./lib/model.mjs";
+import {
+  FileService,
+  fileServiceConfig,
+  makeFileOp,
+  PURPOSES,
+} from "./lib/files.mjs";
 const root = fileURLToPath(new URL(".", import.meta.url));
 const mime = {
   ".html": "text/html; charset=utf-8",
@@ -47,6 +53,53 @@ async function body(req, limit = 65536, raw = false) {
     fail("JSON 格式错误");
   }
 }
+
+// DB-07 §11.6：命中集合 = objectKey ∪ legacyUrls ∪ cloudFileId。四处拦截点
+// 与下载都经此判定；漏掉 cloudFileId 会让 live 下按 cloud:// fileID 查询的
+// 已登记图片被误判「未登记」，在默认 deny 下触发 403 静默裂图。
+function assetLocators(asset) {
+  return [
+    asset.objectKey,
+    asset.cloudFileId,
+    ...(Array.isArray(asset.legacyUrls) ? asset.legacyUrls : []),
+  ].filter((v) => typeof v === "string" && v);
+}
+function matchFileAsset(assets, candidates) {
+  const wanted = candidates.filter((v) => typeof v === "string" && v);
+  return (
+    assets.find((a) => {
+      const locators = assetLocators(a);
+      return wanted.some((w) => locators.includes(w));
+    }) || null
+  );
+}
+
+// 只取 cloudPath / 相对路径「末段文件名」解析扩展名，绝不解析
+// cloud://env.bucket/... 全串（env/bucket 里的点会污染扩展名判定，§10 3c）。
+function cloudPathOf(id) {
+  const m = String(id || "").match(/^cloud:\/\/[^/]+\/(.+)$/);
+  return m ? m[1] : String(id || "");
+}
+function extOfPath(objectKey) {
+  const last = String(objectKey || "").split("/").pop();
+  const dot = last.lastIndexOf(".");
+  return dot < 0 ? "" : last.slice(dot + 1).toLowerCase();
+}
+const IMAGE_EXTS = ["png", "jpg", "jpeg", "webp"];
+// §11.1 前缀按 storage 分叉（local: uploads/、vr-files/；cloud:
+// admin/、admin-vr/；private 恒 private/）——但四处拦截点一律走「命中集合」
+// (assetLocators/matchFileAsset) 而非前缀白名单，因此天然覆盖两种 storage
+// 的公开前缀，不会像硬编码 admin/ 那样漏判 demo 的 /uploads/* 旧路径。
+// 旧上传 purpose（§5 拦截点 4）：只产出 public；query 可覆盖为其它合法
+// public purpose，private purpose 一律回退到入口缺省（私密资料必须走
+// /api/v2/files），避免 purpose 与 visibility 矛盾。
+function legacyPurpose(raw, fallback) {
+  return typeof raw === "string" && PURPOSES[raw] && !PURPOSES[raw].private
+    ? raw
+    : fallback;
+}
+// 旧上传与 v2 上传共用硬上限；具体 purpose 的大小由 FileService.upload 校验。
+const MAX_UPLOAD = Math.max(...Object.values(PURPOSES).map((p) => p.maxSize));
 export async function createApp({
   mode = "demo",
   directory = join(root, ".data", mode),
@@ -89,6 +142,68 @@ export async function createApp({
   const sessions = new Map(),
     attempts = new Map();
   const sessionAge = 8 * 60 * 60 * 1000;
+  // DB-07 T04：文件服务配置位（值只从环境变量读，不入库、不进日志）。
+  // demo 用 LocalStore（无 app），local 适配器不需要 app；live 用 CloudStore
+  // 的 app 实例复用已登录 SDK。root 指向数据目录，与旧上传写盘位置一致。
+  const fileConfig = fileServiceConfig(process.env, {
+    mode,
+    app: store.app || null,
+    root: directory,
+  });
+  const buildFileService = (orgId, membership, account) =>
+    new FileService(store, orgId, {
+      auth: { membershipId: membership?._id },
+      actor: {
+        actorType: "adminAccount",
+        actorId: account._id,
+        role: account.role,
+        permissions: membership?.permissions || [],
+      },
+      config: fileConfig,
+    });
+  // DB-07 §5 拦截点 4 / §6.3：旧上传写完字节后额外登记一条 public
+  // file_assets（orgId=null，legacy 未归属），返回体仅追加 fileId。
+  // 直接以 file_assets 为唯一 ref 写入，不复用 FileService.registerLegacy：
+  // legacy service 的 authRefs() 会带 organizations/null，在 live 的
+  // CloudStore.transact（store.mjs:257 doc(r.id).get()）会触发 doc(null)
+  // 非法读取，使改造前正常的 live 上传回归。本写入字段与 FileService 登记
+  // 记录对齐（bucket / legacyUrls / visibility / status=ready，§11.5/11.6）。
+  const registerLegacyUpload = async (account, fileUrl, detail, action) => {
+    const objectKey = cloudPathOf(fileUrl).replace(/^\/+/, "");
+    const fileId = `file-${randomUUID()}`;
+    const now = Date.now();
+    await store.transact(
+      [{ collection: "file_assets", id: fileId }],
+      () => [
+        {
+          collection: "file_assets",
+          id: fileId,
+          data: {
+            orgId: null, // legacy 未归属，DB-08 迁移前 v2 列表不可见（§6.5）
+            storage: mode === "live" ? "cloud" : "local",
+            objectKey,
+            bucket: "public", // 密级副本（§11.5）
+            originalName: objectKey.split("/").pop(),
+            mimeType: detail.mimeType || null,
+            size: detail.size ?? null,
+            checksum: null, // 迁移期可空
+            purpose: detail.purpose,
+            visibility: "public", // 旧上传只产出 public（§5）
+            status: "ready", // 物理文件已写入，仅补登记
+            uploadedBy: { actorType: "adminAccount", actorId: account._id },
+            legacyUrls: [fileUrl], // 命中集合（§11.6）：旧 URL 兼容映射
+            retentionUntil: null,
+            schemaVersion: 2,
+            revision: 1,
+            createdAt: now,
+            updatedAt: now,
+          },
+        },
+      ],
+      { actor: account.username, actorId: account._id, action },
+    );
+    return fileId;
+  };
   const server = http.createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -291,7 +406,15 @@ export async function createApp({
                 failCode("NOT_FOUND", "组织不存在或不可见", 404);
               else failCode("PARAM_ERROR", "请通过 X-Org-Id 指定组织");
             }
-            const write = method === "POST";
+            // DB-07 §9.2 / §10-7：文件写接口一律用 {write:false} 过组织成员
+            // 校验，再由 authorize() 做第一道分级、FileService.assertActorRole
+            // 做第二道——否则 org.mjs:152「仅 admin 可写」会把 editor 挡在成员
+            // 校验层，测不到 §5 的真实分级（public 允许 editor / private 收紧
+            // 到 admin）。property 路由保持既有「POST 即 write:true」不变。
+            const isFileRoute =
+              path.startsWith("/api/v2/files") ||
+              path.startsWith("/api/v2/file-links");
+            const write = method === "POST" && !isFileRoute;
             const { membership } = await orgService.requireMembership(
               "adminAccount",
               account._id,
@@ -308,6 +431,151 @@ export async function createApp({
               orgId,
             });
             const query = Object.fromEntries(url.searchParams);
+            // ── DB-07 T04：v2 文件资源路由（§3 / §5 / §7）──────────────
+            // 整块独立处理：上传是 raw body，必须绕开下方通用 POST 块的
+            // JSON.parse；下载返回字节流/302，不走 ok() 的 JSON 信封。
+            if (isFileRoute) {
+              const files = buildFileService(orgId, membership, account);
+              // 与 DB-02 一致的 Idempotency-Key → operation_keys 幂等（§12）。
+              const fileOp = (payload) => {
+                const key = req.headers["idempotency-key"];
+                if (typeof key !== "string" || !key.trim() || key.length > 120)
+                  failCode("PARAM_ERROR", "缺少有效的 Idempotency-Key");
+                return makeFileOp({
+                  actorId: account._id,
+                  orgId,
+                  route: path,
+                  key: key.trim(),
+                  body: payload,
+                });
+              };
+
+              // POST /api/v2/files：上传（private 响应不含 url）。
+              if (path === "/api/v2/files" && method === "POST") {
+                authorize(account.role, "uploads", true); // 第一道：editor 可写
+                const purpose = url.searchParams.get("purpose") || "content-image";
+                const name = url.searchParams.get("name") || "";
+                const bytes = await body(req, MAX_UPLOAD, true);
+                const op = fileOp({
+                  purpose,
+                  name,
+                  checksum: createHash("sha256").update(bytes).digest("hex"),
+                });
+                const result = await files.upload(
+                  { bytes, purpose, originalName: name },
+                  auditV2("上传文件"),
+                  op,
+                );
+                return ok(result, 201);
+              }
+              // GET /api/v2/files：列表（orgId 过滤先于分页）。
+              if (path === "/api/v2/files" && method === "GET") {
+                const { data, nextCursor } = await files.list(query);
+                return ok(data, 200, nextCursor);
+              }
+              // POST /api/v2/file-links：关联。
+              if (path === "/api/v2/file-links" && method === "POST") {
+                authorize(account.role, "uploads", true);
+                const data = await body(req);
+                return ok(
+                  await files.attach(data, auditV2("关联文件"), fileOp(data)),
+                  201,
+                );
+              }
+              // GET /api/v2/file-links：只返回 attached。FileService 未导出
+              // link 列表方法，本期在 server 层只读实现（不碰 files.mjs，
+              // 保持 C3 单文件提交）；作为方案缺口回报。
+              if (path === "/api/v2/file-links" && method === "GET") {
+                const { cursor, limit } = pageParams(query);
+                let rows = (await store.list("file_links", orgId)).filter(
+                  (l) =>
+                    l.orgId === orgId &&
+                    l.state === "attached" &&
+                    (query.entityType === undefined ||
+                      l.entityType === query.entityType) &&
+                    (query.entityId === undefined ||
+                      l.entityId === query.entityId),
+                );
+                rows.sort((a, b) => (a._id < b._id ? -1 : a._id > b._id ? 1 : 0));
+                let start = 0;
+                if (cursor) {
+                  start = rows.findIndex((r) => r._id === cursor) + 1;
+                  if (start === 0)
+                    failCode("PARAM_ERROR", "分页游标无效或已过期");
+                }
+                const slice = rows.slice(start, start + limit + 1);
+                const data = slice.slice(0, limit);
+                return ok(
+                  data,
+                  200,
+                  slice.length > limit ? data[data.length - 1]._id : undefined,
+                );
+              }
+              // POST /api/v2/file-links/{id}/detach：只改 link.state（需求 8）。
+              const detachMatch = path.match(
+                /^\/api\/v2\/file-links\/([^/]+)\/detach$/,
+              );
+              if (detachMatch && method === "POST") {
+                authorize(account.role, "uploads", true);
+                const data = await body(req);
+                return ok(
+                  await files.detach(
+                    decodeURIComponent(detachMatch[1]),
+                    data,
+                    auditV2("解绑文件"),
+                    fileOp(data),
+                  ),
+                );
+              }
+              // GET /api/v2/files/{id}/download：逐次鉴权 + 字节流 / 302。
+              const downloadMatch = path.match(
+                /^\/api\/v2\/files\/([^/]+)\/download$/,
+              );
+              if (downloadMatch && method === "GET") {
+                const entityRef = {
+                  entityType: query.entityType,
+                  entityId: query.entityId,
+                };
+                const result = await files.authorizeDownload(
+                  decodeURIComponent(downloadMatch[1]),
+                  undefined,
+                  entityRef,
+                );
+                if (result.tempUrl) {
+                  res.writeHead(302, {
+                    Location: result.tempUrl,
+                    "Cache-Control": "no-store",
+                  });
+                  return res.end();
+                }
+                res.setHeader("Content-Type", result.contentType);
+                res.setHeader(
+                  "Content-Disposition",
+                  `attachment; filename*=UTF-8''${encodeURIComponent(result.originalName || "download")}`,
+                );
+                res.setHeader(
+                  "Content-Security-Policy",
+                  "sandbox; default-src 'none'",
+                );
+                return res.end(result.bytes);
+              }
+              // POST /api/v2/files/{id}/retire：只改 status（需求 8）。
+              const retireMatch = path.match(
+                /^\/api\/v2\/files\/([^/]+)\/retire$/,
+              );
+              if (retireMatch && method === "POST") {
+                authorize(account.role, "uploads", true);
+                const data = await body(req);
+                return ok(
+                  await files.retire(
+                    decodeURIComponent(retireMatch[1]),
+                    auditV2("归档文件"),
+                    fileOp(data),
+                  ),
+                );
+              }
+              fail("接口不存在", 404);
+            }
             if (path === "/api/v2/property/catalog" && method === "GET") {
               const { data, nextCursor } = await service.listCatalog(query);
               return ok(data, 200, nextCursor);
@@ -504,7 +772,22 @@ export async function createApp({
             });
             fileUrl = `/vr-files/${filename}`;
           }
-          return send({ url: fileUrl, name, size: bytes.length });
+          // DB-07 §5 拦截点 4：双写 file_assets（public），返回体仅追加 fileId。
+          // vr-attachment 是 public（§5 定性），故 §10-4 的 legacy 200 不回退。
+          const fileId = await registerLegacyUpload(
+            account,
+            fileUrl,
+            {
+              purpose: legacyPurpose(
+                url.searchParams.get("purpose"),
+                "vr-attachment",
+              ),
+              mimeType: ext === "zip" ? "application/zip" : "text/html",
+              size: bytes.length,
+            },
+            "上传 VR 附件",
+          );
+          return send({ url: fileUrl, name, size: bytes.length, fileId });
         }
         if (path === "/api/vr-download" && method === "GET") {
           authorize(account.role, "content");
@@ -517,6 +800,19 @@ export async function createApp({
           if (record?.orgId) fail("VR 文件不存在", 404);
           const file = vrFile(record?.vrFile);
           if (!file) fail("VR 文件不存在", 404);
+          // DB-07 §5 拦截点 2（最小加法，保持 legacy-only）：仅当 vrFile.url
+          // 命中 file_assets 且 private → 404，与「不存在」同态防枚举。
+          // 命中集合（§11.6）= objectKey ∪ legacyUrls ∪ cloudFileId；候选同时
+          // 覆盖带/不带前导斜杠与 cloud:// 全串/末段两种存法。vr-attachment
+          // 登记为 public，故 R2-02（server-v2.test.mjs:342-424）legacy 200
+          // 语义不回退。不新增 purpose/引用对象判定。
+          const vrHit = matchFileAsset(await store.list("file_assets"), [
+            file.url,
+            file.url.replace(/^\//, ""),
+            cloudPathOf(file.url),
+          ]);
+          if (vrHit && vrHit.visibility === "private")
+            fail("VR 文件不存在", 404);
           let bytes;
           if (mode === "live") {
             if (!file.url.startsWith("cloud://")) fail("文件不属于云存储");
@@ -565,24 +861,72 @@ export async function createApp({
             ext = "webp";
           else fail("仅支持 PNG、JPEG 或 WebP 图片");
           const filename = `${randomUUID()}.${ext}`;
+          let fileUrl;
           if (mode === "live") {
             const result = await store.app.uploadFile({
               cloudPath: `admin/${filename}`,
               fileContent: bytes,
             });
             if (!result.fileID) fail("云存储上传失败，请检查权限", 502);
-            return send({ url: result.fileID });
+            fileUrl = result.fileID;
+          } else {
+            await mkdir(join(directory, "uploads"), { recursive: true });
+            await writeFile(join(directory, "uploads", filename), bytes, {
+              mode: 0o600,
+            });
+            fileUrl = `/uploads/${filename}`;
           }
-          await mkdir(join(directory, "uploads"), { recursive: true });
-          await writeFile(join(directory, "uploads", filename), bytes, {
-            mode: 0o600,
-          });
-          return send({ url: `/uploads/${filename}` });
+          // DB-07 §5 拦截点 4：双写 file_assets（public），返回体仅追加 fileId。
+          const fileId = await registerLegacyUpload(
+            account,
+            fileUrl,
+            {
+              purpose: legacyPurpose(
+                url.searchParams.get("purpose"),
+                "content-image",
+              ),
+              mimeType: { png: "image/png", jpg: "image/jpeg", webp: "image/webp" }[ext],
+              size: bytes.length,
+            },
+            "上传图片",
+          );
+          return send({ url: fileUrl, fileId });
         }
         if (path === "/api/image-url" && method === "GET") {
           const id = url.searchParams.get("id");
+          // ① 补齐 authorize（三种角色均通过，零兼容影响）。
+          authorize(account.role, "content");
           if (mode !== "live" || !id?.startsWith("cloud://"))
             fail("图片地址无效");
+          // 扩展名只取 cloudPath 末段，不解析 cloud://env.bucket/… 全串。
+          const cloudPath = cloudPathOf(id);
+          const ext = extOfPath(cloudPath);
+          // 命中集合（§11.6）= objectKey ∪ legacyUrls ∪ cloudFileId：
+          // live 下按 cloud:// fileID 查询也能命中已登记记录。
+          const hit = matchFileAsset(await store.list("file_assets"), [
+            id,
+            cloudPath,
+          ]);
+          // ② 命中且 private → 403，与 fallback 开关无关（红线，§10-3）。
+          if (hit && hit.visibility === "private")
+            failCode("FILE_FORBIDDEN", "私密图片禁止签发临时 URL", 403);
+          if (!hit) {
+            // ③ 未命中但路径含 private/ → 403（private/ 两侧恒生效，§11.1）。
+            if (/private\//.test(cloudPath))
+              failCode("FILE_FORBIDDEN", "私密路径禁止签发临时 URL", 403);
+            // ④ 未命中且非图片类型 → 403（「图片接口只服务图片」作用域
+            // 约束，非密级判定；挡 admin-vr/*.zip|html，§10-3c）。
+            if (!IMAGE_EXTS.includes(ext))
+              failCode("FILE_FORBIDDEN", "图片接口仅服务图片类型", 403);
+            // ⑤ 未命中且为旧图片 admin/<uuid>.(png|jpg|webp) → 按
+            // FILE_LEGACY_IMAGE_FALLBACK（默认 deny → 403，§10-3b/14）。
+            const fallback =
+              process.env.FILE_LEGACY_IMAGE_FALLBACK ||
+              fileConfig.FILE_LEGACY_IMAGE_FALLBACK ||
+              "deny";
+            if (fallback !== "allow")
+              failCode("FILE_FORBIDDEN", "未登记的旧图片默认拒绝签发", 403);
+          }
           const result = await store.app.getTempFileURL({
             fileList: [{ fileID: id, maxAge: 600 }],
           });
@@ -717,6 +1061,19 @@ export async function createApp({
           mode !== "demo" ||
           !/^\/uploads\/[a-f0-9-]+\.(png|jpg|webp)$/.test(path)
         )
+          fail("文件不存在", 404);
+        // DB-07 §5 拦截点 3：保留 demo-only + 严格正则 + 静态分支不查会话，
+        // 只新增「命中 file_assets 且 private → 404」。命中集合（§11.6）=
+        // objectKey ∪ legacyUrls ∪ cloudFileId；候选覆盖 /uploads/x 与
+        // uploads/x 两种存法。命中场景是「已登记为私密的旧路径文件」，
+        // 不是 private 前缀文件落错目录（private objectKey 恒在 private/，
+        // 本就不落 /uploads/，§11.1）。正负对照见 §10-4b：同目录未改密的
+        // public 旧图片仍 200。
+        const staticHit = matchFileAsset(await store.list("file_assets"), [
+          path,
+          path.slice(1),
+        ]);
+        if (staticHit && staticHit.visibility === "private")
           fail("文件不存在", 404);
         file = join(directory, path);
       } else {

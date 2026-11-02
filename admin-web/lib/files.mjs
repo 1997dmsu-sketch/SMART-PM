@@ -562,15 +562,17 @@ export class FileService {
         results.push(existing);
         continue;
       }
-      // 事务内复查需要真实组织上下文（§5）。legacy 未归属记录（orgId=null，
-      // §6.5）没有归属组织可复查；且下方 authRefs() 恒带
-      // ref("organizations", this.orgId)，orgId 为 null 时 live 的
-      // CloudStore.transact（store.mjs:257 doc(r.id).get()）会触发 doc(null)
-      // 非法读取 —— 改造前正常的 live 上传就是这么被打断的（见 server.mjs
-      // registerLegacyUpload 处的规避注释，那边已注明若将来统一回服务层必须
-      // 先有本分支）。故此处 orgId 为 null（或本服务实例本就没有组织上下文）
-      // 时跳过 authRefs/authCheck，只登记 file_assets 一条。
-      const hasOrgContext = orgId != null && this.orgId != null;
+      // 事务内复查需要真实组织上下文（§5）。authRefs()（本文件 :274）恒带
+      // ref("organizations", this.orgId)，**只用 this.orgId**，与 item.orgId 无关；
+      // this.orgId 为 null 时 live 的 CloudStore.transact（store.mjs:257
+      // doc(r.id).get()）会触发 doc(null) 非法读取 —— 改造前正常的 live 上传
+      // 就是这么被打断的（见 server.mjs registerLegacyUpload 处的规避注释，
+      // 那边已注明若将来统一回服务层必须先有本分支）。
+      // 故**仅当本服务实例没有组织上下文**时跳过 authRefs/authCheck，只登记
+      // file_assets 一条。注意不要连 item.orgId 一起判：服务实例有真实组织
+      // 而 item.orgId=null 时，authRefs() 拼出的是合法 ref，成员关系复查本该
+      // 照常执行，跳过即等于白白放宽一次鉴权。
+      const hasOrgContext = this.orgId != null;
       const fileId = `file-${randomUUID()}`;
       await this.store.transact(
         [ref("file_assets", fileId), ...(hasOrgContext ? this.authRefs() : [])],

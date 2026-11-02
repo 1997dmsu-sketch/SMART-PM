@@ -1246,3 +1246,7 @@ th input[type="checkbox"] {
 .auto-advanced[open] summary {
   margin-bottom: 16px;
 }
+
+.field[hidden] {
+  display: none;
+}

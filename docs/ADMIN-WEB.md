@@ -1,6 +1,6 @@
 # 第一期电脑端管理后台部署与验收
 
-交付：项目 **v0.1.0-beta.13** / 后台 **0.2.0-beta.3**。第二期手机管理页面复用本期 HTTP API 和权限逻辑。
+交付：项目 **v0.1.0-beta.14** / 后台 **0.2.0-beta.4**。第二期手机管理页面复用本期 HTTP API 和权限逻辑。
 
 本版新增整栋物业结构与批量户型，请先阅读 [房源数据结构与升级说明](PROPERTY-MODEL.md)。真实环境需额外创建空集合 `property_catalog`；旧数据逐步归档，不自动迁移。
 
@@ -11,7 +11,7 @@ Windows 安装 Node.js 20+，解压后双击 `admin-web/start-demo.cmd`，保持
 终端方式：
 
 ```powershell
-cd "C:\你的解压目录\SMART-PM-0.1.0-beta.13\admin-web"
+cd "C:\你的解压目录\SMART-PM-0.1.0-beta.14\admin-web"
 npm start
 ```
 

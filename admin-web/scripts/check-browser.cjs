@@ -82,15 +82,21 @@ const assert = require("node:assert/strict");
   await page.getByRole("button", { name: "保存账号" }).click();
   await page.locator("#editor").waitFor({ state: "hidden" });
   await page.locator('[data-nav="rooms"]').click();
-  await page.locator("#new-community").click();
-  await page.locator('#property-form [name="name"]').fill("星河公寓");
+  await page.locator("#new-property").click();
+  await page.locator('[name="communityName"]').fill("星河公寓");
+  await page.locator('[name="buildingName"]').fill("1栋");
+  await page.screenshot({
+    path: path.join(output, "create-property.png"),
+    fullPage: true,
+  });
   await page.locator('[form="property-form"]').click();
   await page.locator("#editor").waitFor({ state: "hidden" });
-  await page.locator("#new-building").click();
-  await page.locator('[name="parentId"]').selectOption({ label: "星河公寓" });
-  await page.locator('#property-form [name="name"]').fill("1栋");
+  await page.locator("#new-property").click();
+  assert.equal(await page.locator('[name="communityName"]').isVisible(), false);
+  await page.locator('[name="buildingName"]').fill("2栋");
   await page.locator('[form="property-form"]').click();
   await page.locator("#editor").waitFor({ state: "hidden" });
+  await page.locator("#property-building").selectOption({ label: "1栋" });
   await page.locator("#new-floor").click();
   await page.locator("#manual-fill").click();
   await page
@@ -217,6 +223,7 @@ const assert = require("node:assert/strict");
   await page.locator('[data-nav="rooms"]').click();
   await page.getByRole("heading", { name: "整栋物业 · 房源管理" }).waitFor();
   assert.equal(await page.locator("#new-rooms").count(), 0);
+  assert.equal(await page.locator("#new-property").count(), 0);
   assert.equal(await page.locator("#batch-layout").count(), 0);
   assert.deepEqual(errors, []);
   console.log(

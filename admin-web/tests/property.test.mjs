@@ -310,3 +310,53 @@ test("cloud multi-record batch reads before writes and rolls back on log failure
   assert.equal(committed.length, 0);
   assert.equal(rollback, true);
 });
+test("combined property creation saves a new community and building together", async (t) => {
+  const x = await setup(t);
+  const result = await x.service.createProperty(
+    { mode: "new", communityName: "新公寓", buildingName: "A栋" },
+    audit,
+  );
+  const catalog = await x.store.list("property_catalog");
+  assert.equal(
+    catalog.find((c) => c._id === result.communityId).name,
+    "新公寓",
+  );
+  assert.equal(
+    catalog.find((c) => c._id === result.buildingId).parentId,
+    result.communityId,
+  );
+  const second = await x.service.createProperty(
+    { mode: "existing", communityId: result.communityId, buildingName: "B栋" },
+    audit,
+  );
+  assert.equal(second.communityId, result.communityId);
+  assert.equal(
+    (await x.store.list("property_catalog")).filter((c) => c.name === "新公寓")
+      .length,
+    1,
+  );
+});
+test("combined creation rejects duplicate or invalid input without orphan communities", async (t) => {
+  const x = await setup(t);
+  const before = await x.store.list("property_catalog");
+  for (const data of [
+    { mode: "new", communityName: "空楼栋测试", buildingName: "" },
+    { mode: "new", communityName: "测试小区", buildingName: "新栋" },
+    { mode: "existing", communityId: x.community._id, buildingName: "1栋" },
+    { mode: "existing", communityId: x.building._id, buildingName: "新栋" },
+  ])
+    await assert.rejects(x.service.createProperty(data, audit));
+  assert.deepEqual(await x.store.list("property_catalog"), before);
+});
+test("concurrent combined creation cannot duplicate the same property", async (t) => {
+  const x = await setup(t);
+  const data = { mode: "new", communityName: "并发创建", buildingName: "1栋" };
+  const outcomes = await Promise.allSettled([
+    x.service.createProperty(data, audit),
+    x.service.createProperty(data, audit),
+  ]);
+  assert.equal(outcomes.filter((o) => o.status === "fulfilled").length, 1);
+  const catalog = await x.store.list("property_catalog");
+  const community = catalog.find((c) => c.name === "并发创建");
+  assert.equal(catalog.filter((c) => c.parentId === community._id).length, 1);
+});

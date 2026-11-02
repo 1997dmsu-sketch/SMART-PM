@@ -82,6 +82,59 @@ export function mountProperties(snapshot, helpers) {
       manual: () => (kind === "floors" ? createCatalog("floor") : addRooms()),
     });
   }
+  function addProperty() {
+    const communities = of("community");
+    form(
+      "添加物业",
+      "选择已有小区添加楼栋，或同时新建小区和楼栋。",
+      field(
+        "communityId",
+        "所属小区 *",
+        communityId || communities[0]?._id || "__new__",
+        {
+          full: true,
+          required: true,
+          choices: [
+            ...communities.map((c) => [c._id, c.name]),
+            ["__new__", "＋ 新建小区"],
+          ],
+        },
+      ) +
+        field("communityName", "新小区名称 *", "", {
+          full: true,
+          required: true,
+        }) +
+        field("buildingName", "楼栋名称 *", "", {
+          full: true,
+          required: true,
+          help: "例如 1栋、A栋。保存后可继续添加楼层和房间。",
+        }),
+      async (d) => {
+        const result = await api("property/create", {
+          method: "POST",
+          data: {
+            ...d,
+            mode: d.communityId === "__new__" ? "new" : "existing",
+          },
+        });
+        communityId = result.communityId;
+        buildingId = result.buildingId;
+        floorId = "";
+        page = 1;
+        keyword = "";
+        orphan = false;
+      },
+    );
+    const input = $('[name="communityName"]');
+    const change = () => {
+      const fresh = $('[name="communityId"]').value === "__new__";
+      input.closest("label").hidden = !fresh;
+      input.disabled = !fresh;
+      input.required = fresh;
+    };
+    $('[name="communityId"]').onchange = change;
+    change();
+  }
   function createCatalog(kind) {
     const names = {
       community: "小区",
@@ -370,7 +423,7 @@ export function mountProperties(snapshot, helpers) {
           ? '<button class="btn primary" id="new-rooms">批量新增房间</button>'
           : "",
       ) +
-      `<div class="property-summary"><span><b>${of("community").length}</b> 个小区</span><span><b>${of("building").length}</b> 栋物业</span><span><b>${of("floor").length}</b> 个楼层</span><span><b>${rooms.length}</b> 间房</span><span class="muted">${rooms.filter((r) => !r.floorId).length} 间待归档</span></div><section class="panel"><div class="filters"><div class="property-tools">${writable ? '<button class="btn" id="new-community">＋ 小区</button><button class="btn" id="new-building">＋ 楼栋</button><button class="btn" id="new-floor">＋ 楼层</button>' : ""}<button class="btn" id="layouts">户型目录</button><button class="btn" id="property-refresh">刷新</button></div><a class="link" href="#houses">出租展示管理 →</a></div><div class="property-filter"><label>小区<select id="property-community">${options(of("community"), communityId, "全部小区")}</select></label><label>楼栋<select id="property-building">${options(
+      `<div class="property-summary"><span><b>${of("community").length}</b> 个小区</span><span><b>${of("building").length}</b> 栋物业</span><span><b>${of("floor").length}</b> 个楼层</span><span><b>${rooms.length}</b> 间房</span><span class="muted">${rooms.filter((r) => !r.floorId).length} 间待归档</span></div><section class="panel"><div class="filters"><div class="property-tools">${writable ? '<button class="btn" id="new-property">＋ 添加物业</button><button class="btn" id="new-floor">＋ 楼层</button>' : ""}<button class="btn" id="layouts">户型目录</button><button class="btn" id="property-refresh">刷新</button></div><a class="link" href="#houses">出租展示管理 →</a></div><div class="property-filter"><label>小区<select id="property-community">${options(of("community"), communityId, "全部小区")}</select></label><label>楼栋<select id="property-building">${options(
         buildings.map((b) => ({
           ...b,
           name: communityId ? b.name : title(b.parentId) + " / " + b.name,
@@ -432,10 +485,8 @@ export function mountProperties(snapshot, helpers) {
     $("#layouts").onclick = layouts;
     $("#property-refresh").onclick = () =>
       refresh().catch((e) => toast(e.message));
-    for (const kind of ["community", "building", "floor"])
-      $("#new-" + kind)?.addEventListener("click", () =>
-        kind === "floor" ? autoFill("floors") : createCatalog(kind),
-      );
+    $("#new-property")?.addEventListener("click", addProperty);
+    $("#new-floor")?.addEventListener("click", () => autoFill("floors"));
     $("#new-rooms")?.addEventListener("click", () => autoFill("rooms"));
     $("#batch-layout")?.addEventListener("click", batch);
     const update = () => {

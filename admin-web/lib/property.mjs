@@ -56,6 +56,46 @@ export class PropertyService {
     ]);
     return { catalog, rooms };
   }
+  async createProperty(data, audit) {
+    if (!data || !["new", "existing"].includes(data.mode))
+      fail("请选择新建小区或已有小区");
+    const buildingName = text(data.buildingName, "楼栋名称");
+    const communityName =
+      data.mode === "new" ? text(data.communityName, "小区名称") : null;
+    const communityId =
+      data.mode === "new"
+        ? "cat-" + stable("community", "", communityName)
+        : text(data.communityId, "小区编号");
+    const buildingId = "cat-" + stable("building", communityId, buildingName);
+    await this.store.transact(
+      [
+        ref("property_catalog", communityId),
+        ref("property_catalog", buildingId),
+      ],
+      (state) => {
+        if (data.mode === "new" && state[`property_catalog/${communityId}`])
+          fail("该小区已存在，请选择已有小区", 409);
+        if (data.mode === "existing") cat(state, communityId, "community");
+        if (state[`property_catalog/${buildingId}`])
+          fail("该小区内已有同名楼栋", 409);
+        const writes = [];
+        if (data.mode === "new")
+          writes.push({
+            collection: "property_catalog",
+            id: communityId,
+            data: { kind: "community", name: communityName, parentId: "" },
+          });
+        writes.push({
+          collection: "property_catalog",
+          id: buildingId,
+          data: { kind: "building", name: buildingName, parentId: communityId },
+        });
+        return writes;
+      },
+      audit,
+    );
+    return { communityId, buildingId };
+  }
   async createCatalog(data, audit) {
     if (!["community", "building", "floor", "layout"].includes(data.kind))
       fail("物业分类无效");

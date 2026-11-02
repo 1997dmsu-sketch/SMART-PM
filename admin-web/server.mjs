@@ -99,7 +99,7 @@ export async function createApp({
           return send({
             mode,
             environment: mode === "live" ? process.env.CLOUDBASE_ENV_ID : null,
-            version: "0.2.0-beta.3",
+            version: "0.2.0-beta.4",
           });
         const token = (req.headers.cookie || "")
           .split(";")
@@ -211,6 +211,11 @@ export async function createApp({
             if (path === "/api/property/auto-rooms")
               return send(
                 await service.autoRooms(data, audit("自动填充房间")),
+                201,
+              );
+            if (path === "/api/property/create")
+              return send(
+                await service.createProperty(data, audit("添加物业")),
                 201,
               );
             if (path === "/api/property/catalog")

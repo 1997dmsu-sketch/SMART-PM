@@ -1,6 +1,6 @@
 # DB-02 实施交接：组织范围与物业归档
 
-状态：首轮审查（`docs/db-01-design` 提交 `9206c6c` 的 [DB-02-REVIEW](DB-02-REVIEW.md)）不通过项已返工完成，修复映射见 §6。基线 `docs/db-01-design` 提交 `a82fe6e`，开发分支 `feat/db-02-org-scope-archive`。
+状态：首轮审查（`9206c6c`）与第二轮复查（`252adf0`，R2-01/R2-02）不通过项均已返工完成，修复映射见 §6。基线 `docs/db-01-design` 提交 `a82fe6e`，开发分支 `feat/db-02-org-scope-archive`。
 范围仅限 admin-web 服务端；未修改登录、实名、门锁逻辑，未连接或操作真实云环境，未合并 main。
 依据文档：[数据模型](DATA-MODEL.md)、[接口契约](API-CONTRACT.md) §2、§8、[迁移方案](MIGRATION-PLAN.md)。
 
@@ -20,7 +20,7 @@
 1. **唯一占位的统一解释**：旧创建路径（确定性文档 ID `cat-/room-+hash`）本身就是固定 ID 占位，与 DATA-MODEL §3.1 同构；v2 新记录用随机 ID + `unique_claims`。未给旧路径补写 claims，原因是旧 `autoFloors` 单事务可达 100 条楼层，补写 claims 会突破 90 条事务引用预算（DATA-MODEL §4）。由此 legacy 与 v2 各管各的范围，靠"legacy 无 orgId、v2 不可见"隔离；最终统一依赖 DB-08 迁移后停用旧写路径。若评审认为必须立即双写，需先重构旧批量接口的事务粒度。
 2. **归档释放占位**：归档释放 catalog-name/layout-code/floor-level/room-no 占位，允许名称/编码/房号复用；历史记录保留可查。房源归档不释放房源关联（§3.1 "房源归档不自动释放占位"）。房号复用后新房 `houseId` 由随机 roomId 派生，不与归档房间重复。
 3. **房间归档阻塞条件**：关联有效房源（lifecycle 非 archived）或存在旧 `users.houses` 绑定（影响设备权限）时拒绝，返回计数。occupancies 尚属 DB-05，未纳入。
-4. **生命周期守卫（返工后协议）**：每组织固定文档 `guard-lifecycle-{orgId}`，**所有 v2 变更（创建/批量布局/归档）都 bump epoch**；归档拆为扫描（记录 `epochSeen`）+ 提交（事务内比较 epoch，不等则抛 `GUARD_CHANGED` 409 并重扫重试，最多 3 次），把"扫描后新增记录漏归档"变成可检测冲突（修复 F02）。建房事务同时重新校验 building/community/layout 的归属、层级链与 active 状态，并以事务内最新文档取冗余字段，杜绝沿用失效快照（修复 F03）。本地串行队列下该机制等价串行化；云端争用重试行为未经真实环境验证，属 DB-08 探针范围。
+4. **生命周期守卫（返工后协议）**：每组织固定文档 `guard-lifecycle-{orgId}`，**所有 v2 变更（创建/批量布局/归档）都 bump epoch**；归档拆为扫描 + 提交，提交事务内比较 epoch，不等则抛 `GUARD_CHANGED` 409 并重扫重试（最多 3 次）。**扫描的读取顺序为：先独立 `await` 读取 guard epoch，再扫描业务集合**（修复 R2-01——并行读取可能把"陈旧业务快照 + 最新 epoch"配对，让归档漏过新关联）；epoch 读取之前提交的变更会体现在 epoch 与后续扫描中，epoch 读取之后提交的变更必然被提交时比较捕获。建房事务同时重新校验 building/community/layout 的归属、层级链与 active 状态，并以事务内最新文档取冗余字段，杜绝沿用失效快照（修复 F03）。本地串行队列下该机制等价串行化；云端读取一致性（非线性化读是否可能让扫描返回早于 epoch 读取点的快照）未经真实环境验证，属 DB-08 探针范围。
 5. **幂等**：`operation_keys` 与业务写入同事务；同 key 同请求体重放已存结果（含原状态码），同 key 不同请求体 409。`expiresAt`（24h）过期后同 key 返回 409 `IDEMPOTENCY_EXPIRED`，拒绝重放也拒绝重复执行（返工后实现，原为只记录不过期）；过期键的清理任务仍未实现。
 6. **v2 未暴露建房 HTTP 接口**：按 §2 契约表，房间创建仍走旧 `/api/property/*` 入口；`createRooms` 仅在服务层供测试与后续切换使用。
 
@@ -36,11 +36,20 @@
 
 ## 4. 已执行检查
 
-- `admin-web`：`npm test` 78 项全部通过（58 项既有回归 + 20 项新增：org-v2 服务层 14 项、server-v2 HTTP 层 7 项，其中含并发双写、越组织 404、伪造 orgId、幂等重放/冲突/过期、归档阻塞计数、游标分页 org 过滤先行、归档扫描-提交屏障、建房事务内快照重校验、成员撤权事务内 403、旧入口对 v2 记录的读写隔离、归档房源禁止重新上架）。
+- `admin-web`：`npm test` 82 项全部通过（58 项既有回归 + 24 项新增：org-v2 服务层 17 项、server-v2 HTTP 层 8 项，其中含并发双写、越组织 404、伪造 orgId、幂等重放/冲突/过期、归档阻塞计数、游标分页 org 过滤先行、归档扫描-提交屏障（含 R2-01 两种时序与读取顺序断言）、建房事务内快照重校验、成员撤权事务内 403、旧入口对 v2 记录的读写隔离、归档房源禁止重新上架、vr-download 组织隔离）。
 - 根目录：`npm test` 51 项通过；`npm run check` 通过（9 页静态结构）。
 - 未运行：`test:sdk`（真实 SDK 模拟传输，与本改动无交集）、`test:browser`（v2 暂无界面）、云端探针（DB-08）。
 
-## 6. 修订记录（响应 9206c6c 审查）
+## 6. 修订记录
+
+### 第二轮复查（252adf0）
+
+| 审查项 | 修复方式 | 覆盖测试 |
+|---|---|---|
+| R2-01 归档扫描与 guard 并行读取 | `scanArchive` 改为先独立 `await` 读取 guard epoch，再扫描业务集合，提交事务内比较同一 epoch；陈旧快照+迟到创建、扫描完成后创建两种时序均强制重扫并阻塞 | org-v2 两项「R2-01 barrier」+「R2-01: the guard epoch is read alone and before every collection scan」 |
+| R2-02 VR 下载绕过组织权限 | `/api/vr-download` 对带 orgId 的 content 记录一律 404，检查在云下载/本地 readFile 之前完成；盘点其余文件路径：`/uploads/*` 仅 demo 模式 uuid 图片（严格正则、无组织数据）、`/vr-files/*` 不静态暴露（仅经 vr-download）、public 静态目录有穿越防护，无其他记录驱动下载路径 | server-v2「R2-02: vr-download never serves org-scoped records; legacy records still download」（无组织账号、其他组织账号、全局 admin 均 404，旧内容 200 正常下载） |
+
+### 第一轮审查（9206c6c）
 
 | 审查项 | 修复方式 | 覆盖测试 |
 |---|---|---|

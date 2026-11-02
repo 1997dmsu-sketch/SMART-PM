@@ -634,15 +634,21 @@ export class OrgPropertyService {
     throw lastError;
   }
   async scanArchive(type, id, data) {
-    const [catalogRows, roomRows, houseRows, userRows, guards] =
-      await Promise.all([
-        this.store.list("property_catalog", this.orgId),
-        this.store.list("rooms", this.orgId),
-        this.store.list("houses", this.orgId),
-        this.store.list("users"),
-        this.store.list("lifecycle_guards"),
-      ]);
+    // R2-01: the guard epoch is read FIRST, alone, and only then are the
+    // business collections scanned; the commit compares that same epoch.
+    // A mutation committing before the epoch read is reflected in the epoch
+    // and therefore visible to the scans that follow; a mutation committing
+    // after the epoch read moves the epoch and forces GUARD_CHANGED + rescan.
+    // Reading them in parallel could return a stale collection snapshot
+    // together with a fresh epoch and let the archive commit slip through.
+    const guards = await this.store.list("lifecycle_guards");
     const epoch = guards.find((g) => g._id === guardId(this.orgId))?.epoch ?? 0;
+    const [catalogRows, roomRows, houseRows, userRows] = await Promise.all([
+      this.store.list("property_catalog", this.orgId),
+      this.store.list("rooms", this.orgId),
+      this.store.list("houses", this.orgId),
+      this.store.list("users"),
+    ]);
     const active = (r) => (r.status || "active") === "active";
     const collection =
       type === "room" ? "rooms" : type === "house" ? "houses" : "property_catalog";

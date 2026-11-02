@@ -590,7 +590,7 @@ test("F02 barrier: a creation landing between archive scan and commit forces a r
       { expectedRevision: x.community.revision, reason: "屏障测试" },
       audit,
     ),
-    (e) => e.code === "ARCHIVE_BLOCKED" && /楼栋1项/.test(e.message),
+    (e) => e.code === "ARCHIVE_BLOCKED" && /楼栋2项/.test(e.message),
   );
   const catalog = await origList("property_catalog");
   assert.equal(
@@ -601,6 +601,118 @@ test("F02 barrier: a creation landing between archive scan and commit forces a r
     catalog.find((c) => c.name === "屏障插入栋").status,
     "active",
   );
+});
+test("R2-01 barrier: a stale catalog snapshot plus a creation after the epoch read cannot slip an archive through", async (t) => {
+  const x = await setup(t);
+  // Target a community WITHOUT pre-existing children so the stale first scan
+  // is clean and the archive actually reaches its commit; only the injected
+  // creation can then block the rescan (the review's exact setup).
+  const empty = await x.a.createCatalog(
+    { kind: "community", name: "空小区" },
+    audit,
+  );
+  const origList = x.store.list.bind(x.store);
+  let injected = false;
+  // Exact R2-01 reproduction timing, adapted to the fixed read order: the
+  // guard epoch is already read, then the catalog scan returns a STALE
+  // snapshot (no children), and a building creation commits before the
+  // archive transaction starts. The commit must notice the moved epoch,
+  // rescan, and block instead of archiving the community.
+  x.store.list = async (name, scope) => {
+    if (!injected && name === "property_catalog") {
+      injected = true;
+      const stale = await origList(name, scope);
+      await x.a.createCatalog(
+        { kind: "building", name: "迟到栋", parentId: empty._id },
+        audit,
+      );
+      return stale;
+    }
+    return origList(name, scope);
+  };
+  await assert.rejects(
+    x.a.archive(
+      "community",
+      empty._id,
+      { expectedRevision: empty.revision, reason: "R2-01 屏障测试" },
+      audit,
+    ),
+    (e) => e.code === "ARCHIVE_BLOCKED" && /楼栋1项/.test(e.message),
+  );
+  const catalog = await origList("property_catalog");
+  assert.equal(catalog.find((c) => c._id === empty._id).status, "active");
+  assert.equal(
+    catalog.find((c) => c.name === "迟到栋").status,
+    "active",
+  );
+});
+test("R2-01 barrier: a creation after the completed scan but before the commit is caught by the epoch comparison", async (t) => {
+  const x = await setup(t);
+  const empty = await x.a.createCatalog(
+    { kind: "community", name: "空小区" },
+    audit,
+  );
+  const origTransact = x.store.transact.bind(x.store);
+  let injected = false;
+  // Pause point: scanArchive has fully completed (guard + collections) and
+  // commitArchive now opens its transaction; a building creation commits
+  // first, moving the guard epoch. The in-transaction comparison must reject
+  // and the retry must rescan and block.
+  x.store.transact = async (refs, fn, auditArg) => {
+    if (!injected) {
+      injected = true;
+      await x.a.createCatalog(
+        { kind: "building", name: "提交前插入栋", parentId: empty._id },
+        audit,
+      );
+    }
+    return origTransact(refs, fn, auditArg);
+  };
+  await assert.rejects(
+    x.a.archive(
+      "community",
+      empty._id,
+      { expectedRevision: empty.revision, reason: "R2-01 屏障测试" },
+      audit,
+    ),
+    (e) => e.code === "ARCHIVE_BLOCKED" && /楼栋1项/.test(e.message),
+  );
+  const catalog = await x.store.list("property_catalog");
+  assert.equal(catalog.find((c) => c._id === empty._id).status, "active");
+  assert.equal(
+    catalog.find((c) => c.name === "提交前插入栋").status,
+    "active",
+  );
+});
+test("R2-01: the guard epoch is read alone and before every collection scan", async (t) => {
+  const x = await setup(t);
+  const origList = x.store.list.bind(x.store);
+  const order = [];
+  x.store.list = async (name, scope) => {
+    order.push(name);
+    return origList(name, scope);
+  };
+  await assert.rejects(
+    x.a.archive(
+      "community",
+      x.community._id,
+      { expectedRevision: x.community.revision, reason: "读取顺序断言" },
+      audit,
+    ),
+    (e) => e.code === "ARCHIVE_BLOCKED",
+  );
+  // Fixed protocol: lifecycle_guards first, alone, and strictly before the
+  // business scans (parallel reads could pair a stale snapshot with a fresh
+  // epoch, which is exactly what R2-01 reported).
+  assert.equal(order[0], "lifecycle_guards");
+  assert.ok(order.indexOf("lifecycle_guards") < order.indexOf("property_catalog"));
+  assert.deepEqual(order.slice(0, 5), [
+    "lifecycle_guards",
+    "property_catalog",
+    "rooms",
+    "houses",
+    "users",
+  ]);
 });
 test("F03 barrier: archiving the layout between pre-read and commit rejects room creation", async (t) => {
   const x = await setup(t);

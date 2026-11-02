@@ -338,3 +338,87 @@ test("F04: archived listings cannot be re-published through the legacy endpoint"
   );
   assert.equal(house.status, "下架");
 });
+
+test("R2-02: vr-download never serves org-scoped records; legacy records still download", async () => {
+  const bytes = Buffer.from("<html>vr-content</html>");
+  const upload = await fetch(`${url}/api/vr-upload?name=tour.html`, {
+    method: "POST",
+    headers: { Origin: url, Cookie: admin.cookie, "X-CSRF-Token": admin.csrf, "Content-Type": "application/octet-stream" },
+    body: bytes,
+  });
+  assert.equal(upload.status, 200);
+  const vrFile = await upload.json();
+  // Seed an org-scoped content record pointing at a REAL file, exactly like
+  // the R2-02 reproduction: hiding the ID in lists is not download authz.
+  await app.store.transact(
+    [{ collection: "content", id: "content-org-scoped" }],
+    () => [
+      {
+        collection: "content",
+        id: "content-org-scoped",
+        data: {
+          title: "组织 VR",
+          type: "share",
+          orgId: "org-demo",
+          schemaVersion: 2,
+          vrFile,
+        },
+      },
+    ],
+    { actor: "test", actorId: "demo-admin", action: "R2-02 测试" },
+  );
+  // Fresh account with NO membership anywhere (viewer2 already holds an
+  // org-demo membership from an earlier test, so it cannot play the outsider).
+  await app.accounts.save({
+    username: "vr-outsider",
+    name: "无组织账号",
+    role: "viewer",
+    password: "test-only-password-123",
+    enabled: true,
+  });
+  const login = await fetch(`${url}/api/login`, {
+    method: "POST",
+    headers: { Origin: url, "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "vr-outsider", password: "test-only-password-123" }),
+  });
+  const outsiderAuth = { cookie: login.headers.get("set-cookie")?.split(";")[0] };
+  const download = (id, auth) =>
+    fetch(`${url}/api/vr-download?id=${id}`, {
+      headers: { Origin: url, Cookie: auth.cookie },
+    });
+  // 1) Account without any membership: must not get the org-scoped file.
+  const outsider = await download("content-org-scoped", outsiderAuth);
+  assert.equal(outsider.status, 404);
+  assert.notEqual(await outsider.text(), bytes.toString());
+  // 2) Same account after joining ANOTHER org (not org-demo): still rejected.
+  const orgs = new OrgService(app.store);
+  await orgs.bootstrap(
+    {
+      id: "org-other",
+      name: "其他组织",
+      adminAccountIds: [app.accounts.rows.find((a) => a.username === "vr-outsider")._id],
+    },
+    { actor: "test", actorId: "demo-admin", action: "R2-02 测试" },
+  );
+  const otherOrg = await download("content-org-scoped", outsiderAuth);
+  assert.equal(otherOrg.status, 404);
+  // Even a global admin must not fetch org-scoped content via the legacy
+  // endpoint (same rule as the other legacy paths closed under F01).
+  assert.equal((await download("content-org-scoped", admin)).status, 404);
+  // 3) Legacy content (no orgId) still downloads normally.
+  await app.store.transact(
+    [{ collection: "content", id: "content-legacy" }],
+    () => [
+      {
+        collection: "content",
+        id: "content-legacy",
+        data: { title: "旧 VR", type: "share", vrFile },
+      },
+    ],
+    { actor: "test", actorId: "demo-admin", action: "R2-02 测试" },
+  );
+  const ok = await download("content-legacy", outsiderAuth);
+  assert.equal(ok.status, 200);
+  assert.match(ok.headers.get("content-disposition"), /^attachment/);
+  assert.equal(await ok.text(), bytes.toString());
+});

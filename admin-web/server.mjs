@@ -511,6 +511,10 @@ export async function createApp({
           const record = (await store.list("content")).find(
             (r) => r._id === url.searchParams.get("id"),
           );
+          // R2-02/F01: legacy endpoints must not serve org-scoped records;
+          // check ownership BEFORE any cloud download or local file read.
+          // New lists hiding the ID is not a substitute for download authz.
+          if (record?.orgId) fail("VR 文件不存在", 404);
           const file = vrFile(record?.vrFile);
           if (!file) fail("VR 文件不存在", 404);
           let bytes;

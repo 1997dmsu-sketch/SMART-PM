@@ -14,6 +14,11 @@ const collections = [
   "unique_claims",
   "lifecycle_guards",
   "operation_keys",
+  // DB-07: unified file resources (§2). Existing collections keep their
+  // original semantics; these three are append-only additions.
+  "file_assets",
+  "file_links",
+  "file_access_log",
 ];
 export function seed() {
   return {
@@ -101,6 +106,9 @@ export function seed() {
     ],
     property_catalog: [],
     admin_audit: [],
+    file_assets: [],
+    file_links: [],
+    file_access_log: [],
   };
 }
 export class LocalStore {
@@ -120,6 +128,11 @@ export class LocalStore {
       await this.persist(this.data);
     }
     this.data.property_catalog ||= [];
+    // DB-07: on-demand initialization for existing local data files that
+    // predate the file collections (same pattern as property_catalog above).
+    this.data.file_assets ||= [];
+    this.data.file_links ||= [];
+    this.data.file_access_log ||= [];
     return this;
   }
   async persist(data) {

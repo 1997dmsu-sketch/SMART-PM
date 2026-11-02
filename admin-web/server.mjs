@@ -8,6 +8,8 @@ import { PropertyService } from "./lib/property.mjs";
 import { OrgService } from "./lib/org.mjs";
 import { OrgPropertyService, OpReplay } from "./lib/property-v2.mjs";
 import { PersonService } from "./lib/persons.mjs";
+import { VerificationService } from "./lib/verification.mjs";
+import { IdentityService } from "./lib/identity.mjs";
 import { operationKeyId } from "./lib/claims.mjs";
 import { LocalStore, CloudStore } from "./lib/store.mjs";
 import { resolvePublicFile } from "./lib/static-path.mjs";
@@ -56,6 +58,8 @@ export async function createApp({
   origin,
   secure = false,
   org,
+  fileValidator = null,
+  identityGateway = null,
 } = {}) {
   if (!["demo", "live"].includes(mode))
     throw Error("ADMIN_MODE must be demo or live");
@@ -89,6 +93,19 @@ export async function createApp({
     );
   const sessions = new Map(),
     attempts = new Map();
+  // DB-03/04: identity digest + private-document encryption keys come from
+  // deployment configuration; the demo values below are development-only and
+  // must never be used in production. fileValidator is the DB-07 interface
+  // hook — unconfigured means private submissions fail closed (503).
+  const identityHmacKey =
+    process.env.IDENTITY_HMAC_KEY || "demo-identity-hmac-key-not-for-production";
+  const identityService = new IdentityService(store, {
+    hmacKey: identityHmacKey,
+    gateway: identityGateway,
+  });
+  const encryptionKey = process.env.IDENTITY_ENCRYPTION_KEY
+    ? Buffer.from(process.env.IDENTITY_ENCRYPTION_KEY, "hex")
+    : Buffer.alloc(32, 7); // demo-only fixed key
   const sessionAge = 8 * 60 * 60 * 1000;
   const server = http.createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -305,6 +322,12 @@ export async function createApp({
             const persons = new PersonService(store, orgId, {
               membershipId: membership._id,
             });
+            const verification = new VerificationService(
+              store,
+              orgId,
+              { membershipId: membership._id },
+              { identity: identityService, encryptionKey, fileValidator },
+            );
             const auditV2 = (action) => ({
               actor: account.username,
               actorId: account._id,
@@ -335,6 +358,29 @@ export async function createApp({
                 nextCursor,
               );
             }
+            if (path === "/api/v2/identity-applications" && method === "GET") {
+              const { data, nextCursor } = await verification.listApplications(query);
+              return ok(data, 200, nextCursor);
+            }
+            const privateMatch = path.match(
+              /^\/api\/v2\/identity-applications\/([^/]+)\/private$/,
+            );
+            if (privateMatch && method === "GET")
+              return ok(
+                await verification.readPrivate(
+                  decodeURIComponent(privateMatch[1]),
+                  auditV2("读取实名私有资料"),
+                ),
+              );
+            const applicationMatch = path.match(
+              /^\/api\/v2\/identity-applications\/([^/]+)$/,
+            );
+            if (applicationMatch && method === "GET")
+              return ok(
+                await verification.getApplication(
+                  decodeURIComponent(applicationMatch[1]),
+                ),
+              );
             if (method === "POST") {
               const data = await body(req);
               const key = req.headers["idempotency-key"];
@@ -389,6 +435,28 @@ export async function createApp({
                   await persons.createPerson(data, auditV2("新增人员档案"), op),
                   201,
                 );
+              if (path === "/api/v2/identity-applications")
+                return ok(
+                  await verification.createApplication(data, auditV2("新建实名申请"), op),
+                  201,
+                );
+              const actionMatch = path.match(
+                /^\/api\/v2\/identity-applications\/([^/]+)\/(submit|supplement|review|provider-start)$/,
+              );
+              if (actionMatch) {
+                const id = decodeURIComponent(actionMatch[1]);
+                const action = actionMatch[2];
+                if (action === "provider-start")
+                  return ok(await verification.providerStart());
+                return ok(
+                  await verification[action](
+                    id,
+                    data,
+                    auditV2({ submit: "提交实名资料", supplement: "补充实名资料", review: "审核实名申请" }[action]),
+                    op,
+                  ),
+                );
+              }
               const archiveMatch = path.match(
                 /^\/api\/v2\/property\/(community|building|floor|layout|room|house)\/([^/]+)\/archive$/,
               );

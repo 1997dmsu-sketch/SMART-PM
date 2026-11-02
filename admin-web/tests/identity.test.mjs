@@ -221,7 +221,7 @@ test("persons need no account or phone; lists are org-scoped", async (t) => {
   assert.equal((await otherOrg.listPersons({ limit: 20 })).data.length, 0);
   assert.equal((await persons.listPersons({ limit: 20 })).data.length, 1);
 });
-test("F02: claimAccount is closed without identity proof — even a verified phone login is rejected with zero writes", async (t) => {
+test("F02: claimAccount without an approved application is rejected with zero writes", async (t) => {
   const { store, identity, persons } = await personSetup(t);
   // Exactly the F02 reproduction: an admin-created unbound profile plus a
   // verified login account, but NO approved identity application. A verified
@@ -232,8 +232,8 @@ test("F02: claimAccount is closed without identity proof — even a verified pho
   await assert.rejects(
     persons.claimAccount(person.personId, { callerUserId: userId }, audit),
     (e) => {
-      assert.equal(e.code, "POLICY_UNDECIDED");
-      assert.equal(e.status, 503);
+      assert.equal(e.code, "IDENTITY_NOT_APPROVED");
+      assert.equal(e.status, 403);
       return true;
     },
   );

@@ -325,6 +325,10 @@ export class FileService {
   // cloud 的 read/tempUrl/head 需要 cloud:// fileID（server.mjs:523、:586），
   // 而 objectKey 是 cloudPath；上传时把 SDK 返回的 fileID 存入 legacyUrls，
   // 下载时从这里取别名。local 直接用相对路径 objectKey。
+  //
+  // 上线门槛（方案 §9-4 同款）：live 上线前必须人工确认线上 cloud:// fileID
+  // 的真实形态（env/bucket 前缀、是否带查询串等）；未确认前 cloud 分支的
+  // read/tempUrl 无法压测，也无从校验本别名映射是否成立。
   locatorFor(file) {
     if (file.storage === "cloud") {
       const alias = (file.legacyUrls || []).find(
@@ -335,7 +339,9 @@ export class FileService {
     return file.objectKey;
   }
 
-  async logAccess(action, fileId, actor, file) {
+  // entityRef 可选 {entityType, entityId}：T04 的下载入口传入引用对象后，
+  // 留痕可追溯到「从哪条业务记录下载」，否则保持 null。
+  async logAccess(action, fileId, actor, entityRef = {}) {
     await this.store.change(
       "file_access_log",
       null,
@@ -345,8 +351,8 @@ export class FileService {
         action,
         actorType: actor.actorType || "unknown",
         actorId: actor.actorId || "unknown",
-        entityType: null,
-        entityId: null,
+        entityType: entityRef?.entityType ?? null,
+        entityId: entityRef?.entityId ?? null,
         createdAt: Date.now(),
       }),
       {
@@ -433,6 +439,8 @@ export class FileService {
     );
 
     // ② 字节写入。任何失败都转 quarantined，绝不产生 ready。
+    // 注（Q03 未定）：失败不写 operation_keys 完成态，重放同一幂等键会
+    // 重试并再留下一条 quarantined 孤儿；本期不清理任何物理文件或孤儿记录。
     let uploadResult;
     try {
       uploadResult = await adapter.upload(objectKey, bytes, sniffed.mime);
@@ -628,6 +636,17 @@ export class FileService {
       failCode("PARAM_ERROR", "关联实体编号无效");
     if (!Number.isInteger(sortOrder))
       failCode("PARAM_ERROR", "sortOrder 需为整数");
+    // 失败关闭（team-lead 裁定）：这两个实体类型对应的集合本期不存在
+    // （DB-03/04 才建），静默跳过 entity 侧 orgId 复查会给将来埋越权口子，
+    // 且本期没有可挂的实体，拒绝的代价为零。
+    // TODO(DB-03/04): 集合落地后移除此分支，并把这两个类型加入
+    // KNOWN_ENTITY_COLLECTIONS，启用事务内 entity.orgId 跨组织复查。
+    if (PRIVATE_ENTITIES.includes(entityType))
+      failCode(
+        "ENTITY_UNSUPPORTED",
+        "该实体类型对应的集合尚未建立（DB-03/04），本期不支持关联",
+        400,
+      );
     await checkOp(this.store, op);
 
     const file = (await this.store.list("file_assets", this.orgId)).find(
@@ -775,12 +794,13 @@ export class FileService {
   // 逐次下载鉴权（§7）：orgId 不匹配 / 不存在 / 非 ready / private 权限不足
   // 一律 404 FILE_NOT_FOUND（无权限与不存在同态，防枚举），并写 denied 留痕。
   // 鉴权通过后才读取字节或签发 URL；private 一律代理下载，不签发持久凭证。
-  async authorizeDownload(fileId, actor = this.actor) {
+  // entityRef 可选 {entityType, entityId}，由 T04 下载入口传入以写入留痕。
+  async authorizeDownload(fileId, actor = this.actor, entityRef = {}) {
     const file = (await this.store.list("file_assets", this.orgId)).find(
       (r) => r._id === fileId,
     );
     const denied = async () => {
-      await this.logAccess("denied", fileId, actor, file);
+      await this.logAccess("denied", fileId, actor, entityRef);
       failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
     };
     if (!file || !this.own(file)) await denied();
@@ -805,7 +825,7 @@ export class FileService {
       tempUrl = await adapter.tempUrl(locator, 300);
       if (!tempUrl) bytes = await adapter.read(locator);
     }
-    await this.logAccess("download", fileId, actor, file);
+    await this.logAccess("download", fileId, actor, entityRef);
     return {
       file,
       contentType: file.mimeType || "application/octet-stream",

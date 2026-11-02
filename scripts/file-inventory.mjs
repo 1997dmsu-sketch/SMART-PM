@@ -277,49 +277,80 @@ async function main() {
   const houseRefs = entries.filter((e) => e.collection === "houses").length;
   const contentRefs = entries.filter((e) => e.collection === "content").length;
 
-  console.log(`DB-07 存量文件盘点  [${apply ? "--apply 写库" : "--dry-run 只读"}]`);
-  console.log(`数据源: ${source}`);
-  console.log(
+  const lines = [];
+  const say = (line = "") => lines.push(line);
+
+  say(`DB-07 存量文件盘点  [${apply ? "--apply 写库" : "--dry-run 只读"}]`);
+  say(`数据源: ${source}`);
+  say(
     `业务引用合计: ${entries.length} 条（houses ${houseRefs} / content ${contentRefs}）`,
   );
-  console.log(
+  say(
     `已登记: ${registered.length} 条 | 跳过（外链/内置静态）: ${skipped.length} 条 | 人工复核: ${manual.length} 条`,
   );
-  console.log(
+  say(
     `未登记图片数（visibility=public，建议登记）: ${pendingImages.length} 条` +
       ` | 未登记公开 VR 附件: ${pendingAttachments.length} 条`,
   );
 
   if (pending.length) {
-    console.log("\n未登记公开文件明细（含所属业务记录 ID）：");
+    say("\n未登记公开文件明细（含所属业务记录 ID）：");
     for (const e of pending)
-      console.log(
+      say(
         `  [${e.collection}/${e.recordId}] ${e.field}  ${e.url}  → visibility=${e.visibility}  action=${e.action}  (${e.reason})`,
       );
   }
   if (manual.length) {
-    console.log("\n人工复核明细（不自动登记）：");
+    say("\n人工复核明细（不自动登记）：");
     for (const e of manual)
-      console.log(
+      say(
         `  [${e.collection}/${e.recordId}] ${e.field}  ${e.url}  → visibility=${e.visibility}  (${e.reason})`,
       );
   }
 
+  // dry-run 只输出到 stdout，绝不写报告文件（零写入）。
   if (!apply) {
-    console.log(
+    say(
       "\ndry-run 结束：未写 DB、未联网、未删除任何文件。需要登记时显式执行 --apply。",
     );
+    console.log(lines.join("\n"));
     return;
   }
-  if (!persisted)
+  if (!persisted) {
+    console.log(lines.join("\n"));
     die("数据文件不存在，--apply 拒绝在只读演示快照上写库");
+  }
 
   await applyRegistration(pending, file, data);
-  console.log(
+  say(
     `\n--apply 完成：登记 ${pending.length} 条 visibility=public 的公开文件到 file_assets` +
       `（图片 ${pendingImages.length} / VR 附件 ${pendingAttachments.length}）；` +
       `private 与人工复核条目未登记；未删除任何物理文件。`,
   );
+
+  // --apply 的批量登记留痕落盘到方案指定的产物位置；dry-run 不走这里。
+  const reportPath = join(
+    repoRoot,
+    "docs",
+    "database",
+    "DB-07-FILE-INVENTORY.md",
+  );
+  const report = [
+    "# DB-07 存量文件批量登记报告（--apply）",
+    "",
+    `生成时间: ${new Date().toISOString()}`,
+    "命令: node scripts/file-inventory.mjs --apply",
+    "",
+    "本文件由 --apply 自动生成，作为本次批量登记的留痕；dry-run 不写本文件。",
+    "",
+    "```text",
+    ...lines,
+    "```",
+    "",
+  ].join("\n");
+  await writeFile(reportPath, report, { mode: 0o600 });
+  console.log(lines.join("\n"));
+  console.log(`登记报告已写入: ${reportPath}`);
 }
 
 main().catch((error) => {

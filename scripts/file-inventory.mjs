@@ -170,13 +170,20 @@ function fromPath(path, storage) {
   };
 }
 
-// ① 是否已登记：按 legacyUrls 或 objectKey 命中 file_assets。
+// ① 是否已登记：命中集合（§11.6）= objectKey ∪ legacyUrls ∪ cloudFileId。
+// live 下按 cloud:// fileID 查询，若只比对 objectKey 会把已登记记录误判成
+// 「未登记」，在默认 deny 下即 403 → 存量图片静默裂图（§10 第 14 条要防的点）。
 function isRegistered(url, cls, assets) {
   return assets.some((asset) => {
-    if (Array.isArray(asset.legacyUrls) && asset.legacyUrls.includes(url)) return true;
-    if (cls.objectKey && (asset.objectKey === cls.objectKey || asset.objectKey === url))
-      return true;
-    return false;
+    const locators = [
+      asset.objectKey,
+      asset.cloudFileId,
+      ...(Array.isArray(asset.legacyUrls) ? asset.legacyUrls : []),
+    ].filter((v) => typeof v === "string" && v);
+    return (
+      locators.includes(url) ||
+      (!!cls.objectKey && locators.includes(cls.objectKey))
+    );
   });
 }
 
@@ -221,8 +228,7 @@ async function applyRegistration(pending, file, data) {
       orgId: null, // legacy 未归属，DB-08 迁移前 v2 列表不可见
       storage: entry.storage,
       objectKey: entry.objectKey,
-      bucket: entry.visibility,
-      prefix: entry.prefix,
+      bucket: entry.visibility, // 密级副本，供拦截点快速判定（§11.5）
       originalName: String(entry.objectKey).split("/").pop(),
       mimeType: guessMime(entry.objectKey),
       size: null,

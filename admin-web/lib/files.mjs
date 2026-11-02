@@ -323,19 +323,19 @@ export class FileService {
   }
 
   // cloud 的 read/tempUrl/head 需要 cloud:// fileID（server.mjs:523、:586），
-  // 而 objectKey 是 cloudPath；上传时把 SDK 返回的 fileID 存入 legacyUrls，
-  // 下载时从这里取别名。local 直接用相对路径 objectKey。
+  // 而 objectKey 是 cloudPath；上传成功后把 SDK 返回的 fileID 单独写入
+  // cloudFileId（§11.2），下载时从这里取对象定位。local 直接用相对路径
+  // objectKey。legacyUrls 只保存改造前已存在的旧 URL 兼容映射，绝不落库
+  // 临时下载 URL，也绝不混入正常上传产生的 fileID（否则污染 §10 第 14 条
+  // 覆盖率统计与盘点脚本判定）。
   //
-  // 上线门槛（方案 §9-4 同款）：live 上线前必须人工确认线上 cloud:// fileID
-  // 的真实形态（env/bucket 前缀、是否带查询串等）；未确认前 cloud 分支的
-  // read/tempUrl 无法压测，也无从校验本别名映射是否成立。
+  // 上线门槛（方案 §9-4 / §11.2 同款）：live 云分支在隔离环境探针确认线上
+  // cloud:// fileID 的真实形态（env/bucket 前缀、是否带查询串等）前不得宣称
+  // 可用，本地串行不构成证明（与 DB-02/03 云端门槛一致）；未确认前 cloud
+  // 分支的 read/tempUrl 无法压测，也无从校验本定位映射是否成立。
   locatorFor(file) {
-    if (file.storage === "cloud") {
-      const alias = (file.legacyUrls || []).find(
-        (u) => typeof u === "string" && u.startsWith("cloud://"),
-      );
-      return alias || file.objectKey;
-    }
+    if (file.storage === "cloud")
+      return file.cloudFileId || file.objectKey;
     return file.objectKey;
   }
 
@@ -411,8 +411,7 @@ export class FileService {
       orgId: this.orgId,
       storage: adapter.kind,
       objectKey,
-      bucket: visibility,
-      prefix: objectKey.split("/")[0],
+      bucket: visibility, // 密级副本，供拦截点快速判定（§11.5）
       originalName: name,
       mimeType: sniffed.mime,
       size: bytes.length,
@@ -466,13 +465,25 @@ export class FileService {
     }
 
     // ③ 成功事务改 ready + operation_keys（同一事务）。
+    // public 返回旧格式 url 供旧前端直接使用：cloud 为 SDK 返回的 cloud://
+    // fileID（/api/image-url?id=… 的形态），local 为 /uploads/<uuid>.<ext>；
+    // private 不返回 url。
+    //
+    // cloudFileId（§11.2）：仅 storage==='cloud' 且上传成功后写入，值是
+    // SDK 返回的对象定位（cloud://…），供 read/tempUrl 使用；绝不落库临时
+    // 下载 URL。legacyUrls 语义是「改造前旧 URL 兼容映射」，正常上传产生的
+    // 记录保持 staged 时的空数组，绝不混入 fileID —— 否则会污染 §10 第 14
+    // 条覆盖率统计与盘点脚本「是否已登记」判定，把新文件误判为遗留文件。
     const url =
       visibility === "public"
         ? adapter.kind === "cloud"
           ? uploadResult.fileID
           : `/${objectKey}`
         : undefined;
-    const legacyUrls = url ? [url] : [];
+    const cloudFileId =
+      adapter.kind === "cloud" ? uploadResult.fileID || null : null;
+    const readyData = { status: "ready", revision: 2 };
+    if (cloudFileId) readyData.cloudFileId = cloudFileId;
     let result;
     await this.store.transact(
       [ref("file_assets", fileId), ...this.authRefs(), ...opRefs],
@@ -499,7 +510,7 @@ export class FileService {
           {
             collection: "file_assets",
             id: fileId,
-            data: { status: "ready", revision: 2, legacyUrls },
+            data: readyData,
           },
           ...opw,
         ];
@@ -510,7 +521,8 @@ export class FileService {
   }
 
   // 登记旧 URL 引用（§6.2）：只补 file_assets 记录，不搬迁物理文件、不写字节、
-  // 不联网。已登记（legacyUrls/objectKey 命中）则直接返回既有记录。
+  // 不联网。已登记（命中集合 objectKey ∪ legacyUrls ∪ cloudFileId，§11.6）
+  // 则直接返回既有记录。
   async registerLegacy(input, audit) {
     const list = Array.isArray(input?.urls) ? input.urls : [input || {}];
     const results = [];
@@ -534,11 +546,17 @@ export class FileService {
       const now = Date.now();
 
       const assets = await this.store.list("file_assets");
+      // 命中集合（§11.6）= objectKey ∪ legacyUrls ∪ cloudFileId。
+      // live 下旧 URL 常以 cloud:// fileID 形式出现，只比对 objectKey 会
+      // 把已登记记录误判成「未登记」，默认 deny 下即 403 → 存量图片静默裂图。
+      const locators = (a) =>
+        [
+          a.objectKey,
+          a.cloudFileId,
+          ...(Array.isArray(a.legacyUrls) ? a.legacyUrls : []),
+        ].filter((v) => typeof v === "string" && v);
       const existing = assets.find(
-        (a) =>
-          (Array.isArray(a.legacyUrls) && a.legacyUrls.includes(url)) ||
-          a.objectKey === objectKey ||
-          a.objectKey === url,
+        (a) => locators(a).includes(url) || locators(a).includes(objectKey),
       );
       if (existing) {
         results.push(existing);
@@ -557,8 +575,7 @@ export class FileService {
                 orgId, // legacy 未归属 → v2 列表不可见（§6.5）
                 storage,
                 objectKey,
-                bucket: visibility,
-                prefix: String(objectKey).split("/")[0],
+                bucket: visibility, // 密级副本，供拦截点快速判定（§11.5）
                 originalName: item.originalName || String(objectKey).split("/").pop(),
                 mimeType: item.mimeType || null,
                 size: item.size ?? null,
@@ -643,7 +660,7 @@ export class FileService {
     // KNOWN_ENTITY_COLLECTIONS，启用事务内 entity.orgId 跨组织复查。
     if (PRIVATE_ENTITIES.includes(entityType))
       failCode(
-        "ENTITY_UNSUPPORTED",
+        "ENTITY_NOT_SUPPORTED",
         "该实体类型对应的集合尚未建立（DB-03/04），本期不支持关联",
         400,
       );

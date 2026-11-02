@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { failCode } from "./model.mjs";
-import { claimId } from "./claims.mjs";
+import { claimId, eligibilityGuardId } from "./claims.mjs";
 import { maskName } from "./identity.mjs";
 import { opWrite, page, pageParams } from "./property-v2.mjs";
 // DB-03: persons (org-scoped resident profiles) are separate from login
@@ -17,6 +17,26 @@ import { opWrite, page, pageParams } from "./property-v2.mjs";
 //   transaction together with the per-org person-account unique claim.
 const ref = (collection, id) => ({ collection, id });
 const base = () => ({ schemaVersion: 2, revision: 1, createdAt: Date.now() });
+// DB-06: binding a login account introduces a new blacklist subject. Claim
+// and activation therefore write the same person/user guards (no user-core
+// field or login rule is changed by this integration).
+const eligibilityWrite = (state, orgId, subjectType, subjectKey) => {
+  const id = eligibilityGuardId(orgId, subjectType, subjectKey);
+  const current = state[`eligibility_guards/${id}`];
+  if (current && current.orgId !== orgId)
+    failCode("FORBIDDEN", "资格 guard 组织边界无效", 403);
+  return {
+    collection: "eligibility_guards",
+    id,
+    data: {
+      orgId,
+      subjectType,
+      subjectKey,
+      epoch: (current?.epoch ?? 0) + 1,
+      ...(current ? { revision: (current.revision ?? 0) + 1 } : base()),
+    },
+  };
+};
 const text = (v, label, max = 80) => {
   if (typeof v !== "string" || !v.trim() || v.trim().length > max)
     failCode("PARAM_ERROR", `${label}需为 1–${max} 字`);
@@ -113,6 +133,8 @@ export class PersonService {
         ref("unique_claims", claim),
         ref("organizations", this.orgId),
         ref("identity_applications", applicationId),
+        ref("eligibility_guards", eligibilityGuardId(this.orgId, "person", personId)),
+        ref("eligibility_guards", eligibilityGuardId(this.orgId, "user", callerUserId)),
         ...identityIds.map((id) => ref("auth_identities", id)),
       ],
       (state) => {
@@ -173,6 +195,8 @@ export class PersonService {
               ...base(),
             },
           },
+          eligibilityWrite(state, this.orgId, "person", personId),
+          eligibilityWrite(state, this.orgId, "user", callerUserId),
         ];
       },
       { ...audit, actorType: "user" },

@@ -18,5 +18,9 @@ export const claims = {
   roomListing: (orgId, roomId) => claimId("room-listing", `${orgId}`, roomId),
 };
 export const guardId = (orgId) => `guard-lifecycle-${orgId}`;
+// DB-06 eligibility guards are shared by blacklist changes, account claims
+// and DB-05 activation. The subject key is already an ID or keyed digest.
+export const eligibilityGuardId = (orgId, subjectType, subjectKey) =>
+  `eligibility-${hash(orgId, subjectType, subjectKey)}`;
 export const operationKeyId = (actorId, orgId, route, key) =>
   `op-${hash("idempotency", actorId, orgId, route, key)}`;

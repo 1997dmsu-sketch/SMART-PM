@@ -9,6 +9,7 @@ import { OrgService } from "./lib/org.mjs";
 import { OrgPropertyService, OpReplay } from "./lib/property-v2.mjs";
 import { PersonService } from "./lib/persons.mjs";
 import { VerificationService } from "./lib/verification.mjs";
+import { BlacklistService } from "./lib/blacklist.mjs";
 import { IdentityService } from "./lib/identity.mjs";
 import { operationKeyId } from "./lib/claims.mjs";
 import { LocalStore, CloudStore } from "./lib/store.mjs";
@@ -349,6 +350,12 @@ export async function createApp({
               { membershipId: membership._id },
               { identity: identityService, encryptionKey, fileValidator },
             );
+            const blacklist = new BlacklistService(
+              store,
+              orgId,
+              { membershipId: membership._id },
+              { fileValidator },
+            );
             const auditV2 = (action) => ({
               actor: account.username,
               actorId: account._id,
@@ -381,6 +388,13 @@ export async function createApp({
             }
             if (path === "/api/v2/identity-applications" && method === "GET") {
               const { data, nextCursor } = await verification.listApplications(query);
+              return ok(data, 200, nextCursor);
+            }
+            if (path === "/api/v2/blacklist" && method === "GET") {
+              const { data, nextCursor } = await blacklist.listEntries(
+                query,
+                auditV2("读取内部黑名单"),
+              );
               return ok(data, 200, nextCursor);
             }
             const privateMatch = path.match(
@@ -461,6 +475,31 @@ export async function createApp({
                   await verification.createApplication(data, auditV2("新建实名申请"), op),
                   201,
                 );
+              if (path === "/api/v2/blacklist")
+                return ok(
+                  await blacklist.createEntry(data, auditV2("新增内部黑名单"), op),
+                  201,
+                );
+              const blacklistRevoke = path.match(
+                /^\/api\/v2\/blacklist\/([^/]+)\/revoke$/,
+              );
+              if (blacklistRevoke)
+                return ok(await blacklist.revokeEntry(
+                  decodeURIComponent(blacklistRevoke[1]),
+                  data,
+                  auditV2("解除内部黑名单"),
+                  op,
+                ));
+              const blacklistReview = path.match(
+                /^\/api\/v2\/occupancies\/([^/]+)\/blacklist-review$/,
+              );
+              if (blacklistReview)
+                return ok(await blacklist.reviewOccupancy(
+                  decodeURIComponent(blacklistReview[1]),
+                  data,
+                  auditV2("复核入住名单"),
+                  op,
+                ));
               const actionMatch = path.match(
                 /^\/api\/v2\/identity-applications\/([^/]+)\/(submit|supplement|review|provider-start)$/,
               );

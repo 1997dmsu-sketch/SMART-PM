@@ -10,7 +10,12 @@
  *   - 本组织成员 → 字段集 A + vrFile（仅当其 url 命中 file_assets 且 public）
  * 返回结构恒为 {code:0,data,total}（miniprogram/services/api.js:47 依赖 data）。
  *
- * 失败关闭：成员态判定或 file_assets 查询任一步异常/集合缺失，一律降级为
+ * 「本组织成员」是**逐条按记录锚定**的：仅当调用者是「该条 content.orgId
+ * 所属组织」的 active 成员时，这一条才可能返回 vrFile；A 组织成员拿不到
+ * B 组织 content 的 vrFile，legacy 无 orgId 的内容一律按非成员处理。
+ * 不是「只要有任意一条 active 成员关系就对全部行放行」的全局成员态。
+ *
+ * 失败关闭：成员关系判定或 file_assets 查询任一步异常/集合缺失，一律降级为
  * 「非成员」并剔除 vrFile，绝不因鉴权异常放大暴露面或破坏主返回结构。
  */
 const cloud = require('wx-server-sdk');
@@ -79,39 +84,51 @@ function publicVrFile(vrFile, assets) {
 }
 
 // 一次读回 file_assets 在内存里做命中集合匹配，与 admin-web/server.mjs 的
-// store.list('file_assets') 同构。limit(100)：DB-07 落地初期登记量小；超出
-// 部分按「未登记」处理（失败关闭方向：宁可少返回 vrFile，不会多返回）。
-// 集合不存在 / 查询失败由 loadPublicVrAssets 的调用方 catch 兜底为剔除。
+// store.list('file_assets') 同构。
+// limit(100) 是**有意设定的上限**，不是遗漏分页：DB-07 落地初期登记量小，
+// 超过 100 条时多出的按「未登记」处理 —— 方向是失败关闭（宁可少返回
+// vrFile，绝不会多返回），可接受。后续登记量上来再改为分页拉全量。
+// 集合不存在 / 查询失败由调用方 catch 兜底为剔除。
 async function loadAssets() {
   const res = await db.collection('file_assets').limit(100).get();
   return (res && res.data) || [];
 }
 
-// 三态判定（§5.1）。OPENID→users 沿用 phoneLogin/index.js:44 既有约定
+// 三态判定（§5.1）：返回该调用者是 active 成员的组织 orgId 集合，供逐条
+// 按 content.orgId 锚定，而不是一个全局的「是/否成员」标志。
+//   - null：匿名（无 OPENID，含服务侧调用）→ 字段集 A
+//   - []  ：有 OPENID 但 users 无记录 / 无 active 成员关系（outsider）→ 字段集 A
+//   - ['org-a', …]：active 成员关系的 orgId 去重数组（成员态，逐条比对）
+// OPENID→users 沿用 phoneLogin/index.js:44 既有约定
 // （users.where({ _openid: OPENID })），不引入新的身份字段。
 // users→org_memberships 的 principalId 用 users._id，与 org.mjs:118-134
-// organizationsFor('user', principalId) 及 bootstrap 用 account._id 同构。
-// 说明：方案 §5.1 判定式为「有任意 status=active 成员关系」，云函数环境
-// 无组织 orgId 配置来源，故不做逐条 content.orgId 匹配（见回报缺口）。
-async function resolveMemberState() {
+// organizationsFor('user', principalId) 及 bootstrap 用 account._id 同构
+// （team-lead 裁定采纳；DB-03 若改走 auth_identities 再同步改这一行）。
+async function resolveMemberOrgs() {
   try {
     const { OPENID } = cloud.getWXContext();
-    if (!OPENID) return 'anonymous';
+    if (!OPENID) return null;
     const users = await db.collection('users').where({ _openid: OPENID }).get();
     const user = users.data && users.data[0];
-    if (!user) return 'outsider';
+    if (!user) return [];
     const mem = await db.collection('org_memberships').where({
       principalType: 'user',
       principalId: user._id,
       status: 'active',
     }).get();
-    if (!mem.data || mem.data.length === 0) return 'outsider';
-    return 'member';
+    if (!mem.data || mem.data.length === 0) return [];
+    // 只收字符串 orgId 并去重；空/非字符串 orgId 不能作为锚点，否则
+    // legacy 无 orgId 的记录可能被错误放行（失败关闭）。
+    return [...new Set(
+      mem.data
+        .map((m) => m.orgId)
+        .filter((id) => typeof id === 'string' && id),
+    )];
   } catch (err) {
     // users / org_memberships 集合可能尚未初始化（DB-07/DB-03 之前），
     // 失败关闭到「非成员」态，vrFile 一律剔除。
     console.warn('contentList membership check failed (fail-closed):', err && err.message);
-    return 'outsider';
+    return [];
   }
 }
 
@@ -127,9 +144,11 @@ exports.main = async (event) => {
 
     const res = await query.orderBy('sortOrder', 'asc').limit(100).get();
 
-    const state = await resolveMemberState();
+    const memberOrgs = await resolveMemberOrgs();
+    // 没有任何 active 成员组织时无需读 file_assets（匿名 / outsider 恒为
+    // 字段集 A）；有成员组织时读一次供逐条 public 判定。
     let assets = [];
-    if (state === 'member') {
+    if (memberOrgs && memberOrgs.length > 0) {
       try {
         assets = await loadAssets();
       } catch (err) {
@@ -141,7 +160,16 @@ exports.main = async (event) => {
 
     const data = res.data.map((row) => {
       const item = projectA(row);
-      if (state === 'member') {
+      // 成员态是「该条内容所属组织的成员」，不是「任意组织的成员」：
+      // 只有 row.orgId 命中该调用者的 active 组织集合，这一条才附带 vrFile。
+      // row.orgId 缺失 / 非字符串（legacy 内容）一律按非成员处理，不含 vrFile。
+      const isMemberOfThisRow =
+        memberOrgs &&
+        memberOrgs.length > 0 &&
+        typeof row.orgId === 'string' &&
+        row.orgId &&
+        memberOrgs.includes(row.orgId);
+      if (isMemberOfThisRow) {
         const vrFile = publicVrFile(row.vrFile, assets);
         if (vrFile) item.vrFile = vrFile;
       }

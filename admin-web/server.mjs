@@ -163,11 +163,15 @@ export async function createApp({
     });
   // DB-07 §5 拦截点 4 / §6.3：旧上传写完字节后额外登记一条 public
   // file_assets（orgId=null，legacy 未归属），返回体仅追加 fileId。
-  // 直接以 file_assets 为唯一 ref 写入，不复用 FileService.registerLegacy：
-  // legacy service 的 authRefs() 会带 organizations/null，在 live 的
+  //
+  // 不要「顺手统一」成 FileService.registerLegacy()（team-lead 裁定采纳规避）：
+  // legacy service 的 authRefs()（files.mjs:274-279）恒带
+  // ref("organizations", this.orgId)，orgId=null 时该 ref.id 为 null；live 的
   // CloudStore.transact（store.mjs:257 doc(r.id).get()）会触发 doc(null)
-  // 非法读取，使改造前正常的 live 上传回归。本写入字段与 FileService 登记
-  // 记录对齐（bucket / legacyUrls / visibility / status=ready，§11.5/11.6）。
+  // 非法读取，把改造前正常的 live 上传弄崩。故此处直接以 file_assets 为唯一
+  // ref 写入，字段与 registerLegacy 记录对齐（bucket / legacyUrls /
+  // visibility / status=ready，§11.5/11.6）。若将来要统一回服务层，必须先给
+  // registerLegacy 加「跳过 authRefs」的 legacy 分支，否则会复现该故障。
   const registerLegacyUpload = async (account, fileUrl, detail, action) => {
     const objectKey = cloudPathOf(fileUrl).replace(/^\/+/, "");
     const fileId = `file-${randomUUID()}`;
@@ -484,7 +488,9 @@ export async function createApp({
               }
               // GET /api/v2/file-links：只返回 attached。FileService 未导出
               // link 列表方法，本期在 server 层只读实现（不碰 files.mjs，
-              // 保持 C3 单文件提交）；作为方案缺口回报。
+              // 保持 C3 单文件提交）；team-lead 裁定采纳此取舍。
+              // TODO(DB-08): FileService 增加 link 列表方法后收敛回服务层，
+              // 保持「file_links 唯一读取入口」的形状。
               if (path === "/api/v2/file-links" && method === "GET") {
                 const { cursor, limit } = pageParams(query);
                 let rows = (await store.list("file_links", orgId)).filter(

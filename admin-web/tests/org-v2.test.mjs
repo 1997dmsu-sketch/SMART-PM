@@ -62,7 +62,9 @@ test("bootstrap is idempotent, creates guard and admin memberships, never from r
   const guard = (await x.store.list("lifecycle_guards")).find(
     (g) => g._id === guardId("org-a"),
   );
-  assert.equal(guard.epoch, 0);
+  // Bootstrap creates the guard; setup's v2 creations have already bumped it.
+  assert.equal(guard.orgId, "org-a");
+  assert.ok(Number.isInteger(guard.epoch) && guard.epoch >= 0);
   const memberships = await x.store.list("org_memberships");
   assert.equal(
     memberships.filter((m) => m.orgId === "org-a" && m.role === "admin").length,
@@ -376,7 +378,14 @@ test("house archive keeps the room link and does not release the listing placeho
   assert.equal(done.status, "archived");
   const house = (await x.store.list("houses")).find((h) => h._id === listing._id);
   assert.equal(house.lifecycle, "archived");
-  assert.equal(house.status, "在租"); // business status untouched
+  // F04: archiving also takes the listing off-market so the unchanged customer
+  // query predicate (status=在租 && !isPublic) never returns it; the previous
+  // business status is preserved for audit.
+  assert.equal(house.status, "下架");
+  assert.equal(house.statusBeforeArchive, "在租");
+  const customerVisible = (h) =>
+    h.status === "在租" && h.isPublic !== true && h.lifecycle !== "archived";
+  assert.equal(customerVisible(house), false);
   assert.equal(house.propertyRoomId, ids[0]); // history link kept
   // Now the room can be archived; its number claim and slot are released.
   await x.a.archive("room", ids[0], { expectedRevision: 1, reason: "房间下线" }, audit);
@@ -429,12 +438,51 @@ test("batchLayout checks expectedRevisions, rejects archived rooms and syncs lis
     assert.equal(room.layoutCode, "B1");
     assert.equal(room.revision, 2);
   }
-  // Archived rooms cannot be re-assigned.
+  // Archived rooms cannot be re-assigned (revisions still required).
   await x.a.archive("room", ids[0], { expectedRevision: 2, reason: "下线" }, audit);
   await assert.rejects(
-    x.a.batchLayout({ ids, layoutId: x.layout._id }, audit),
+    x.a.batchLayout(
+      { ids, layoutId: x.layout._id, expectedRevisions: { [ids[0]]: 3, [ids[1]]: 2 } },
+      audit,
+    ),
     (e) => e.code === "INVALID_STATE",
   );
+});
+test("batchLayout requires expectedRevisions and rejects cross-organization listing links", async (t) => {
+  const x = await setup(t);
+  const { ids } = await x.a.createRooms(
+    { floorId: x.floor._id, layoutId: x.layout._id, numbers: ["101"] },
+    audit,
+  );
+  await assert.rejects(
+    x.a.batchLayout({ ids, layoutId: x.layout._id }, audit),
+    (e) => e.code === "PARAM_ERROR" && /expectedRevisions/.test(e.message),
+  );
+  // A dirty link to another organization's listing rejects the whole batch.
+  await x.store.transact(
+    [
+      { collection: "houses", id: "house-foreign" },
+      { collection: "rooms", id: ids[0] },
+    ],
+    () => [
+      {
+        collection: "houses",
+        id: "house-foreign",
+        data: { orgId: "org-b", propertyRoomId: ids[0], lifecycle: "active", revision: 1 },
+      },
+      { collection: "rooms", id: ids[0], data: { listingId: "house-foreign" } },
+    ],
+    audit,
+  );
+  await assert.rejects(
+    x.a.batchLayout(
+      { ids, layoutId: x.layout._id, expectedRevisions: { [ids[0]]: 1 } },
+      audit,
+    ),
+    (e) => e.code === "ORG_MISMATCH" && e.status === 409,
+  );
+  const rooms = await x.store.list("rooms");
+  assert.equal(rooms.find((r) => r._id === ids[0]).revision, 1); // untouched
 });
 test("idempotent operations replay results and reject same-key different-body retries", async (t) => {
   const x = await setup(t);
@@ -515,5 +563,157 @@ test("createProperty keeps new/existing modes with org-scoped name claims", asyn
       audit,
     ),
     (e) => e.status === 404,
+  );
+});
+test("F02 barrier: a creation landing between archive scan and commit forces a rescan that blocks", async (t) => {
+  const x = await setup(t);
+  const origList = x.store.list.bind(x.store);
+  let injected = false;
+  // Pause point: right after the archive pre-scan reads the lifecycle guard,
+  // a building creation commits (bumping the guard epoch) before the archive
+  // transaction starts.
+  x.store.list = async (name, scope) => {
+    const rows = await origList(name, scope);
+    if (!injected && name === "lifecycle_guards") {
+      injected = true;
+      await x.a.createCatalog(
+        { kind: "building", name: "屏障插入栋", parentId: x.community._id },
+        audit,
+      );
+    }
+    return rows;
+  };
+  await assert.rejects(
+    x.a.archive(
+      "community",
+      x.community._id,
+      { expectedRevision: x.community.revision, reason: "屏障测试" },
+      audit,
+    ),
+    (e) => e.code === "ARCHIVE_BLOCKED" && /楼栋1项/.test(e.message),
+  );
+  const catalog = await origList("property_catalog");
+  assert.equal(
+    catalog.find((c) => c._id === x.community._id).status,
+    "active",
+  );
+  assert.equal(
+    catalog.find((c) => c.name === "屏障插入栋").status,
+    "active",
+  );
+});
+test("F03 barrier: archiving the layout between pre-read and commit rejects room creation", async (t) => {
+  const x = await setup(t);
+  const origTransact = x.store.transact.bind(x.store);
+  let injected = false;
+  // Pause point: after createRooms pre-reads (valid layout), the layout is
+  // archived before the create transaction runs.
+  x.store.transact = async (refs, build, auditArg) => {
+    if (!injected) {
+      injected = true;
+      await x.a.archive(
+        "layout",
+        x.layout._id,
+        { expectedRevision: x.layout.revision, reason: "屏障归档" },
+        audit,
+      );
+    }
+    return origTransact(refs, build, auditArg);
+  };
+  await assert.rejects(
+    x.a.createRooms(
+      { floorId: x.floor._id, layoutId: x.layout._id, numbers: ["301"] },
+      audit,
+    ),
+    (e) => e.code === "INVALID_STATE",
+  );
+  const rooms = await x.store.list("rooms");
+  assert.equal(rooms.some((r) => r.roomNo === "301"), false);
+  // The room-no claim was not left bound either.
+  const claimsLeft = (await x.store.list("unique_claims")).filter(
+    (c) => c.namespace === "room-no" && c.key === "301",
+  );
+  assert.equal(claimsLeft.length, 0);
+});
+test("expired idempotency keys are rejected instead of replayed or re-executed", async (t) => {
+  const x = await setup(t);
+  const op = {
+    id: "op-expired",
+    actorId: "acc-1",
+    orgId: "org-a",
+    route: "/api/v2/property/catalog",
+    keyDigest: "k",
+    bodyDigest: "body-1",
+  };
+  await x.store.transact(
+    [{ collection: "operation_keys", id: op.id }],
+    () => [
+      {
+        collection: "operation_keys",
+        id: op.id,
+        data: {
+          ...op,
+          state: "completed",
+          resultRef: JSON.stringify({ status: 201, body: { _id: "old" } }),
+          expiresAt: Date.now() - 1000,
+        },
+      },
+    ],
+    audit,
+  );
+  await assert.rejects(
+    x.a.createCatalog({ kind: "community", name: "过期键小区" }, audit, op),
+    (e) => e.code === "IDEMPOTENCY_EXPIRED" && e.status === 409,
+  );
+  assert.equal(
+    (await x.store.list("property_catalog")).filter((c) => c.name === "过期键小区")
+      .length,
+    0,
+  );
+});
+test("membership revoked after pre-check is caught inside the write transaction", async (t) => {
+  const x = await setup(t);
+  const membershipId = "mem-revoked";
+  await x.store.transact(
+    [{ collection: "org_memberships", id: membershipId }],
+    () => [
+      {
+        collection: "org_memberships",
+        id: membershipId,
+        data: {
+          orgId: "org-a",
+          principalType: "adminAccount",
+          principalId: "acc-temp",
+          role: "admin",
+          status: "active",
+          schemaVersion: 2,
+          revision: 1,
+        },
+      },
+    ],
+    audit,
+  );
+  const authed = new OrgPropertyService(x.store, "org-a", { membershipId });
+  // Revoke the membership before the write; the in-transaction check must
+  // refuse even though the service was constructed while it was valid.
+  await x.store.transact(
+    [{ collection: "org_memberships", id: membershipId }],
+    () => [
+      {
+        collection: "org_memberships",
+        id: membershipId,
+        data: { status: "disabled", revision: 2 },
+      },
+    ],
+    audit,
+  );
+  await assert.rejects(
+    authed.createCatalog({ kind: "community", name: "撤权小区" }, audit),
+    (e) => e.code === "FORBIDDEN" && e.status === 403,
+  );
+  assert.equal(
+    (await x.store.list("property_catalog")).filter((c) => c.name === "撤权小区")
+      .length,
+    0,
   );
 });

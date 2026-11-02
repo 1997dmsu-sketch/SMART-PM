@@ -235,3 +235,106 @@ test("v2 cursor pagination is stable and org-filtered over HTTP", async () => {
   ]);
   assert.equal(names.size, first.data.data.length + second.data.data.length);
 });
+test("F01: legacy endpoints never expose or mutate org-scoped records", async () => {
+  const { OrgPropertyService } = await import("../lib/property-v2.mjs");
+  const service = new OrgPropertyService(app.store, "org-demo", {
+    membershipId: (await app.store.list("org_memberships")).find(
+      (m) => m.orgId === "org-demo" && m.principalId === "demo-admin",
+    )._id,
+  });
+  const audit = { actor: "test", actorId: "demo-admin", action: "F01 测试" };
+  const { communityId, buildingId } = await service.createProperty(
+    { mode: "new", communityName: "隔离小区", buildingName: "隔离栋" },
+    audit,
+  );
+  const floor = await service.createCatalog(
+    { kind: "floor", name: "1层", level: 1, parentId: buildingId },
+    audit,
+  );
+  const { ids, } = await service.createRooms(
+    { floorId: floor._id, numbers: ["601"] },
+    audit,
+  );
+  const v2Room = (await app.store.list("rooms", "org-demo")).find(
+    (r) => r._id === ids[0],
+  );
+  // Old snapshot and resource lists stay legacy-only — for any role.
+  for (const auth of [admin, viewer]) {
+    const snapshot = await request("property/snapshot", { auth });
+    // request() prefixes /api/v2/ — call the legacy path directly.
+    const legacy = await fetch(`${url}/api/property/snapshot`, {
+      headers: { Origin: url, Cookie: auth.cookie },
+    });
+    assert.equal(legacy.status, 200);
+    const body = await legacy.json();
+    assert.ok(body.catalog.every((c) => !c.orgId));
+    assert.ok(body.rooms.every((r) => !r.orgId));
+    const roomsList = await fetch(`${url}/api/rooms`, {
+      headers: { Origin: url, Cookie: auth.cookie },
+    });
+    const roomsBody = await roomsList.json();
+    assert.ok(roomsBody.rows.every((r) => !r.orgId));
+    void snapshot;
+  }
+  // Old write paths reject v2 parents and identifiers.
+  const viaLegacyCatalog = await fetch(`${url}/api/property/catalog`, {
+    method: "POST",
+    headers: { Origin: url, Cookie: admin.cookie, "X-CSRF-Token": admin.csrf, "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "floor", name: "2层", level: 2, parentId: buildingId }),
+  });
+  assert.equal(viaLegacyCatalog.status, 409);
+  const viaLegacyBinding = await fetch(`${url}/api/users/demo-user-2/binding`, {
+    method: "POST",
+    headers: { Origin: url, Cookie: admin.cookie, "X-CSRF-Token": admin.csrf, "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "bind", houseId: v2Room.houseId }),
+  });
+  assert.equal(viaLegacyBinding.status, 400);
+  const viaLegacyRoomEdit = await fetch(`${url}/api/rooms/${v2Room._id}`, {
+    method: "PUT",
+    headers: { Origin: url, Cookie: admin.cookie, "X-CSRF-Token": admin.csrf, "Content-Type": "application/json" },
+    body: JSON.stringify({ houseId: v2Room.houseId, name: "篡改", sortOrder: 0 }),
+  });
+  assert.equal(viaLegacyRoomEdit.status, 404);
+  void communityId;
+});
+test("F04: archived listings cannot be re-published through the legacy endpoint", async () => {
+  // A legacy-visible listing already archived (lifecycle) stays 下架.
+  await app.store.transact(
+    [{ collection: "houses", id: "house-archived-legacy" }],
+    () => [
+      {
+        collection: "houses",
+        id: "house-archived-legacy",
+        data: {
+          title: "已归档房源",
+          community: "测试",
+          price: 1000,
+          area: 40,
+          rooms: "1室1厅",
+          rentType: "整租",
+          status: "下架",
+          lifecycle: "archived",
+        },
+      },
+    ],
+    { actor: "test", actorId: "demo-admin", action: "F04 测试" },
+  );
+  const republish = await fetch(`${url}/api/houses/house-archived-legacy`, {
+    method: "PUT",
+    headers: { Origin: url, Cookie: admin.cookie, "X-CSRF-Token": admin.csrf, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: "已归档房源",
+      community: "测试",
+      price: 1000,
+      area: 40,
+      rooms: "1室1厅",
+      rentType: "整租",
+      status: "在租",
+    }),
+  });
+  assert.equal(republish.status, 409);
+  const house = (await app.store.list("houses")).find(
+    (h) => h._id === "house-archived-legacy",
+  );
+  assert.equal(house.status, "下架");
+});

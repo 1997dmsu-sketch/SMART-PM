@@ -18,13 +18,22 @@ export class OpReplay extends Error {
     this.resultRef = resultRef;
   }
 }
+export const OP_KEY_TTL = 24 * 3600 * 1000;
 // Idempotency record written in the same transaction as the business writes
 // (docs/database/DATA-MODEL.md §2 operation_keys). The in-transaction re-check
 // keeps concurrent retries safe; the pre-read in the server is only a fast path.
+// Expired keys are rejected: callers must query state before retrying with a
+// new key (API-CONTRACT §1), so a stale retry can never silently re-execute.
 function opWrite(state, op, result) {
   if (!op) return [];
   const existing = state[`operation_keys/${op.id}`];
   if (existing) {
+    if (existing.expiresAt && existing.expiresAt < Date.now())
+      failCode(
+        "IDEMPOTENCY_EXPIRED",
+        "幂等键已过期，请先查询操作状态并使用新键",
+        409,
+      );
     if (existing.bodyDigest !== op.bodyDigest)
       failCode(
         "IDEMPOTENCY_CONFLICT",
@@ -45,34 +54,35 @@ function opWrite(state, op, result) {
         bodyDigest: op.bodyDigest,
         state: "completed",
         resultRef: JSON.stringify(result),
-        expiresAt: Date.now() + 24 * 3600 * 1000,
+        expiresAt: Date.now() + OP_KEY_TTL,
         ...base(),
       },
     },
   ];
 }
-// Lifecycle guard: every create and archive in the organization declares and
-// rewrites the same fixed document, so an archive racing a create is a
-// detectable write conflict instead of a stale pre-check (DATA-MODEL §3.2 归档).
-function guardWrite(state, orgId, bump) {
+// Lifecycle guard version protocol (review F02/F03):
+// every v2 mutation — create, batch layout, archive — reads AND bumps the
+// fixed per-organization guard document in the same transaction. Archive
+// pre-scans record the observed epoch and the commit transaction requires it
+// to still match, so any mutation that commits between scan and write forces
+// a rescan instead of slipping through with stale blocker results. On a cloud
+// store the shared write also turns archive-vs-create races into transaction
+// conflicts (probe verification remains a DB-08 gate).
+function guardWrite(state, orgId) {
   const id = guardId(orgId);
   const existing = state[`lifecycle_guards/${id}`];
-  if (!existing && !bump)
-    return [
-      { collection: "lifecycle_guards", id, data: { orgId, epoch: 0, ...base() } },
-    ];
-  if (!existing)
-    failCode("ARCHIVE_BLOCKED", "组织生命周期守卫未初始化", 409);
   return [
     {
       collection: "lifecycle_guards",
       id,
-      data: bump
+      data: existing
         ? { epoch: existing.epoch + 1, revision: (existing.revision ?? 0) + 1 }
-        : { epoch: existing.epoch },
+        : { orgId, epoch: 1, ...base() },
     },
   ];
 }
+const guardEpoch = (state, orgId) =>
+  state[`lifecycle_guards/${guardId(orgId)}`]?.epoch ?? 0;
 const claim = (id, orgId, namespace, key, ownerId) => ({
   collection: "unique_claims",
   id,
@@ -131,13 +141,34 @@ const PARENT_KIND = { building: "community", floor: "building", layout: "buildin
 // uniqueness is enforced by fixed-ID claims written in the same transaction.
 // Legacy records without orgId are never visible here — they require the
 // explicit manifest migration (DB-08), not a silent default to this org.
+//
+// `auth` (optional) carries {membershipId} from the server-side membership
+// resolution; when present, every write transaction re-reads the organization
+// and membership documents so a concurrent suspension or revocation cannot
+// slip past a stale pre-check.
 export class OrgPropertyService {
-  constructor(store, orgId) {
+  constructor(store, orgId, auth = null) {
     this.store = store;
     this.orgId = orgId;
+    this.auth = auth;
   }
   own(record) {
     return record && record.orgId === this.orgId;
+  }
+  authRefs() {
+    return [
+      ref("organizations", this.orgId),
+      ...(this.auth ? [ref("org_memberships", this.auth.membershipId)] : []),
+    ];
+  }
+  authCheck(state) {
+    const org = state[`organizations/${this.orgId}`];
+    if (org && org.status !== "active")
+      failCode("FORBIDDEN", "组织当前不可用", 403);
+    if (!this.auth) return;
+    const m = state[`org_memberships/${this.auth.membershipId}`];
+    if (!m || m.orgId !== this.orgId || m.status !== "active" || m.role !== "admin")
+      failCode("FORBIDDEN", "组织成员关系已失效或权限不足", 403);
   }
   async catalogRecord(id, kind = null) {
     const record = (await this.store.list("property_catalog")).find(
@@ -153,7 +184,7 @@ export class OrgPropertyService {
       failCode("PARAM_ERROR", "物业分类无效");
     if (query.status !== undefined && !["active", "archived"].includes(query.status))
       failCode("PARAM_ERROR", "状态无效");
-    const rows = (await this.store.list("property_catalog")).filter(
+    const rows = (await this.store.list("property_catalog", this.orgId)).filter(
       (r) =>
         this.own(r) &&
         (query.kind === undefined || r.kind === query.kind) &&
@@ -166,7 +197,7 @@ export class OrgPropertyService {
     const { cursor, limit } = pageParams(query);
     if (query.status !== undefined && !["active", "archived"].includes(query.status))
       failCode("PARAM_ERROR", "状态无效");
-    const rows = (await this.store.list("rooms"))
+    const rows = (await this.store.list("rooms", this.orgId))
       .filter(
         (r) =>
           this.own(r) &&
@@ -236,6 +267,7 @@ export class OrgPropertyService {
       ref("lifecycle_guards", guardId(this.orgId)),
       ref("unique_claims", claimInfo.id),
       ref("property_catalog", id),
+      ...this.authRefs(),
     ];
     if (parentId) refs.push(ref("property_catalog", parentId));
     if (op) refs.push(ref("operation_keys", op.id));
@@ -251,6 +283,7 @@ export class OrgPropertyService {
       refs,
       (state) => {
         const opw = opWrite(state, op, { status: 201, body: result });
+        this.authCheck(state);
         if (parentId) {
           const parent = state[`property_catalog/${parentId}`];
           if (!this.own(parent) || parent.kind !== PARENT_KIND[value.kind])
@@ -260,7 +293,7 @@ export class OrgPropertyService {
         }
         claimFree(state, claimInfo.id, claimInfo.label);
         return [
-          ...guardWrite(state, this.orgId, false),
+          ...guardWrite(state, this.orgId),
           claim(claimInfo.id, this.orgId, claimInfo.namespace, claimInfo.key, id),
           {
             collection: "property_catalog",
@@ -301,6 +334,7 @@ export class OrgPropertyService {
       ref("property_catalog", communityId),
       ref("property_catalog", buildingId),
       ref("unique_claims", buildingClaim.id),
+      ...this.authRefs(),
     ];
     if (communityClaim) refs.push(ref("unique_claims", communityClaim.id));
     if (op) refs.push(ref("operation_keys", op.id));
@@ -309,6 +343,7 @@ export class OrgPropertyService {
       refs,
       (state) => {
         const opw = opWrite(state, op, { status: 201, body: result });
+        this.authCheck(state);
         if (data.mode === "existing") {
           const community = state[`property_catalog/${communityId}`];
           if (!this.own(community) || community.kind !== "community")
@@ -318,7 +353,7 @@ export class OrgPropertyService {
         }
         if (communityClaim) claimFree(state, communityClaim.id, "该小区");
         claimFree(state, buildingClaim.id, "该小区内同名楼栋");
-        const writes = [...guardWrite(state, this.orgId, false)];
+        const writes = [...guardWrite(state, this.orgId)];
         if (communityClaim) {
           writes.push(
             claim(communityClaim.id, this.orgId, "catalog-name", communityName, communityId),
@@ -370,41 +405,66 @@ export class OrgPropertyService {
       failCode("PARAM_ERROR", "房号只允许字母、数字、下划线和连字符");
     if (new Set(numbers).size !== numbers.length)
       failCode("PARAM_ERROR", "同批房号重复");
-    const floor = await this.catalogRecord(text(data.floorId, "楼层编号"), "floor");
-    const building = await this.catalogRecord(floor.parentId, "building");
-    const community = await this.catalogRecord(building.parentId, "community");
-    for (const record of [floor, building, community])
-      if ((record.status || "active") !== "active")
-        failCode("INVALID_STATE", "所属物业已归档，不能新增房间", 409);
-    let layout = null;
-    if (data.layoutId) {
-      layout = await this.catalogRecord(text(data.layoutId, "户型"), "layout");
-      if (layout.parentId !== building._id)
-        failCode("PARAM_ERROR", "户型不属于所选楼栋");
-      if ((layout.status || "active") !== "active")
-        failCode("INVALID_STATE", "户型已归档，不能用于新房间", 409);
-    }
+    const floorId = text(data.floorId, "楼层编号");
+    // Pre-reads only locate the ancestor IDs for the transaction's read set;
+    // every ownership, hierarchy and lifecycle check is repeated against the
+    // in-transaction state (review F03), never trusted from this snapshot.
+    const floor = await this.catalogRecord(floorId, "floor");
+    const buildingId = floor.parentId;
+    const building = await this.catalogRecord(buildingId, "building");
+    const communityId = building.parentId;
+    const layoutId = data.layoutId ? text(data.layoutId, "户型") : null;
     // Room IDs are random; uniqueness of the room number is enforced by the
     // room-no claim, so archiving a room (which releases the claim) keeps the
     // archived record intact while allowing the number to be reused. houseId
     // derives from the random room ID to stay globally unique across reuses.
     const ids = numbers.map(() => `room-${randomUUID()}`);
-    const claimIds = numbers.map((n) => claims.roomNo(this.orgId, floor._id, n));
+    const claimIds = numbers.map((n) => claims.roomNo(this.orgId, floorId, n));
     const refs = [
       ref("lifecycle_guards", guardId(this.orgId)),
-      ref("property_catalog", floor._id),
+      ref("property_catalog", floorId),
+      ref("property_catalog", buildingId),
+      ref("property_catalog", communityId),
       ...ids.map((id) => ref("rooms", id)),
       ...claimIds.map((id) => ref("unique_claims", id)),
+      ...this.authRefs(),
     ];
+    if (layoutId) refs.push(ref("property_catalog", layoutId));
     if (op) refs.push(ref("operation_keys", op.id));
     const result = { count: ids.length, ids };
     await this.store.transact(
       refs,
       (state) => {
         const opw = opWrite(state, op, { status: 201, body: result });
-        const floorNow = state[`property_catalog/${floor._id}`];
-        if (!this.own(floorNow) || (floorNow.status || "active") !== "active")
-          failCode("INVALID_STATE", "楼层已变更，请刷新后重试", 409);
+        this.authCheck(state);
+        const floorNow = state[`property_catalog/${floorId}`];
+        const buildingNow = state[`property_catalog/${buildingId}`];
+        const communityNow = state[`property_catalog/${communityId}`];
+        for (const [record, kind] of [
+          [floorNow, "floor"],
+          [buildingNow, "building"],
+          [communityNow, "community"],
+        ]) {
+          if (!this.own(record) || record.kind !== kind)
+            failCode("NOT_FOUND", "所属物业不存在或不可见", 404);
+          if ((record.status || "active") !== "active")
+            failCode("INVALID_STATE", "所属物业已归档，不能新增房间", 409);
+        }
+        if (
+          floorNow.parentId !== buildingId ||
+          buildingNow.parentId !== communityId
+        )
+          failCode("REVISION_CONFLICT", "物业层级已变更，请刷新后重试", 409);
+        let layoutNow = null;
+        if (layoutId) {
+          layoutNow = state[`property_catalog/${layoutId}`];
+          if (!this.own(layoutNow) || layoutNow.kind !== "layout")
+            failCode("NOT_FOUND", "户型不存在或不可见", 404);
+          if (layoutNow.parentId !== buildingId)
+            failCode("PARAM_ERROR", "户型不属于所选楼栋");
+          if ((layoutNow.status || "active") !== "active")
+            failCode("INVALID_STATE", "户型已归档，不能用于新房间", 409);
+        }
         let slots = [...(floorNow.slots || [])];
         if (slots.length + numbers.length > 1000)
           failCode("PARAM_ERROR", "单层最多维护 1000 间房");
@@ -422,20 +482,20 @@ export class OrgPropertyService {
               data: {
                 orgId: this.orgId,
                 houseId: `PROP-${hash("v2", this.orgId, ids[i])}`,
-                communityId: community._id,
-                community: community.name,
-                buildingId: building._id,
-                buildingName: building.name,
-                floorId: floor._id,
-                floorName: floor.name,
+                communityId,
+                community: communityNow.name,
+                buildingId,
+                buildingName: buildingNow.name,
+                floorId,
+                floorName: floorNow.name,
                 roomNo: number,
-                name: `${building.name} ${floor.name} ${number}室`,
-                address: `${community.name} ${building.name} ${floor.name} ${number}室`,
-                layoutId: layout?._id || "",
-                layoutName: layout?.name || "",
-                layoutCode: layout?.code || "",
-                rooms: layout?.rooms || "",
-                isPublic: layout?.isPublic === true,
+                name: `${buildingNow.name} ${floorNow.name} ${number}室`,
+                address: `${communityNow.name} ${buildingNow.name} ${floorNow.name} ${number}室`,
+                layoutId: layoutNow?._id || "",
+                layoutName: layoutNow?.name || "",
+                layoutCode: layoutNow?.code || "",
+                rooms: layoutNow?.rooms || "",
+                isPublic: layoutNow?.isPublic === true,
                 sortOrder: i,
                 status: "active",
                 ...base(),
@@ -446,10 +506,10 @@ export class OrgPropertyService {
         writes.push(
           {
             collection: "property_catalog",
-            id: floor._id,
+            id: floorId,
             data: { slots, revision: (floorNow.revision ?? 0) + 1 },
           },
-          ...guardWrite(state, this.orgId, false),
+          ...guardWrite(state, this.orgId),
           ...opw,
         );
         return writes;
@@ -467,18 +527,16 @@ export class OrgPropertyService {
     )
       failCode("PARAM_ERROR", "请选择 1–30 间不同的房间");
     const layoutId = text(data.layoutId, "户型");
-    const layout = await this.catalogRecord(layoutId, "layout");
-    if ((layout.status || "active") !== "active")
-      failCode("INVALID_STATE", "户型已归档，不能用于批量设置", 409);
+    // Every modified record requires an explicit expected revision
+    // (API-CONTRACT §1: 修改已有记录需 expectedRevision).
     const expected = data.expectedRevisions;
-    if (expected !== undefined) {
-      if (typeof expected !== "object" || expected === null || Array.isArray(expected))
-        failCode("PARAM_ERROR", "expectedRevisions 格式无效");
-      for (const id of data.ids)
-        if (!Number.isInteger(expected[id]))
-          failCode("PARAM_ERROR", "缺少所选房间的 expectedRevision");
-    }
-    const all = await this.store.list("rooms");
+    if (typeof expected !== "object" || expected === null || Array.isArray(expected))
+      failCode("PARAM_ERROR", "缺少 expectedRevisions");
+    for (const id of data.ids)
+      if (!Number.isInteger(expected[id]))
+        failCode("PARAM_ERROR", "缺少所选房间的 expectedRevision");
+    const layout = await this.catalogRecord(layoutId, "layout");
+    const all = await this.store.list("rooms", this.orgId);
     const selected = data.ids.map((id) => {
       const room = all.find((r) => r._id === id);
       if (!this.own(room)) failCode("NOT_FOUND", "所选房间不存在或不可见", 404);
@@ -489,6 +547,7 @@ export class OrgPropertyService {
       ref("property_catalog", layoutId),
       ...selected.map((r) => ref("rooms", r._id)),
       ...selected.filter((r) => r.listingId).map((r) => ref("houses", r.listingId)),
+      ...this.authRefs(),
     ];
     if (op) refs.push(ref("operation_keys", op.id));
     const result = { count: selected.length };
@@ -496,9 +555,12 @@ export class OrgPropertyService {
       refs,
       (state) => {
         const opw = opWrite(state, op, { status: 200, body: result });
+        this.authCheck(state);
         const layoutNow = state[`property_catalog/${layoutId}`];
-        if (!this.own(layoutNow) || (layoutNow.status || "active") !== "active")
-          failCode("INVALID_STATE", "户型已变更，请刷新后重试", 409);
+        if (!this.own(layoutNow) || layoutNow.kind !== "layout")
+          failCode("NOT_FOUND", "户型不存在或不可见", 404);
+        if ((layoutNow.status || "active") !== "active")
+          failCode("INVALID_STATE", "户型已归档，不能用于批量设置", 409);
         const patch = {
           layoutId: layoutNow._id,
           layoutName: layoutNow.name,
@@ -506,7 +568,7 @@ export class OrgPropertyService {
           rooms: layoutNow.rooms,
           isPublic: layoutNow.isPublic === true,
         };
-        const writes = [...guardWrite(state, this.orgId, false)];
+        const writes = [...guardWrite(state, this.orgId)];
         for (const previous of selected) {
           const room = state[`rooms/${previous._id}`];
           if (!this.own(room)) failCode("NOT_FOUND", "所选房间不存在或不可见", 404);
@@ -516,7 +578,7 @@ export class OrgPropertyService {
             failCode("PARAM_ERROR", "所选房间须属于该户型所在楼栋，整批未保存");
           if (room.listingId !== previous.listingId)
             failCode("REVISION_CONFLICT", "房源关联已改变，请刷新后重试", 409);
-          if (expected && expected[room._id] !== room.revision)
+          if (expected[room._id] !== room.revision)
             failCode("REVISION_CONFLICT", `房间 ${room.roomNo} 版本不一致，请刷新后重试`, 409);
           writes.push({
             collection: "rooms",
@@ -528,6 +590,11 @@ export class OrgPropertyService {
             if (!listing) failCode("REVISION_CONFLICT", "关联房源不存在，请先核对", 409);
             if (listing.propertyRoomId !== room._id)
               failCode("REVISION_CONFLICT", "房源关联不一致，请先核对", 409);
+            // A linked listing must belong to this same organization; a dirty
+            // or mis-migrated link rejects the whole batch instead of leaking
+            // a write into another organization's record.
+            if (listing.orgId !== this.orgId)
+              failCode("ORG_MISMATCH", "关联房源不属于当前组织，请先核对", 409);
             writes.push({
               collection: "houses",
               id: room.listingId,
@@ -544,20 +611,38 @@ export class OrgPropertyService {
   }
   // Archive never deletes; it marks lifecycle and keeps history readable.
   // Active relations or unhandled listings block archiving with non-sensitive
-  // counts only (Q06 建议); concurrency with creation is serialized by the
-  // organization lifecycle guard.
+  // counts only (Q06 建议). The blocker scan is protected by the lifecycle
+  // guard epoch: any mutation committing between scan and write changes the
+  // epoch, the commit refuses with GUARD_CHANGED, and the scan repeats
+  // (review F02).
   async archive(type, id, data, audit, op = null) {
     const archiveTypes = [...CATALOG_KINDS, "room", "house"];
     if (!archiveTypes.includes(type)) failCode("PARAM_ERROR", "归档类型无效");
     const reason = text(data?.reason, "归档原因", 200);
     if (!Number.isInteger(data?.expectedRevision))
       failCode("PARAM_ERROR", "缺少 expectedRevision");
-    const [catalogRows, roomRows, houseRows, userRows] = await Promise.all([
-      this.store.list("property_catalog"),
-      this.store.list("rooms"),
-      this.store.list("houses"),
-      this.store.list("users"),
-    ]);
+    let lastError = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const plan = await this.scanArchive(type, id, data);
+      try {
+        return await this.commitArchive(plan, reason, audit, op);
+      } catch (e) {
+        if (e instanceof OpReplay || e.code !== "GUARD_CHANGED") throw e;
+        lastError = e; // epoch moved between scan and commit: rescan and retry
+      }
+    }
+    throw lastError;
+  }
+  async scanArchive(type, id, data) {
+    const [catalogRows, roomRows, houseRows, userRows, guards] =
+      await Promise.all([
+        this.store.list("property_catalog", this.orgId),
+        this.store.list("rooms", this.orgId),
+        this.store.list("houses", this.orgId),
+        this.store.list("users"),
+        this.store.list("lifecycle_guards"),
+      ]);
+    const epoch = guards.find((g) => g._id === guardId(this.orgId))?.epoch ?? 0;
     const active = (r) => (r.status || "active") === "active";
     const collection =
       type === "room" ? "rooms" : type === "house" ? "houses" : "property_catalog";
@@ -633,13 +718,18 @@ export class OrgPropertyService {
       claimIds.push({
         id: claims.catalogName(this.orgId, target.parentId, type, target.name),
       });
+    return { type, id, target, collection, epoch, claimIds, stateOf };
+  }
+  async commitArchive(plan, reason, audit, op) {
+    const { type, id, collection, epoch, claimIds, stateOf } = plan;
     const refs = [
       ref("lifecycle_guards", guardId(this.orgId)),
       ref(collection, id),
       ...claimIds.map((c) => ref("unique_claims", c.id)),
+      ...this.authRefs(),
     ];
-    if (type === "room" && target.floorId)
-      refs.push(ref("property_catalog", target.floorId));
+    if (type === "room" && plan.target.floorId)
+      refs.push(ref("property_catalog", plan.target.floorId));
     if (op) refs.push(ref("operation_keys", op.id));
     const result = { id, type, status: "archived" };
     const archivedBy = audit.actorId || audit.actor || "unknown";
@@ -647,14 +737,27 @@ export class OrgPropertyService {
       refs,
       (state) => {
         const opw = opWrite(state, op, { status: 200, body: result });
+        this.authCheck(state);
+        // F02: the guard epoch observed during the blocker scan must still be
+        // current; otherwise the scan is stale and the caller rescans.
+        if (guardEpoch(state, this.orgId) !== epoch)
+          failCode("GUARD_CHANGED", "组织数据已变更，正在重新核对", 409);
         const current = state[`${collection}/${id}`];
-        if (!current || (current.revision ?? 0) !== data.expectedRevision)
+        if (!current || (current.revision ?? 0) !== plan.target.revision)
           failCode("REVISION_CONFLICT", "记录版本不一致，请刷新后重试", 409);
         if (stateOf(current) !== "active")
           failCode("INVALID_STATE", "记录已归档", 409);
+        // F04: archiving a listing also takes it off-market so the unchanged
+        // customer query (status=在租 && !isPublic) never returns it;
+        // the previous status is kept for audit, and legacy edits cannot
+        // re-publish an archived listing (server rejects the status change).
         const lifecycle =
           collection === "houses"
-            ? { lifecycle: "archived" }
+            ? {
+                lifecycle: "archived",
+                status: "下架",
+                statusBeforeArchive: current.status ?? null,
+              }
             : { status: "archived" };
         const writes = [
           {
@@ -668,14 +771,14 @@ export class OrgPropertyService {
               revision: (current.revision ?? 0) + 1,
             },
           },
-          ...guardWrite(state, this.orgId, true),
+          ...guardWrite(state, this.orgId),
         ];
-        if (type === "room" && target.floorId) {
-          const floor = state[`property_catalog/${target.floorId}`];
+        if (type === "room" && plan.target.floorId) {
+          const floor = state[`property_catalog/${plan.target.floorId}`];
           if (floor)
             writes.push({
               collection: "property_catalog",
-              id: target.floorId,
+              id: plan.target.floorId,
               data: {
                 slots: (floor.slots || []).filter((s) => s.id !== id),
                 revision: (floor.revision ?? 0) + 1,

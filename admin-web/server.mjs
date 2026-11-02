@@ -292,13 +292,15 @@ export async function createApp({
               else failCode("PARAM_ERROR", "请通过 X-Org-Id 指定组织");
             }
             const write = method === "POST";
-            await orgService.requireMembership(
+            const { membership } = await orgService.requireMembership(
               "adminAccount",
               account._id,
               orgId,
               { write },
             );
-            const service = new OrgPropertyService(store, orgId);
+            const service = new OrgPropertyService(store, orgId, {
+              membershipId: membership._id,
+            });
             const auditV2 = (action) => ({
               actor: account.username,
               actorId: account._id,
@@ -334,6 +336,12 @@ export async function createApp({
                 (r) => r._id === op.id,
               );
               if (existing) {
+                if (existing.expiresAt && existing.expiresAt < Date.now())
+                  failCode(
+                    "IDEMPOTENCY_EXPIRED",
+                    "幂等键已过期，请先查询操作状态并使用新键",
+                    409,
+                  );
                 if (existing.bodyDigest !== bodyDigest)
                   failCode(
                     "IDEMPOTENCY_CONFLICT",
@@ -402,12 +410,13 @@ export async function createApp({
           }
         }
         if (path === "/api/dashboard" && method === "GET") {
-          const [houses, content, users, rooms] = await Promise.all(
-            resources.map((n) => store.list(n)),
-          );
+          const [houses, content, users, rooms] = (
+            await Promise.all(resources.map((n) => store.list(n)))
+          ).map((rows) => rows.filter((r) => !r.orgId)); // F01: legacy views exclude v2 records
           const activity =
             account.role === "admin"
               ? [...(await store.list("admin_audit")), ...accounts.events]
+                  .filter((r) => !r.orgId)
                   .sort((a, b) => b.createdAt - a.createdAt)
                   .slice(0, 5)
               : [];
@@ -469,7 +478,9 @@ export async function createApp({
           const rows = [
             ...(await store.list("admin_audit")),
             ...accounts.events,
-          ].sort((a, b) => b.createdAt - a.createdAt);
+          ]
+            .filter((r) => !r.orgId) // F01: v2 actions are org-scoped, not legacy-visible
+            .sort((a, b) => b.createdAt - a.createdAt);
           return send(filterRows(rows, Object.fromEntries(url.searchParams)));
         }
         if (path === "/api/vr-upload" && method === "POST") {
@@ -586,7 +597,7 @@ export async function createApp({
         ) {
           const data = await body(req);
           if (!["bind", "unbind"].includes(data.action)) fail("绑定操作无效");
-          const rooms = await store.list("rooms");
+          const rooms = (await store.list("rooms")).filter((r) => !r.orgId);
           if (
             typeof data.houseId !== "string" ||
             !data.houseId ||
@@ -618,9 +629,9 @@ export async function createApp({
         }
         if (parts[3]) fail("接口不存在", 404);
         if (method === "GET" && !id) {
-          const rows = (await store.list(resource)).map((r) =>
-            publicRecord(resource, r),
-          );
+          const rows = (await store.list(resource))
+            .filter((r) => !r.orgId) // F01: v2 records are invisible to legacy lists
+            .map((r) => publicRecord(resource, r));
           return send(
             filterRows(
               rows.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
@@ -632,6 +643,13 @@ export async function createApp({
           if (resource === "users" && !id) fail("用户由小程序授权登录创建");
           const input = await body(req);
           const data = validate(resource, input);
+          // F01: legacy writes must not touch organization-scoped records.
+          if (id) {
+            const targeted = (await store.list(resource)).find(
+              (r) => r._id === id,
+            );
+            if (targeted?.orgId) fail("记录不存在", 404);
+          }
           if (
             mode === "live" &&
             [data.cover, data.image, ...(data.images || [])].some((v) =>
@@ -644,6 +662,10 @@ export async function createApp({
               ? (await store.list("houses")).find((r) => r._id === id)
               : null;
             if (id && !old) fail("记录不存在", 404);
+            // F04: an archived listing stays off-market; legacy edits cannot
+            // re-publish it (customer queries filter on status).
+            if (old?.lifecycle === "archived" && data.status !== "下架")
+              fail("已归档房源不能重新上架", 409);
             const roomId = old?.propertyRoomId || input.propertyRoomId;
             if (
               old?.propertyRoomId &&

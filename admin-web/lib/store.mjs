@@ -16,6 +16,7 @@ const collections = [
   "operation_keys",
   "auth_identities",
   "persons",
+  "identity_domains",
 ];
 export function seed() {
   return {

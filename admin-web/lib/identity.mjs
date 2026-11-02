@@ -46,6 +46,47 @@ export class IdentityService {
       .update(`${this.keyVersion}|${kind}|${scope}|${subject}`)
       .digest("hex");
   }
+  // F03: the login realm's digest configuration is persisted as a fixed-ID
+  // domain document. keyVersion and the key both feed the fixed identity
+  // IDs, so silently changing either would re-register every existing
+  // identity as a second user. Any mismatch is refused loudly instead.
+  // The fingerprint is an HMAC of configuration metadata and never exposes
+  // the key itself.
+  get domainId() {
+    return `identity-domain-${this.loginRealm}`;
+  }
+  get keyFingerprint() {
+    return createHmac("sha256", this.hmacKey)
+      .update(`identity-domain-fingerprint|${this.loginRealm}|${this.keyVersion}`)
+      .digest("hex");
+  }
+  domainWrite(state) {
+    const domain = state[`identity_domains/${this.domainId}`];
+    if (domain) {
+      if (
+        domain.keyVersion !== this.keyVersion ||
+        domain.keyFingerprint !== this.keyFingerprint
+      )
+        failCode(
+          "IDENTITY_CONFIG_CHANGED",
+          "身份摘要密钥或版本已变更，须先执行受控轮换，不能继续注册或登录",
+          503,
+        );
+      return [];
+    }
+    return [
+      {
+        collection: "identity_domains",
+        id: this.domainId,
+        data: {
+          loginRealm: this.loginRealm,
+          keyVersion: this.keyVersion,
+          keyFingerprint: this.keyFingerprint,
+          ...base(),
+        },
+      },
+    ];
+  }
   phoneIdentity(phone) {
     const subjectDigest = this.digest("phone", this.loginRealm, phone);
     return { id: `ident-${subjectDigest.slice(0, 32)}`, subjectDigest };
@@ -110,6 +151,7 @@ export class IdentityService {
       return wechat && u._openid && u._openid === wechat.openid;
     });
     const refs = [
+      ref("identity_domains", this.domainId),
       ...(pIdent ? [ref("auth_identities", pIdent.id)] : []),
       ...(wIdent ? [ref("auth_identities", wIdent.id)] : []),
       ref("users", newUserId),
@@ -130,6 +172,9 @@ export class IdentityService {
     await this.store.transact(
       uniqueRefs,
       (state) => {
+        // F03: refuse a changed digest configuration before any resolution —
+        // continuing would register every existing identity as a new user.
+        const domainWrites = this.domainWrite(state);
         const p = pIdent ? state[`auth_identities/${pIdent.id}`] : null;
         const w = wIdent ? state[`auth_identities/${wIdent.id}`] : null;
         const bound = (i) => i && i.status === "bound";
@@ -154,7 +199,7 @@ export class IdentityService {
         }
         if (existing && existing.status && existing.status !== "active")
           failCode("USER_DISABLED", "账号已停用，请联系管理员", 403);
-        const writes = [];
+        const writes = [...domainWrites];
         const userPatch = {};
         if (pIdent && !bound(p)) {
           if (existing?.phoneIdentityId && existing.phoneIdentityId !== pIdent.id)

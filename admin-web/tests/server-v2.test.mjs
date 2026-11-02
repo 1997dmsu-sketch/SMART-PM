@@ -448,3 +448,31 @@ test("DB-03: persons HTTP endpoints are org-admin only and org-scoped", async ()
   const forged = await request("persons?limit=5", { headers: { "X-Org-Id": "org-other" } });
   assert.equal(forged.status, 404);
 });
+
+test("F01: persons HTTP pagination defaults, validation and cursor pages", async () => {
+  // Default request (no limit) must return existing persons, not an empty page.
+  const fallback = await request("persons");
+  assert.equal(fallback.status, 200);
+  assert.ok(fallback.data.data.length > 0);
+  for (const bad of ["0", "-1", "101", "abc", "1.5"]) {
+    const r = await request(`persons?limit=${bad}`);
+    assert.equal(r.status, 400);
+    assert.equal(r.data.error.code, "PARAM_ERROR");
+  }
+  const stringNumeric = await request("persons?limit=5");
+  assert.equal(stringNumeric.status, 200);
+  assert.ok(stringNumeric.data.data.length > 0 && stringNumeric.data.data.length <= 5);
+  for (let i = 0; i < 21; i++)
+    await post("persons", { name: `分页人员${String(i).padStart(2, "0")}` });
+  const first = await request("persons?limit=20");
+  assert.equal(first.data.data.length, 20);
+  assert.ok(first.data.nextCursor);
+  const second = await request(
+    `persons?limit=20&cursor=${encodeURIComponent(first.data.nextCursor)}`,
+  );
+  assert.ok(second.data.data.length > 0);
+  const ids = new Set([...first.data.data, ...second.data.data].map((p) => p.personId));
+  assert.equal(ids.size, first.data.data.length + second.data.data.length);
+  const badCursor = await request("persons?limit=20&cursor=no-such-cursor");
+  assert.equal(badCursor.status, 400);
+});

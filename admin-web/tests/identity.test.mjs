@@ -221,56 +221,100 @@ test("persons need no account or phone; lists are org-scoped", async (t) => {
   assert.equal((await otherOrg.listPersons({ limit: 20 })).data.length, 0);
   assert.equal((await persons.listPersons({ limit: 20 })).data.length, 1);
 });
-test("claimAccount binds only the caller's own verified account, once per org", async (t) => {
+test("F02: claimAccount is closed without identity proof — even a verified phone login is rejected with zero writes", async (t) => {
   const { store, identity, persons } = await personSetup(t);
+  // Exactly the F02 reproduction: an admin-created unbound profile plus a
+  // verified login account, but NO approved identity application. A verified
+  // caller is not proof that the target profile belongs to that caller.
   const { userId } = await loginPhone(identity, "13800009999", "w11");
   const person = await persons.createPerson({ name: "李住户" }, audit);
-  const claimed = await persons.claimAccount(person.personId, { callerUserId: userId }, audit);
-  assert.equal(claimed.userId, userId);
+  const claimsBefore = (await store.list("unique_claims")).length;
+  await assert.rejects(
+    persons.claimAccount(person.personId, { callerUserId: userId }, audit),
+    (e) => {
+      assert.equal(e.code, "POLICY_UNDECIDED");
+      assert.equal(e.status, 503);
+      return true;
+    },
+  );
   const stored = (await store.list("persons")).find((p) => p._id === person.personId);
-  assert.equal(stored.userId, userId);
-  // The same account cannot claim a second profile in the same org.
-  const second = await persons.createPerson({ name: "王住户" }, audit);
-  await assert.rejects(
-    persons.claimAccount(second.personId, { callerUserId: userId }, audit),
-    (e) => e.code === "IDENTITY_CONFLICT" && /已绑定其他人员档案/.test(e.message),
-  );
-  // Another verified account cannot take over an already-bound profile.
-  const other = await loginPhone(identity, "13800009998", "w12");
-  await assert.rejects(
-    persons.claimAccount(person.personId, { callerUserId: other.userId }, audit),
-    (e) => e.code === "IDENTITY_CONFLICT" && /已绑定账号/.test(e.message),
-  );
-  // The profile is visible in the caller's self-profile.
+  assert.equal(stored.userId, null); // untouched
+  assert.equal((await store.list("unique_claims")).length, claimsBefore); // zero writes
   const profile = await identity.getMyProfile(userId);
-  assert.equal(profile.persons.length, 1);
-  assert.equal(profile.persons[0].personId, person.personId);
+  assert.equal(profile.persons.length, 0);
 });
-test("claimAccount requires a verified identity and an active, existing profile", async (t) => {
-  const { store, persons } = await personSetup(t);
-  const person = await persons.createPerson({ name: "赵住户" }, audit);
+test("F01: listPersons applies default limit and validates pagination input", async (t) => {
+  const { persons } = await personSetup(t);
+  await persons.createPerson({ name: "张无账" }, audit);
+  // F01 reproduction: no limit used to return an empty page (NaN slice).
+  assert.equal((await persons.listPersons({})).data.length, 1);
+  assert.equal((await persons.listPersons()).data.length, 1);
+  for (const bad of [{ limit: 0 }, { limit: -1 }, { limit: 101 }, { limit: "abc" }, { limit: 1.5 }])
+    await assert.rejects(persons.listPersons(bad), (e) => e.code === "PARAM_ERROR");
+  assert.equal((await persons.listPersons({ limit: "20" })).data.length, 1);
+  for (let i = 0; i < 21; i++) await persons.createPerson({ name: `住户${i}` }, audit);
+  const first = await persons.listPersons({ limit: 20 });
+  assert.equal(first.data.length, 20);
+  assert.ok(first.nextCursor);
+  const second = await persons.listPersons({ limit: 20, cursor: first.nextCursor });
+  assert.equal(second.data.length, 2);
+  assert.equal(second.nextCursor, undefined);
+  const ids = new Set([...first.data, ...second.data].map((p) => p._id));
+  assert.equal(ids.size, 22);
   await assert.rejects(
-    persons.claimAccount(person.personId, { callerUserId: "ghost" }, audit),
-    (e) => e.status === 404,
+    persons.listPersons({ limit: 20, cursor: "no-such-cursor" }),
+    (e) => e.code === "PARAM_ERROR",
   );
-  // An account without any verified identity mapping is refused.
+});
+test("F03: changing keyVersion or the key itself is refused instead of re-registering users", async (t) => {
+  const { store, identity } = await setup(t);
+  const first = await loginPhone(identity, "13800001111", "w1");
+  const v2 = new IdentityService(store, {
+    hmacKey: "test-identity-key-0123456789",
+    keyVersion: 2,
+    gateway,
+  });
+  // Same realm, bumped keyVersion: must fail loudly, not create user #2.
+  await assert.rejects(loginPhone(v2, "13800001111", "w1"), (e) => {
+    assert.equal(e.code, "IDENTITY_CONFIG_CHANGED");
+    assert.equal(e.status, 503);
+    return true;
+  });
+  // Same keyVersion, different key: also refused.
+  const otherKey = new IdentityService(store, {
+    hmacKey: "another-secret-key-987654321",
+    gateway,
+  });
+  await assert.rejects(loginPhone(otherKey, "13800001111", "w1"), (e) => e.code === "IDENTITY_CONFIG_CHANGED");
+  // A completely new phone cannot bypass the guard either (no registration
+  // path may exist under a mismatched configuration).
+  await assert.rejects(loginPhone(v2, "13900000000", "wnew"), (e) => e.code === "IDENTITY_CONFIG_CHANGED");
+  assert.equal((await store.list("users")).filter((u) => u.schemaVersion === 2).length, 1);
+  assert.equal((await store.list("auth_identities")).length, 2);
+  // Rolling deploy: the old-version instance keeps working unchanged.
+  const again = await loginPhone(identity, "13800001111", "w1");
+  assert.equal(again.userId, first.userId);
+  assert.equal(again.isNewUser, false);
+  const domain = (await store.list("identity_domains")).find(
+    (d) => d._id === "identity-domain-resident",
+  );
+  assert.equal(domain.keyVersion, 1);
+  assert.ok(domain.keyFingerprint && !JSON.stringify(domain).includes("test-identity-key"));
+});
+test("F03: a disabled account plus a changed key still cannot bypass into a new user", async (t) => {
+  const { store, identity } = await setup(t);
+  const { userId } = await loginPhone(identity, "13800006666", "w7");
   await store.transact(
-    [{ collection: "users", id: "unverified-user" }],
-    () => [
-      {
-        collection: "users",
-        id: "unverified-user",
-        data: { name: "未验证", role: "user", status: "active" },
-      },
-    ],
+    [{ collection: "users", id: userId }],
+    () => [{ collection: "users", id: userId, data: { status: "disabled" } }],
     audit,
   );
-  await assert.rejects(
-    persons.claimAccount(person.personId, { callerUserId: "unverified-user" }, audit),
-    (e) => e.code === "IDENTITY_NOT_VERIFIED" && e.status === 403,
-  );
-  await assert.rejects(
-    persons.claimAccount("missing-person", { callerUserId: "unverified-user" }, audit),
-    (e) => e.status === 404,
-  );
+  const rotated = new IdentityService(store, {
+    hmacKey: "rotated-secret-key-abcdef12345",
+    keyVersion: 2,
+    gateway,
+  });
+  await assert.rejects(loginPhone(rotated, "13800006666", "w7"), (e) => e.code === "IDENTITY_CONFIG_CHANGED");
+  assert.equal((await store.list("users")).filter((u) => u.schemaVersion === 2).length, 1);
+  assert.equal((await store.list("auth_identities")).length, 2);
 });

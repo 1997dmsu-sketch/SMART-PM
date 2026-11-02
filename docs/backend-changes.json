@@ -3,5 +3,10 @@
     "originalSha256": "b3a2f8ac9fee3472a3110d061c6f0fc050fe28005c4c9aa68a6ff2c3cb67a371",
     "sha256": "3ca1634f5b8d23603366850fab754334edab2df21be574bddb6546d5a7cad2a1",
     "reason": "修复房产绑定状态；保留网页管理后台手动维护的 housesManaged 绑定，不被旧 owners 覆盖。"
+  },
+  "cloudfunctions/getHouses/index.js": {
+    "originalSha256": "204bb88b13078e19910038035420ae83d444b3e68ee57358c72066878614518d",
+    "sha256": "8c110cbb3302b7bf7155dbb7d4450782992f60c2fd1bc75114a7a04f6760edef",
+    "reason": "在分页和计数前排除公共用房；支持按 ID 重新验证客户房源详情可见性。"
   }
 }

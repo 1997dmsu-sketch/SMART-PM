@@ -360,3 +360,62 @@ test("concurrent combined creation cannot duplicate the same property", async (t
   const community = catalog.find((c) => c.name === "并发创建");
   assert.equal(catalog.filter((c) => c.parentId === community._id).length, 1);
 });
+
+test("public layout propagates to rooms and linked rentals and can be reverted", async (t) => {
+  const x = await setup(t);
+  assert.equal(x.layout.isPublic, false);
+  const pub = await x.service.createCatalog(
+    {
+      kind: "layout",
+      parentId: x.building._id,
+      name: "公共活动室",
+      code: "P1",
+      bedrooms: 0,
+      livingRooms: 1,
+      isPublic: true,
+    },
+    audit,
+  );
+  await assert.rejects(
+    x.service.createCatalog(
+      {
+        kind: "layout",
+        parentId: x.building._id,
+        name: "无效",
+        code: "P2",
+        bedrooms: 0,
+        livingRooms: 1,
+        isPublic: "false",
+      },
+      audit,
+    ),
+    /布尔/,
+  );
+  const { ids } = await x.service.createRooms(
+    { floorId: x.floor._id, layoutId: pub._id, numbers: ["101"] },
+    audit,
+  );
+  assert.equal(
+    (await x.store.list("rooms")).find((r) => r._id === ids[0]).isPublic,
+    true,
+  );
+  const listing = await x.service.saveListing(
+    null,
+    { title: "活动室", status: "在租", price: 100, isPublic: false },
+    ids[0],
+    audit,
+  );
+  assert.equal(listing.isPublic, true);
+  await x.service.batchLayout({ ids, layoutId: x.layout._id }, audit);
+  assert.equal(
+    (await x.store.list("houses")).find((r) => r._id === listing._id).isPublic,
+    false,
+  );
+  await x.service.batchLayout({ ids, layoutId: pub._id }, audit);
+  const hidden = (await x.store.list("houses")).find(
+    (r) => r._id === listing._id,
+  );
+  assert.equal(hidden.isPublic, true);
+  assert.equal(hidden.price, 100);
+  assert.equal(hidden.status, "在租");
+});

@@ -9,10 +9,11 @@ const db = cloud.database();
 const _ = db.command;
 
 exports.main = async (event) => {
-  const { community, priceMin, priceMax, roomType, rentType, page = 1, pageSize = 20 } = event;
+  const { community, priceMin, priceMax, roomType, rentType, id, page = 1, pageSize = 20 } = event;
 
   try {
-    let query = db.collection('houses').where({ status: '在租' });
+    let query = db.collection('houses').where({ status: '在租', isPublic: _.neq(true) });
+    if (id) query = query.where({ _id: id });
 
     // 按小区筛选
     if (community) {

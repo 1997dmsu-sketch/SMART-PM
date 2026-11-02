@@ -43,6 +43,7 @@ function roomFields(state, floorId, layoutId) {
     layoutName: layout?.name || "",
     layoutCode: layout?.code || "",
     rooms: layout?.rooms || "",
+    isPublic: layout?.isPublic === true,
   };
 }
 export class PropertyService {
@@ -105,6 +106,9 @@ export class PropertyService {
       kind === "community" ? "" : text(data.parentId, "上级物业编号");
     const value = { kind, name, parentId };
     if (kind === "layout") {
+      if (data.isPublic !== undefined && typeof data.isPublic !== "boolean")
+        fail("是否为公共用房必须为布尔值");
+      value.isPublic = data.isPublic === true;
       value.code = text(data.code, "户型编码", 20).toUpperCase();
       if (!/^[A-Z0-9_-]+$/.test(value.code))
         fail("户型编码只允许字母、数字、下划线和连字符");
@@ -382,6 +386,7 @@ export class PropertyService {
           layoutName: layout.name,
           layoutCode: layout.code,
           rooms: layout.rooms,
+          isPublic: layout.isPublic === true,
         };
         return selected.flatMap((previous) => {
           const room = get(state, "rooms", previous._id);
@@ -445,7 +450,12 @@ export class PropertyService {
           {
             collection: "houses",
             id,
-            data: { ...data, ...canonical, propertyRoomId: roomId },
+            data: {
+              ...data,
+              ...canonical,
+              isPublic: room.isPublic === true,
+              propertyRoomId: roomId,
+            },
           },
           { collection: "rooms", id: roomId, data: { listingId: id } },
         ];

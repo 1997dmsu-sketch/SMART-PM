@@ -3,7 +3,6 @@ const demo = require('./demo');
 const clone = value => JSON.parse(JSON.stringify(value));
 const isDemo = () => config.mode === 'demo';
 let profile = null;
-const houseCache = new Map();
 const pendingUnlocks = new Set();
 let demoConversations = clone(demo.conversations);
 function unsupported(message) { return Promise.reject(new Error(message)); }
@@ -28,21 +27,20 @@ function normalizeHouse(h) {
 async function listHouses(filters = {}) {
   let result;
   if (isDemo()) {
-    const rows=demo.houses.filter(h => (!filters.community||h.community===filters.community) && (filters.priceMin===undefined||h.price>=filters.priceMin) && (filters.priceMax===undefined||h.price<filters.priceMax) && (!filters.roomType||h.rooms.startsWith(String(filters.roomType))) && (!filters.rentType||filters.rentType==='all'||h.rentType===(filters.rentType==='whole'?'整租':'合租')));
+    const rows=demo.houses.filter(h => h.isPublic !== true && (!filters.community||h.community===filters.community) && (filters.priceMin===undefined||h.price>=filters.priceMin) && (filters.priceMax===undefined||h.price<filters.priceMax) && (!filters.roomType||h.rooms.startsWith(String(filters.roomType))) && (!filters.rentType||filters.rentType==='all'||h.rentType===(filters.rentType==='whole'?'整租':'合租')));
     const page=filters.page||1,pageSize=filters.pageSize||20;
     result={houses:clone(rows.slice((page-1)*pageSize,page*pageSize)),total:rows.length,page,pageSize};
   } else result=(await call('getHouses',filters)).data;
   if (!result || !Array.isArray(result.houses)) throw new Error('房源数据格式异常');
-  result.houses=result.houses.map(normalizeHouse);
-  result.houses.forEach(h=>houseCache.set(String(h.id),h));
+  result.houses=result.houses.filter(h=>h.isPublic !== true).map(normalizeHouse);
   return result;
 }
 async function getHouse(id) {
-  if (houseCache.has(String(id))) return clone(houseCache.get(String(id)));
-  if (isDemo()) return clone(demo.houses.find(h=>h.id===id)||(!id?demo.houses[0]:null));
-  // Legacy backend has no detail query; never substitute an unrelated house.
-  await listHouses({page:1,pageSize:100});
-  return houseCache.has(String(id))?clone(houseCache.get(String(id))):null;
+  if (isDemo()) return clone(demo.houses.find(h=>h.isPublic !== true && (h.id===id || !id)) || null);
+  if (!id) return null;
+  // Revalidate visibility; a previously viewed rental may now be a public room.
+  const result = await listHouses({id:String(id),page:1,pageSize:1});
+  return clone(result.houses.find(h=>String(h.id)===String(id)) || null);
 }
 async function listContent(type) {
   if (isDemo()) return clone(type==='house'?demo.houses:demo.feed);
@@ -98,7 +96,7 @@ async function loginWithPhone(code) {
   if(!code)throw new Error('未获得手机号授权');
   const r=await call('phoneLogin',{code});profile=mapProfile(r.userInfo||{});return clone(profile);
 }
-function logout(){profile=null;houseCache.clear();}
+function logout(){profile=null;}
 function listFamily(){return isDemo()?Promise.resolve(clone(demo.family)):unsupported('旧后端尚未提供家庭成员查询接口');}
 function addFamily(){return unsupported('家庭成员添加接口尚未接入，未保存成员');}
 function getProperty(){return isDemo()?Promise.resolve(clone(demo.property)):unsupported('旧后端尚未提供住户房产详情接口');}

@@ -135,6 +135,21 @@ export function mountProperties(snapshot, helpers) {
     $('[name="communityId"]').onchange = change;
     change();
   }
+  function layoutFields() {
+    return (
+      field("code", "户型编码 *（如 A1）", "", { full: true, required: true }) +
+      field("bedrooms", "房间数", 1, { type: "number", required: true }) +
+      field("livingRooms", "客厅数", 1, { type: "number", required: true }) +
+      field("isPublic", "是否为公共用房", "false", {
+        full: true,
+        choices: [
+          ["false", "否 · 普通用房"],
+          ["true", "是 · 公共用房"],
+        ],
+        help: "公共用房仅在后台维护，不在客户房源列表和详情中展示。",
+      })
+    );
+  }
   function createCatalog(kind) {
     const names = {
       community: "小区",
@@ -176,14 +191,7 @@ export function mountProperties(snapshot, helpers) {
     );
     if (kind === "floor")
       fields += `<label class="field full">楼层序号 *<input name="level" type="number" min="-10" max="200" step="1" required placeholder="例如 1；地下层可填 -1"></label>`;
-    if (kind === "layout")
-      fields +=
-        field("code", "户型编码 *（如 A1）", "", {
-          full: true,
-          required: true,
-        }) +
-        field("bedrooms", "房间数", 1, { type: "number", required: true }) +
-        field("livingRooms", "客厅数", 1, { type: "number", required: true });
+    if (kind === "layout") fields += layoutFields();
     form(
       `新增${names[kind]}`,
       kind === "layout"
@@ -192,6 +200,7 @@ export function mountProperties(snapshot, helpers) {
       fields,
       async (d) => {
         d.kind = kind;
+        if (kind === "layout") d.isPublic = d.isPublic === "true";
         for (const k of ["level", "bedrooms", "livingRooms"])
           if (k in d) d[k] = Number(d[k]);
         await api("property/catalog", { method: "POST", data: d });
@@ -279,37 +288,84 @@ export function mountProperties(snapshot, helpers) {
       return;
     }
     const layouts = of("layout").filter((l) => l.parentId === building);
-    if (!layouts.length) {
-      toast("请先为该楼栋创建户型");
-      return;
-    }
     form(
       "批量设置户型",
-      `已选 ${ids.length} 间 · ${title(building)}。只更改户型，不修改租金、面积和展示状态。`,
+      `已选 ${ids.length} 间 · ${title(building)}。公共用房将从客户页面隐藏，租金和面积保持不变。`,
       field("layoutId", "选择户型 *", "", {
         full: true,
         required: true,
         choices: [
           ["", "请选择"],
-          ...layouts.map((l) => [l._id, `${l.code} · ${l.name}（${l.rooms}）`]),
+          ...layouts.map((l) => [
+            l._id,
+            `${l.code} · ${l.name}（${l.rooms}）${l.isPublic ? " · 公共用房" : ""}`,
+          ]),
+          ["__new__", "＋ 新增户型"],
         ],
       }) +
+        `<div class="field full"><button type="button" class="btn" id="batch-new-layout">＋ 新增户型</button></div><div class="field full" id="batch-new-fields" hidden><div class="form-grid">${field("name", "户型名称 *", "", { full: true, required: true }) + layoutFields()}</div></div>` +
         `<div class="field full"><div class="notice">所选房间：${selection.map((r) => esc(r.roomNo || r.name)).join("、")}<br>已经关联的出租房源将同步更新户型。</div></div>`,
       async (d) => {
-        const layout = catalog.find((l) => l._id === d.layoutId);
+        const creating = d.layoutId === "__new__";
+        let layout = creating
+          ? {
+              ...d,
+              code: d.code.toUpperCase(),
+              isPublic: d.isPublic === "true",
+            }
+          : catalog.find((l) => l._id === d.layoutId);
         if (
           !(await confirmAction(
             "确认批量设置户型？",
-            `将 ${ids.length} 间房设置为 ${layout.code} · ${layout.name}。租金、面积、住户绑定不会改变。`,
+            `将 ${ids.length} 间房设置为 ${layout.code} · ${layout.name}。${layout.isPublic ? "公共用房不会在客户页面展示。" : "普通用房按出租展示状态显示。"}租金、面积、住户绑定不会改变。`,
           ))
         )
           throw Error("已取消，尚未修改");
+        if (creating) {
+          layout = await api("property/catalog", {
+            method: "POST",
+            data: {
+              kind: "layout",
+              parentId: building,
+              name: d.name,
+              code: d.code,
+              bedrooms: Number(d.bedrooms),
+              livingRooms: Number(d.livingRooms),
+              isPublic: d.isPublic === "true",
+            },
+          });
+          catalog.push(layout);
+          const option = new Option(
+            `${layout.code} · ${layout.name}${layout.isPublic ? " · 公共用房" : ""}`,
+            layout._id,
+          );
+          $('[name="layoutId"]').add(option);
+          $('[name="layoutId"]').value = layout._id;
+          $('[name="layoutId"]').dispatchEvent(new Event("change"));
+          d.layoutId = layout._id;
+        }
         await api("property/layout", {
           method: "POST",
           data: { ids, layoutId: d.layoutId },
         });
       },
     );
+    const select = $('[name="layoutId"]');
+    const update = () => {
+      const fresh = select.value === "__new__";
+      $("#batch-new-fields").hidden = !fresh;
+      $("#batch-new-fields")
+        .querySelectorAll("input,select")
+        .forEach((el) => {
+          el.disabled = !fresh;
+        });
+    };
+    select.onchange = update;
+    $("#batch-new-layout").onclick = () => {
+      select.value = "__new__";
+      update();
+    };
+    update();
   }
   function assign(room) {
     if (room.listingId) {
@@ -369,7 +425,7 @@ export function mountProperties(snapshot, helpers) {
     openDialog(
       "楼栋户型目录",
       "户型名称与户型编码分别保存；编码只在所属楼栋内唯一。",
-      `<div class="editor-body">${list.length ? `<table><thead><tr><th>楼栋</th><th>编码</th><th>户型名称</th><th>房间 / 客厅</th></tr></thead><tbody>${list.map((l) => `<tr><td>${esc(title(l.parentId))}</td><td><b>${esc(l.code)}</b></td><td>${esc(l.name)}</td><td>${esc(l.rooms)}</td></tr>`).join("")}</tbody></table>` : '<div class="empty">还没有户型，请先新增。</div>'}</div>`,
+      `<div class="editor-body">${list.length ? `<table><thead><tr><th>楼栋</th><th>编码</th><th>户型名称</th><th>房间 / 客厅</th><th>公共用房</th></tr></thead><tbody>${list.map((l) => `<tr><td>${esc(title(l.parentId))}</td><td><b>${esc(l.code)}</b></td><td>${esc(l.name)}</td><td>${esc(l.rooms)}</td><td>${l.isPublic ? "是 · 客户不可见" : "否"}</td></tr>`).join("")}</tbody></table>` : '<div class="empty">还没有户型，请先新增。</div>'}</div>`,
       `${writable ? '<button class="btn primary" id="add-layout">新增户型</button>' : ""}<button class="btn" data-close>关闭</button>`,
     );
     $("#add-layout")?.addEventListener("click", () => createCatalog("layout"));
@@ -437,7 +493,7 @@ export function mountProperties(snapshot, helpers) {
         })),
         floorId,
         "全部楼层",
-      )}</select></label><form id="property-search"><label>房号 / 户型<input name="keyword" value="${esc(keyword)}" placeholder="如 101、A1、一房一厅"></label><button class="btn">搜索</button></form></div><div class="property-batch"><label><input type="checkbox" id="orphans" ${orphan ? "checked" : ""}> 仅看待归档房间</label><span id="selection-count">已选择 ${selected.size} 间（当前筛选内）</span>${writable ? '<button class="btn primary" id="batch-layout">批量设置户型</button>' : ""}</div><div class="table-wrap"><table><thead><tr>${writable ? '<th><input type="checkbox" id="select-page" aria-label="全选本页"></th>' : ""}<th>房间</th><th>小区 / 楼栋 / 楼层</th><th>户型名称</th><th>户型编码</th><th>出租展示</th>${writable ? "<th>操作</th>" : ""}</tr></thead><tbody>${visible.map((r) => `<tr>${writable ? `<td><input type="checkbox" data-room-select="${esc(r._id)}" aria-label="选择房间 ${esc(r.roomNo || r.name)}" ${selected.has(r._id) ? "checked" : ""}></td>` : ""}<td><b>${esc(r.roomNo || r.name)}</b><br><small>${esc(r.houseId)}</small></td><td>${r.floorId ? `${esc(r.community)} / ${esc(r.buildingName)} / ${esc(r.floorName)}` : '<span class="badge amber">待归档</span>'}</td><td>${esc(r.layoutName || "未设置")}</td><td><span class="badge blue">${esc(r.layoutCode || "—")}</span></td><td>${r.listingId ? "已关联" : "未关联"}</td>${writable ? `<td><button class="link" data-assign-room="${esc(r._id)}">${r.floorId ? "修改归档" : "归档房间"}</button></td>` : ""}</tr>`).join("")}</tbody></table>${visible.length ? "" : '<div class="empty">没有符合条件的房间。可先新增小区、楼栋、楼层，再批量创建房间。</div>'}</div><div class="pagination"><span>共 ${all.length} 间 · 每页 20 间</span><div class="pages"><button id="property-prev" ${page <= 1 ? "disabled" : ""}>‹</button><span>${page}</span><small>/ ${Math.max(1, Math.ceil(all.length / 20))}</small><button id="property-next" ${page * 20 >= all.length ? "disabled" : ""}>›</button></div></div></section>` +
+      )}</select></label><form id="property-search"><label>房号 / 户型<input name="keyword" value="${esc(keyword)}" placeholder="如 101、A1、一房一厅"></label><button class="btn">搜索</button></form></div><div class="property-batch"><label><input type="checkbox" id="orphans" ${orphan ? "checked" : ""}> 仅看待归档房间</label><span id="selection-count">已选择 ${selected.size} 间（当前筛选内）</span>${writable ? '<button class="btn primary" id="batch-layout">批量设置户型</button>' : ""}</div><div class="table-wrap"><table><thead><tr>${writable ? '<th><input type="checkbox" id="select-page" aria-label="全选本页"></th>' : ""}<th>房间</th><th>小区 / 楼栋 / 楼层</th><th>户型名称</th><th>户型编码</th><th>出租展示</th>${writable ? "<th>操作</th>" : ""}</tr></thead><tbody>${visible.map((r) => `<tr>${writable ? `<td><input type="checkbox" data-room-select="${esc(r._id)}" aria-label="选择房间 ${esc(r.roomNo || r.name)}" ${selected.has(r._id) ? "checked" : ""}></td>` : ""}<td><b>${esc(r.roomNo || r.name)}</b><br><small>${esc(r.houseId)}</small></td><td>${r.floorId ? `${esc(r.community)} / ${esc(r.buildingName)} / ${esc(r.floorName)}` : '<span class="badge amber">待归档</span>'}</td><td>${esc(r.layoutName || "未设置")}${r.isPublic ? '<br><span class="badge amber">公共用房 · 客户不可见</span>' : ""}</td><td><span class="badge blue">${esc(r.layoutCode || "—")}</span></td><td>${r.listingId ? "已关联" : "未关联"}</td>${writable ? `<td><button class="link" data-assign-room="${esc(r._id)}">${r.floorId ? "修改归档" : "归档房间"}</button></td>` : ""}</tr>`).join("")}</tbody></table>${visible.length ? "" : '<div class="empty">没有符合条件的房间。可先新增小区、楼栋、楼层，再批量创建房间。</div>'}</div><div class="pagination"><span>共 ${all.length} 间 · 每页 20 间</span><div class="pages"><button id="property-prev" ${page <= 1 ? "disabled" : ""}>‹</button><span>${page}</span><small>/ ${Math.max(1, Math.ceil(all.length / 20))}</small><button id="property-next" ${page * 20 >= all.length ? "disabled" : ""}>›</button></div></div></section>` +
       footer();
     const reset = () => {
       selected.clear();

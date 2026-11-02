@@ -68,3 +68,11 @@ test('phone login suppresses duplicates, authenticates and logs out',async()=>{
 test('phone login backend rejection clears busy state and permits retry',async()=>{
  config.mode='live';config.cloudEnv='test-env';wx.cloud.callFunction=async()=>({result:{code:500,msg:'授权已过期'}});const p=page('profile');await p.login({detail:{code:'expired'}});assert.equal(p.data.authenticated,false);assert.equal(p.data.loggingIn,false);assert.equal(calls[0][1].title,'授权已过期');
 });
+test('rental detail rechecks visibility after a cached listing becomes public',async()=>{
+ config.mode='live';config.cloudEnv='test-env';let hidden=false;
+ wx.cloud.callFunction=async request=>{calls.push(request);return {result:{code:0,data:{houses:[{_id:'r1',isPublic:hidden}],total:1}}};};
+ assert.equal((await api.listHouses()).houses.length,1);
+ hidden=true;
+ assert.equal(await api.getHouse('r1'),null);
+ assert.equal(calls.at(-1).data.id,'r1');
+});

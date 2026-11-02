@@ -106,15 +106,6 @@ const assert = require("node:assert/strict");
   await page.locator('[name="level"]').fill("1");
   await page.locator('[form="property-form"]').click();
   await page.locator("#editor").waitFor({ state: "hidden" });
-  await page.locator("#layouts").click();
-  await page.locator("#add-layout").click();
-  await page
-    .locator('[name="parentId"]')
-    .selectOption({ label: "星河公寓 / 1栋" });
-  await page.locator('#property-form [name="name"]').fill("一房一厅");
-  await page.locator('[name="code"]').fill("A1");
-  await page.locator('[form="property-form"]').click();
-  await page.locator("#editor").waitFor({ state: "hidden" });
   await page.locator("#new-rooms").click();
   await page.locator("#manual-fill").click();
   await page
@@ -127,9 +118,9 @@ const assert = require("node:assert/strict");
   await page.locator("#property-building").selectOption({ label: "1栋" });
   await page.locator("#select-page").check();
   await page.locator("#batch-layout").click();
-  await page
-    .locator('[name="layoutId"]')
-    .selectOption({ label: "A1 · 一房一厅（1室1厅）" });
+  await page.locator("#batch-new-layout").click();
+  await page.locator('#batch-new-fields [name="name"]').fill("一房一厅");
+  await page.locator('#batch-new-fields [name="code"]').fill("A1");
   await page.locator('[form="property-form"]').click();
   await page.getByRole("button", { name: "确认操作" }).click();
   await page.locator("#editor").waitFor({ state: "hidden" });
@@ -141,6 +132,29 @@ const assert = require("node:assert/strict");
     await page.getByRole("cell", { name: "A1", exact: true }).count(),
     3,
   );
+  await page.locator("#select-page").check();
+  await page.locator("#batch-layout").click();
+  await page.locator("#batch-new-layout").click();
+  await page.locator('#batch-new-fields [name="name"]').fill("公共活动室");
+  await page.locator('#batch-new-fields [name="code"]').fill("P1");
+  await page
+    .locator('#batch-new-fields [name="isPublic"]')
+    .selectOption("true");
+  await page.locator('[form="property-form"]').click();
+  await page.getByRole("button", { name: "确认操作" }).click();
+  await page.locator("#editor").waitFor({ state: "hidden" });
+  assert.equal(
+    await page.getByText("公共用房 · 客户不可见", { exact: true }).count(),
+    3,
+  );
+  await page.locator("#select-page").check();
+  await page.locator("#batch-layout").click();
+  await page
+    .locator('[name="layoutId"]')
+    .selectOption({ label: "A1 · 一房一厅（1室1厅）" });
+  await page.locator('[form="property-form"]').click();
+  await page.getByRole("button", { name: "确认操作" }).click();
+  await page.locator("#editor").waitFor({ state: "hidden" });
   await page.screenshot({
     path: path.join(output, "property.png"),
     fullPage: true,

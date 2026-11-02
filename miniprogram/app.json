@@ -1,5 +1,5 @@
 {
-  "pages": ["pages/home/index", "pages/life/index", "pages/unlock/index", "pages/messages/index", "pages/profile/index", "pages/rental/index", "pages/property/index", "pages/chat/index"],
+  "pages": ["pages/home/index", "pages/life/index", "pages/unlock/index", "pages/messages/index", "pages/profile/index", "pages/rental/index", "pages/property/index", "pages/chat/index", "pages/vr/index"],
   "window": {"navigationStyle":"custom", "navigationBarTextStyle":"black", "backgroundTextStyle":"dark", "backgroundColor":"#f7f7f7"},
   "tabBar": {
     "custom": true, "color":"#888888", "selectedColor":"#111111", "backgroundColor":"#ffffff",

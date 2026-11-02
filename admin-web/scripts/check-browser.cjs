@@ -59,6 +59,16 @@ const assert = require("node:assert/strict");
   await page.locator('[data-nav="content"]').click();
   await page.getByRole("button", { name: "新增内容" }).click();
   await page.locator('[name="title"]').fill("浏览器验证内容");
+  await page.locator('[name="vrUrl"]').fill("https://example.com/tour");
+  await page.locator("#vr-upload").setInputFiles({
+    name: "tour.html",
+    mimeType: "text/html",
+    buffer: Buffer.from("<!doctype html><html><body>VR demo</body></html>"),
+  });
+  await page
+    .getByText("VR 文件已上传，保存内容后生效", { exact: true })
+    .waitFor();
+
   await page
     .locator('[name="description"]')
     .fill("这是正文，应保持安全文本 <script>bad()</script>");
@@ -66,6 +76,21 @@ const assert = require("node:assert/strict");
   await page.locator("#editor").waitFor({ state: "hidden" });
   await page.getByRole("button", { name: "预览", exact: true }).first().click();
   await page.getByRole("heading", { name: "内容预览" }).waitFor();
+  await page.screenshot({
+    path: path.join(output, "content-vr.png"),
+    fullPage: true,
+  });
+  assert.equal(
+    await page
+      .getByRole("link", { name: "打开 VR 在线链接" })
+      .getAttribute("href"),
+    "https://example.com/tour",
+  );
+  assert.equal(
+    await page.getByRole("link", { name: "下载 VR 项目：tour.html" }).count(),
+    1,
+  );
+
   await page.getByRole("button", { name: "关闭预览" }).click();
   await page.locator('[data-nav="users"]').click();
   await page.getByRole("button", { name: "维护绑定" }).nth(1).click();
@@ -116,8 +141,8 @@ const assert = require("node:assert/strict");
   await page.locator("#editor").waitFor({ state: "hidden" });
   await page.locator("#property-community").selectOption({ label: "星河公寓" });
   await page.locator("#property-building").selectOption({ label: "1栋" });
-  await page.locator("#select-page").check();
   await page.locator("#batch-layout").click();
+  await page.locator("#layout-select-all").click();
   await page.locator("#batch-new-layout").click();
   await page.locator('#batch-new-fields [name="name"]').fill("一房一厅");
   await page.locator('#batch-new-fields [name="code"]').fill("A1");
@@ -132,8 +157,8 @@ const assert = require("node:assert/strict");
     await page.getByRole("cell", { name: "A1", exact: true }).count(),
     3,
   );
-  await page.locator("#select-page").check();
   await page.locator("#batch-layout").click();
+  await page.locator("#layout-select-all").click();
   await page.locator("#batch-new-layout").click();
   await page.locator('#batch-new-fields [name="name"]').fill("公共活动室");
   await page.locator('#batch-new-fields [name="code"]').fill("P1");
@@ -147,8 +172,8 @@ const assert = require("node:assert/strict");
     await page.getByText("公共用房 · 客户不可见", { exact: true }).count(),
     3,
   );
-  await page.locator("#select-page").check();
   await page.locator("#batch-layout").click();
+  await page.locator("#layout-select-all").click();
   await page
     .locator('[name="layoutId"]')
     .selectOption({ label: "A1 · 一房一厅（1室1厅）" });
@@ -211,6 +236,44 @@ const assert = require("node:assert/strict");
   await page.locator("#editor").waitFor({ state: "hidden", timeout: 60000 });
   const allRooms = await app.store.list("rooms");
   assert.equal(allRooms.filter((r) => r.buildingId).length, 1000);
+  await page.locator("#batch-layout").click();
+  await page.locator("#layout-select-all").click();
+  await page.getByText("已选 1000 / 1000 间", { exact: true }).waitFor();
+  const firstFloor = page.locator("[data-layout-floor]").first();
+  await firstFloor.uncheck();
+  await page.getByText("已选 950 / 1000 间", { exact: true }).waitFor();
+  await firstFloor.check();
+  const firstRoom = page.locator("[data-layout-room]").first();
+  await firstRoom.uncheck();
+  assert.equal(await firstFloor.evaluate((el) => el.indeterminate), true);
+  await firstRoom.check();
+  await page
+    .locator("#layout-building")
+    .selectOption({ label: "星河公寓 / 2栋" });
+  await page.getByText("已选 0 / 0 间", { exact: true }).waitFor();
+  assert.equal(await page.locator('[name="layoutId"] option').count(), 2);
+  await page
+    .locator("#layout-building")
+    .selectOption({ label: "星河公寓 / 1栋" });
+  await page.getByText("已选 0 / 1000 间", { exact: true }).waitFor();
+  await page.locator("#layout-select-all").click();
+  await page
+    .locator('[name="layoutId"]')
+    .selectOption({ label: "A1 · 一房一厅（1室1厅）" });
+  await page.screenshot({
+    path: path.join(output, "batch-layout.png"),
+    fullPage: true,
+  });
+  await page.locator('[form="property-form"]').click();
+  await page.getByRole("button", { name: "确认操作" }).click();
+  await page.locator("#editor").waitFor({ state: "hidden", timeout: 60000 });
+  assert.equal(
+    (await app.store.list("rooms")).filter(
+      (r) => r.buildingId && r.layoutCode === "A1",
+    ).length,
+    1000,
+  );
+
   for (const width of [1024, 1280, 1920]) {
     await page.setViewportSize({ width, height: 900 });
     await page.locator('[data-nav="dashboard"]').click();

@@ -251,6 +251,98 @@ test("image upload rejects SVG and accepts PNG with persistent local URL", async
     bytes,
   );
 });
+test("VR project attachments persist and download as attachments, with role and CSRF protection", async () => {
+  await app.accounts.save({
+    username: "vr_viewer",
+    name: "VR viewer",
+    role: "viewer",
+    password: "test-only-password-123",
+    enabled: true,
+  });
+  const viewer = await login("vr_viewer", "test-only-password-123");
+  const bytes = Buffer.from(
+    "<!doctype html><html><body>VR project<script>alert(1)</script></body></html>",
+  );
+  for (const opts of [{ auth: viewer }, { auth: null }, { csrf: false }])
+    assert.ok(
+      (
+        await request("vr-upload?name=tour.html", {
+          method: "POST",
+          raw: bytes,
+          ...opts,
+        })
+      ).status >= 400,
+    );
+  assert.equal(
+    (await request("vr-upload?name=tour.zip", { method: "POST", raw: bytes }))
+      .status,
+    400,
+  );
+  assert.equal(
+    (await request("vr-upload?name=bad.exe", { method: "POST", raw: bytes }))
+      .status,
+    400,
+  );
+  const file = await request("vr-upload?name=tour.html", {
+    method: "POST",
+    raw: bytes,
+    auth: editor,
+  });
+  assert.equal(file.status, 200);
+  const data = {
+    title: "VR 测试",
+    type: "share",
+    description: "",
+    enabled: false,
+    sortOrder: 1,
+    vrUrl: "https://example.com/tour",
+    vrFile: file.data,
+  };
+  const saved = await request("content", { method: "POST", data });
+  assert.equal(saved.status, 201);
+  assert.equal(saved.data.vrFile.name, "tour.html");
+  assert.equal(saved.data.vrUrl, data.vrUrl);
+  const response = await fetch(url + "/api/vr-download?id=" + saved.data._id, {
+    headers: { Cookie: viewer.cookie },
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-disposition"), /^attachment/);
+  assert.match(response.headers.get("content-security-policy"), /sandbox/);
+  assert.equal(await response.text(), bytes.toString());
+  assert.equal((await fetch(url + file.data.url)).status, 404);
+  assert.equal(
+    (await request("vr-download?id=" + saved.data._id, { auth: null })).status,
+    401,
+  );
+  assert.equal(
+    (
+      await request("content", {
+        method: "POST",
+        data: { ...data, vrUrl: "javascript:alert(1)" },
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request("content", {
+        method: "POST",
+        data: {
+          ...data,
+          vrFile: { ...file.data, url: "/vr-files/../../accounts.json" },
+        },
+      })
+    ).status,
+    400,
+  );
+  const cleared = await request("content/" + saved.data._id, {
+    method: "PUT",
+    data: { ...data, vrFile: null, vrUrl: "" },
+  });
+  assert.equal(cleared.data.vrFile, null);
+  assert.equal(cleared.data.vrUrl, "");
+});
+
 test("account permissions change revokes sessions and never exposes hashes", async () => {
   const account = app.accounts.rows.find((a) => a.username === "viewer");
   const r = await request("accounts", {

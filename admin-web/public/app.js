@@ -516,6 +516,14 @@ async function edit(resource, record) {
         full: true,
         help: "支持 HTTPS 图片链接或上传后生成的地址。",
       });
+  let vrAttachment = r.vrFile || null;
+  if (resource === "content")
+    fields +=
+      field("vrUrl", "VR 在线链接", r.vrUrl || "", {
+        full: true,
+        help: "填写 VR 平台发布的 HTTPS 地址；小程序内打开需配置对应业务域名。",
+      }) +
+      `<div class="field full">VR 项目文件（ZIP / HTML）<input type="file" id="vr-upload" accept=".zip,.html,.htm" ${writable ? "" : "disabled"}><small>最大 50 MB。文件作为项目附件保存，不自动解压或在线运行；在线观看请填写上方链接。HTML 如包含外部资源，建议将完整项目打包为 ZIP。</small><span id="vr-file-name">${esc(vrAttachment?.name || "未上传文件")}</span>${r.vrFile ? `<a class="link" href="/api/vr-download?id=${encodeURIComponent(r._id)}">下载已保存的 VR 项目</a>` : ""}${writable ? '<button type="button" class="btn" id="vr-remove">移除文件关联</button>' : ""}</div>`;
   openDialog(
     `${record ? (writable ? "编辑" : "查看") : "新增"}${labels[resource].replace("管理", "")}`,
     record ? `记录编号：${r._id}` : "填写资料后保存，可随时继续编辑。",
@@ -536,6 +544,45 @@ async function edit(resource, record) {
     };
     select.onchange = sync;
     sync();
+  }
+  if (resource === "content" && writable) {
+    $("#vr-remove").onclick = () => {
+      vrAttachment = null;
+      $("#vr-file-name").textContent = "未上传文件";
+    };
+    $("#vr-upload").onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 50 * 1024 * 1024) {
+        toast("VR 文件不能超过 50 MB");
+        return;
+      }
+      const form = $("#record-form"),
+        save = $("#save"),
+        dialog = $("#editor");
+      const closers = [...dialog.querySelectorAll("[data-close]")];
+      const cancel = (e) => e.preventDefault();
+      form.inert = true;
+      save.disabled = true;
+      closers.forEach((el) => (el.disabled = true));
+      dialog.addEventListener("cancel", cancel);
+      $("#vr-file-name").textContent = "正在上传…";
+      try {
+        vrAttachment = await api(
+          `vr-upload?name=${encodeURIComponent(file.name)}`,
+          { method: "POST", raw: file },
+        );
+        toast("VR 文件已上传，保存内容后生效");
+      } catch (error) {
+        $("#record-form .form-error").textContent = error.message;
+      } finally {
+        $("#vr-file-name").textContent = vrAttachment?.name || "未上传文件";
+        form.inert = false;
+        save.disabled = false;
+        closers.forEach((el) => (el.disabled = false));
+        dialog.removeEventListener("cancel", cancel);
+      }
+    };
   }
   if (picture && writable) {
     $("#upload").onchange = async (e) => {
@@ -576,6 +623,7 @@ async function edit(resource, record) {
         .map((s) => s.trim())
         .filter(Boolean);
     if (resource === "houses") d.images = r.images || [];
+    if (resource === "content") d.vrFile = vrAttachment;
     const save = $("#save");
     save.disabled = true;
     try {
@@ -652,7 +700,7 @@ function preview(r) {
   openDialog(
     "内容预览",
     "预览用于核对内容，实际排版以小程序为准。",
-    `<div class="editor-body"><div class="preview-card">${image(r.image || r.cover, "preview-image")}<h2>${esc(r.title)}</h2><p>${esc(r.description || r.content || r.text || "暂无正文")}</p><small>${esc(typeof r.author === "string" ? r.author : "物业服务中心")}</small></div>${badge(r.enabled)}</div>`,
+    `<div class="editor-body"><div class="preview-card">${image(r.image || r.cover, "preview-image")}<h2>${esc(r.title)}</h2><p>${esc(r.description || r.content || r.text || "暂无正文")}</p><small>${esc(typeof r.author === "string" ? r.author : "物业服务中心")}</small></div>${badge(r.enabled)}${r.vrUrl && /^https:\/\//.test(r.vrUrl) ? `<p><a class="btn" href="${esc(r.vrUrl)}" target="_blank" rel="noopener noreferrer">打开 VR 在线链接</a></p>` : ""}${r.vrFile ? `<p><a class="btn" href="/api/vr-download?id=${encodeURIComponent(r._id)}">下载 VR 项目：${esc(r.vrFile.name)}</a></p>` : ""}</div>`,
     '<button class="btn" data-close>关闭预览</button>',
   );
 }

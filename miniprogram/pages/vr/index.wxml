@@ -1,0 +1,2 @@
+<web-view wx:if="{{url}}" src="{{url}}" binderror="onError" />
+<view wx:else class="vr-state">{{error || '正在打开 VR…'}}</view>

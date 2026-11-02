@@ -1,3 +1,4 @@
+import { applyLayoutBatches, mountLayoutRooms } from "./layout-batches.js";
 import { openAutoFill } from "./auto-fill-ui.js";
 // Property inventory is separate from rental marketing records.
 export function mountProperties(snapshot, helpers) {
@@ -272,40 +273,38 @@ export function mountProperties(snapshot, helpers) {
     update();
   }
   async function batch() {
-    const ids = [...selected],
-      selection = rooms.filter((r) => selected.has(r._id));
-    if (!ids.length) {
-      toast("请先勾选房间");
+    if (!of("building").length) {
+      toast("请先添加物业楼栋");
       return;
     }
-    if (ids.length > 30) {
-      toast("每批最多 30 间，请缩小选择范围");
-      return;
-    }
-    const building = selection[0].buildingId;
-    if (!building || selection.some((r) => r.buildingId !== building)) {
-      toast("请先按同一楼栋筛选，不能跨楼栋设置户型");
-      return;
-    }
+    let picker;
+    let building =
+      buildingId ||
+      rooms.find((r) => selected.has(r._id) && r.buildingId)?.buildingId ||
+      of("building")[0]._id;
     const layouts = of("layout").filter((l) => l.parentId === building);
     form(
       "批量设置户型",
-      `已选 ${ids.length} 间 · ${title(building)}。公共用房将从客户页面隐藏，租金和面积保持不变。`,
-      field("layoutId", "选择户型 *", "", {
-        full: true,
-        required: true,
-        choices: [
-          ["", "请选择"],
-          ...layouts.map((l) => [
-            l._id,
-            `${l.code} · ${l.name}（${l.rooms}）${l.isPublic ? " · 公共用房" : ""}`,
-          ]),
-          ["__new__", "＋ 新增户型"],
-        ],
-      }) +
+      "选择楼栋后按楼层勾选房间，也可全选整栋。保存时自动分批处理。",
+      `<div class="field full" id="layout-room-picker"></div>` +
+        field("layoutId", "选择户型 *", "", {
+          full: true,
+          required: true,
+          choices: [
+            ["", "请选择"],
+            ...layouts.map((l) => [
+              l._id,
+              `${l.code} · ${l.name}（${l.rooms}）${l.isPublic ? " · 公共用房" : ""}`,
+            ]),
+            ["__new__", "＋ 新增户型"],
+          ],
+        }) +
         `<div class="field full"><button type="button" class="btn" id="batch-new-layout">＋ 新增户型</button></div><div class="field full" id="batch-new-fields" hidden><div class="form-grid">${field("name", "户型名称 *", "", { full: true, required: true }) + layoutFields()}</div></div>` +
-        `<div class="field full"><div class="notice">所选房间：${selection.map((r) => esc(r.roomNo || r.name)).join("、")}<br>已经关联的出租房源将同步更新户型。</div></div>`,
+        `<div class="field full"><div class="notice">已经关联的出租房源将同步更新户型；公共用房不会在客户页面展示。</div><div id="layout-progress" role="status"></div></div>`,
       async (d) => {
+        const ids = picker.ids();
+        if (!ids.length) throw Error("请在上方选择要设置户型的房间");
+        building = picker.building();
         const creating = d.layoutId === "__new__";
         let layout = creating
           ? {
@@ -321,33 +320,58 @@ export function mountProperties(snapshot, helpers) {
           ))
         )
           throw Error("已取消，尚未修改");
-        if (creating) {
-          layout = await api("property/catalog", {
-            method: "POST",
-            data: {
-              kind: "layout",
-              parentId: building,
-              name: d.name,
-              code: d.code,
-              bedrooms: Number(d.bedrooms),
-              livingRooms: Number(d.livingRooms),
-              isPublic: d.isPublic === "true",
-            },
-          });
-          catalog.push(layout);
-          const option = new Option(
-            `${layout.code} · ${layout.name}${layout.isPublic ? " · 公共用房" : ""}`,
-            layout._id,
-          );
-          $('[name="layoutId"]').add(option);
-          $('[name="layoutId"]').value = layout._id;
-          $('[name="layoutId"]').dispatchEvent(new Event("change"));
-          d.layoutId = layout._id;
+        const dialog = $("#editor"),
+          body = $("#property-form");
+        const cancel = (e) => e.preventDefault();
+        const leaving = (e) => {
+          e.preventDefault();
+          e.returnValue = "";
+        };
+        const closers = [...dialog.querySelectorAll("[data-close]")];
+        dialog.addEventListener("cancel", cancel);
+        window.addEventListener("beforeunload", leaving);
+        body.inert = true;
+        closers.forEach((el) => (el.disabled = true));
+        try {
+          if (creating) {
+            layout = await api("property/catalog", {
+              method: "POST",
+              data: {
+                kind: "layout",
+                parentId: building,
+                name: d.name,
+                code: d.code,
+                bedrooms: Number(d.bedrooms),
+                livingRooms: Number(d.livingRooms),
+                isPublic: d.isPublic === "true",
+              },
+            });
+            catalog.push(layout);
+            const option = new Option(
+              `${layout.code} · ${layout.name}${layout.isPublic ? " · 公共用房" : ""}`,
+              layout._id,
+            );
+            $('[name="layoutId"]').add(option);
+            $('[name="layoutId"]').value = layout._id;
+            $('[name="layoutId"]').dispatchEvent(new Event("change"));
+            d.layoutId = layout._id;
+          }
+          const progress = (done, total) => {
+            $("#layout-progress").textContent =
+              `正在设置 ${done} / ${total} 间，请勿关闭页面`;
+            $('[form="property-form"]').textContent =
+              `正在设置 ${done} / ${total}`;
+          };
+          progress(0, ids.length);
+          await applyLayoutBatches(api, ids, d.layoutId, progress);
+        } finally {
+          body.inert = false;
+          closers.forEach((el) => (el.disabled = false));
+          dialog.removeEventListener("cancel", cancel);
+          window.removeEventListener("beforeunload", leaving);
+          $('[form="property-form"]').textContent = "保存";
+          $("#layout-progress").textContent = "";
         }
-        await api("property/layout", {
-          method: "POST",
-          data: { ids, layoutId: d.layoutId },
-        });
       },
     );
     const select = $('[name="layoutId"]');
@@ -366,6 +390,28 @@ export function mountProperties(snapshot, helpers) {
       update();
     };
     update();
+    picker = mountLayoutRooms($("#layout-room-picker"), {
+      catalog,
+      rooms,
+      initialBuilding: building,
+      initialIds: [...selected],
+      esc,
+      onBuilding(id) {
+        building = id;
+        select.innerHTML =
+          options(
+            of("layout")
+              .filter((l) => l.parentId === id)
+              .map((l) => ({
+                ...l,
+                name: `${l.code} · ${l.name}（${l.rooms}）${l.isPublic ? " · 公共用房" : ""}`,
+              })),
+            "",
+            "请选择",
+          ) + '<option value="__new__">＋ 新增户型</option>';
+        update();
+      },
+    });
   }
   function assign(room) {
     if (room.listingId) {

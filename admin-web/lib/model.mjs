@@ -1,3 +1,4 @@
+import { vrLink, vrFile } from "./vr.mjs";
 export class HttpError extends Error {
   constructor(status, message) {
     super(message);
@@ -77,6 +78,8 @@ export function validate(resource, data) {
       type: choice(data.type, ["share", "house"], "内容分类"),
       description: str(data.description || "", "正文", 5000),
       image: imageURL(data.image || ""),
+      vrUrl: vrLink(data.vrUrl),
+      vrFile: vrFile(data.vrFile),
       author: str(data.author || "物业服务中心", "发布人", 50),
       enabled:
         typeof data.enabled === "boolean" ? data.enabled : fail("发布状态错误"),

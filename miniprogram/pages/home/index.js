@@ -34,6 +34,7 @@ Page({
         description: item.description || item.content || item.summary || '',
         imageHeight: index % 4 === 1 ? 478 : 398,
         houseId: item.houseId || '',
+        vrUrl: typeof item.vrUrl === 'string' && /^https:\/\//.test(item.vrUrl) ? item.vrUrl : '',
       }));
       this.applyFilter();
     } catch (err) {
@@ -62,6 +63,10 @@ Page({
     if (!post) return;
     if (post.houseId) { wx.navigateTo({ url: `/pages/rental/index?id=${encodeURIComponent(post.houseId)}` }); return; }
     this.setData({ selectedPost: post });
+  },
+  openVR() {
+    const post = this.data.selectedPost;
+    if (post && post.vrUrl) wx.navigateTo({url:`/pages/vr/index?id=${encodeURIComponent(post.id)}`});
   },
   closePost() { this.setData({ selectedPost: null }); },
   stopTap() {},

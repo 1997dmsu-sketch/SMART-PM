@@ -76,3 +76,13 @@ test('rental detail rechecks visibility after a cached listing becomes public',a
  assert.equal(await api.getHouse('r1'),null);
  assert.equal(calls.at(-1).data.id,'r1');
 });
+test('VR page resolves published content links by ID and rejects invalid links',async()=>{
+ const original=api.listContent;
+ try {
+  api.listContent=async()=>[{_id:'vr1',vrUrl:'https://example.com/tour'}];
+  let p=page('vr');await p.onLoad({id:'vr1'});assert.equal(p.data.url,'https://example.com/tour');
+  p=page('vr');await p.onLoad({id:'missing'});assert.equal(p.data.url,'');assert.ok(p.data.error);
+  api.listContent=async()=>[{_id:'vr1',vrUrl:'javascript:alert(1)'}];
+  p=page('vr');await p.onLoad({id:'vr1'});assert.equal(p.data.url,'');assert.ok(p.data.error);
+ } finally {api.listContent=original;}
+});

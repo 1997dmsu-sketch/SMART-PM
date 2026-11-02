@@ -20,5 +20,5 @@
       </view>
     </view>
   </view>
-  <view wx:if="{{selectedPost}}" class="post-mask" bindtap="closePost"><view class="post-detail" catchtap="stopTap"><view class="detail-close" bindtap="closePost">×</view><image wx:if="{{selectedPost.cover}}" class="detail-image" src="{{selectedPost.cover}}" mode="aspectFill" bindtap="previewPostImage"/><view class="detail-title">{{selectedPost.title}}</view><text class="detail-author">{{selectedPost.author}}</text><text class="detail-description">{{selectedPost.description || '一同发现社区里的美好日常。'}}</text><button class="detail-button" bindtap="closePost">继续发现</button></view></view>
+  <view wx:if="{{selectedPost}}" class="post-mask" bindtap="closePost"><view class="post-detail" catchtap="stopTap"><view class="detail-close" bindtap="closePost">×</view><image wx:if="{{selectedPost.cover}}" class="detail-image" src="{{selectedPost.cover}}" mode="aspectFill" bindtap="previewPostImage"/><view class="detail-title">{{selectedPost.title}}</view><text class="detail-author">{{selectedPost.author}}</text><text class="detail-description">{{selectedPost.description || '一同发现社区里的美好日常。'}}</text><button wx:if="{{selectedPost.vrUrl}}" class="detail-button" bindtap="openVR">VR 在线看房</button><button class="detail-button" bindtap="closePost">继续发现</button></view></view>
 </view>

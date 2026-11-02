@@ -1250,3 +1250,76 @@ th input[type="checkbox"] {
 .field[hidden] {
   display: none;
 }
+
+/* Whole-building layout assignment, independent of table pagination. */
+#editor:has(#layout-room-picker) {
+  width: 980px;
+}
+.layout-room-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin: 16px 0;
+}
+.layout-floor-list {
+  max-height: 42vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.layout-floor {
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.layout-floor:last-child {
+  border-bottom: 0;
+}
+.layout-floor-title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 12px;
+}
+.layout-room-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+  gap: 8px;
+}
+.layout-room {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: pointer;
+  min-width: 0;
+}
+.layout-room:has(input:checked) {
+  background: #fff0f4;
+  border-color: #ff6b8a;
+}
+.layout-room span {
+  min-width: 0;
+}
+.layout-room small {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: #777;
+}
+#layout-progress {
+  color: #d92d60;
+  font-weight: 600;
+}
+.layout-room input[type="checkbox"],
+.layout-floor-title input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin: 0;
+  padding: 0;
+}

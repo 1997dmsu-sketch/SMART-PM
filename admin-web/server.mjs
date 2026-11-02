@@ -1,3 +1,4 @@
+import { VR_LIMIT, vrUpload, vrFile } from "./lib/vr.mjs";
 import http from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
@@ -99,7 +100,7 @@ export async function createApp({
           return send({
             mode,
             environment: mode === "live" ? process.env.CLOUDBASE_ENV_ID : null,
-            version: "0.2.0-beta.4",
+            version: "0.2.0-beta.6",
           });
         const token = (req.headers.cookie || "")
           .split(";")
@@ -309,6 +310,58 @@ export async function createApp({
             ...accounts.events,
           ].sort((a, b) => b.createdAt - a.createdAt);
           return send(filterRows(rows, Object.fromEntries(url.searchParams)));
+        }
+        if (path === "/api/vr-upload" && method === "POST") {
+          authorize(account.role, "uploads", true);
+          const name = url.searchParams.get("name") || "";
+          const bytes = await body(req, VR_LIMIT, true);
+          const ext = vrUpload(bytes, name);
+          const filename = `${randomUUID()}.${ext}`;
+          let fileUrl;
+          if (mode === "live") {
+            const result = await store.app.uploadFile({
+              cloudPath: `admin-vr/${filename}`,
+              fileContent: bytes,
+            });
+            if (!result.fileID) fail("云存储上传失败", 502);
+            fileUrl = result.fileID;
+          } else {
+            await mkdir(join(directory, "vr-files"), { recursive: true });
+            await writeFile(join(directory, "vr-files", filename), bytes, {
+              mode: 0o600,
+            });
+            fileUrl = `/vr-files/${filename}`;
+          }
+          return send({ url: fileUrl, name, size: bytes.length });
+        }
+        if (path === "/api/vr-download" && method === "GET") {
+          authorize(account.role, "content");
+          const record = (await store.list("content")).find(
+            (r) => r._id === url.searchParams.get("id"),
+          );
+          const file = vrFile(record?.vrFile);
+          if (!file) fail("VR 文件不存在", 404);
+          let bytes;
+          if (mode === "live") {
+            if (!file.url.startsWith("cloud://")) fail("文件不属于云存储");
+            const result = await store.app.downloadFile({ fileID: file.url });
+            bytes = result.fileContent;
+          } else {
+            if (!file.url.startsWith("/vr-files/")) fail("文件不属于本地存储");
+            bytes = await readFile(
+              join(directory, "vr-files", file.url.split("/").pop()),
+            );
+          }
+          res.setHeader("Content-Type", "application/octet-stream");
+          res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="vr-project.${file.url.endsWith(".zip") ? "zip" : "html"}"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+          );
+          res.setHeader(
+            "Content-Security-Policy",
+            "sandbox; default-src 'none'",
+          );
+          return res.end(bytes);
         }
         if (path === "/api/uploads" && method === "POST") {
           authorize(account.role, "uploads", true);

@@ -1,10 +1,13 @@
 import { VR_LIMIT, vrUpload, vrFile } from "./lib/vr.mjs";
 import http from "node:http";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve, extname } from "node:path";
 import { PropertyService } from "./lib/property.mjs";
+import { OrgService } from "./lib/org.mjs";
+import { OrgPropertyService, OpReplay } from "./lib/property-v2.mjs";
+import { operationKeyId } from "./lib/claims.mjs";
 import { LocalStore, CloudStore } from "./lib/store.mjs";
 import { resolvePublicFile } from "./lib/static-path.mjs";
 import { Accounts, publicAccount } from "./lib/auth.mjs";
@@ -16,6 +19,7 @@ import {
   resources,
   HttpError,
   fail,
+  failCode,
 } from "./lib/model.mjs";
 const root = fileURLToPath(new URL(".", import.meta.url));
 const mime = {
@@ -50,6 +54,7 @@ export async function createApp({
   accounts,
   origin,
   secure = false,
+  org,
 } = {}) {
   if (!["demo", "live"].includes(mode))
     throw Error("ADMIN_MODE must be demo or live");
@@ -64,6 +69,23 @@ export async function createApp({
     !accounts.rows.some((a) => a.role === "admin" && a.enabled)
   )
     throw Error("Create an administrator with npm run create-admin first");
+  // DB-02 organization scope: the organization is bootstrapped with a fixed,
+  // explicitly configured ID — never created from request input. In live mode
+  // without org configuration the /api/v2 surface stays disabled (503).
+  const orgService = new OrgService(store);
+  const orgConfig =
+    org || (mode === "demo"
+      ? { id: "org-demo", name: "演示组织", admins: ["demo-admin"] }
+      : null);
+  if (orgConfig)
+    await orgService.bootstrap(
+      {
+        id: orgConfig.id,
+        name: orgConfig.name,
+        adminAccountIds: orgConfig.admins || [],
+      },
+      { actor: "system", actorId: "system", action: "初始化组织" },
+    );
   const sessions = new Map(),
     attempts = new Map();
   const sessionAge = 8 * 60 * 60 * 1000;
@@ -100,7 +122,7 @@ export async function createApp({
           return send({
             mode,
             environment: mode === "live" ? process.env.CLOUDBASE_ENV_ID : null,
-            version: "0.2.0-beta.6",
+            version: "0.3.0-beta.1",
           });
         const token = (req.headers.cookie || "")
           .split(";")
@@ -239,6 +261,145 @@ export async function createApp({
               );
           }
           fail("接口不存在", 404);
+        }
+        // DB-02 organization-scoped API (docs/database/API-CONTRACT.md §2).
+        // Envelope {data,requestId,nextCursor?} / {error:{code,message},requestId};
+        // the organization context always comes from server-side membership,
+        // never from request body fields.
+        if (path.startsWith("/api/v2/")) {
+          const requestId = randomUUID();
+          const ok = (data, status = 200, nextCursor) =>
+            send(nextCursor ? { data, requestId, nextCursor } : { data, requestId }, status);
+          const v2Code = (e) =>
+            e.code ||
+            { 400: "PARAM_ERROR", 401: "UNAUTHORIZED", 403: "FORBIDDEN", 404: "NOT_FOUND", 409: "CONFLICT" }[e.status] ||
+            "ADAPTER_UNAVAILABLE";
+          try {
+            if (!orgConfig)
+              failCode("ADAPTER_UNAVAILABLE", "组织服务未配置", 503);
+            const memberships = await orgService.organizationsFor(
+              "adminAccount",
+              account._id,
+            );
+            if (path === "/api/v2/me/organizations" && method === "GET")
+              return ok(memberships);
+            const wanted = req.headers["x-org-id"] || url.searchParams.get("orgId");
+            let orgId = typeof wanted === "string" && wanted ? wanted : null;
+            if (!orgId) {
+              if (memberships.length === 1) orgId = memberships[0].orgId;
+              else if (memberships.length === 0)
+                failCode("NOT_FOUND", "组织不存在或不可见", 404);
+              else failCode("PARAM_ERROR", "请通过 X-Org-Id 指定组织");
+            }
+            const write = method === "POST";
+            await orgService.requireMembership(
+              "adminAccount",
+              account._id,
+              orgId,
+              { write },
+            );
+            const service = new OrgPropertyService(store, orgId);
+            const auditV2 = (action) => ({
+              actor: account.username,
+              actorId: account._id,
+              action,
+              orgId,
+            });
+            const query = Object.fromEntries(url.searchParams);
+            if (path === "/api/v2/property/catalog" && method === "GET") {
+              const { data, nextCursor } = await service.listCatalog(query);
+              return ok(data, 200, nextCursor);
+            }
+            if (path === "/api/v2/rooms" && method === "GET") {
+              const { data, nextCursor } = await service.listRooms(query);
+              return ok(data, 200, nextCursor);
+            }
+            if (method === "POST") {
+              const data = await body(req);
+              const key = req.headers["idempotency-key"];
+              if (typeof key !== "string" || !key.trim() || key.length > 120)
+                failCode("PARAM_ERROR", "缺少有效的 Idempotency-Key");
+              const bodyDigest = createHash("sha256")
+                .update(JSON.stringify(data ?? null))
+                .digest("hex");
+              const op = {
+                id: operationKeyId(account._id, orgId, path, key.trim()),
+                actorId: account._id,
+                orgId,
+                route: path,
+                keyDigest: createHash("sha256").update(key.trim()).digest("hex"),
+                bodyDigest,
+              };
+              const existing = (await store.list("operation_keys")).find(
+                (r) => r._id === op.id,
+              );
+              if (existing) {
+                if (existing.bodyDigest !== bodyDigest)
+                  failCode(
+                    "IDEMPOTENCY_CONFLICT",
+                    "相同幂等键的请求内容不一致，请勿修改后重试",
+                    409,
+                  );
+                const stored = JSON.parse(existing.resultRef);
+                return ok(stored.body, stored.status);
+              }
+              if (path === "/api/v2/property/create")
+                return ok(
+                  await service.createProperty(data, auditV2("添加物业"), op),
+                  201,
+                );
+              if (path === "/api/v2/property/catalog")
+                return ok(
+                  await service.createCatalog(data, auditV2("新增物业目录"), op),
+                  201,
+                );
+              if (path === "/api/v2/property/layout")
+                return ok(
+                  await service.batchLayout(data, auditV2("批量设置户型"), op),
+                );
+              const archiveMatch = path.match(
+                /^\/api\/v2\/property\/(community|building|floor|layout|room|house)\/([^/]+)\/archive$/,
+              );
+              if (archiveMatch) {
+                const label = {
+                  community: "小区",
+                  building: "楼栋",
+                  floor: "楼层",
+                  layout: "户型",
+                  room: "房间",
+                  house: "房源",
+                }[archiveMatch[1]];
+                return ok(
+                  await service.archive(
+                    archiveMatch[1],
+                    decodeURIComponent(archiveMatch[2]),
+                    data,
+                    auditV2(`归档${label}`),
+                    op,
+                  ),
+                );
+              }
+              fail("接口不存在", 404);
+            }
+            fail("接口不存在", 404);
+          } catch (error) {
+            if (error instanceof OpReplay) {
+              const stored = JSON.parse(error.resultRef);
+              return ok(stored.body, stored.status);
+            }
+            return send(
+              {
+                error: {
+                  code: v2Code(error),
+                  message: error.status
+                    ? error.message
+                    : "服务暂不可用，请检查服务端配置与日志",
+                },
+                requestId,
+              },
+              error.status || 503,
+            );
+          }
         }
         if (path === "/api/dashboard" && method === "GET") {
           const [houses, content, users, rooms] = await Promise.all(
@@ -601,6 +762,17 @@ if (
     store,
     origin,
     secure: origin.startsWith("https://"),
+    // DB-02: fixed organization identity comes from configuration only.
+    org: process.env.ADMIN_ORG_ID
+      ? {
+          id: process.env.ADMIN_ORG_ID,
+          name: process.env.ADMIN_ORG_NAME || process.env.ADMIN_ORG_ID,
+          admins: (process.env.ADMIN_ORG_ADMINS || "")
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean),
+        }
+      : undefined,
   });
   app.server.listen(port, host, () =>
     console.log(

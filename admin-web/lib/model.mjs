@@ -1,12 +1,17 @@
 import { vrLink, vrFile } from "./vr.mjs";
 export class HttpError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code = null) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 export const fail = (message, status = 400) => {
   throw new HttpError(status, message);
+};
+// v2 API errors carry a stable machine-readable code (see docs/database/API-CONTRACT.md §1).
+export const failCode = (code, message, status = 400) => {
+  throw new HttpError(status, message, code);
 };
 export const resources = ["houses", "content", "users", "rooms"];
 export function authorize(role, resource, write = false) {

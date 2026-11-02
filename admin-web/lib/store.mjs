@@ -9,6 +9,11 @@ const collections = [
   "rooms",
   "admin_audit",
   "property_catalog",
+  "organizations",
+  "org_memberships",
+  "unique_claims",
+  "lifecycle_guards",
+  "operation_keys",
 ];
 export function seed() {
   return {

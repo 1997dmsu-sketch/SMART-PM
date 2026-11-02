@@ -14,6 +14,8 @@ const collections = [
   "unique_claims",
   "lifecycle_guards",
   "operation_keys",
+  "auth_identities",
+  "persons",
 ];
 export function seed() {
   return {

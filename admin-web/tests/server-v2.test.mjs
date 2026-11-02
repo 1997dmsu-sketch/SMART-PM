@@ -422,3 +422,29 @@ test("R2-02: vr-download never serves org-scoped records; legacy records still d
   assert.match(ok.headers.get("content-disposition"), /^attachment/);
   assert.equal(await ok.text(), bytes.toString());
 });
+
+test("DB-03: persons HTTP endpoints are org-admin only and org-scoped", async () => {
+  const created = await post("persons", { name: "张无账" });
+  assert.equal(created.status, 201);
+  assert.equal(created.data.data.orgId, "org-demo");
+  assert.equal(created.data.data.nameMasked, "张**");
+  assert.ok(!JSON.stringify(created.data).includes("张无账"));
+  const list = await request("persons?limit=20");
+  assert.equal(list.status, 200);
+  const row = list.data.data.find((p) => p.personId === created.data.data.personId);
+  assert.equal(row.userId, null);
+  assert.ok(!("phone" in row));
+  // Idempotent replay of the same creation returns the stored person.
+  const key = randomUUID();
+  const first = await post("persons", { name: "幂等人员" }, { headers: { "Idempotency-Key": key } });
+  const replay = await post("persons", { name: "幂等人员" }, { headers: { "Idempotency-Key": key } });
+  assert.equal(replay.data.data.personId, first.data.data.personId);
+  // viewer2 holds an org-demo viewer membership: read yes, write no.
+  const viewerRead = await request("persons?limit=5", { auth: viewer });
+  assert.equal(viewerRead.status, 200);
+  const viewerWrite = await post("persons", { name: "越权人员" }, { auth: viewer });
+  assert.equal(viewerWrite.status, 403);
+  // A forged org context is indistinguishable from a missing one.
+  const forged = await request("persons?limit=5", { headers: { "X-Org-Id": "org-other" } });
+  assert.equal(forged.status, 404);
+});

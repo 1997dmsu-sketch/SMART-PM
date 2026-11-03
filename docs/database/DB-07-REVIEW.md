@@ -48,3 +48,25 @@ list仅按orgId/查询条件过滤，返回原始file_assets记录，不按私�
 ## 给开发AI
 
 在原PR/分支修复F01–F03并补测试，更新实施文档说明与DB-04/06的权限对齐及待接入边界。保持共享文件改动可独立整合，提交新head供复核。暂不合并main、不执行生产清点写入或发布版本。
+
+## 第二轮复审：b2e40bf
+
+结论：F02 已通过；F01、F03 仅部分修复，暂不建议合并。
+
+### F01 仍未通过：证件读取使用了错误权限，组织角色来源也未修正
+
+显式权限逻辑已加入，但 `identity-document` 仍映射到 `identity.review`。DB-04 已将“审核申请”和“读取私有证件”拆成 `identity.review` 与 `identity.readPrivate`；当前持有审核权但没有私有读取权的账号仍能下载证件字节。独立复现：actor permissions 只有 `identity.review`，`authorizeDownload` 成功返回 20 字节虚构 PNG。
+
+此外 `buildFileService` 仍把全局 `account.role` 作为文件 actor.role，而不是当前组织 `membership.role`。文件路由调用 `requireMembership(... write:false)`，因此全局 admin、组织 viewer 仍可能以 admin 身份执行 public 文件写操作。修复时应分别定义上传/关联/读取权限：证件上传可使用审核工作流专用写权限，证件读取必须 `identity.readPrivate`；证据读取必须 `blacklist.read`；角色和权限一律来自当前有效组织成员关系并在事务内复核。
+
+### F02 已通过
+
+server 的 locator 匹配收集全部命中并采用 private 优先；同一路径 public 在前、private 在后时，匿名 `/uploads/*` 返回 404。registerLegacy 也实现密级只升不降。仍应保留并发重复登记测试和唯一占位/冲突策略，避免依赖事后扫描。
+
+### F03 仍未通过：脱敏条目仍泄露私密资源存在性，关联列表未同步鉴权
+
+未授权调用者现在看不到 objectKey、cloudFileId、legacyUrls 和 originalName，这是有效改进；但 `GET /api/v2/files` 仍返回私密条目的 ID、purpose、storage、size、MIME 和时间，暴露某人员/组织存在证件或黑名单证据。独立复现中普通 viewer 仍能定位 private 记录，只是 objectKey 为 undefined。`GET /api/v2/file-links` 继续直接返回原始关联行，没有按目标文件的私密权限过滤，可能泄露证件/证据与业务实体的关联。
+
+修复：无对应私密读取权限的调用者应在分页前过滤这些文件和关联；若业务确需显示“已上传”状态，应由对应业务接口返回不含 fileId、purpose、storage、size、MIME 的布尔状态，而不是暴露文件资源记录。补混合 public/private 跨页、file-links、权限撤销和组织角色不一致测试。
+
+复审实跑：后台 110 项、根目录 51 项、9 页静态检查全部通过；F02 独立复现通过，F01/F03 上述场景仍可复现。该分支仍基于 DB-02，整合 DB-04/06 时必须采用最终权限点，不能以本分支测试中的 `identity.review` 作为证件读取标准。

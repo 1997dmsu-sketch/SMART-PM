@@ -9,6 +9,16 @@ const collections = [
   "rooms",
   "admin_audit",
   "property_catalog",
+  "organizations",
+  "org_memberships",
+  "unique_claims",
+  "lifecycle_guards",
+  "operation_keys",
+  // DB-07: unified file resources (§2). Existing collections keep their
+  // original semantics; these three are append-only additions.
+  "file_assets",
+  "file_links",
+  "file_access_log",
 ];
 export function seed() {
   return {
@@ -96,6 +106,9 @@ export function seed() {
     ],
     property_catalog: [],
     admin_audit: [],
+    file_assets: [],
+    file_links: [],
+    file_access_log: [],
   };
 }
 export class LocalStore {
@@ -115,6 +128,11 @@ export class LocalStore {
       await this.persist(this.data);
     }
     this.data.property_catalog ||= [];
+    // DB-07: on-demand initialization for existing local data files that
+    // predate the file collections (same pattern as property_catalog above).
+    this.data.file_assets ||= [];
+    this.data.file_links ||= [];
+    this.data.file_access_log ||= [];
     return this;
   }
   async persist(data) {
@@ -122,8 +140,11 @@ export class LocalStore {
     await writeFile(file + ".tmp", JSON.stringify(data), { mode: 0o600 });
     await rename(file + ".tmp", file);
   }
-  async list(name) {
-    return structuredClone(this.data[name] || []);
+  async list(name, orgId = null) {
+    const rows = this.data[name] || [];
+    return structuredClone(
+      orgId ? rows.filter((r) => r.orgId === orgId) : rows,
+    );
   }
   async transact(refs, build, audit) {
     const task = this.queue.then(async () => {
@@ -204,17 +225,16 @@ export class CloudStore {
     this.app = app;
     this.db = app.database({ throwOnCode: true });
   }
-  async list(name) {
+  async list(name, orgId = null) {
     if (!collections.includes(name)) throw Error("Invalid collection");
     const result = [];
     let skip = 0;
     while (true) {
-      const r = await this.db
-        .collection(name)
-        .orderBy("_id", "asc")
-        .skip(skip)
-        .limit(100)
-        .get();
+      // DB-02: organization filtering is pushed down to the database query so
+      // unrelated organizations' volume cannot exhaust the 20,000-row budget.
+      let query = this.db.collection(name);
+      if (orgId) query = query.where({ orgId });
+      const r = await query.orderBy("_id", "asc").skip(skip).limit(100).get();
       if (r.code || !Array.isArray(r.data))
         throw new HttpError(503, "云数据库查询失败");
       result.push(...r.data);

@@ -12,8 +12,12 @@ const text = (v, label, max = 80) => {
 const get = (state, collection, id) => {
   const v = state[`${collection}/${id}`];
   if (!v) fail("关联记录不存在，请刷新后重试", 409);
+  // F01: records carrying orgId belong to the organization-scoped v2 surface;
+  // legacy paths must never read or mutate them.
+  if (v.orgId) fail("该记录属于组织管理范围，请使用新版接口操作", 409);
   return v;
 };
+const legacyOnly = (rows) => rows.filter((r) => !r.orgId);
 const cat = (state, id, kind) => {
   const v = get(state, "property_catalog", id);
   if (v.kind !== kind) fail("物业层级不匹配");
@@ -55,7 +59,8 @@ export class PropertyService {
       this.store.list("property_catalog"),
       this.store.list("rooms"),
     ]);
-    return { catalog, rooms };
+    // F01: legacy views never expose organization-scoped v2 records.
+    return { catalog: legacyOnly(catalog), rooms: legacyOnly(rooms) };
   }
   async createProperty(data, audit) {
     if (!data || !["new", "existing"].includes(data.mode))
@@ -143,7 +148,7 @@ export class PropertyService {
     return { ...value, _id: id };
   }
   async context(floorId, layoutId) {
-    const catalog = await this.store.list("property_catalog");
+    const catalog = legacyOnly(await this.store.list("property_catalog"));
     const floor = catalog.find((c) => c._id === floorId && c.kind === "floor");
     if (!floor) fail("请选择有效楼层");
     const building = catalog.find(
@@ -188,7 +193,7 @@ export class PropertyService {
     return { count, skipped: plan.length - count };
   }
   async autoRooms(data, audit) {
-    const catalog = await this.store.list("property_catalog");
+    const catalog = legacyOnly(await this.store.list("property_catalog"));
     const fullPlan = roomPlan(data, catalog);
     const offset = data.offset ?? 0;
     if (!Number.isInteger(offset) || offset < 0 || offset >= fullPlan.length)
@@ -309,7 +314,9 @@ export class PropertyService {
   async assignRoom(id, data, audit) {
     const number = text(data.roomNo, "房号", 20);
     if (!/^[a-zA-Z0-9_-]+$/.test(number)) fail("房号格式无效");
-    const before = (await this.store.list("rooms")).find((r) => r._id === id);
+    const before = legacyOnly(await this.store.list("rooms")).find(
+      (r) => r._id === id,
+    );
     if (!before) fail("房间不存在", 404);
     if (before.listingId)
       fail("已关联出租房源的房间不能移动，请通过批量户型功能修改户型");
@@ -364,7 +371,7 @@ export class PropertyService {
       new Set(data.ids).size !== data.ids.length
     )
       fail("请选择 1–30 间不同的房间");
-    const rooms = await this.store.list("rooms");
+    const rooms = legacyOnly(await this.store.list("rooms"));
     const selected = data.ids.map((id) => {
       const room = rooms.find((r) => r._id === id);
       if (!room) fail("所选房间不存在");
@@ -414,7 +421,7 @@ export class PropertyService {
   }
   async saveListing(id, data, roomId, audit) {
     const creating = !id;
-    const rooms = await this.store.list("rooms");
+    const rooms = legacyOnly(await this.store.list("rooms"));
     const initial = rooms.find((r) => r._id === roomId);
     if (!initial) fail("关联房间不存在");
     if (!initial.layoutId) fail("请先为房间设置户型");

@@ -43,15 +43,16 @@ const text = (v, label, max = 80) => {
   return v.trim();
 };
 export class PersonService {
-  constructor(store, orgId, auth = null) {
+  constructor(store, orgId, auth = null, { sponsorAccess = null } = {}) {
     this.store = store;
     this.orgId = orgId;
     this.auth = auth;
+    this.sponsorAccess = sponsorAccess;
   }
   authRefs() {
     return [
       ref("organizations", this.orgId),
-      ...(this.auth ? [ref("org_memberships", this.auth.membershipId)] : []),
+      ...(this.auth?.membershipId ? [ref("org_memberships", this.auth.membershipId)] : []),
     ];
   }
   orgCheck(state) {
@@ -66,16 +67,26 @@ export class PersonService {
     if (!m || m.orgId !== this.orgId || m.status !== "active" || m.role !== "admin")
       failCode("FORBIDDEN", "组织成员关系已失效或权限不足", 403);
   }
-  // Org-admin created profile. Only a masked display name is stored; full
-  // names / documents belong to the restricted identity flow (DB-04).
-  async createPerson({ name }, audit, op = null) {
+  // Only a masked display name is stored. Admins may create profiles directly;
+  // a resident must prove an effective primary relation through DB-05 in the
+  // same transaction. This grants no arbitrary person-query permission.
+  async createPerson({ name, occupancyId = null }, audit, op = null) {
     const trimmed = text(name, "姓名");
+    let proxy = null;
+    if ((audit.actorType || "adminAccount") === "user" && occupancyId) {
+      if (!this.sponsorAccess) failCode("FORBIDDEN", "主租客人员档案适配器未配置", 403);
+      proxy = await this.sponsorAccess.sponsorContext({ primaryOccupancyId: occupancyId }, audit);
+    }
     const id = randomUUID();
     const result = { status: 201, body: { personId: id, orgId: this.orgId, nameMasked: maskName(trimmed) } };
     await this.store.transact(
-      [ref("persons", id), ...this.authRefs(), ...(op ? [ref("operation_keys", op.id)] : [])],
+      [ref("persons", id), ...this.authRefs(), ...(proxy?.refs || []),
+        ...(op ? [ref("operation_keys", op.id)] : [])],
       (state) => {
-        this.authCheck(state);
+        if (proxy) {
+          this.orgCheck(state);
+          proxy.check(state);
+        } else this.authCheck(state);
         return [
           {
             collection: "persons",

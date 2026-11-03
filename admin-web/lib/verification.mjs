@@ -44,7 +44,7 @@ function decrypt(key, payload) {
   return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
 }
 export class VerificationService {
-  constructor(store, orgId, auth = null, { identity, encryptionKey = null, encryptionKeyVersion = 1, fileValidator = null } = {}) {
+  constructor(store, orgId, auth = null, { identity, encryptionKey = null, encryptionKeyVersion = 1, fileValidator = null, sponsorAccess = null } = {}) {
     this.store = store;
     this.orgId = orgId;
     this.auth = auth;
@@ -52,12 +52,24 @@ export class VerificationService {
     this.encryptionKey = encryptionKey;
     this.encryptionKeyVersion = encryptionKeyVersion;
     this.fileValidator = fileValidator;
+    this.sponsorAccess = sponsorAccess;
   }
   authRefs() {
     return [
       ref("organizations", this.orgId),
-      ...(this.auth ? [ref("org_memberships", this.auth.membershipId)] : []),
+      ...(this.auth?.membershipId ? [ref("org_memberships", this.auth.membershipId)] : []),
     ];
+  }
+  async proxyContext(personId, occupancyId, audit) {
+    if ((audit.actorType || "adminAccount") !== "user" || !occupancyId) return null;
+    if (!this.sponsorAccess) failCode("FORBIDDEN", "主租客实名代理适配器未配置", 403);
+    return this.sponsorAccess.sponsorContext({ memberOccupancyId: occupancyId, personId }, audit);
+  }
+  actorCheck(state, audit, proxy) {
+    if (!proxy) return this.adminCheck(state);
+    const org = state[`organizations/${this.orgId}`];
+    if (!org || org.status !== "active") failCode("FORBIDDEN", "组织当前不可用", 403);
+    proxy.check(state);
   }
   adminCheck(state, permission = null) {
     const org = state[`organizations/${this.orgId}`];
@@ -110,7 +122,7 @@ export class VerificationService {
     if (!app) failCode("NOT_FOUND", "实名申请不存在或不可见", 404);
     return app;
   }
-  async createApplication({ personId, documentType }, audit, op = null) {
+  async createApplication({ personId, documentType, occupancyId = null }, audit, op = null) {
     if (!DOCUMENT_TYPES.includes(documentType))
       failCode("PARAM_ERROR", "证件类型无效");
     const person = (await this.store.list("persons", this.orgId)).find(
@@ -119,12 +131,14 @@ export class VerificationService {
     if (!person || person.status !== "active")
       failCode("NOT_FOUND", "人员档案不存在或不可见", 404);
     this.subjectCheck(person, audit);
+    const proxy = await this.proxyContext(personId, occupancyId, audit);
     const id = randomUUID();
-    const result = { status: 201, body: { applicationId: id, documentVersion: 1, state: "draft" } };
+    const result = { status: 201, body: { applicationId: id, documentVersion: 1, state: "draft", revision: 1 } };
     await this.store.transact(
-      [ref("identity_applications", id), ref("persons", personId), ...this.authRefs(), ...(op ? [ref("operation_keys", op.id)] : [])],
+      [ref("identity_applications", id), ref("persons", personId), ...this.authRefs(),
+        ...(proxy?.refs || []), ...(op ? [ref("operation_keys", op.id)] : [])],
       (state) => {
-        this.adminCheck(state);
+        this.actorCheck(state, audit, proxy);
         return [
           {
             collection: "identity_applications",
@@ -132,6 +146,7 @@ export class VerificationService {
             data: {
               orgId: this.orgId,
               personId,
+              ...(proxy ? { occupancyId } : {}),
               submittedBy: audit.actorId || audit.actor || "unknown",
               submittedByType: audit.actorType || "adminAccount",
               method: "manual",
@@ -171,6 +186,7 @@ export class VerificationService {
     if (!this.encryptionKey || !this.identity)
       failCode("ADAPTER_UNAVAILABLE", "资料加密密钥未配置", 503);
     const app = await this.application(id);
+    const proxy = await this.proxyContext(app.personId, app.occupancyId, audit);
     const normalizedNumber = number.toUpperCase();
     const identityDigest = this.identity.digest(
       "identity-document",
@@ -191,10 +207,11 @@ export class VerificationService {
         ref("identity_domains", `identity-domain-${digestRealm}`),
         ref("persons", app.personId),
         ...this.authRefs(),
+        ...(proxy?.refs || []),
         ...(op ? [ref("operation_keys", op.id)] : []),
       ],
       (state) => {
-        this.adminCheck(state);
+        this.actorCheck(state, audit, proxy);
         const domainWrites = this.identity.guardDomain(state, digestRealm, {
           allowInit: !hasDigested,
         });
@@ -237,12 +254,25 @@ export class VerificationService {
               revision: (current.revision ?? 0) + 1,
             },
           },
-          ...opWrite(state, op, { status: 200, body: { applicationId: id, state: "submitted", documentVersion } }),
+          ...opWrite(state, op, {
+            status: 200,
+            body: {
+              applicationId: id,
+              state: "submitted",
+              documentVersion,
+              revision: (current.revision ?? 0) + 1,
+            },
+          }),
         ];
       },
       audit,
     );
-    return { applicationId: id, state: "submitted", documentVersion: supplement ? app.documentVersion + 1 : app.documentVersion };
+    return {
+      applicationId: id,
+      state: "submitted",
+      documentVersion: nextVersion,
+      revision: app.revision + 1,
+    };
   }
   async review(id, { decision, reason, reasonCode = null, expectedRevision, documentVersion }, audit, op = null) {
     if (!DECISIONS[decision]) failCode("PARAM_ERROR", "审核决定无效");
@@ -340,9 +370,16 @@ export class VerificationService {
     return { applicationId: id, state };
   }
   // Masked view for ordinary reads: never includes digests or private data.
-  async getApplication(id) {
-    await this.readCheck();
+  // A primary may follow only a proxy application tied to a member of their
+  // current effective cycle. Reviews, queues and private evidence stay admin-only.
+  async getApplication(id, audit = null) {
+    const userActor = (audit?.actorType || "adminAccount") === "user";
+    if (!userActor) await this.readCheck(); // preserve admin denial semantics
     const app = await this.application(id);
+    if (userActor) {
+      if (!app.occupancyId) failCode("FORBIDDEN", "该申请不是本周期成员代理申请", 403);
+      await this.proxyContext(app.personId, app.occupancyId, audit);
+    }
     return {
       applicationId: app._id,
       orgId: app.orgId,

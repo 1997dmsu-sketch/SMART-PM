@@ -23,6 +23,10 @@ const collections = [
   "blacklist_entries",
   "blacklist_decisions",
   "eligibility_guards",
+  "occupancy_cycles",
+  "occupancies",
+  "room_primary_slots",
+  "occupancy_materializations",
 ];
 export function seed() {
   return {

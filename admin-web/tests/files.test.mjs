@@ -123,7 +123,8 @@ test("§10 #2 purpose=nas 上传 503 且文件表零新增", async (t) => {
 test("§10 #8 identity-document 强制 private + private/ 前缀，客户端无法改写", async (t) => {
   const { dir, store, cleanup } = await mkStore();
   t.after(cleanup);
-  const svc = makeService(store, dir);
+  // F01（复审）：identity-document 声明了 identity.review 权限点，上传必须持有。
+  const svc = makeService(store, dir, { perms: ["identity.review"] });
   const res = await svc.upload({ bytes: PNG, purpose: "identity-document", originalName: "id.png" });
   assert.equal(res.visibility, "private");
   assert.equal(res.status, "ready");
@@ -137,7 +138,8 @@ test("§10 #8 identity-document 强制 private + private/ 前缀，客户端无�
 test("§10 #8b 私密文件 attach 到展示 usage → PURPOSE_FORBIDDEN", async (t) => {
   const { dir, store, cleanup } = await mkStore();
   t.after(cleanup);
-  const svc = makeService(store, dir);
+  // F01（复审）：上传证件须持有 identity.review 权限点。
+  const svc = makeService(store, dir, { perms: ["identity.review"] });
   const priv = await svc.upload({ bytes: PNG, purpose: "identity-document" });
   for (const usage of ["cover", "gallery", "vr"]) {
     await assert.rejects(
@@ -309,7 +311,8 @@ test("§10 #5 跨组织隔离：B 组织实例读不到 A 组织的文件", asyn
 test("§10 #6 下载鉴权：public 任意成员可读，private 仅 admin/权限点", async (t) => {
   const { dir, store, cleanup } = await mkStore();
   t.after(cleanup);
-  const admin = makeService(store, dir, { role: "admin" });
+  // F01（复审）：上传证件须持有 identity.review 权限点。
+  const admin = makeService(store, dir, { role: "admin", perms: ["identity.review"] });
   const pub = await admin.upload({ bytes: PNG, purpose: "content-image" });
   const priv = await admin.upload({ bytes: PNG, purpose: "identity-document" });
   const viewer = { actorType: "adminAccount", actorId: "v", role: "viewer", permissions: [] };
@@ -325,9 +328,16 @@ test("§10 #6 下载鉴权：public 任意成员可读，private 仅 admin/权�
   const privileged = { actorType: "adminAccount", actorId: "v2", role: "viewer", permissions: ["identity.review"] };
   const okPriv = await admin.authorizeDownload(priv.fileId, privileged);
   assert.equal(okPriv.file._id, priv.fileId);
-  // admin 读 private → 200
+  // 持有对应权限点的 admin 可放行
   const okAdmin = await admin.authorizeDownload(priv.fileId, admin.actor);
   assert.equal(okAdmin.file._id, priv.fileId);
+  // F01（复审）：无 identity.review 的 admin 不得下载证件（与 DB-04/06 一致，
+  // 旧实现凭 role==="admin" 无条件放行）。未授权与不存在同态 → FILE_NOT_FOUND。
+  const bareAdmin = { actorType: "adminAccount", actorId: "a2", role: "admin", permissions: [] };
+  await assert.rejects(
+    admin.authorizeDownload(priv.fileId, bareAdmin),
+    hasCode("FILE_NOT_FOUND"),
+  );
 });
 
 test("§10 #7 editor 可上传 public；editor 上传 private → FORBIDDEN", async (t) => {

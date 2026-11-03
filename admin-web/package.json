@@ -7,6 +7,7 @@
     "start": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
     "create-admin": "node create-admin.mjs",
+    "probe:db08": "node probes/db08/run.mjs",
     "test:sdk": "node scripts/check-sdk.mjs",
     "test:browser": "node scripts/check-browser.cjs"
   },

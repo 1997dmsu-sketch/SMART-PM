@@ -50,3 +50,43 @@
 2. F02：补反向 winner、事务重试和双请求稳定解析测试。
 3. F03：场景级证据范围、独立证据回查和不可自报的云执行证明。
 4. 返工阶段只运行本地/dry-run；代码复审通过后，才另行准备专用隔离环境与真实安全适配器。生产环境 `cloud1-d6gs08jbb8aa7a138` 不得用于 DB-08 探针。
+
+## 第二轮复审：94b1f29
+
+结论：F01、F03 的框架问题已关闭；F02 只在单元测试中覆盖双向顺序，正式执行入口仍只跑默认顺序；另发现索引探针查询与候选索引定义不一致。当前仍需返工，暂不执行真实隔离云探针。
+
+### F01 已通过：事务探针已绑定正式服务
+
+新增 `ServiceStore` 仅负责逻辑／物理 ID 映射和隔离前缀，身份、实名、名单、入住、组织与房间批量探针分别调用 `IdentityService`、`VerificationService`、`BlacklistService`、`OccupancyService`、`OrgService`、`OrgPropertyService`。故障注入测试替换 `IdentityService.login` 后探针会传播失败，证明不再由影子算法独立给出通过。证件场景也已改为正式 `VerificationService.review` 与 `verified-person` `unique_claims` 竞争。
+
+### F02 [P1] 仍未关闭：完整执行器没有运行反向 winner／反向审核顺序
+
+位置：`admin-web/probes/db08/transaction-probes.mjs:18-65,210-255,408-411`，`run.mjs:67-83`。
+
+身份函数支持 `{winner:0|1}`，入住审核函数支持 `{reverse:true|false}`，专项测试直接调用函数验证两种顺序；但场景清单每类只有一个 ID，`runTransactionProbe(id, backend)` 调用探针时不传参数，所以真实 `run.mjs --execute-isolated` 中手机号、微信、证件都只执行默认 `winner=0`，入住审核只执行默认 `reverse=false`。报告仍会把单次默认顺序记为该场景通过，与文档“winner=0/1”“两种提交顺序均通过”的验收口径不符。
+
+修复：让正式场景内部顺序执行两个独立、不同前缀/夹具标签的子场景，或把正反顺序拆成独立场景 ID；总结果必须记录两个子结果，任一未执行或失败都不能通过。补从 `run()` 入口断言报告实际包含 winner 0、winner 1 和 review/mutation 两种顺序的测试，不能只直接测试导出函数。
+
+### F03 框架通过，真实适配器仍是后续执行门槛
+
+云后端改用模块私有 WeakSet 能力识别，同名本地类不能冒充；安全执行结果需要独立验证器、管理通道审计回查和对象匿名反向请求，缺少验证器时为 `not-run/incomplete`。零云调用本地模拟不能得到 `cloudEvidenceAccepted=true`。本轮认为首审的“自报即可云通过”已修复。
+
+`CloudSecurityEvidenceVerifier` 的真实 `verify/reverseRequest` 仍明确未实现，当前只有本地模拟。这不是本轮新增实现错误，但意味着现状无法完成真实安全验收；实现后必须单独审查适配器与验证器的独立身份、原始响应来源和审计回查。
+
+### F04 [P1] 索引探针验证了带 probeRunId 的查询，不是文档列出的生产索引
+
+位置：`admin-web/probes/db08/transaction-probes.mjs:299-320`，`manifest.mjs` 的 `INDEXES`，`DB-08-INDEXES.md`。
+
+17 条候选索引定义为 `orgId + 业务等值字段 + orderBy`；实际探针给每条查询额外加入 `probeRunId`：`where: { probeRunId: backend.runId, ...where }`。云数据库的复合索引需求取决于完整查询字段，因此该探针验证的是包含 `probeRunId` 的探针专用查询，而候选清单没有该字段。即使查询通过，也不能证明正式服务使用的候选索引可用；反之也可能因为缺少探针专用索引而误报失败。
+
+修复：测试组织 ID 本身已按 runId 隔离，可在 index smoke 中去掉 `probeRunId` 条件，使执行查询与候选定义逐字段一致；报告记录实际 where/orderBy 并与 manifest 做结构断言。为每个候选建立能命中的合成记录，至少验证返回、组织隔离和排序，而不是让大多数查询以空结果通过。
+
+### 第二轮实跑
+
+- 管理端：184/184 通过。
+- 根目录：51/51 通过。
+- 9 页小程序静态检查通过，包体约 869 KiB。
+- dry-run 仍为 11 个场景、17 条索引、19 项安全检查，零云调用、零云写入、未读凭据。
+- `git diff --check` 通过。
+
+以上均为本地验证。真实云事务、索引、安全规则、云端审计、对象反查和清理仍未执行。

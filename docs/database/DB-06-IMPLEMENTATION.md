@@ -1,6 +1,6 @@
 # DB-06 实施交接：组织内黑名单
 
-状态：已实现，待交叉审查。基线 `feat/db-04-identity-review` 提交 `bb76099`（含 DB-04 首轮审查 F01–F04 返工），开发分支 `feat/db-06-blacklist`。未修改 DB-02/03/04 分支或 main，未合并 main。
+状态：首轮审查 `f3532cd` 的 F01 已返工，待复审。基线 `feat/db-04-identity-review` 提交 `bb76099`（含 DB-04 首轮审查 F01–F04 返工），开发分支 `feat/db-06-blacklist`。未修改 DB-02/03/04 分支或 main，未合并 main。
 范围仅限 admin-web 服务端与本地测试；未实现 DB-05 入住关系、未修改门锁逻辑、未调用付费接口、未连接或操作真实云数据库。测试使用临时 LocalStore、伪造证件值、模拟证据校验器和唯一占位写入，不创建真实入住或设备记录。
 依据文档：[接口契约](API-CONTRACT.md) §6、[数据模型](DATA-MODEL.md) §2/§3.2/§5、[迁移方案](MIGRATION-PLAN.md) §5 R09。
 
@@ -19,7 +19,7 @@
   - 决定绑定 org+occupancyId、当时完整命中 ID/版本；expiresAt 取命中记录最早 endsAt。名单新增、版本变化或命中集合变化后，旧 allow 不可复用。
   - `blacklist_decisions` 中固定 current head 用于读取最新决定，随机 ID decision 记录追加保存每次审核历史；复核同时推进相关主体 guard，防止新 deny 与使用旧 allow 的激活并发穿透。
 - `withEligibility` 是 DB-05 唯一接入边界，不提供公共姓名/手机号名单查询：
-  - 预读 person、可选绑定 user、可选 approved 实名身份，派生全部主体及 guard；候选排除已解除/已到期终态记录，但保留未来生效记录以覆盖事务内时间边界。
+  - 预读 person、可选绑定 user、可选 approved 实名身份，派生全部主体及 guard；随后先顺序读取 guard，再读取名单候选，杜绝旧候选搭配新 epoch。候选排除已解除/已到期终态记录，但保留未来生效记录以覆盖事务内时间边界。
   - 事务内重算 guard epoch、当前命中、复核 ID/版本及 expiresAt；不一致时重跑整个预读+事务，最多 3 次，仍冲突则失败关闭。
   - 无命中允许；精确 allow 允许；精确 deny 返回 403 `BLACKLIST_DENIED`；其他命中返回 409 `BLACKLIST_REVIEW_REQUIRED`，错误不携带名单理由或证据。
   - 激活业务写入与所有相关主体 guard 写入同事务提交；失败不写业务记录。
@@ -55,13 +55,19 @@ DB-05 必须同时保证：occupancyId 属于同一组织、对应正确 personI
 
 ## 4. 已执行检查
 
-- `admin-web npm test`：**135 项全部通过**（DB-04 基线 120 项 + DB-06 新增 15 项：服务 13、HTTP 2）。
+- `admin-web npm test`：**140 项全部通过**（DB-04 基线 120 项 + DB-06 新增 20 项：服务 18、HTTP 2）。
 - 新增覆盖：三类主体、权限点、证据适配器关闭、列表审计、22 条服务/HTTP 多页、跨组织隔离、revision、解除、实时起止边界、无业务写入的命中拒绝、一次性 allow/deny、新名单使旧放行失效、追加审核历史。
-- 确定性并发覆盖：资格预读后新增名单、旧 allow 预读后改判 deny、账号认领引入历史用户名单；均重跑或拒绝，模拟激活占位零写入。
+- 确定性并发覆盖：资格预读后新增名单、名单快照返回前提交新名单、旧 allow 预读后改判 deny、账号认领引入历史用户名单；均重跑或拒绝，模拟激活占位零写入。F01 窗口覆盖首次无 guard、已有 guard、已有 allow 后新增命中，以及 person／user／identity 三类主体的相同协议。
 - 根目录 `npm test`：**51 项通过**；`npm run check` 通过（9 页，869 KiB；静态检查，非微信开发者工具编译或视觉测试）。
 - 未运行：`test:sdk`、`test:browser`、真实隔离云事务探针。
 
-## 5. 未解决问题与上线门槛
+## 5. 首轮审查返工
+
+- F01 根因：`prepareEligibility` 原先先读名单候选、再读 guard，可能组合旧候选与新 epoch，漏掉名单快照返回前已提交的新名单。
+- 修复：主体派生后先顺序读取 guard，再读取名单；保留事务内 epoch 复核与最多三次完整预读重试，不放宽命中、拒绝或失败关闭语义。
+- 回归：五项 F01 确定性测试均在旧名单快照返回前通过正式 `createEntry` 提交新名单，并断言返回 `BLACKLIST_REVIEW_REQUIRED`、测试专用激活占位不存在；未创建真实 occupancy 或设备记录。
+
+## 6. 未解决问题与上线门槛
 
 - DB-05 尚未实现；必须接入 `withEligibility` 并验证 occupancy 状态、组织、人员与唯一生命周期，当前复核路由本身不会创建或激活入住关系。
 - `occupancy.create` 仅保留资格检查范围；其独立创建/复核流程待 DB-05 设计接入，当前 HTTP 复核只接受 activate 命中。

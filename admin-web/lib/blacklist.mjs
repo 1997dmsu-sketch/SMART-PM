@@ -423,6 +423,16 @@ export class BlacklistService {
       refs.push(ref("identity_applications", identityApplicationId));
     }
     subjects.sort((a, b) => subjectKeyOf(a).localeCompare(subjectKeyOf(b)));
+    const guardIds = subjects.map((s) => eligibilityGuardId(this.orgId, s.subjectType, s.subjectKey));
+    // F01: read guard epochs BEFORE the entry snapshot, sequentially. If an
+    // entry commits while the entry list is being read, its guard write makes
+    // the earlier epoch stale and evaluateEligibility forces a full rescan.
+    // The reverse order could combine old candidates with a newer epoch.
+    const guards = await this.store.list("eligibility_guards", this.orgId);
+    const guardEpochs = Object.fromEntries(guardIds.map((id) => {
+      const guard = guards.find((g) => g._id === id);
+      return [id, guard?.epoch ?? 0];
+    }));
     const now = this.now();
     const candidates = (await this.store.list("blacklist_entries", this.orgId))
       // Revoked and already expired records can never hit again; scheduled
@@ -433,12 +443,6 @@ export class BlacklistService {
         entry.restrictions.includes(restriction) &&
         subjects.some((subject) => sameSubject(entry, subject)))
       .sort((a, b) => a._id.localeCompare(b._id));
-    const guardIds = subjects.map((s) => eligibilityGuardId(this.orgId, s.subjectType, s.subjectKey));
-    const guards = await this.store.list("eligibility_guards", this.orgId);
-    const guardEpochs = Object.fromEntries(guardIds.map((id) => {
-      const guard = guards.find((g) => g._id === id);
-      return [id, guard?.epoch ?? 0];
-    }));
     const headId = blacklistDecisionHeadId(this.orgId, occupancyId);
     return {
       personId,

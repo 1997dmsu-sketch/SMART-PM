@@ -120,6 +120,27 @@ async function probeActivate(service, { personId, occupancyId, identityApplicati
     result: { ...eligibility, claimId },
   }), adminAudit);
 }
+// F01 deterministic interleaving: the entry query has obtained its snapshot,
+// then a real createEntry commits before that stale snapshot is returned.
+// Guard reads must already have happened, forcing withEligibility to rescan.
+async function injectEntryDuringFirstEntryList(store, inject, action) {
+  const original = store.list;
+  let intercepted = false;
+  store.list = async function (name, orgId = null) {
+    if (!intercepted && name === "blacklist_entries") {
+      intercepted = true;
+      const snapshot = await original.call(this, name, orgId);
+      await inject();
+      return snapshot;
+    }
+    return original.call(this, name, orgId);
+  };
+  try {
+    return await action();
+  } finally {
+    store.list = original;
+  }
+}
 
 test("blacklist permissions are explicit; evidence validation and sensitive list audit work", async (t) => {
   const { store, persons, manager, reader, unprivileged, validations } = await setup(t);
@@ -477,4 +498,74 @@ test("account claim writes shared guards so a concurrent legacy user entry canno
   const guards = await store.list("eligibility_guards", "org-a");
   assert.equal(guards.find((g) => g._id === eligibilityGuardId("org-a", "person", person.personId)).epoch, 1);
   assert.equal(guards.find((g) => g._id === userGuardId).epoch, 2);
+});
+
+test("F01: entry commit during the entry-list window is caught when no guard existed", async (t) => {
+  const { store, persons, manager, internal } = await setup(t);
+  const person = await persons.createPerson({ name: "首次名单住户" }, adminAudit);
+  const claimId = "activation-probe-f01-first-guard";
+  const activation = injectEntryDuringFirstEntryList(store,
+    () => manager.createEntry(entryInput(person.personId), managerAudit),
+    () => probeActivate(internal, { personId: person.personId, occupancyId: "occ-f01-first", claimId }));
+  await assert.rejects(activation, (e) => e.code === "BLACKLIST_REVIEW_REQUIRED");
+  assert.equal((await store.list("unique_claims")).some((c) => c._id === claimId), false);
+  assert.equal((await store.list("blacklist_entries")).length, 1);
+});
+
+test("F01: the entry-list window is also safe with an existing guard and terminal history", async (t) => {
+  const { store, persons, manager, internal } = await setup(t);
+  const person = await persons.createPerson({ name: "已有guard住户" }, adminAudit);
+  const old = await manager.createEntry(entryInput(person.personId, { reason: "已解除历史" }), managerAudit);
+  await manager.revokeEntry(old.entryId, { expectedRevision: 1, reason: "解除历史" }, managerAudit);
+  const claimId = "activation-probe-f01-existing-guard";
+  const activation = injectEntryDuringFirstEntryList(store,
+    () => manager.createEntry(entryInput(person.personId, { reason: "窗口内新增" }), managerAudit),
+    () => probeActivate(internal, { personId: person.personId, occupancyId: "occ-f01-existing", claimId }));
+  await assert.rejects(activation, (e) => e.code === "BLACKLIST_REVIEW_REQUIRED");
+  assert.equal((await store.list("unique_claims")).some((c) => c._id === claimId), false);
+  assert.equal((await store.list("blacklist_entries")).length, 2);
+});
+
+test("F01: a second entry committed in the entry-list window invalidates an existing allow", async (t) => {
+  const { store, persons, manager, reviewer, internal } = await setup(t);
+  const person = await persons.createPerson({ name: "已有放行住户" }, adminAudit);
+  const first = await manager.createEntry(entryInput(person.personId), managerAudit);
+  await reviewer.reviewOccupancy("occ-f01-allow", {
+    decision: "allow", reason: "首条名单放行", entryIds: [first.entryId], entryRevisions: [1],
+  }, reviewerAudit);
+  const claimId = "activation-probe-f01-existing-allow";
+  const activation = injectEntryDuringFirstEntryList(store,
+    () => manager.createEntry(entryInput(person.personId, { reason: "放行后新增" }), managerAudit),
+    () => probeActivate(internal, { personId: person.personId, occupancyId: "occ-f01-allow", claimId }));
+  await assert.rejects(activation, (e) => e.code === "BLACKLIST_REVIEW_REQUIRED");
+  assert.equal((await store.list("unique_claims")).some((c) => c._id === claimId), false);
+  assert.equal((await store.list("blacklist_entries")).length, 2);
+});
+
+test("F01: user-subject activation uses the same guard-before-entry protocol", async (t) => {
+  const { store, persons, manager, internal, bindUser } = await setup(t);
+  const person = await persons.createPerson({ name: "账号窗口住户" }, adminAudit);
+  await bindUser(person.personId, "user-f01-window");
+  const claimId = "activation-probe-f01-user";
+  const activation = injectEntryDuringFirstEntryList(store,
+    () => manager.createEntry({ subjectType: "user", userId: "user-f01-window",
+      reason: "账号窗口新增", evidenceFileIds: [], restrictions: ["occupancy.activate"] }, managerAudit),
+    () => probeActivate(internal, { personId: person.personId, occupancyId: "occ-f01-user", claimId }));
+  await assert.rejects(activation, (e) => e.code === "BLACKLIST_REVIEW_REQUIRED");
+  assert.equal((await store.list("unique_claims")).some((c) => c._id === claimId), false);
+});
+
+test("F01: identity-subject activation uses the same guard-before-entry protocol", async (t) => {
+  const { store, persons, manager, internal, approveFor } = await setup(t);
+  const person = await persons.createPerson({ name: "身份窗口住户" }, adminAudit);
+  const applicationId = await approveFor(person.personId);
+  const claimId = "activation-probe-f01-identity";
+  const activation = injectEntryDuringFirstEntryList(store,
+    () => manager.createEntry({ subjectType: "identity", applicationId,
+      reason: "身份窗口新增", evidenceFileIds: [], restrictions: ["occupancy.activate"] }, managerAudit),
+    () => probeActivate(internal, {
+      personId: person.personId, occupancyId: "occ-f01-identity", identityApplicationId: applicationId, claimId,
+    }));
+  await assert.rejects(activation, (e) => e.code === "BLACKLIST_REVIEW_REQUIRED");
+  assert.equal((await store.list("unique_claims")).some((c) => c._id === claimId), false);
 });

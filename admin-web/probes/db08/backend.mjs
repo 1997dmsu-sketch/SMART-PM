@@ -16,6 +16,7 @@ const ORG_SET = new Set(ORG_COLLECTIONS);
 const GLOBAL_SET = new Set(GLOBAL_COLLECTIONS);
 const keyOf = ({ collection, id }) => `${collection}/${id}`;
 const clone = (value) => value === undefined ? undefined : structuredClone(value);
+const CLOUD_BACKENDS = new WeakSet();
 
 export class ProbeError extends Error {
   constructor(code, message) {
@@ -101,9 +102,12 @@ export class ProbeBackend {
       collection: "admin_audit", id,
       data: {
         orgId: this.validateOrg(audit?.orgId || this.config.orgA),
-        actorType: "db08-probe",
-        actorId: this.id("actor"),
+        actorType: audit?.actorType || "db08-probe",
+        actorId: audit?.actorId || this.id("actor"),
         action: String(audit?.action || "DB-08 isolated probe").slice(0, 120),
+        ...(audit?.entityType ? { entityType: audit.entityType } : {}),
+        ...(audit?.entityId ? { entityId: audit.entityId } : {}),
+        ...(audit?.requestId ? { requestId: audit.requestId } : {}),
         schemaVersion: 1,
         revision: 1,
       },
@@ -213,20 +217,23 @@ export class LocalProbeBackend extends ProbeBackend {
         invariant(Array.isArray(writes), "WRITE_VIOLATION", "事务回调必须返回写入数组或 {writes,result}");
         const allWrites = auditWrite ? [...writes, auditWrite] : writes;
         const allowed = new Set([...refs.map(keyOf), ...(auditWrite ? [keyOf(auditWrite)] : [])]);
+        // Stage every write so a late validation failure cannot leak a partial commit.
+        const next = new Map(this.rows);
         for (const write of allWrites) {
           invariant(allowed.has(keyOf(write)), "UNDECLARED_WRITE", "不能写入未声明的事务引用");
           if (write.remove) {
-            this.rows.delete(keyOf(write));
+            next.delete(keyOf(write));
             continue;
           }
           const merged = this.validateWrite(write, state);
           const previous = state[keyOf(write)];
-          this.rows.set(keyOf(write), {
+          next.set(keyOf(write), {
             ...merged, _id: write.id, probeRunId: this.runId,
             createdAt: previous?.createdAt ?? merged.createdAt ?? this.now(),
             updatedAt: this.now(),
           });
         }
+        this.rows = next;
         this.metrics.transactionsCommitted += 1;
         return Array.isArray(built) ? undefined : built?.result;
       } catch (error) {
@@ -266,6 +273,7 @@ export class CloudProbeBackend extends ProbeBackend {
     super(config, options);
     this.app = app;
     this.db = app.database({ throwOnCode: true });
+    CLOUD_BACKENDS.add(this);
   }
 
   async get(collection, id) {
@@ -342,6 +350,12 @@ export class CloudProbeBackend extends ProbeBackend {
     invariant(!result.code && Array.isArray(result.data), "CLOUD_QUERY_FAILED", "云查询失败");
     return result.data;
   }
+}
+
+// Capability is held in module-private WeakSet storage; a same-named local
+// class or a constructor.name spoof cannot obtain isolated-cloud evidence scope.
+export function isCloudProbeBackend(value) {
+  return value instanceof CloudProbeBackend && CLOUD_BACKENDS.has(value);
 }
 
 export async function createCloudBackend(config, env = process.env) {

@@ -106,6 +106,7 @@ export function resolveConfig(args = [], env = {}) {
     only,
     envId: null,
     securityAdapter: null,
+    securityVerifier: null,
   };
   if (!execute) return config;
   const envId = env.DB08_PROBE_ENV;
@@ -119,6 +120,7 @@ export function resolveConfig(args = [], env = {}) {
     ...config,
     envId,
     securityAdapter: env.DB08_SECURITY_ADAPTER || null,
+    securityVerifier: env.DB08_SECURITY_VERIFIER || null,
   };
 }
 

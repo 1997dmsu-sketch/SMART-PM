@@ -296,8 +296,15 @@ export class FileService {
   assertActorRole(privateRequired, permission = null) {
     const role = this.actor.role;
     if (privateRequired) {
+      // F01（复审）：purpose 声明了显式权限点时，任何角色（含 admin）都必须持有
+      // 该权限点，与 DB-04/06 的证件/黑名单权限模型一致；admin 仅在 purpose 未
+      // 声明权限点时才作为回落。旧实现先判 role === "admin" 直接 return，使无
+      // identity.review 的管理员也能下载证件。
+      if (permission) {
+        if ((this.actor.permissions || []).includes(permission)) return;
+        failCode("FORBIDDEN", `缺少权限点 ${permission}，无法操作私密文件`, 403);
+      }
       if (role === "admin") return;
-      if (permission && (this.actor.permissions || []).includes(permission)) return;
       failCode("FORBIDDEN", "当前角色没有私密文件操作权限", 403);
     }
     if (!["admin", "editor"].includes(role))
@@ -559,6 +566,19 @@ export class FileService {
         (a) => locators(a).includes(url) || locators(a).includes(objectKey),
       );
       if (existing) {
+        // F02（复审）：重复登记不得让 private 密级丢失。旧实现命中即原样返回，
+        // 同一 URL/objectKey 先登记 public、再登记 private 时，private 被静默
+        // 丢弃，读侧再也看不到私密记录 → 私密拦截被绕过。此处只升不降。
+        if (visibility === "private" && existing.visibility !== "private") {
+          const upgraded = await this.store.change(
+            "file_assets",
+            existing._id,
+            (old) => ({ ...old, visibility: "private", updatedAt: Date.now() }),
+            audit,
+          );
+          results.push(upgraded || existing);
+          continue;
+        }
         results.push(existing);
         continue;
       }
@@ -613,6 +633,29 @@ export class FileService {
     return results.length === 1 ? results[0] : results;
   }
 
+  // F03（复审）：列表不得泄露私密文件的存储路径与原始文件名。未持有该 purpose
+  // 权限点的调用者只看到非敏感字段；判定与 F01 同源，避免两处规则漂移。
+  projectAsset(row, actor = this.actor) {
+    if (row.visibility !== "private") return row;
+    const permission = PURPOSES[row.purpose]?.permission;
+    const allowed = permission
+      ? (actor.permissions || []).includes(permission)
+      : actor.role === "admin";
+    if (allowed) return row;
+    return {
+      _id: row._id,
+      orgId: row.orgId,
+      purpose: row.purpose,
+      visibility: row.visibility,
+      status: row.status,
+      storage: row.storage,
+      size: row.size,
+      mimeType: row.mimeType,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
   // 列表：orgId 过滤先于分页（§3、store.mjs:130-135）。
   async list(query = {}) {
     const { cursor, limit } = pageParams(query);
@@ -646,7 +689,7 @@ export class FileService {
       if (start === 0) failCode("PARAM_ERROR", "分页游标无效或已过期");
     }
     const slice = rows.slice(start, start + limit + 1);
-    const data = slice.slice(0, limit);
+    const data = slice.slice(0, limit).map((r) => this.projectAsset(r));
     return {
       data,
       nextCursor: slice.length > limit ? data[data.length - 1]._id : undefined,
@@ -835,9 +878,12 @@ export class FileService {
     if (file.status !== "ready") await denied();
     if (file.visibility === "private") {
       const permission = PURPOSES[file.purpose]?.permission;
-      const allowed =
-        actor.role === "admin" ||
-        (permission && (actor.permissions || []).includes(permission));
+      // F01（复审）：显式权限点优先于角色。purpose 声明了权限点（如
+      // identity-document → identity.review）时，仅凭 admin 角色不再放行；
+      // 未声明权限点的私密文件仍回落到 admin。未授权一律 404 与不存在同态。
+      const allowed = permission
+        ? (actor.permissions || []).includes(permission)
+        : actor.role === "admin";
       if (!allowed) await denied();
     }
 

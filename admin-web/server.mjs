@@ -160,7 +160,9 @@ export async function createApp({
       actor: {
         actorType: "adminAccount",
         actorId: account._id,
-        role: account.role,
+        // 复审：私密文件授权以「组织成员角色」为准（membership.role），而非
+        // 平台账号角色。未配置成员关系时回落到账号角色，保证旧链路不崩。
+        role: membership?.role || account.role,
         permissions: membership?.permissions || [],
       },
       config: fileConfig,
@@ -497,6 +499,15 @@ export async function createApp({
               // 保持「file_links 唯一读取入口」的形状。
               if (path === "/api/v2/file-links" && method === "GET") {
                 const { cursor, limit } = pageParams(query);
+                // 复审「分页前过滤」：关联所指文件若私密且调用者无权读取，则在
+                // 分页前剔除，不泄露私密关联；与 list() 同策略，共用 canReadFile。
+                const fileById = new Map(
+                  (await store.list("file_assets", orgId)).map((f) => [f._id, f]),
+                );
+                const linkVisible = (l) => {
+                  const f = fileById.get(l.fileId);
+                  return !!f && files.canReadFile(f);
+                };
                 let rows = (await store.list("file_links", orgId)).filter(
                   (l) =>
                     l.orgId === orgId &&
@@ -504,7 +515,8 @@ export async function createApp({
                     (query.entityType === undefined ||
                       l.entityType === query.entityType) &&
                     (query.entityId === undefined ||
-                      l.entityId === query.entityId),
+                      l.entityId === query.entityId) &&
+                    linkVisible(l),
                 );
                 rows.sort((a, b) => (a._id < b._id ? -1 : a._id > b._id ? 1 : 0));
                 let start = 0;

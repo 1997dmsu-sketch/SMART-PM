@@ -3,7 +3,7 @@
 // 纯新增，不改任何既有用例。覆盖：
 //   §12    v2 信封 / Idempotency-Key 缺失·重放·冲突
 //   §10 #7  editor 可上传 public；editor 上传 private → 403
-//   §10 #6  下载鉴权：viewer 读 public→200；viewer 读 private→404；admin 读 private→200
+//   §10 #6  下载鉴权：viewer 读 public→200；viewer 读 private→404；admin 可上传 private 但读需 identity.review
 //   §10 #5  跨组织隔离：无成员资格的账号读文件/列表 → 404 同态
 //   §10 #4  /api/vr-download 命中私密 file_assets → 404（与不存在同态）
 //   §10 #4b /uploads/* 静态：public 旧图 200；同路径改密 private → 404
@@ -141,12 +141,13 @@ test("§10 #7 editor 可上传 public；editor 上传 private → 403", async ()
   assert.equal((await priv.json()).error.code, "FORBIDDEN");
 });
 
-test("§10 #6 下载鉴权：viewer 读 public→200；viewer 读 private→404；admin 读 private→200", async () => {
+test("§10 #6 下载鉴权：viewer 读 public→200；viewer 读 private→404；admin 可上传 private 但读需 identity.review", async () => {
   // 公共图（admin 上传）
   const pub = await postFile("files", PNG, { auth: admin });
   const pubId = (await pub.json()).data.fileId;
-  // 私密图（identity-document）：F01 后上传也须 identity.review，故由 privAdmin 上传
-  const priv = await postFile("files", PNG, { auth: privAdmin, purpose: "identity-document" });
+  // 私密图（identity-document）：复审后写入按组织管理员角色，无需 identity.review，
+  // 故由无权限点的 admin 上传即可；读取才需 readPermission（identity.review）。
+  const priv = await postFile("files", PNG, { auth: admin, purpose: "identity-document" });
   assert.equal(priv.status, 201);
   const privId = (await priv.json()).data.fileId;
 
@@ -161,15 +162,15 @@ test("§10 #6 下载鉴权：viewer 读 public→200；viewer 读 private→404�
   // viewer 读 private → 404（与不存在同态）
   const vPriv = await dl(privId, viewer);
   assert.equal(vPriv.status, 404);
-  // 持有 identity.review 的 admin 读 private → 200
+  // 持有 identity.review 的 privAdmin 读 private → 200
   const aPriv = await dl(privId, privAdmin);
   assert.equal(aPriv.status, 200);
   assert.equal(await aPriv.text(), PNG.toString());
-  // F01（复审）：无 identity.review 的 admin 读 private → 404（与不存在同态）。
-  // 旧实现凭 role==="admin" 无条件放行，与 DB-04/06 权限规则冲突。
+  // 复审要点：上传该私密文件的 admin（无 identity.review）读取 → 404——
+  // 读写权限分立，凭 role==="admin" 不再无条件放行读取。
   const barePriv = await dl(privId, admin);
   assert.equal(barePriv.status, 404);
-  // 无权限点的 editor 甚至不能上传证件
+  // 无权限点的 editor 不能上传证件（写入仅限组织管理员角色）
   const editorUp = await postFile("files", PNG, { auth: editor, purpose: "identity-document" });
   assert.equal(editorUp.status, 403);
 });
@@ -378,19 +379,17 @@ test("§10 #3c 作用域：admin-vr/*.zip 经 image-url → 403；admin-vr/*.htm
 
 // ───────── 复审 F01–F03 专项回归（PR #5 review） ─────────
 
-test("F01 回归：无 identity.review 的 admin 不能上传/下载证件", async () => {
-  // 上传：无权限点 → 403（旧实现 role==="admin" 放行）
+test("F01 回归（复审·读写权限分立）：无 identity.review 的 admin 可上传证件、但不可下载", async () => {
+  // 写入按组织管理员角色：无 identity.review 的 admin 仍可上传（旧 F01 修复曾
+  // 错把上传与下载共用同一权限点，导致管理员无法上传私密文件）。
   const up = await postFile("files", PNG, { auth: admin, purpose: "identity-document" });
-  assert.equal(up.status, 403);
-  // 持有权限点的 admin → 201
-  const okUp = await postFile("files", PNG, { auth: privAdmin, purpose: "identity-document" });
-  assert.equal(okUp.status, 201);
-  const id = (await okUp.json()).data.fileId;
+  assert.equal(up.status, 201);
+  const id = (await up.json()).data.fileId;
   const get = (a) =>
     fetch(`${url}/api/v2/files/${id}/download`, { headers: { Origin: url, Cookie: a.cookie } });
-  // 无权限点 admin 下载 → 404（与不存在同态，防枚举）
+  // 读取按 readPermission：无 identity.review 的 admin 下载 → 404（与不存在同态）
   assert.equal((await get(admin)).status, 404);
-  // 有权限点 admin 下载 → 200
+  // 持有 identity.review 的 privAdmin 下载 → 200
   assert.equal((await get(privAdmin)).status, 200);
 });
 
@@ -421,21 +420,17 @@ test("F02 回归：同路径重复登记 public+private，匿名下载 404（不
   assert.equal((await fetch(`${url}${upUrl}`, { headers: { Origin: url } })).status, 404);
 });
 
-test("F03 回归：列表对未授权私密文件脱敏，不泄露 objectKey / originalName", async () => {
+test("F03 回归（复审·分页前过滤）：未授权私密文件从列表剔除，不泄露元数据", async () => {
   const priv = await postFile("files", PNG, { auth: privAdmin, purpose: "identity-document", name: "secret-id.png" });
   assert.equal(priv.status, 201);
   const privId = (await priv.json()).data.fileId;
-  // 普通 viewer：可见该私密文件条目，但路径与原始文件名等敏感字段被剔除
+  // 复审：列表在分页前过滤无权查看的私密文件——普通 viewer 根本看不到该条目，
+  // 而非旧实现那样「脱敏后仍在列表中」，避免私密元数据经分页泄露或占用槽位。
   const vList = await v2("files", { auth: viewer });
   assert.equal(vList.status, 200);
   const privRow = vList.data.data.find((r) => r._id === privId);
-  assert.ok(privRow, "列表应包含该私密文件（可见但脱敏）");
-  assert.equal(privRow.objectKey, undefined);
-  assert.equal(privRow.originalName, undefined);
-  assert.equal(privRow.legacyUrls, undefined);
-  assert.equal(privRow.cloudFileId, undefined);
-  assert.equal(privRow.purpose, "identity-document"); // 非敏感字段保留
-  // 持有权限点的 admin：可见完整元数据
+  assert.equal(privRow, undefined, "未授权者列表不应包含该私密文件");
+  // 持有权限点的 privAdmin：可见完整元数据
   const aList = await v2("files", { auth: privAdmin });
   assert.equal(aList.status, 200);
   const aRow = aList.data.data.find((r) => r._id === privId);

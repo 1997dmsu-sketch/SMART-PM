@@ -301,10 +301,9 @@ export class BlacklistService {
     }, audit);
     return body;
   }
-  // Record a decision for one opaque occupancy application reference. DB-05
-  // owns that record and its lifecycle; DB-06 deliberately does not fabricate
-  // or activate it. A current head serializes review vs activation, while the
-  // random-ID decision record preserves append-only review history.
+  // Activation review retains the DB-06 contract. Creation review is allowed
+  // only for a persisted DB-05 application and snapshots its immutable request
+  // digest/version plus the complete current hit set into append-only history.
   async reviewOccupancy(occupancyId, data, audit, op = null) {
     identifier(occupancyId, "occupancyId");
     const restriction = data.restriction ?? "occupancy.activate";
@@ -319,6 +318,25 @@ export class BlacklistService {
     const sortedIds = pairs.map((p) => p.id);
     const sortedRevisions = pairs.map((p) => p.revision);
     await this.readCheck("blacklist.review");
+    let createApplication = null;
+    let createToken = null;
+    if (restriction === "occupancy.create") {
+      createApplication = (await this.store.list("occupancy_applications", this.orgId))
+        .find((application) => application._id === occupancyId);
+      if (!createApplication) failCode("NOT_FOUND", "待审入住申请不存在或不可见", 404);
+      if (createApplication.state === "consumed")
+        failCode("INVALID_STATE", "待审入住申请已消费，不能重复复核", 409);
+      if (typeof createApplication.requestDigest !== "string" ||
+          !Number.isInteger(createApplication.requestVersion) || createApplication.requestVersion < 1)
+        failCode("INVALID_STATE", "待审入住申请请求版本无效", 409);
+      createToken = await this.prepareEligibility({
+        personId: createApplication.personId,
+        occupancyId,
+        restriction,
+        requestDigest: createApplication.requestDigest,
+        requestVersion: createApplication.requestVersion,
+      });
+    }
     const entries = (await this.store.list("blacklist_entries", this.orgId))
       .filter((e) => sortedIds.includes(e._id));
     if (entries.length !== sortedIds.length)
@@ -340,6 +358,10 @@ export class BlacklistService {
       decision: data.decision,
       entryIds: sortedIds,
       entryRevisions: sortedRevisions,
+      ...(createApplication ? {
+        applicationId: occupancyId,
+        requestVersion: createApplication.requestVersion,
+      } : {}),
     };
     await this.store.transact([
       ref("blacklist_decisions", headId),
@@ -347,11 +369,29 @@ export class BlacklistService {
       ...sortedIds.map((id) => ref("blacklist_entries", id)),
       ...reviewSubjects.map((subject) => ref("eligibility_guards",
         eligibilityGuardId(this.orgId, subject.subjectType, subject.subjectKey))),
+      ...(createToken ? [ref("occupancy_applications", occupancyId), ...createToken.refs] : []),
       ...this.authRefs(),
       ...(op ? [ref("operation_keys", op.id)] : []),
     ], (state) => {
       this.adminCheck(state, "blacklist.review");
       const now = this.now();
+      let currentCreateApplication = null;
+      if (createToken) {
+        currentCreateApplication = state[`occupancy_applications/${occupancyId}`];
+        if (!currentCreateApplication || currentCreateApplication.orgId !== this.orgId ||
+            currentCreateApplication.revision !== createApplication.revision ||
+            currentCreateApplication.requestDigest !== createApplication.requestDigest ||
+            currentCreateApplication.requestVersion !== createApplication.requestVersion)
+          failCode("REVISION_CONFLICT", "待审入住申请版本已变化，请重新复核", 409);
+        if (currentCreateApplication.state === "consumed")
+          failCode("INVALID_STATE", "待审入住申请已消费，不能重复复核", 409);
+        // The client supplies a review checklist, not the scope of the check.
+        // Re-derive every current hit from person + bound-user subjects so a
+        // second entry cannot be omitted to manufacture a partial allow.
+        const eligibility = this.evaluateEligibility(state, createToken, { deferBlocked: true });
+        if (JSON.stringify(eligibility.entryIds) !== JSON.stringify(sortedIds))
+          failCode("REVISION_CONFLICT", "当前完整命中名单已变化，请重新复核", 409);
+      }
       let expiresAt = null;
       for (const pair of pairs) {
         const current = state[`blacklist_entries/${pair.id}`];
@@ -376,6 +416,12 @@ export class BlacklistService {
         reviewerId: audit.actorId || audit.actor || "unknown",
         decidedAt: now,
         expiresAt,
+        ...(currentCreateApplication ? {
+          applicationId: occupancyId,
+          applicationRevision: currentCreateApplication.revision,
+          requestDigest: currentCreateApplication.requestDigest,
+          requestVersion: currentCreateApplication.requestVersion,
+        } : {}),
       };
       return [
         {
@@ -393,6 +439,16 @@ export class BlacklistService {
             ...(head ? { revision: (head.revision ?? 0) + 1 } : base()),
           },
         },
+        ...(currentCreateApplication ? [{
+          collection: "occupancy_applications",
+          id: occupancyId,
+          data: {
+            state: data.decision === "allow" ? "allowed" : "denied",
+            latestDecisionId: decisionId,
+            reviewedAt: now,
+            revision: currentCreateApplication.revision + 1,
+          },
+        }] : []),
         // Review and activation also serialize through the subject guards;
         // a newer deny cannot race with an activation using an older allow.
         ...reviewSubjects.map((subject) => this.guardWrite(state, subject)),
@@ -402,10 +458,13 @@ export class BlacklistService {
     return body;
   }
   async prepareEligibility({ personId, identityApplicationId = null, occupancyId,
-    restriction = "occupancy.activate" }) {
+    restriction = "occupancy.activate", requestDigest = null, requestVersion = null }) {
     identifier(personId, "personId");
     identifier(occupancyId, "occupancyId");
     if (!BLACKLIST_RESTRICTIONS.includes(restriction)) failCode("PARAM_ERROR", "资格检查范围无效");
+    if (restriction === "occupancy.create" &&
+        (typeof requestDigest !== "string" || !Number.isInteger(requestVersion) || requestVersion < 1))
+      failCode("PARAM_ERROR", "创建资格检查缺少请求摘要或版本");
     const person = (await this.store.list("persons", this.orgId)).find((p) => p._id === personId);
     if (!person) failCode("NOT_FOUND", "人员档案不存在或不可见", 404);
     const subjects = [{ subjectType: "person", subjectKey: personId }];
@@ -470,6 +529,8 @@ export class BlacklistService {
       guardIds,
       guardEpochs,
       headId,
+      requestDigest,
+      requestVersion,
       refs: [
         ...refs,
         ...candidates.map((e) => ref("blacklist_entries", e._id)),
@@ -478,7 +539,7 @@ export class BlacklistService {
       ],
     };
   }
-  evaluateEligibility(state, token) {
+  evaluateEligibility(state, token, { deferBlocked = false } = {}) {
     const person = state[`persons/${token.personId}`];
     if (!person || person.orgId !== this.orgId || person.revision !== token.personRevision ||
         (person.userId ?? null) !== token.boundUserId) retry();
@@ -502,26 +563,32 @@ export class BlacklistService {
     const head = state[`blacklist_decisions/${token.headId}`];
     const entryIds = hits.map((e) => e._id);
     const entryRevisions = hits.map((e) => e.revision);
-    const exact = head && (head.restriction ?? "occupancy.activate") === token.restriction &&
+    const requestMatches = token.restriction !== "occupancy.create" ||
+      (head?.requestDigest === token.requestDigest && head?.requestVersion === token.requestVersion);
+    const exact = head && requestMatches &&
+      (head.restriction ?? "occupancy.activate") === token.restriction &&
       JSON.stringify(head.entryIds) === JSON.stringify(entryIds) &&
       JSON.stringify(head.entryRevisions) === JSON.stringify(entryRevisions);
     const unexpired = head && (head.expiresAt === null || now < head.expiresAt);
     if (exact && unexpired && head.decision === "allow")
       return { eligible: true, entryIds, decisionId: head.latestDecisionId };
-    if (exact && unexpired && head.decision === "deny")
-      failCode("BLACKLIST_DENIED", "本次申请已复核拒绝", 403);
-    failCode("BLACKLIST_REVIEW_REQUIRED", "命中内部复核规则，须管理员复核", 409);
+    const code = exact && unexpired && head.decision === "deny"
+      ? "BLACKLIST_DENIED"
+      : "BLACKLIST_REVIEW_REQUIRED";
+    if (deferBlocked) return { eligible: false, code, entryIds, decisionId: null };
+    if (code === "BLACKLIST_DENIED") failCode(code, "本次申请已复核拒绝", 403);
+    failCode(code, "命中内部复核规则，须管理员复核", 409);
   }
   // DB-05 integration boundary. build(state, eligibility) returns
   // {writes,result}; this wrapper appends the same subject guard writes and
   // retries the WHOLE pre-read + transaction when a list change is detected.
-  async withEligibility(request, refs, build, audit) {
+  async withEligibility(request, refs, build, audit, { deferBlocked = false } = {}) {
     for (let attempt = 0; attempt < 3; attempt++) {
       const token = await this.prepareEligibility(request);
       let result;
       try {
         await this.store.transact([...refs, ...token.refs], async (state) => {
-          const eligibility = this.evaluateEligibility(state, token);
+          const eligibility = this.evaluateEligibility(state, token, { deferBlocked });
           const built = await build(state, eligibility);
           if (!built || !Array.isArray(built.writes))
             throw Error("Eligibility transaction build must return {writes,result}");

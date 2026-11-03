@@ -167,17 +167,30 @@ test("DB-05 HTTP create review returns an opaque retry reference and keeps list 
   assert.ok(blocked.data.error.occupancyId);
   assert.ok(!("reason" in blocked.data.error) && !("evidenceFileIds" in blocked.data.error));
   const applicationRef = blocked.data.error.occupancyId;
+  const pending = (await app.store.list("occupancy_applications", "org-demo"))
+    .find((application) => application._id === applicationRef);
+  assert.equal(pending.state, "pending_review");
+  assert.equal(pending.roomId, roomId);
+  assert.equal(pending.personId, primary.personId);
   const reviewed = await post(`occupancies/${applicationRef}/blacklist-review`, {
     restriction: "occupancy.create", decision: "allow", reason: "HTTP 允许本次创建",
     entryIds: [entry.data.data.entryId], entryRevisions: [1],
   }, { auth: reviewer });
   assert.equal(reviewed.status, 200);
   assert.equal(reviewed.data.data.restriction, "occupancy.create");
+  assert.equal(reviewed.data.data.requestVersion, 1);
+  const tampered = await post(`rooms/${roomId}/occupancy-cycles`, {
+    ...body, endsAt: Date.now() + 86400000, occupancyId: applicationRef,
+  });
+  assert.equal(tampered.status, 409);
+  assert.equal(tampered.data.error.code, "OCCUPANCY_APPLICATION_CONFLICT");
   const created = await post(`rooms/${roomId}/occupancy-cycles`, {
     ...body, occupancyId: applicationRef,
   });
   assert.equal(created.status, 201);
   assert.equal(created.data.data.occupancyId, applicationRef);
+  assert.equal((await app.store.list("occupancy_applications", "org-demo"))
+    .find((application) => application._id === applicationRef).state, "consumed");
   const activated = await post(`occupancies/${applicationRef}/activate`, {
     expectedRevision: 1, identityApplicationId: primary.applicationId,
   });

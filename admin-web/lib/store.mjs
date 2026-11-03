@@ -25,6 +25,7 @@ const collections = [
   "eligibility_guards",
   "occupancy_cycles",
   "occupancies",
+  "occupancy_applications",
   "room_primary_slots",
   "occupancy_materializations",
 ];

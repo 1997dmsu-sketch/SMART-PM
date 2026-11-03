@@ -9,7 +9,7 @@ import { OrgPropertyService } from "../lib/property-v2.mjs";
 import { PersonService } from "../lib/persons.mjs";
 import { IdentityService } from "../lib/identity.mjs";
 import { VerificationService } from "../lib/verification.mjs";
-import { BlacklistService } from "../lib/blacklist.mjs";
+import { BlacklistService, blacklistDecisionHeadId } from "../lib/blacklist.mjs";
 import { OccupancyService, primarySlotId } from "../lib/occupancies.mjs";
 
 const KEY = Buffer.alloc(32, 11);
@@ -775,6 +775,11 @@ test("F02 member invitation and primary transfer enforce create review without e
     restriction: "occupancy.create", decision: "allow", reason: "允许成员邀请",
     entryIds: [memberEntry.entryId], entryRevisions: [1],
   }, reviewerAudit);
+  await assert.rejects(x.service.createOccupancy(memberInput(
+    x.roomId, cycle.cycleId, member.personId,
+    { occupancyId: memberBlocked.occupancyId, endsAt: 2_000_000 },
+  ), audit), (e) => e.code === "OCCUPANCY_APPLICATION_CONFLICT");
+  assert.equal((await x.store.list("occupancies", "org-a")).length, 1);
   const invited = await x.service.createOccupancy(memberInput(
     x.roomId, cycle.cycleId, member.personId, { occupancyId: memberBlocked.occupancyId },
   ), audit);
@@ -806,6 +811,12 @@ test("F02 member invitation and primary transfer enforce create review without e
     restriction: "occupancy.create", decision: "allow", reason: "允许换租新周期",
     entryIds: [nextEntry.entryId], entryRevisions: [1],
   }, reviewerAudit);
+  await assert.rejects(x.service.transferPrimary(x.roomId, {
+    ...transferInput, newOccupancyId: transferBlocked.occupancyId, startsAt: 1_000_001,
+  }, audit), (e) => e.code === "OCCUPANCY_APPLICATION_CONFLICT");
+  assert.equal((await x.store.list("occupancies", "org-a"))
+    .find((o) => o._id === cycle.occupancyId).state, "active");
+  assert.equal((await x.store.list("occupancy_cycles", "org-a")).length, 1);
   const transferred = await x.service.transferPrimary(x.roomId, {
     ...transferInput, newOccupancyId: transferBlocked.occupancyId,
   }, audit);
@@ -848,4 +859,148 @@ test("F02 a create rule committed after eligibility pre-read invalidates the cre
   assert.ok(blocked.occupancyId);
   assert.equal((await x.store.list("occupancy_cycles", "org-a")).length, 0);
   assert.equal((await x.store.list("occupancies", "org-a")).length, 0);
+});
+
+test("F03 persists the reviewed request and rejects changed person room period or replay", async (t) => {
+  const x = await setup(t);
+  const primary = await x.persons.createPerson({ name: "持久申请主租客" }, audit);
+  const other = await x.persons.createPerson({ name: "替换人员" }, audit);
+  const entry = await x.reviewerBlacklist.createEntry({
+    subjectType: "person", personId: primary.personId, reason: "绑定请求复核",
+    evidenceFileIds: [], restrictions: ["occupancy.create"], startsAt: 1_000_000, endsAt: null,
+  }, reviewerAudit);
+  await assert.rejects(x.reviewerBlacklist.reviewOccupancy("review-before-record", {
+    restriction: "occupancy.create", decision: "allow", reason: "裸 ID 不得复核",
+    entryIds: [entry.entryId], entryRevisions: [1],
+  }, reviewerAudit), (e) => e.code === "NOT_FOUND");
+
+  const body = cycleInput(primary.personId);
+  const blocked = await x.service.createCycle(x.roomId, body, audit).catch((e) => e);
+  assert.equal(blocked.code, "BLACKLIST_REVIEW_REQUIRED");
+  const pending = (await x.store.list("occupancy_applications", "org-a"))
+    .find((a) => a._id === blocked.occupancyId);
+  assert.equal(pending.state, "pending_review");
+  assert.equal(pending.revision, 1);
+  assert.equal(pending.requestVersion, 1);
+  assert.equal(pending.personId, primary.personId);
+  assert.equal(pending.roomId, x.roomId);
+  assert.equal(pending.cycleId, null);
+  assert.equal(pending.role, "primary");
+  assert.deepEqual(pending.request, {
+    action: "occupancy-cycle.create", roomId: x.roomId, personId: primary.personId,
+    role: "primary", startsAt: 1_000_000, endsAt: null,
+  });
+  assert.equal((await x.store.list("occupancies", "org-a")).length, 0);
+
+  const reviewed = await x.reviewerBlacklist.reviewOccupancy(blocked.occupancyId, {
+    restriction: "occupancy.create", decision: "allow", reason: "仅放行原请求",
+    entryIds: [entry.entryId], entryRevisions: [1],
+  }, reviewerAudit);
+  assert.equal(reviewed.requestVersion, 1);
+  const head = (await x.store.list("blacklist_decisions", "org-a"))
+    .find((d) => d.recordType === "current" && d.occupancyId === blocked.occupancyId);
+  assert.equal(head.requestDigest, pending.requestDigest);
+  assert.equal(head.requestVersion, 1);
+  assert.equal(head.applicationRevision, 1);
+
+  await assert.rejects(x.service.createCycle(x.otherRoomId, {
+    ...body, occupancyId: blocked.occupancyId,
+  }, audit), (e) => e.code === "OCCUPANCY_APPLICATION_CONFLICT");
+  await assert.rejects(x.service.createCycle(x.roomId, {
+    ...body, primaryPersonId: other.personId, occupancyId: blocked.occupancyId,
+  }, audit), (e) => e.code === "OCCUPANCY_APPLICATION_CONFLICT");
+  await assert.rejects(x.service.createCycle(x.roomId, {
+    ...body, endsAt: 2_000_000, occupancyId: blocked.occupancyId,
+  }, audit), (e) => e.code === "OCCUPANCY_APPLICATION_CONFLICT");
+  assert.equal((await x.store.list("occupancy_cycles", "org-a")).length, 0);
+
+  const created = await x.service.createCycle(x.roomId, {
+    ...body, occupancyId: blocked.occupancyId,
+  }, audit);
+  assert.equal(created.occupancyId, blocked.occupancyId);
+  const consumed = (await x.store.list("occupancy_applications", "org-a"))
+    .find((a) => a._id === blocked.occupancyId);
+  assert.equal(consumed.state, "consumed");
+  assert.equal(consumed.consumedDecisionId, reviewed.decisionId);
+  assert.equal(consumed.revision, 3);
+  await assert.rejects(x.reviewerBlacklist.reviewOccupancy(blocked.occupancyId, {
+    restriction: "occupancy.create", decision: "allow", reason: "不得重复复核已消费申请",
+    entryIds: [entry.entryId], entryRevisions: [1],
+  }, reviewerAudit), (e) => e.code === "INVALID_STATE");
+});
+
+test("F03 create review requires the complete current person and bound-user hit set", async (t) => {
+  const x = await setup(t);
+  const primary = await x.persons.createPerson({ name: "完整名单主租客" }, audit);
+  await x.bindUser(primary.personId, "user-full-create-review");
+  const personEntry = await x.reviewerBlacklist.createEntry({
+    subjectType: "person", personId: primary.personId, reason: "人员限制",
+    evidenceFileIds: [], restrictions: ["occupancy.create"], startsAt: 1_000_000, endsAt: null,
+  }, reviewerAudit);
+  const userEntry = await x.reviewerBlacklist.createEntry({
+    subjectType: "user", userId: "user-full-create-review", reason: "账号限制",
+    evidenceFileIds: [], restrictions: ["occupancy.create"], startsAt: 1_000_000, endsAt: null,
+  }, reviewerAudit);
+  const body = cycleInput(primary.personId);
+  const blocked = await x.service.createCycle(x.roomId, body, audit).catch((e) => e);
+  assert.equal(blocked.code, "BLACKLIST_REVIEW_REQUIRED");
+  await assert.rejects(x.reviewerBlacklist.reviewOccupancy(blocked.occupancyId, {
+    restriction: "occupancy.create", decision: "allow", reason: "漏掉账号名单",
+    entryIds: [personEntry.entryId], entryRevisions: [1],
+  }, reviewerAudit), (e) => e.code === "REVISION_CONFLICT");
+  assert.equal((await x.store.list("blacklist_decisions", "org-a")).length, 0);
+  assert.equal((await x.store.list("occupancy_applications", "org-a"))
+    .find((a) => a._id === blocked.occupancyId).state, "pending_review");
+
+  await x.reviewerBlacklist.reviewOccupancy(blocked.occupancyId, {
+    restriction: "occupancy.create", decision: "allow", reason: "完整名单放行",
+    entryIds: [personEntry.entryId, userEntry.entryId], entryRevisions: [1, 1],
+  }, reviewerAudit);
+  const created = await x.service.createCycle(x.roomId, {
+    ...body, occupancyId: blocked.occupancyId,
+  }, audit);
+  assert.equal(created.occupancyId, blocked.occupancyId);
+});
+
+test("F03 legacy unbound allows fail closed and an approved application is consumed once", async (t) => {
+  const x = await setup(t);
+  const primary = await x.persons.createPerson({ name: "旧放行兼容主租客" }, audit);
+  const entry = await x.reviewerBlacklist.createEntry({
+    subjectType: "person", personId: primary.personId, reason: "旧决定兼容",
+    evidenceFileIds: [], restrictions: ["occupancy.create"], startsAt: 1_000_000, endsAt: null,
+  }, reviewerAudit);
+  const occupancyId = "legacy-create-allow";
+  await x.store.transact([{
+    collection: "blacklist_decisions",
+    id: blacklistDecisionHeadId("org-a", occupancyId, "occupancy.create"),
+  }], () => [{
+    collection: "blacklist_decisions",
+    id: blacklistDecisionHeadId("org-a", occupancyId, "occupancy.create"),
+    data: {
+      orgId: "org-a", occupancyId, restriction: "occupancy.create", recordType: "current",
+      latestDecisionId: "legacy-decision", entryIds: [entry.entryId], entryRevisions: [1],
+      decision: "allow", expiresAt: null, revision: 1,
+    },
+  }], reviewerAudit);
+  const body = cycleInput(primary.personId, { occupancyId });
+  const blocked = await x.service.createCycle(x.roomId, body, audit).catch((e) => e);
+  assert.equal(blocked.code, "BLACKLIST_REVIEW_REQUIRED");
+  assert.equal((await x.store.list("occupancy_applications", "org-a"))
+    .find((a) => a._id === occupancyId).state, "pending_review");
+  assert.equal((await x.store.list("occupancies", "org-a")).length, 0);
+
+  await x.reviewerBlacklist.reviewOccupancy(occupancyId, {
+    restriction: "occupancy.create", decision: "allow", reason: "重新绑定请求后放行",
+    entryIds: [entry.entryId], entryRevisions: [1],
+  }, reviewerAudit);
+  const outcomes = await Promise.allSettled([
+    x.service.createCycle(x.roomId, body, audit),
+    x.service.createCycle(x.roomId, body, audit),
+  ]);
+  assert.equal(outcomes.filter((o) => o.status === "fulfilled").length, 1);
+  assert.equal(outcomes.find((o) => o.status === "rejected").reason.code, "DUPLICATE_OCCUPANCY");
+  assert.equal((await x.store.list("occupancies", "org-a")).length, 1);
+  assert.equal((await x.store.list("occupancy_cycles", "org-a")).length, 1);
+  assert.equal((await x.store.list("occupancy_applications", "org-a"))
+    .find((a) => a._id === occupancyId).state, "consumed");
 });

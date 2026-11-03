@@ -274,18 +274,96 @@ export class OccupancyService {
       }),
     };
   }
-  async withCreateEligibility(personId, occupancyId, refs, build, audit) {
+  checkCreateApplication(state, application, eligibility) {
+    const id = application.occupancyId;
+    const existing = state[`occupancy_applications/${id}`];
+    if (existing) {
+      if (!this.own(existing) || existing.requestDigest !== application.requestDigest ||
+          existing.requestVersion !== application.requestVersion ||
+          JSON.stringify(existing.request) !== JSON.stringify(application.request) ||
+          existing.personId !== application.personId || existing.roomId !== application.roomId ||
+          existing.cycleId !== application.cycleId || existing.role !== application.role ||
+          existing.startsAt !== application.startsAt || existing.endsAt !== application.endsAt)
+        failCode("OCCUPANCY_APPLICATION_CONFLICT", "入住申请与已复核请求不一致，请重新申请", 409);
+      if (existing.state === "consumed")
+        failCode("OCCUPANCY_APPLICATION_CONSUMED", "入住申请已消费，不能重复使用", 409);
+    }
+    if (!eligibility.eligible) {
+      return {
+        writes: existing ? [] : [{
+          collection: "occupancy_applications",
+          id,
+          data: {
+            _id: id,
+            orgId: this.orgId,
+            action: application.action,
+            personId: application.personId,
+            roomId: application.roomId,
+            cycleId: application.cycleId,
+            role: application.role,
+            startsAt: application.startsAt,
+            endsAt: application.endsAt,
+            request: application.request,
+            requestDigest: application.requestDigest,
+            requestVersion: application.requestVersion,
+            restriction: "occupancy.create",
+            state: "pending_review",
+            createdBy: application.createdBy,
+            createdByType: application.createdByType,
+            ...base(),
+          },
+        }],
+        result: {
+          createReview: {
+            code: eligibility.code,
+            occupancyId: id,
+            restriction: "occupancy.create",
+          },
+        },
+      };
+    }
+    return {
+      writes: existing ? [{
+        collection: "occupancy_applications",
+        id,
+        data: {
+          state: "consumed",
+          consumedAt: this.now(),
+          consumedDecisionId: eligibility.decisionId,
+          revision: existing.revision + 1,
+        },
+      }] : [],
+      result: null,
+    };
+  }
+  async withCreateEligibility(application, refs, build, audit) {
     if (!this.blacklist || this.blacklist.orgId !== this.orgId)
       failCode("ADAPTER_UNAVAILABLE", "黑名单资格服务未配置", 503);
+    const scoped = {
+      ...application,
+      requestDigest: hash("occupancy-application-v1", this.orgId, application.request),
+      requestVersion: 1,
+      createdBy: audit.actorId || audit.actor || "unknown",
+      createdByType: audit.actorType || "adminAccount",
+    };
     try {
-      return await this.blacklist.withEligibility({
-        personId, occupancyId, restriction: "occupancy.create",
-      }, refs, build, audit);
+      const result = await this.blacklist.withEligibility({
+        personId: scoped.personId,
+        occupancyId: scoped.occupancyId,
+        restriction: "occupancy.create",
+        requestDigest: scoped.requestDigest,
+        requestVersion: scoped.requestVersion,
+      }, [...refs, ref("occupancy_applications", scoped.occupancyId)],
+      (state, eligibility) => build(state, eligibility, scoped), audit, { deferBlocked: true });
+      if (result?.createReview) {
+        const { code } = result.createReview;
+        failCode(code, code === "BLACKLIST_DENIED" ? "本次申请已复核拒绝" : "命中内部复核规则，须管理员复核",
+          code === "BLACKLIST_DENIED" ? 403 : 409);
+      }
+      return result;
     } catch (error) {
       if (["BLACKLIST_REVIEW_REQUIRED", "BLACKLIST_DENIED"].includes(error.code)) {
-        // No business record exists yet. Return the opaque application reference
-        // so review can complete before retrying creation with the same ID.
-        error.occupancyId = occupancyId;
+        error.occupancyId = scoped.occupancyId;
         error.restriction = "occupancy.create";
       }
       throw error;
@@ -300,6 +378,22 @@ export class OccupancyService {
     const occupancyId = data?.occupancyId === undefined
       ? randomUUID()
       : text(data.occupancyId, "occupancyId");
+    const application = {
+      action: "occupancy-cycle.create",
+      occupancyId,
+      personId: primaryPersonId,
+      roomId,
+      cycleId: null,
+      role: "primary",
+      ...period,
+      request: {
+        action: "occupancy-cycle.create",
+        roomId,
+        personId: primaryPersonId,
+        role: "primary",
+        ...period,
+      },
+    };
     const refs = [
       ...this.roomRefs(room), ref("persons", primaryPersonId),
       ref("occupancy_cycles", cycleId), ref("occupancies", occupancyId),
@@ -307,13 +401,15 @@ export class OccupancyService {
       ref("lifecycle_guards", guardId(this.orgId)), ...this.authRefs(),
       ...(op ? [ref("operation_keys", op.id)] : []),
     ];
-    return this.withCreateEligibility(primaryPersonId, occupancyId, refs, (state) => {
+    return this.withCreateEligibility(application, refs, (state, eligibility, currentApplication) => {
       this.adminCheck(state);
       this.checkRoom(state, room);
       this.checkPerson(state, primaryPersonId);
       if (state[`occupancies/${occupancyId}`])
         failCode("DUPLICATE_OCCUPANCY", "入住申请引用已存在，请核对后重试", 409);
       this.checkClaim(state, cycleId, roomId, primaryPersonId, occupancyId, { create: true });
+      const gate = this.checkCreateApplication(state, currentApplication, eligibility);
+      if (gate.result) return gate;
       const cycle = {
         _id: cycleId, orgId: this.orgId, roomId, primaryOccupancyId: occupancyId,
         epoch: 0, state: "pending", ...period, ...base(),
@@ -328,6 +424,7 @@ export class OccupancyService {
       const result = this.resultFor(occupancy, cycle);
       return {
         writes: [
+          ...gate.writes,
           { collection: "occupancy_cycles", id: cycleId, data: cycle },
           { collection: "occupancies", id: occupancyId, data: occupancy },
           this.claimWrite(cycleId, roomId, primaryPersonId, occupancyId),
@@ -362,6 +459,24 @@ export class OccupancyService {
     const occupancyId = data?.occupancyId === undefined
       ? randomUUID()
       : text(data.occupancyId, "occupancyId");
+    const application = {
+      action: "occupancy-member.create",
+      occupancyId,
+      personId,
+      roomId,
+      cycleId,
+      role: "member",
+      ...period,
+      request: {
+        action: "occupancy-member.create",
+        roomId,
+        personId,
+        cycleId,
+        role: "member",
+        sponsorOccupancyId: sponsor?._id ?? null,
+        ...period,
+      },
+    };
     const slotId = primarySlotId(this.orgId, roomId);
     const refs = uniqueRefs([
       ...this.roomRefs(room), ref("persons", personId), ref("occupancy_cycles", cycleId),
@@ -373,7 +488,7 @@ export class OccupancyService {
       ...(sponsor ? [ref("occupancies", sponsor._id)] : []),
       ...(op ? [ref("operation_keys", op.id)] : []),
     ]);
-    return this.withCreateEligibility(personId, occupancyId, refs, (state) => {
+    return this.withCreateEligibility(application, refs, (state, eligibility, currentApplication) => {
       const now = this.now();
       if (this.auth?.userId) {
         this.orgCheck(state);
@@ -407,6 +522,8 @@ export class OccupancyService {
           failCode("SPONSOR_INACTIVE", "当前主租客关系已失效，不能邀请成员", 403);
       }
       this.checkClaim(state, cycleId, roomId, personId, occupancyId, { create: true });
+      const gate = this.checkCreateApplication(state, currentApplication, eligibility);
+      if (gate.result) return gate;
       const nextCycle = {
         ...currentCycle, epoch: currentCycle.epoch + 1, revision: currentCycle.revision + 1,
       };
@@ -420,6 +537,7 @@ export class OccupancyService {
       const result = this.resultFor(occupancy, nextCycle);
       return {
         writes: [
+          ...gate.writes,
           { collection: "occupancies", id: occupancyId, data: occupancy },
           {
             collection: "occupancy_cycles", id: cycleId,
@@ -672,6 +790,29 @@ export class OccupancyService {
     const newOccupancyId = data?.newOccupancyId === undefined
       ? randomUUID()
       : text(data.newOccupancyId, "newOccupancyId");
+    const application = {
+      action: "occupancy-primary.transfer",
+      occupancyId: newOccupancyId,
+      personId: newPersonId,
+      roomId,
+      cycleId: oldCycleId,
+      role: "primary",
+      ...period,
+      request: {
+        action: "occupancy-primary.transfer",
+        roomId,
+        oldOccupancyId,
+        oldCycleId,
+        expectedRevision,
+        expectedCycleRevision,
+        newPrimaryPersonId: newPersonId,
+        newPersonExpectedRevision: newPersonRevision,
+        oldEndsAt: data?.oldEndsAt,
+        role: "primary",
+        reason,
+        ...period,
+      },
+    };
     const jobId = randomUUID();
     const slotId = primarySlotId(this.orgId, roomId);
     const refs = uniqueRefs([
@@ -683,7 +824,7 @@ export class OccupancyService {
       ref("lifecycle_guards", guardId(this.orgId)), ...this.authRefs(),
       ...(op ? [ref("operation_keys", op.id)] : []),
     ]);
-    return this.withCreateEligibility(newPersonId, newOccupancyId, refs, (state) => {
+    return this.withCreateEligibility(application, refs, (state, eligibility, currentApplication) => {
       this.adminCheck(state);
       this.checkRoom(state, room);
       this.checkPerson(state, newPersonId, newPersonRevision);
@@ -706,6 +847,8 @@ export class OccupancyService {
       const slot = state[`room_primary_slots/${slotId}`];
       if (slot?.currentCycleId !== oldCycleId || slot.currentOccupancyId !== oldOccupancyId)
         failCode("REVISION_CONFLICT", "主租客槽已变化，请刷新后重试", 409);
+      const gate = this.checkCreateApplication(state, currentApplication, eligibility);
+      if (gate.result) return gate;
       const actor = audit.actorId || audit.actor || "unknown";
       const endedCycle = {
         ...currentCycle, state: "ended", endedAt: oldEndsAt, endedBy: actor,
@@ -722,6 +865,7 @@ export class OccupancyService {
         sponsorOccupancyId: null, identityApplicationId: null, ...base(),
       };
       const writes = [
+        ...gate.writes,
         { collection: "occupancies", id: oldOccupancyId, data: {
           state: "ended", endsAt: oldEndsAt, terminationReason: reason,
           endedBy: actor, revision: current.revision + 1,

@@ -56,3 +56,16 @@ DB-06允许维护仅限制occupancy.create的有效名单，但DB-05创建阶段
 修复建议：首次命中时原子保存受限的 `occupancy_applications`/pending proposal（组织、人员、房间、周期/角色、期限、请求摘要、revision、状态），复核事务必须读取该记录和当前完整名单；重试创建必须逐字段匹配批准版本并消费决定。也可使用不可伪造的服务端请求摘要，但仍需有可审计、可失效、可防重放的持久对象。不要让客户端自报一个裸 occupancyId 代表已审核申请。
 
 复审实跑：后台 161 项、根目录 51 项、9 页静态检查全部通过。现有新增测试验证了裸 ID 流程本身，没有验证“审核后改变房间/人员/期限必须拒绝”。云端事务、索引和安全规则仍待 DB-08。
+
+## 第三轮复审：b9ee061
+
+结论：上一轮剩余 F03 已修复，DB-05 当前服务层本地复审通过，可作为后续整合与 DB-08 探针基线；未合并、未上线。
+
+- 新增 `occupancy_applications` 持久待审对象，保存组织、动作、人员、房间、周期/角色、起止时间、规范化请求、请求摘要和版本。
+- 创建名单复核只接受真实存在且未消费的申请；事务内重新派生完整命中集合，并把决定绑定 application revision、requestDigest、requestVersion 和名单版本。
+- 创建重试逐字段核对申请；改变人员、房间、周期、角色、期限或换租参数会返回 `OCCUPANCY_APPLICATION_CONFLICT`。成功后申请原子变为 consumed，不能复用。
+- 不存在的申请复核返回 `NOT_FOUND`；名单变化、申请版本变化和并发复核通过 guard/revision 失败关闭。
+
+独立复现：停用账号激活/邀请均返回 `USER_DISABLED`；create-only 命中返回 `BLACKLIST_REVIEW_REQUIRED` 并持久化申请；不存在申请复核返回 `NOT_FOUND`；批准后改变 endsAt 返回 `OCCUPANCY_APPLICATION_CONFLICT`；原请求重试成功进入 `pending_review`。
+
+实跑后台 164 项、根目录 51 项、9 页静态检查全部通过。本结论不替代 DB-08 的真实云事务、索引和安全规则验证，也不表示新入住关系已经接入小程序或门锁权限。

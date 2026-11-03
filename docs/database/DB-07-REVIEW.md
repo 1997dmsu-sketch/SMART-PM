@@ -70,3 +70,22 @@ server 的 locator 匹配收集全部命中并采用 private 优先；同一路�
 修复：无对应私密读取权限的调用者应在分页前过滤这些文件和关联；若业务确需显示“已上传”状态，应由对应业务接口返回不含 fileId、purpose、storage、size、MIME 的布尔状态，而不是暴露文件资源记录。补混合 public/private 跨页、file-links、权限撤销和组织角色不一致测试。
 
 复审实跑：后台 110 项、根目录 51 项、9 页静态检查全部通过；F02 独立复现通过，F01/F03 上述场景仍可复现。该分支仍基于 DB-02，整合 DB-04/06 时必须采用最终权限点，不能以本分支测试中的 `identity.review` 作为证件读取标准。
+
+## 第三轮复审：420d028
+
+结论：F02、F03 通过；F01 仍有一个明确的权限点映射错误，修正后再复审。
+
+- F02 保持通过：重复 public/private 定位符采用 private 优先，匿名旧静态入口返回 404。
+- F03 已通过：无私密读取权限的文件在分页前过滤，不再返回私密记录；`GET /api/v2/file-links` 同样先按目标文件读取权限过滤。独立 viewer 复现中私密记录完全不可见。
+- 组织角色来源已修正为 `membership.role`，不再用全局 account.role 提升组织内文件写权限。
+- 私密写入与读取已经拆分为 writePermission/readPermission，结构正确。
+
+### F01 [P1] 剩余问题：identity-document 仍映射到 identity.review
+
+`PURPOSES["identity-document"].readPermission` 仍是 `identity.review`，代码注释也把它称为 DB-04 读取权限。但 DB-04 已明确拆分：`identity.review` 用于审核队列/决定，`identity.readPrivate` 才允许逐次读取证件原文并强制审计。当前拥有审核权、没有私有读取权的账号仍能通过文件下载接口取得证件字节。
+
+独立复现：actor permissions 仅含 `identity.review`，不含 `identity.readPrivate`，`authorizeDownload` 成功返回 20 字节虚构 PNG。现有测试也把这一行为写成成功预期，因此 110 项通过不覆盖最终权限模型。
+
+修复：将 identity-document 的 `readPermission` 改为 `identity.readPrivate`，同步 HTTP/服务测试和实施文档；验证只有 identity.review 时下载/列表/关联均不可见，只有 identity.readPrivate 时可读取并留下访问审计，权限撤销后立即拒绝。上传权限继续独立按已确定的组织角色或专用写权限处理。
+
+实跑后台 110 项、根目录 51 项、9 页静态检查全部通过。除上述权限点映射外，本轮未发现新的可复现阻断项。分支仍需在 DB-04/06 基线上整合后跑全量回归与 DB-08 云端探针。

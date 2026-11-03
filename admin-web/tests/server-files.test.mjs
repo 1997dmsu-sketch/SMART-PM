@@ -3,7 +3,7 @@
 // 纯新增，不改任何既有用例。覆盖：
 //   §12    v2 信封 / Idempotency-Key 缺失·重放·冲突
 //   §10 #7  editor 可上传 public；editor 上传 private → 403
-//   §10 #6  下载鉴权：viewer 读 public→200；viewer 读 private→404；admin 可上传 private 但读需 identity.review
+//   §10 #6  下载鉴权：viewer 读 public→200；viewer 读 private→404；admin 可上传 private 但读需 identity.readPrivate
 //   §10 #5  跨组织隔离：无成员资格的账号读文件/列表 → 404 同态
 //   §10 #4  /api/vr-download 命中私密 file_assets → 404（与不存在同态）
 //   §10 #4b /uploads/* 静态：public 旧图 200；同路径改密 private → 404
@@ -82,7 +82,7 @@ before(async () => {
   editor = await mk("files-editor", "editor");
   viewer = await mk("files-viewer", "viewer");
   outsider = await mk("files-outsider", "viewer"); // 不授予 org-demo 成员资格
-  // F01（复审）：证件访问须显式权限点，故另建一个持有 identity.review 的 admin，
+  // 三次复审：证件「读取」权限点改为 identity.readPrivate（区别于 DB-04 的 identity.review），
   // 与不带权限点的 admin（admin）形成正负对照。
   privAdmin = await mk("files-privadmin", "admin");
 
@@ -99,7 +99,7 @@ before(async () => {
       { actor: "system", actorId: "system", action: "测试授权" },
     );
   }
-  // 成员资格默认 permissions=[]；给 privAdmin 授予 identity.review 权限点
+  // 成员资格默认 permissions=[]；给 privAdmin 授予 identity.readPrivate 权限点
   // （server.mjs:164 actor.permissions 取自 membership.permissions）。
   const privRow = app.accounts.rows.find((a) => a.username === "files-privadmin");
   const privMem = (await app.store.list("org_memberships")).find(
@@ -108,7 +108,7 @@ before(async () => {
   await app.store.change(
     "org_memberships",
     privMem._id,
-    (old) => ({ ...old, permissions: ["identity.review"] }),
+    (old) => ({ ...old, permissions: ["identity.readPrivate"] }),
     { actor: "system", actorId: "system", action: "测试授权" },
   );
 });
@@ -141,12 +141,12 @@ test("§10 #7 editor 可上传 public；editor 上传 private → 403", async ()
   assert.equal((await priv.json()).error.code, "FORBIDDEN");
 });
 
-test("§10 #6 下载鉴权：viewer 读 public→200；viewer 读 private→404；admin 可上传 private 但读需 identity.review", async () => {
+test("§10 #6 下载鉴权：viewer 读 public→200；viewer 读 private→404；admin 可上传 private 但读需 identity.readPrivate", async () => {
   // 公共图（admin 上传）
   const pub = await postFile("files", PNG, { auth: admin });
   const pubId = (await pub.json()).data.fileId;
-  // 私密图（identity-document）：复审后写入按组织管理员角色，无需 identity.review，
-  // 故由无权限点的 admin 上传即可；读取才需 readPermission（identity.review）。
+  // 私密图（identity-document）：三次复审后读取权限点改为 identity.readPrivate，
+  // 写入仍按组织管理员角色（无需任何读取权限点），故由无权限点的 admin 上传即可。
   const priv = await postFile("files", PNG, { auth: admin, purpose: "identity-document" });
   assert.equal(priv.status, 201);
   const privId = (await priv.json()).data.fileId;
@@ -162,11 +162,11 @@ test("§10 #6 下载鉴权：viewer 读 public→200；viewer 读 private→404�
   // viewer 读 private → 404（与不存在同态）
   const vPriv = await dl(privId, viewer);
   assert.equal(vPriv.status, 404);
-  // 持有 identity.review 的 privAdmin 读 private → 200
+  // 持有 identity.readPrivate 的 privAdmin 读 private → 200
   const aPriv = await dl(privId, privAdmin);
   assert.equal(aPriv.status, 200);
   assert.equal(await aPriv.text(), PNG.toString());
-  // 复审要点：上传该私密文件的 admin（无 identity.review）读取 → 404——
+  // 复审要点：上传该私密文件的 admin（无 identity.readPrivate）读取 → 404——
   // 读写权限分立，凭 role==="admin" 不再无条件放行读取。
   const barePriv = await dl(privId, admin);
   assert.equal(barePriv.status, 404);
@@ -379,17 +379,16 @@ test("§10 #3c 作用域：admin-vr/*.zip 经 image-url → 403；admin-vr/*.htm
 
 // ───────── 复审 F01–F03 专项回归（PR #5 review） ─────────
 
-test("F01 回归（复审·读写权限分立）：无 identity.review 的 admin 可上传证件、但不可下载", async () => {
-  // 写入按组织管理员角色：无 identity.review 的 admin 仍可上传（旧 F01 修复曾
-  // 错把上传与下载共用同一权限点，导致管理员无法上传私密文件）。
+test("F01 回归（三次复审·identity.readPrivate）：admin 可上传证件、但仅 readPrivate 可读", async () => {
+  // 场景4：写入按组织管理员角色，无读取权限的 admin 仍可上传私密文件。
   const up = await postFile("files", PNG, { auth: admin, purpose: "identity-document" });
   assert.equal(up.status, 201);
   const id = (await up.json()).data.fileId;
   const get = (a) =>
     fetch(`${url}/api/v2/files/${id}/download`, { headers: { Origin: url, Cookie: a.cookie } });
-  // 读取按 readPermission：无 identity.review 的 admin 下载 → 404（与不存在同态）
+  // 场景1：无 identity.readPrivate 的 admin 下载 → 404（与不存在同态）
   assert.equal((await get(admin)).status, 404);
-  // 持有 identity.review 的 privAdmin 下载 → 200
+  // 持有 identity.readPrivate 的 privAdmin 下载 → 200
   assert.equal((await get(privAdmin)).status, 200);
 });
 
@@ -436,4 +435,79 @@ test("F03 回归（复审·分页前过滤）：未授权私密文件从列表�
   const aRow = aList.data.data.find((r) => r._id === privId);
   assert.ok(aRow.objectKey, "授权者应看到完整元数据");
   assert.match(aRow.objectKey, /^private\//);
+});
+
+
+test("F04 回归（三次复审）：仅 identity.review 时下载/列表/关联均不可见；readPrivate 可读且审计；撤销即拒", async () => {
+  // 预备：用无读取权限的 admin 上传证件，并注入一条指向它的私密关联（API 无法
+  // 为 private 文件建关联，因私有关联实体本期未建，此处直注 file_links 验证过滤）。
+  const up = await postFile("files", PNG, { auth: admin, purpose: "identity-document", name: "secret.png" });
+  assert.equal(up.status, 201);
+  const id = (await up.json()).data.fileId;
+  const linkId = `link-${id}`;
+  await app.store.transact(
+    [{ collection: "file_links", id: linkId }],
+    () => [{ collection: "file_links", id: linkId, data: {
+      orgId: "org-demo", fileId: id, entityType: "content", entityId: "c1",
+      usage: "other", state: "attached",
+      attachedBy: { actorType: "adminAccount", actorId: "t" },
+      revision: 1, schemaVersion: 2, createdAt: Date.now(),
+    } }],
+    { actor: "t", actorId: "t", action: "seed" },
+  );
+
+  // 建一个专属测试账号，便于在用例内动态切换其成员权限点。
+  const mkAcc = async (username, role, perms) => {
+    await app.accounts.save({ username, name: username, role, password: "test-only-password-123", enabled: true });
+    const login = await fetch(`${url}/api/login`, {
+      method: "POST", headers: { Origin: url, "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password: "test-only-password-123" }),
+    });
+    const sess = { cookie: login.headers.get("set-cookie")?.split(";")[0], csrf: (await login.json()).csrf };
+    const row = app.accounts.rows.find((a) => a.username === username);
+    const orgs = new OrgService(app.store);
+    await orgs.grantMembership(
+      { orgId: "org-demo", principalType: "adminAccount", principalId: row._id, role },
+      { actor: "system", actorId: "system", action: "测试授权" },
+    );
+    const mem = (await app.store.list("org_memberships")).find(
+      (m) => m.orgId === "org-demo" && m.principalId === row._id,
+    );
+    if (perms) await app.store.change("org_memberships", mem._id, (old) => ({ ...old, permissions: perms }), { actor: "system", actorId: "system", action: "测试授权" });
+    return { sess, memId: mem._id };
+  };
+  const setPerms = (memId, perms) =>
+    app.store.change("org_memberships", memId, (old) => ({ ...old, permissions: perms }), { actor: "system", actorId: "system", action: "测试授权" });
+
+  const { sess: tester, memId } = await mkAcc("files-tester", "admin", ["identity.review"]);
+  const dl = (a) => fetch(`${url}/api/v2/files/${id}/download`, { headers: { Origin: url, Cookie: a.cookie } });
+  const list = (a) => v2("files", { auth: a });
+  const links = (a) => v2("file-links", { auth: a });
+
+  // 场景1：仅持 identity.review（无 identity.readPrivate）→ 下载/列表/关联均不可见
+  assert.equal((await dl(tester)).status, 404);
+  let l = await list(tester);
+  assert.equal(l.status, 200);
+  assert.equal(l.data.data.find((r) => r._id === id), undefined, "列表不应出现该私密文件");
+  let ls = await links(tester);
+  assert.equal(ls.status, 200);
+  assert.equal(ls.data.data.find((r) => r._id === linkId), undefined, "关联列表不应出现该私密关联");
+
+  // 场景2：授予 identity.readPrivate → 可读且写入访问审计
+  await setPerms(memId, ["identity.readPrivate"]);
+  assert.equal((await dl(tester)).status, 200);
+  l = await list(tester);
+  const row = l.data.data.find((r) => r._id === id);
+  assert.ok(row, "授权后列表应出现该私密文件");
+  assert.ok(row.objectKey, "授权者应看到完整元数据");
+  ls = await links(tester);
+  assert.ok(ls.data.data.find((r) => r._id === linkId), "授权后关联列表应出现该私密关联");
+  const audit = (await app.store.list("file_access_log")).filter(
+    (x) => x.action === "download" && x.fileId === id,
+  );
+  assert.ok(audit.length >= 1, "应记录下载访问审计");
+
+  // 场景3：撤销 identity.readPrivate 后立即拒绝（下次请求即生效，无缓存窗口）
+  await setPerms(memId, []);
+  assert.equal((await dl(tester)).status, 404);
 });

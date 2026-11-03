@@ -309,37 +309,46 @@ test("§10 #5 跨组织隔离：B 组织实例读不到 A 组织的文件", asyn
   assert.equal(ok.file._id, up.fileId);
 });
 
-test("§10 #6 下载鉴权：public 任意成员可读，private 仅 readPermission/组织管理员", async (t) => {
+test("§10 #6 下载鉴权：public 任意成员可读，private 仅 identity.readPrivate/组织管理员", async (t) => {
   const { dir, store, cleanup } = await mkStore();
   t.after(cleanup);
-  // 复审「读写权限分立」：私密文件「写入」按组织管理员角色（无需 readPermission），
-  // 「读取」按 readPermission（identity.review）或组织管理员角色。
+  // 三次复审：identity-document 的「读取」权限点改为 identity.readPrivate，与
+  // DB-04 的 identity.review（证件审查）区分；仅凭 identity.review 不足以读取。
   const admin = makeService(store, dir, { role: "admin", perms: [] });
   const pub = await admin.upload({ bytes: PNG, purpose: "content-image" });
-  // 管理员可上传证件：写入仅限角色，无需 identity.review。
+  // 管理员可上传证件：写入按组织管理员角色，无需任何读取权限点（场景4：上传权限不变）。
   const priv = await admin.upload({ bytes: PNG, purpose: "identity-document" });
   assert.equal(priv.visibility, "private");
+
   const viewer = { actorType: "adminAccount", actorId: "v", role: "viewer", permissions: [] };
   // viewer 读 public → 200
   const okPub = await admin.authorizeDownload(pub.fileId, viewer);
   assert.equal(okPub.file._id, pub.fileId);
   // viewer 读 private → FILE_NOT_FOUND（与不存在同态）
-  await assert.rejects(
-    admin.authorizeDownload(priv.fileId, viewer),
-    hasCode("FILE_NOT_FOUND"),
-  );
-  // 持有 readPermission 的 viewer 可放行
-  const privileged = { actorType: "adminAccount", actorId: "v2", role: "viewer", permissions: ["identity.review"] };
-  const okPriv = await admin.authorizeDownload(priv.fileId, privileged);
+  await assert.rejects(admin.authorizeDownload(priv.fileId, viewer), hasCode("FILE_NOT_FOUND"));
+
+  // 场景1：仅持 identity.review（无 identity.readPrivate）→ 仍不可读证件
+  const reviewOnly = { actorType: "adminAccount", actorId: "v1", role: "viewer", permissions: ["identity.review"] };
+  await assert.rejects(admin.authorizeDownload(priv.fileId, reviewOnly), hasCode("FILE_NOT_FOUND"));
+
+  // 场景2：持 identity.readPrivate → 可读，且写入访问审计
+  const readPriv = { actorType: "adminAccount", actorId: "v2", role: "viewer", permissions: ["identity.readPrivate"] };
+  const okPriv = await admin.authorizeDownload(priv.fileId, readPriv);
   assert.equal(okPriv.file._id, priv.fileId);
-  // 复审要点：无 readPermission 的组织管理员「可上传、但不可下载」——
-  // 读写权限彻底分立，不再凭 role==="admin" 无条件放行读取。
-  await assert.rejects(
-    admin.authorizeDownload(priv.fileId, admin.actor),
-    hasCode("FILE_NOT_FOUND"),
+  const audit = (await store.list("file_access_log")).filter(
+    (l) => l.action === "download" && l.fileId === priv.fileId,
   );
-  // 同时持有 readPermission 的组织管理员可放行
-  const adminWithPerm = makeService(store, dir, { role: "admin", perms: ["identity.review"] });
+  assert.ok(audit.length >= 1, "应记录下载访问审计");
+  assert.equal(audit[audit.length - 1].actorId, "v2");
+
+  // 场景3：撤销 identity.readPrivate 后立即拒绝
+  const revoked = { actorType: "adminAccount", actorId: "v2", role: "viewer", permissions: [] };
+  await assert.rejects(admin.authorizeDownload(priv.fileId, revoked), hasCode("FILE_NOT_FOUND"));
+
+  // 复审要点：无 readPermission 的组织管理员「可上传、但不可下载」
+  await assert.rejects(admin.authorizeDownload(priv.fileId, admin.actor), hasCode("FILE_NOT_FOUND"));
+  // 同时持 identity.readPrivate 的组织管理员可放行
+  const adminWithPerm = makeService(store, dir, { role: "admin", perms: ["identity.readPrivate"] });
   const okAdmin = await adminWithPerm.authorizeDownload(priv.fileId, adminWithPerm.actor);
   assert.equal(okAdmin.file._id, priv.fileId);
 });

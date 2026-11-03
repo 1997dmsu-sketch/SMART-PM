@@ -643,11 +643,14 @@ export class OrgPropertyService {
     // together with a fresh epoch and let the archive commit slip through.
     const guards = await this.store.list("lifecycle_guards");
     const epoch = guards.find((g) => g._id === guardId(this.orgId))?.epoch ?? 0;
-    const [catalogRows, roomRows, houseRows, userRows] = await Promise.all([
+    const [catalogRows, roomRows, houseRows, userRows, occupancyRows, cycleRows, slotRows] = await Promise.all([
       this.store.list("property_catalog", this.orgId),
       this.store.list("rooms", this.orgId),
       this.store.list("houses", this.orgId),
       this.store.list("users"),
+      this.store.list("occupancies", this.orgId),
+      this.store.list("occupancy_cycles", this.orgId),
+      this.store.list("room_primary_slots", this.orgId),
     ]);
     const active = (r) => (r.status || "active") === "active";
     const collection =
@@ -663,8 +666,26 @@ export class OrgPropertyService {
       const boundUsers = userRows.filter(
         (u) => Array.isArray(u.houses) && u.houses.includes(target.houseId),
       ).length;
-      if (listings || boundUsers)
-        blockers = { 关联房源: listings, 绑定用户: boundUsers };
+      // DB-05: storedState alone is not authoritative. A relation blocks room
+      // archival only while its cycle, primary slot and [start,end) are all
+      // effective. Activation/end writes the same lifecycle guard, so a change
+      // after this scan forces the existing GUARD_CHANGED rescan protocol.
+      const now = Date.now();
+      const cycles = new Map(cycleRows.map((c) => [c._id, c]));
+      const slot = slotRows.find((s) => s.roomId === id);
+      const effectiveOccupancies = occupancyRows.filter((o) => {
+        if (o.roomId !== id || o.state !== "active") return false;
+        const cycle = cycles.get(o.cycleId);
+        if (cycle?.state !== "active" || slot?.currentCycleId !== o.cycleId ||
+            (o.role === "primary" && slot.currentOccupancyId !== o._id)) return false;
+        const ends = [o.endsAt, cycle.endsAt, cycle.endedAt]
+          .filter((v) => v !== null && v !== undefined);
+        const effectiveEnd = ends.length ? Math.min(...ends) : null;
+        return o.startsAt <= now && cycle.startsAt <= now &&
+          (effectiveEnd === null || now < effectiveEnd);
+      }).length;
+      if (listings || boundUsers || effectiveOccupancies)
+        blockers = { 关联房源: listings, 绑定用户: boundUsers, 有效入住: effectiveOccupancies };
     } else if (type === "house") {
       target = houseRows.find((r) => r._id === id);
       if (!this.own(target)) failCode("NOT_FOUND", "记录不存在或不可见", 404);

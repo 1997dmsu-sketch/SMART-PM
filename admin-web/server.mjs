@@ -10,6 +10,7 @@ import { OrgPropertyService, OpReplay } from "./lib/property-v2.mjs";
 import { PersonService } from "./lib/persons.mjs";
 import { VerificationService } from "./lib/verification.mjs";
 import { BlacklistService } from "./lib/blacklist.mjs";
+import { OccupancyService } from "./lib/occupancies.mjs";
 import { IdentityService } from "./lib/identity.mjs";
 import { operationKeyId } from "./lib/claims.mjs";
 import { LocalStore, CloudStore } from "./lib/store.mjs";
@@ -356,6 +357,12 @@ export async function createApp({
               { membershipId: membership._id },
               { fileValidator },
             );
+            const occupancies = new OccupancyService(
+              store,
+              orgId,
+              { membershipId: membership._id },
+              { blacklist },
+            );
             const auditV2 = (action) => ({
               actor: account.username,
               actorId: account._id,
@@ -371,6 +378,16 @@ export async function createApp({
               const { data, nextCursor } = await service.listRooms(query);
               return ok(data, 200, nextCursor);
             }
+            const occupancyList = path.match(/^\/api\/v2\/rooms\/([^/]+)\/occupancies$/);
+            if (occupancyList && method === "GET") {
+              const { data, nextCursor } = await occupancies.listOccupancies(
+                decodeURIComponent(occupancyList[1]), query,
+              );
+              return ok(data, 200, nextCursor);
+            }
+            const materialization = path.match(/^\/api\/v2\/occupancy-materializations\/([^/]+)$/);
+            if (materialization && method === "GET")
+              return ok(await occupancies.getMaterialization(decodeURIComponent(materialization[1])));
             if (path === "/api/v2/persons" && method === "GET") {
               const { data, nextCursor } = await persons.listPersons(query);
               return ok(
@@ -470,6 +487,28 @@ export async function createApp({
                   await persons.createPerson(data, auditV2("新增人员档案"), op),
                   201,
                 );
+              const cycleCreate = path.match(/^\/api\/v2\/rooms\/([^/]+)\/occupancy-cycles$/);
+              if (cycleCreate)
+                return ok(await occupancies.createCycle(
+                  decodeURIComponent(cycleCreate[1]), data, auditV2("创建主租客入住周期"), op,
+                ), 201);
+              if (path === "/api/v2/occupancies")
+                return ok(await occupancies.createOccupancy(
+                  data, auditV2("邀请入住成员"), op,
+                ), 201);
+              const primaryTransfer = path.match(/^\/api\/v2\/rooms\/([^/]+)\/primary-transfer$/);
+              if (primaryTransfer)
+                return ok(await occupancies.transferPrimary(
+                  decodeURIComponent(primaryTransfer[1]), data, auditV2("更换主租客"), op,
+                ), 201);
+              const occupancyAction = path.match(/^\/api\/v2\/occupancies\/([^/]+)\/(activate|end)$/);
+              if (occupancyAction) {
+                const id = decodeURIComponent(occupancyAction[1]);
+                const action = occupancyAction[2];
+                return ok(await occupancies[action](
+                  id, data, auditV2(action === "activate" ? "激活入住关系" : "结束入住关系"), op,
+                ));
+              }
               if (path === "/api/v2/identity-applications")
                 return ok(
                   await verification.createApplication(data, auditV2("新建实名申请"), op),
@@ -554,6 +593,9 @@ export async function createApp({
                   message: error.status
                     ? error.message
                     : "服务暂不可用，请检查服务端配置与日志",
+                  ...(error.restriction === "occupancy.create" && error.occupancyId
+                    ? { restriction: error.restriction, occupancyId: error.occupancyId }
+                    : {}),
                 },
                 requestId,
               },

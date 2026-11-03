@@ -1,7 +1,7 @@
-// Confirmed existing WeChat environment for backend integration.
-// Real device commands remain disabled until authorization/hardware validation.
+// Offline design and interaction preview. No cloud environment is selected.
+// Device operations remain disabled and demo identifiers are rejected.
 module.exports = {
-  mode: 'live',
-  cloudEnv: 'cloud1-d6gs08jbb8aa7a138',
+  mode: 'demo',
+  cloudEnv: '',
   allowDeviceOperations: false
 };

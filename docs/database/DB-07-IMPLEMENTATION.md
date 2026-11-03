@@ -203,7 +203,7 @@ FILE_LEGACY_IMAGE_FALLBACK=deny  # 未登记旧图片默认拒绝；迁移期用
 
 | 动作 | public | private |
 |---|---|---|
-| 上传 | 组织成员 + `authorize(role,'uploads',true)`（editor 亦可，`model.mjs:22-24`） | org admin；`identity-document` 需 `identity.review`、`evidence` 需 `blacklist.read`（本期用 `membership.permissions` 预留，role=admin 兜底） |
+| 上传 | 组织成员 + `authorize(role,'uploads',true)`（editor 亦可，`model.mjs:22-24`） | org admin 角色（写入按角色，**无需任何读取权限点**，role=admin 兜底）；读取才需 readPermission：`identity-document` → `identity.readPrivate`、`evidence` → `blacklist.read`（三次复审后证件读取权限点由 `identity.review` 改为 `identity.readPrivate`，与 DB-04 证件审查权限区分） |
 | 关联/解绑/retire | 组织成员写权限 | org admin |
 | 下载 | 任意组织成员（含 viewer） | 仅上表对应权限点；否则 404 `FILE_NOT_FOUND`（无权限与不存在同态，防枚举） |
 

@@ -79,7 +79,7 @@ export const PURPOSES = {
     visibility: "private",
     private: true,
     writePermission: null, // 写入：组织管理员角色
-    readPermission: "identity.review", // 读取：证件审查权限点（DB-04）
+    readPermission: "identity.readPrivate", // 读取：证件私密读取权限点（DB-04 证件审查「读」子集）
   },
   evidence: {
     maxSize: 50 * MB,
@@ -321,7 +321,7 @@ export class FileService {
     if (privateRequired) {
       // 写入权限点优先（仅当 purpose 显式声明 writePermission）。本表当前
       // 各私密 purpose 的 writePermission 均为 null，故私密写入一律回落到
-      // 组织管理员角色——与「读」所需的 identity.review / blacklist.read 彻底
+      // 组织管理员角色——与「读」所需的 identity.readPrivate / blacklist.read 彻底
       // 分开，避免「能读就能写 / 能写就能读」的越权。
       if (permission) {
         if ((this.actor.permissions || []).includes(permission)) return;
@@ -895,7 +895,7 @@ export class FileService {
     if (file.visibility === "private") {
       const readPermission = PURPOSES[file.purpose]?.readPermission;
       // 读取权限独立于写入（复审）：purpose 声明了 readPermission（如
-      // identity-document → identity.review）时，仅凭组织管理员角色不再放行，
+      // identity-document → identity.readPrivate）时，仅凭组织管理员角色不再放行，
       // 必须持有该读取权限点；未声明 readPermission 的私密文件回落到组织管理员。
       // 未授权一律 404 与不存在同态（防枚举）。
       const allowed = this.canReadFile(file, actor);

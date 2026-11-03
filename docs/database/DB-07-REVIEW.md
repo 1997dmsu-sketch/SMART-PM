@@ -89,3 +89,16 @@ server 的 locator 匹配收集全部命中并采用 private 优先；同一路�
 修复：将 identity-document 的 `readPermission` 改为 `identity.readPrivate`，同步 HTTP/服务测试和实施文档；验证只有 identity.review 时下载/列表/关联均不可见，只有 identity.readPrivate 时可读取并留下访问审计，权限撤销后立即拒绝。上传权限继续独立按已确定的组织角色或专用写权限处理。
 
 实跑后台 110 项、根目录 51 项、9 页静态检查全部通过。除上述权限点映射外，本轮未发现新的可复现阻断项。分支仍需在 DB-04/06 基线上整合后跑全量回归与 DB-08 云端探针。
+
+## 第四轮复审：20e7fb8
+
+结论：**DB-07 独立分支复审通过，可以进入集成阶段。** 第一轮提出的 F01–F03 均已关闭，本轮未发现新的可复现阻断项；这不等于已批准直接合并 main 或上线生产。
+
+- F01 通过：`identity-document` 的 `readPermission` 已改为 `identity.readPrivate`。独立临时库验证中，仅持 `identity.review` 返回同态 `FILE_NOT_FOUND`；持 `identity.readPrivate` 可读取 20 字节虚构 PNG，并生成下载访问审计。上传仍按组织管理员角色独立控制，无私密读取权限的管理员可以上传但不能读取。
+- F02 保持通过：相同定位符同时存在 public/private 登记时采用最严密级，匿名静态入口返回 404。
+- F03 保持通过：未获私密读取权限的调用者在分页前被过滤，文件列表与文件关联列表均不暴露私密记录；权限授予后可见，撤销后下一次请求立即拒绝。
+- 组织上下文继续采用当前有效 `membership.role` 与 `membership.permissions`，未恢复全局账号角色旁路。
+
+实跑验证：后台 111 项、根目录 51 项、9 页静态检查全部通过；`git show --check` 未发现空白错误。独立复现仅使用临时 LocalStore、虚构 PNG 和本地 HTTP，未调用云存储、NAS 或真实私密资料。
+
+集成边界仍保持不变：DB-07 基于 DB-02，不能直接覆盖 DB-05/DB-04/DB-06 的共享 `store.mjs`、`server.mjs`；应由单一集成负责人以 DB-05 已复核 head 为基线整合。整合时必须把 DB-04/06 的 `fileValidator` 接到 DB-07，复核文件 `ready` 状态、组织、purpose、private 密级与引用权限，并重新运行合并后的全量测试。生产上线前还必须用真实云数据执行文件清点并确认覆盖率 100%，本轮演示种子 dry-run 不能替代该检查。

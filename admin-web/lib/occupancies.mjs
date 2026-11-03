@@ -85,11 +85,31 @@ export class OccupancyService {
         membership.status !== "active" || membership.role !== "admin")
       failCode("FORBIDDEN", "组织成员关系已失效或权限不足", 403);
   }
+  assertActiveUser(user) {
+    // Trusted auth identifies the account; it does not prove it is still usable.
+    // Missing users fail closed while legacy records without status remain active.
+    if (!user || (user.status && user.status !== "active"))
+      failCode("USER_DISABLED", "绑定账号不存在或已停用", 403);
+    return user;
+  }
+  checkUser(state, userId) {
+    return this.assertActiveUser(state[`users/${userId}`]);
+  }
+  checkBoundUser(state, person) {
+    if (person.userId) this.checkUser(state, person.userId);
+  }
+  async activeUser(userId) {
+    const user = (await this.store.list("users")).find((u) => u._id === userId);
+    return this.assertActiveUser(user);
+  }
   async readCheck({ resident = false } = {}) {
     const org = (await this.store.list("organizations")).find((o) => o._id === this.orgId);
     if (!org || org.status !== "active") failCode("FORBIDDEN", "组织当前不可用", 403);
     if (!this.auth) return;
-    if (resident && this.auth.userId) return;
+    if (resident && this.auth.userId) {
+      await this.activeUser(this.auth.userId);
+      return;
+    }
     if (!this.auth.membershipId) failCode("FORBIDDEN", "仅组织管理员可执行此操作", 403);
     const membership = (await this.store.list("org_memberships"))
       .find((m) => m._id === this.auth.membershipId);
@@ -208,6 +228,7 @@ export class OccupancyService {
       failCode("FORBIDDEN", "住户身份上下文无效", 403);
     if (!primaryOccupancyId === !memberOccupancyId)
       failCode("PARAM_ERROR", "须提供一个主租客或成员关系引用");
+    const actorUser = await this.activeUser(this.auth.userId);
     const actorPerson = (await this.store.list("persons", this.orgId))
       .find((p) => p.userId === this.auth.userId && p.status === "active");
     if (!actorPerson) failCode("FORBIDDEN", "登录账号未绑定本组织人员档案", 403);
@@ -218,8 +239,9 @@ export class OccupancyService {
     const slotId = primarySlotId(this.orgId, primary.roomId);
     const slot = (await this.store.list("room_primary_slots", this.orgId))
       .find((s) => s._id === slotId);
-    const verify = ({ actor, primaryNow, cycleNow, slotNow, memberNow }) => {
+    const verify = ({ account, actor, primaryNow, cycleNow, slotNow, memberNow }) => {
       const now = this.now();
+      this.assertActiveUser(account);
       if (!this.own(actor) || actor.status !== "active" || actor.userId !== this.auth.userId ||
           !this.own(primaryNow) || primaryNow.state !== "active" || primaryNow.role !== "primary" ||
           primaryNow.personId !== actor._id || !activeAt(primaryNow, now) ||
@@ -234,14 +256,16 @@ export class OccupancyService {
           !["invited", "pending_review", "active"].includes(memberNow.state)))
         failCode("FORBIDDEN", "只能管理本有效周期的成员资料", 403);
     };
-    verify({ actor: actorPerson, primaryNow: primary, cycleNow: cycle, slotNow: slot, memberNow: member });
+    verify({ account: actorUser, actor: actorPerson, primaryNow: primary, cycleNow: cycle, slotNow: slot, memberNow: member });
     return {
       refs: uniqueRefs([
+        ref("users", this.auth.userId),
         ref("persons", actorPerson._id), ref("occupancies", primary._id),
         ref("occupancy_cycles", cycle._id), ref("room_primary_slots", slotId),
         ...(member ? [ref("occupancies", member._id)] : []),
       ]),
       check: (state) => verify({
+        account: state[`users/${this.auth.userId}`],
         actor: state[`persons/${actorPerson._id}`],
         primaryNow: state[`occupancies/${primary._id}`],
         cycleNow: state[`occupancy_cycles/${cycle._id}`],
@@ -250,13 +274,32 @@ export class OccupancyService {
       }),
     };
   }
+  async withCreateEligibility(personId, occupancyId, refs, build, audit) {
+    if (!this.blacklist || this.blacklist.orgId !== this.orgId)
+      failCode("ADAPTER_UNAVAILABLE", "黑名单资格服务未配置", 503);
+    try {
+      return await this.blacklist.withEligibility({
+        personId, occupancyId, restriction: "occupancy.create",
+      }, refs, build, audit);
+    } catch (error) {
+      if (["BLACKLIST_REVIEW_REQUIRED", "BLACKLIST_DENIED"].includes(error.code)) {
+        // No business record exists yet. Return the opaque application reference
+        // so review can complete before retrying creation with the same ID.
+        error.occupancyId = occupancyId;
+        error.restriction = "occupancy.create";
+      }
+      throw error;
+    }
+  }
   async createCycle(roomId, data, audit, op = null) {
     const primaryPersonId = text(data?.primaryPersonId, "primaryPersonId");
     const period = range(data?.startsAt, data?.endsAt ?? null);
     const room = await this.room(roomId);
     await this.person(primaryPersonId);
     const cycleId = randomUUID();
-    const occupancyId = randomUUID();
+    const occupancyId = data?.occupancyId === undefined
+      ? randomUUID()
+      : text(data.occupancyId, "occupancyId");
     const refs = [
       ...this.roomRefs(room), ref("persons", primaryPersonId),
       ref("occupancy_cycles", cycleId), ref("occupancies", occupancyId),
@@ -264,11 +307,12 @@ export class OccupancyService {
       ref("lifecycle_guards", guardId(this.orgId)), ...this.authRefs(),
       ...(op ? [ref("operation_keys", op.id)] : []),
     ];
-    let result;
-    await this.store.transact(refs, (state) => {
+    return this.withCreateEligibility(primaryPersonId, occupancyId, refs, (state) => {
       this.adminCheck(state);
       this.checkRoom(state, room);
       this.checkPerson(state, primaryPersonId);
+      if (state[`occupancies/${occupancyId}`])
+        failCode("DUPLICATE_OCCUPANCY", "入住申请引用已存在，请核对后重试", 409);
       this.checkClaim(state, cycleId, roomId, primaryPersonId, occupancyId, { create: true });
       const cycle = {
         _id: cycleId, orgId: this.orgId, roomId, primaryOccupancyId: occupancyId,
@@ -281,16 +325,18 @@ export class OccupancyService {
         addedByType: audit.actorType || "adminAccount", sponsorOccupancyId: null,
         identityApplicationId: null, ...base(),
       };
-      result = this.resultFor(occupancy, cycle);
-      return [
-        { collection: "occupancy_cycles", id: cycleId, data: cycle },
-        { collection: "occupancies", id: occupancyId, data: occupancy },
-        this.claimWrite(cycleId, roomId, primaryPersonId, occupancyId),
-        lifecycleWrite(state, this.orgId),
-        ...opWrite(state, op, { status: 201, body: result }),
-      ];
+      const result = this.resultFor(occupancy, cycle);
+      return {
+        writes: [
+          { collection: "occupancy_cycles", id: cycleId, data: cycle },
+          { collection: "occupancies", id: occupancyId, data: occupancy },
+          this.claimWrite(cycleId, roomId, primaryPersonId, occupancyId),
+          lifecycleWrite(state, this.orgId),
+          ...opWrite(state, op, { status: 201, body: result }),
+        ],
+        result,
+      };
     }, audit);
-    return result;
   }
   async createOccupancy(data, audit, op = null) {
     const roomId = text(data?.roomId, "roomId");
@@ -304,6 +350,7 @@ export class OccupancyService {
     let actorPerson = null;
     let sponsor = null;
     if (this.auth?.userId) {
+      await this.activeUser(this.auth.userId);
       actorPerson = (await this.store.list("persons", this.orgId))
         .find((p) => p.userId === this.auth.userId && p.status === "active");
       if (!actorPerson) failCode("FORBIDDEN", "登录账号未绑定本组织人员档案", 403);
@@ -312,28 +359,33 @@ export class OccupancyService {
         o.role === "primary" && o.state === "active");
       if (!sponsor) failCode("SPONSOR_INACTIVE", "当前主租客关系无效，不能邀请成员", 403);
     }
-    const occupancyId = randomUUID();
+    const occupancyId = data?.occupancyId === undefined
+      ? randomUUID()
+      : text(data.occupancyId, "occupancyId");
     const slotId = primarySlotId(this.orgId, roomId);
     const refs = uniqueRefs([
       ...this.roomRefs(room), ref("persons", personId), ref("occupancy_cycles", cycleId),
       ref("occupancies", occupancyId), ref("room_primary_slots", slotId),
       ref("unique_claims", occupancyClaimId(this.orgId, roomId, cycleId, personId)),
       ref("lifecycle_guards", guardId(this.orgId)), ...this.authRefs(),
+      ...(this.auth?.userId ? [ref("users", this.auth.userId)] : []),
       ...(actorPerson ? [ref("persons", actorPerson._id)] : []),
       ...(sponsor ? [ref("occupancies", sponsor._id)] : []),
       ...(op ? [ref("operation_keys", op.id)] : []),
     ]);
-    let result;
-    await this.store.transact(refs, (state) => {
+    return this.withCreateEligibility(personId, occupancyId, refs, (state) => {
       const now = this.now();
       if (this.auth?.userId) {
         this.orgCheck(state);
+        this.checkUser(state, this.auth.userId);
         const currentActor = this.checkPerson(state, actorPerson._id);
         if (currentActor.userId !== this.auth.userId)
           failCode("FORBIDDEN", "登录账号的人员绑定已变化", 403);
       } else this.adminCheck(state);
       this.checkRoom(state, room);
       this.checkPerson(state, personId);
+      if (state[`occupancies/${occupancyId}`])
+        failCode("DUPLICATE_OCCUPANCY", "入住申请引用已存在，请核对后重试", 409);
       const currentCycle = state[`occupancy_cycles/${cycleId}`];
       if (!this.own(currentCycle) || currentCycle.roomId !== roomId)
         failCode("NOT_FOUND", "入住周期不存在或不可见", 404);
@@ -365,19 +417,21 @@ export class OccupancyService {
         addedByType: this.auth?.userId ? "user" : (audit.actorType || "adminAccount"),
         sponsorOccupancyId: sponsor?._id ?? null, identityApplicationId: null, ...base(),
       };
-      result = this.resultFor(occupancy, nextCycle);
-      return [
-        { collection: "occupancies", id: occupancyId, data: occupancy },
-        {
-          collection: "occupancy_cycles", id: cycleId,
-          data: { epoch: nextCycle.epoch, revision: nextCycle.revision },
-        },
-        this.claimWrite(cycleId, roomId, personId, occupancyId),
-        lifecycleWrite(state, this.orgId),
-        ...opWrite(state, op, { status: 201, body: result }),
-      ];
+      const result = this.resultFor(occupancy, nextCycle);
+      return {
+        writes: [
+          { collection: "occupancies", id: occupancyId, data: occupancy },
+          {
+            collection: "occupancy_cycles", id: cycleId,
+            data: { epoch: nextCycle.epoch, revision: nextCycle.revision },
+          },
+          this.claimWrite(cycleId, roomId, personId, occupancyId),
+          lifecycleWrite(state, this.orgId),
+          ...opWrite(state, op, { status: 201, body: result }),
+        ],
+        result,
+      };
     }, audit);
-    return result;
   }
   async activate(id, data, audit, op = null) {
     const expectedRevision = requiredRevision(data?.expectedRevision);
@@ -416,7 +470,8 @@ export class OccupancyService {
       if (!(current.role === "primary" ? current.state === "pending_review" : current.state === "invited"))
         failCode("INVALID_STATE", "当前入住关系不允许激活", 409);
       this.checkRoom(state, room);
-      this.checkPerson(state, current.personId);
+      const currentPerson = this.checkPerson(state, current.personId);
+      this.checkBoundUser(state, currentPerson);
       this.checkClaim(state, current.cycleId, current.roomId, current.personId, id);
       const currentCycle = state[`occupancy_cycles/${current.cycleId}`];
       if (!this.own(currentCycle) || currentCycle.roomId !== current.roomId ||
@@ -614,7 +669,9 @@ export class OccupancyService {
       .map((o) => o.startsAt);
     const earliestOldEnd = Math.max(oldOccupancy.startsAt, oldCycle.startsAt, ...activeStarts);
     const newCycleId = randomUUID();
-    const newOccupancyId = randomUUID();
+    const newOccupancyId = data?.newOccupancyId === undefined
+      ? randomUUID()
+      : text(data.newOccupancyId, "newOccupancyId");
     const jobId = randomUUID();
     const slotId = primarySlotId(this.orgId, roomId);
     const refs = uniqueRefs([
@@ -626,11 +683,12 @@ export class OccupancyService {
       ref("lifecycle_guards", guardId(this.orgId)), ...this.authRefs(),
       ...(op ? [ref("operation_keys", op.id)] : []),
     ]);
-    let result;
-    await this.store.transact(refs, (state) => {
+    return this.withCreateEligibility(newPersonId, newOccupancyId, refs, (state) => {
       this.adminCheck(state);
       this.checkRoom(state, room);
       this.checkPerson(state, newPersonId, newPersonRevision);
+      if (state[`occupancies/${newOccupancyId}`])
+        failCode("DUPLICATE_OCCUPANCY", "入住申请引用已存在，请核对后重试", 409);
       this.checkClaim(state, newCycleId, roomId, newPersonId, newOccupancyId, { create: true });
       const current = state[`occupancies/${oldOccupancyId}`];
       const currentCycle = state[`occupancy_cycles/${oldCycleId}`];
@@ -685,13 +743,12 @@ export class OccupancyService {
         this.claimWrite(newCycleId, roomId, newPersonId, newOccupancyId),
         lifecycleWrite(state, this.orgId),
       ];
-      result = this.resultFor(newOccupancy, newCycle, {
+      const result = this.resultFor(newOccupancy, newCycle, {
         oldCycleId, oldOccupancyId, materializationJobId: jobId,
       });
       writes.push(...opWrite(state, op, { status: 201, body: result }));
-      return writes;
+      return { writes, result };
     }, audit);
-    return result;
   }
   effective(occupancy, cycle, slot, room, now = this.now()) {
     const effectiveEndsAt = minEnd(occupancy.endsAt, cycle?.endsAt, cycle?.endedAt);

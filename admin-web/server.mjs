@@ -593,6 +593,9 @@ export async function createApp({
                   message: error.status
                     ? error.message
                     : "服务暂不可用，请检查服务端配置与日志",
+                  ...(error.restriction === "occupancy.create" && error.occupancyId
+                    ? { restriction: error.restriction, occupancyId: error.occupancyId }
+                    : {}),
                 },
                 requestId,
               },

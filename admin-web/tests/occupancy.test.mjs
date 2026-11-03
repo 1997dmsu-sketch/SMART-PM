@@ -71,15 +71,34 @@ async function setup(t) {
     }, reviewerAudit);
     return applicationId;
   };
-  const bindUser = async (personId, userId) => {
-    await store.transact([{ collection: "persons", id: personId }], (state) => [{
-      collection: "persons", id: personId,
-      data: { userId, revision: state[`persons/${personId}`].revision + 1 },
+  const bindUser = async (personId, userId, { createUser = true } = {}) => {
+    await store.transact([
+      { collection: "persons", id: personId }, { collection: "users", id: userId },
+    ], (state) => [
+      {
+        collection: "persons", id: personId,
+        data: { userId, revision: state[`persons/${personId}`].revision + 1 },
+      },
+      ...(createUser ? [{
+        collection: "users", id: userId,
+        data: {
+          role: "user", status: "active",
+          ...(state[`users/${userId}`]
+            ? { revision: (state[`users/${userId}`].revision ?? 0) + 1 }
+            : { revision: 1, createdAt: Date.now() }),
+        },
+      }] : []),
+    ], audit);
+  };
+  const setUserStatus = async (userId, status) => {
+    await store.transact([{ collection: "users", id: userId }], (state) => [{
+      collection: "users", id: userId,
+      data: { status, revision: (state[`users/${userId}`]?.revision ?? 0) + 1 },
     }], audit);
   };
   return {
     store, orgs, property, persons, service, residentService, reviewerBlacklist,
-    verificationAdmin, verificationReviewer, approveFor, bindUser,
+    verificationAdmin, verificationReviewer, approveFor, bindUser, setUserStatus,
     roomId: rooms.ids[0], otherRoomId: rooms.ids[1],
     setClock: (value) => { clock = value; },
   };
@@ -575,4 +594,258 @@ test("effective primary sponsors no-account profiles and masked member verificat
   assert.equal(stillDraft.revision, 1);
   await assert.rejects(residentVerification.getApplication(draft.applicationId, userAudit),
     (e) => e.code === "SPONSOR_INACTIVE");
+});
+
+test("F01 activation rejects disabled or missing bound accounts and still supports no-account persons", async (t) => {
+  const x = await setup(t);
+  const disabled = await x.persons.createPerson({ name: "停用账号住户" }, audit);
+  await x.bindUser(disabled.personId, "user-activation-disabled");
+  await x.setUserStatus("user-activation-disabled", "disabled");
+  const disabledApplication = await x.approveFor(disabled.personId);
+  const disabledCycle = await x.service.createCycle(x.roomId, cycleInput(disabled.personId), audit);
+  await assert.rejects(activate(x.service, disabledCycle, disabledApplication),
+    (e) => e.code === "USER_DISABLED");
+
+  const missing = await x.persons.createPerson({ name: "缺失账号住户" }, audit);
+  await x.bindUser(missing.personId, "user-activation-missing", { createUser: false });
+  const missingApplication = await x.approveFor(missing.personId);
+  const missingCycle = await x.service.createCycle(x.roomId, cycleInput(missing.personId), audit);
+  await assert.rejects(activate(x.service, missingCycle, missingApplication),
+    (e) => e.code === "USER_DISABLED");
+  const pendingRows = (await x.store.list("occupancies", "org-a"))
+    .filter((o) => [disabledCycle.occupancyId, missingCycle.occupancyId].includes(o._id));
+  assert.ok(pendingRows.every((o) => o.state === "pending_review" && o.activatedAt === undefined));
+  assert.equal((await x.store.list("room_primary_slots", "org-a")).length, 0);
+
+  const normal = await x.persons.createPerson({ name: "正常账号住户" }, audit);
+  await x.bindUser(normal.personId, "user-activation-active");
+  const normalApplication = await x.approveFor(normal.personId);
+  const normalCycle = await x.service.createCycle(x.roomId, cycleInput(normal.personId), audit);
+  assert.equal((await activate(x.service, normalCycle, normalApplication)).effectiveState, "active");
+
+  const child = await x.persons.createPerson({ name: "无账号儿童" }, audit);
+  const childApplication = await x.approveFor(child.personId);
+  const childCycle = await x.service.createCycle(x.otherRoomId, cycleInput(child.personId), audit);
+  assert.equal((await activate(x.service, childCycle, childApplication)).effectiveState, "active");
+  assert.equal((await x.store.list("persons", "org-a"))
+    .find((p) => p._id === child.personId).userId, null);
+});
+
+test("F01 disabling a primary account closes invites proxy writes and resident reads without new business writes", async (t) => {
+  const x = await setup(t);
+  const userId = "user-disabled-primary";
+  const primary = await x.persons.createPerson({ name: "待停用主租客" }, audit);
+  const member = await x.persons.createPerson({ name: "代理资料成员" }, audit);
+  const otherMember = await x.persons.createPerson({ name: "停用后邀请成员" }, audit);
+  await x.bindUser(primary.personId, userId);
+  const primaryApplication = await x.approveFor(primary.personId);
+  const cycle = await x.service.createCycle(x.roomId, cycleInput(primary.personId), audit);
+  await activate(x.service, cycle, primaryApplication);
+  const resident = x.residentService(userId);
+  const userAudit = { actor: "resident", actorId: userId, actorType: "user", action: "停用账号测试" };
+  const invited = await resident.createOccupancy(
+    memberInput(x.roomId, cycle.cycleId, member.personId), userAudit,
+  );
+  const residentPersons = new PersonService(x.store, "org-a", { userId }, {
+    sponsorAccess: resident,
+  });
+  const residentVerification = new VerificationService(x.store, "org-a", { userId }, {
+    identity: new IdentityService(x.store, { hmacKey: "test-occupancy-key-0123456789" }),
+    encryptionKey: KEY, fileValidator: async () => true, sponsorAccess: resident,
+  });
+  const draft = await residentVerification.createApplication({
+    personId: member.personId, documentType: "id-card", occupancyId: invited.occupancyId,
+  }, userAudit);
+  await x.setUserStatus(userId, "disabled");
+  const before = {
+    persons: (await x.store.list("persons", "org-a")).length,
+    occupancies: (await x.store.list("occupancies", "org-a")).length,
+    applications: (await x.store.list("identity_applications", "org-a")).length,
+    privateRows: (await x.store.list("identity_private", "org-a")).length,
+  };
+  await assert.rejects(resident.createOccupancy(
+    memberInput(x.roomId, cycle.cycleId, otherMember.personId), userAudit,
+  ), (e) => e.code === "USER_DISABLED");
+  await assert.rejects(residentPersons.createPerson({
+    name: "停用后代建", occupancyId: cycle.occupancyId,
+  }, userAudit), (e) => e.code === "USER_DISABLED");
+  await assert.rejects(residentVerification.createApplication({
+    personId: member.personId, documentType: "id-card", occupancyId: invited.occupancyId,
+  }, userAudit), (e) => e.code === "USER_DISABLED");
+  await assert.rejects(residentVerification.submit(draft.applicationId, {
+    expectedRevision: 1,
+    document: { name: "代理资料成员", documentNumber: "110101199001019878" },
+    fileIds: ["file-disabled-account"],
+  }, userAudit), (e) => e.code === "USER_DISABLED");
+  await assert.rejects(residentVerification.getApplication(draft.applicationId, userAudit),
+    (e) => e.code === "USER_DISABLED");
+  await assert.rejects(resident.listOccupancies(x.roomId), (e) => e.code === "USER_DISABLED");
+  assert.deepEqual({
+    persons: (await x.store.list("persons", "org-a")).length,
+    occupancies: (await x.store.list("occupancies", "org-a")).length,
+    applications: (await x.store.list("identity_applications", "org-a")).length,
+    privateRows: (await x.store.list("identity_private", "org-a")).length,
+  }, before);
+  assert.equal((await x.store.list("identity_applications", "org-a"))
+    .find((a) => a._id === draft.applicationId).state, "draft");
+  assert.equal((await x.service.listOccupancies(x.roomId)).data
+    .find((o) => o.occupancyId === cycle.occupancyId).effectiveState, "active");
+});
+
+test("F02 create-only blacklist requires a scoped review before a primary cycle exists", async (t) => {
+  const x = await setup(t);
+  const primary = await x.persons.createPerson({ name: "创建复核主租客" }, audit);
+  const applicationId = await x.approveFor(primary.personId);
+  const entry = await x.reviewerBlacklist.createEntry({
+    subjectType: "person", personId: primary.personId, reason: "创建阶段复核",
+    evidenceFileIds: [], restrictions: ["occupancy.create"], startsAt: 1_000_000, endsAt: null,
+  }, reviewerAudit);
+  const blocked = await x.service.createCycle(x.roomId, cycleInput(primary.personId), audit)
+    .catch((e) => e);
+  assert.equal(blocked.code, "BLACKLIST_REVIEW_REQUIRED");
+  assert.equal(blocked.restriction, "occupancy.create");
+  assert.ok(blocked.occupancyId);
+  assert.equal((await x.store.list("occupancy_cycles", "org-a")).length, 0);
+  assert.equal((await x.store.list("occupancies", "org-a")).length, 0);
+  await x.reviewerBlacklist.reviewOccupancy(blocked.occupancyId, {
+    restriction: "occupancy.create", decision: "allow", reason: "允许本次创建",
+    entryIds: [entry.entryId], entryRevisions: [1],
+  }, reviewerAudit);
+  const created = await x.service.createCycle(x.roomId, cycleInput(primary.personId, {
+    occupancyId: blocked.occupancyId,
+  }), audit);
+  assert.equal(created.occupancyId, blocked.occupancyId);
+  assert.equal((await activate(x.service, created, applicationId)).effectiveState, "active");
+});
+
+test("F02 create and activate allows are independent when both restrictions hit", async (t) => {
+  const x = await setup(t);
+  const primary = await x.persons.createPerson({ name: "双重名单主租客" }, audit);
+  const applicationId = await x.approveFor(primary.personId);
+  const entry = await x.reviewerBlacklist.createEntry({
+    subjectType: "person", personId: primary.personId, reason: "创建与激活均复核",
+    evidenceFileIds: [], restrictions: ["occupancy.create", "occupancy.activate"],
+    startsAt: 1_000_000, endsAt: null,
+  }, reviewerAudit);
+  const blocked = await x.service.createCycle(x.roomId, cycleInput(primary.personId), audit)
+    .catch((e) => e);
+  assert.equal(blocked.code, "BLACKLIST_REVIEW_REQUIRED");
+  await x.reviewerBlacklist.reviewOccupancy(blocked.occupancyId, {
+    restriction: "occupancy.create", decision: "allow", reason: "仅放行创建",
+    entryIds: [entry.entryId], entryRevisions: [1],
+  }, reviewerAudit);
+  const created = await x.service.createCycle(x.roomId, cycleInput(primary.personId, {
+    occupancyId: blocked.occupancyId,
+  }), audit);
+  await assert.rejects(activate(x.service, created, applicationId),
+    (e) => e.code === "BLACKLIST_REVIEW_REQUIRED");
+  assert.equal((await x.store.list("room_primary_slots", "org-a")).length, 0);
+  await x.reviewerBlacklist.reviewOccupancy(created.occupancyId, {
+    decision: "allow", reason: "单独放行激活",
+    entryIds: [entry.entryId], entryRevisions: [1],
+  }, reviewerAudit);
+  assert.equal((await activate(x.service, created, applicationId)).effectiveState, "active");
+  const heads = (await x.store.list("blacklist_decisions", "org-a"))
+    .filter((d) => d.recordType === "current" && d.occupancyId === created.occupancyId);
+  assert.equal(heads.length, 2);
+  assert.deepEqual(new Set(heads.map((d) => d.restriction)),
+    new Set(["occupancy.create", "occupancy.activate"]));
+});
+
+test("F02 member invitation and primary transfer enforce create review without ending the old cycle on failure", async (t) => {
+  const x = await setup(t);
+  const primary = await x.persons.createPerson({ name: "创建检查旧主租" }, audit);
+  const member = await x.persons.createPerson({ name: "创建检查成员" }, audit);
+  const nextPrimary = await x.persons.createPerson({ name: "创建检查新主租" }, audit);
+  const [primaryApplication, memberApplication, nextApplication] = await Promise.all([
+    x.approveFor(primary.personId), x.approveFor(member.personId), x.approveFor(nextPrimary.personId),
+  ]);
+  const cycle = await x.service.createCycle(x.roomId, cycleInput(primary.personId), audit);
+  const activePrimary = await activate(x.service, cycle, primaryApplication);
+  const memberEntry = await x.reviewerBlacklist.createEntry({
+    subjectType: "person", personId: member.personId, reason: "成员创建复核",
+    evidenceFileIds: [], restrictions: ["occupancy.create"], startsAt: 1_000_000, endsAt: null,
+  }, reviewerAudit);
+  const memberBlocked = await x.service.createOccupancy(
+    memberInput(x.roomId, cycle.cycleId, member.personId), audit,
+  ).catch((e) => e);
+  assert.equal(memberBlocked.code, "BLACKLIST_REVIEW_REQUIRED");
+  assert.equal(memberBlocked.restriction, "occupancy.create");
+  await x.reviewerBlacklist.reviewOccupancy(memberBlocked.occupancyId, {
+    restriction: "occupancy.create", decision: "allow", reason: "允许成员邀请",
+    entryIds: [memberEntry.entryId], entryRevisions: [1],
+  }, reviewerAudit);
+  const invited = await x.service.createOccupancy(memberInput(
+    x.roomId, cycle.cycleId, member.personId, { occupancyId: memberBlocked.occupancyId },
+  ), audit);
+  await activate(x.service, invited, memberApplication);
+
+  const nextEntry = await x.reviewerBlacklist.createEntry({
+    subjectType: "person", personId: nextPrimary.personId, reason: "换租创建复核",
+    evidenceFileIds: [], restrictions: ["occupancy.create"], startsAt: 1_000_000, endsAt: null,
+  }, reviewerAudit);
+  const currentCycle = (await x.store.list("occupancy_cycles", "org-a"))
+    .find((c) => c._id === cycle.cycleId);
+  const nextPerson = (await x.store.list("persons", "org-a"))
+    .find((p) => p._id === nextPrimary.personId);
+  const transferInput = {
+    occupancyId: cycle.occupancyId, cycleId: cycle.cycleId,
+    expectedRevision: activePrimary.revision, expectedCycleRevision: currentCycle.revision,
+    newPrimaryPersonId: nextPrimary.personId, newPersonExpectedRevision: nextPerson.revision,
+    reason: "创建限制换租", oldEndsAt: 1_000_000, startsAt: 1_000_000, endsAt: null,
+  };
+  const transferBlocked = await x.service.transferPrimary(x.roomId, transferInput, audit)
+    .catch((e) => e);
+  assert.equal(transferBlocked.code, "BLACKLIST_REVIEW_REQUIRED");
+  assert.equal(transferBlocked.restriction, "occupancy.create");
+  assert.equal((await x.store.list("occupancies", "org-a"))
+    .find((o) => o._id === cycle.occupancyId).state, "active");
+  assert.equal((await x.store.list("occupancy_cycles", "org-a")).length, 1);
+  assert.equal((await x.store.list("occupancy_materializations", "org-a")).length, 0);
+  await x.reviewerBlacklist.reviewOccupancy(transferBlocked.occupancyId, {
+    restriction: "occupancy.create", decision: "allow", reason: "允许换租新周期",
+    entryIds: [nextEntry.entryId], entryRevisions: [1],
+  }, reviewerAudit);
+  const transferred = await x.service.transferPrimary(x.roomId, {
+    ...transferInput, newOccupancyId: transferBlocked.occupancyId,
+  }, audit);
+  assert.equal(transferred.occupancyId, transferBlocked.occupancyId);
+  assert.equal(transferred.storedState, "pending_review");
+  assert.equal((await activate(x.service, transferred, nextApplication)).effectiveState, "active");
+});
+
+test("F02 a create rule committed after eligibility pre-read invalidates the creation snapshot", async (t) => {
+  const x = await setup(t);
+  const primary = await x.persons.createPerson({ name: "创建竞态住户" }, audit);
+  const internal = x.service.blacklist;
+  const original = internal.prepareEligibility.bind(internal);
+  let readyResolve;
+  let resume;
+  let once = true;
+  const ready = new Promise((resolve) => { readyResolve = resolve; });
+  const gate = new Promise((resolve) => { resume = resolve; });
+  internal.prepareEligibility = async (request) => {
+    const token = await original(request);
+    if (request.restriction === "occupancy.create" && once) {
+      once = false;
+      readyResolve();
+      await gate;
+    }
+    return token;
+  };
+  const outcome = x.service.createCycle(x.roomId, cycleInput(primary.personId), audit)
+    .catch((e) => e);
+  await ready;
+  await x.reviewerBlacklist.createEntry({
+    subjectType: "person", personId: primary.personId, reason: "预读后新增创建限制",
+    evidenceFileIds: [], restrictions: ["occupancy.create"], startsAt: 1_000_000, endsAt: null,
+  }, reviewerAudit);
+  resume();
+  const blocked = await outcome;
+  internal.prepareEligibility = original;
+  assert.equal(blocked.code, "BLACKLIST_REVIEW_REQUIRED");
+  assert.equal(blocked.restriction, "occupancy.create");
+  assert.ok(blocked.occupancyId);
+  assert.equal((await x.store.list("occupancy_cycles", "org-a")).length, 0);
+  assert.equal((await x.store.list("occupancies", "org-a")).length, 0);
 });

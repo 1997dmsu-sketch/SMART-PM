@@ -28,8 +28,10 @@ const uniqueStrings = (value, label, { allowEmpty = true, max = 30 } = {}) => {
   return result;
 };
 export const BLACKLIST_RESTRICTIONS = ["occupancy.create", "occupancy.activate"];
-export const blacklistDecisionHeadId = (orgId, occupancyId) =>
-  `blacklist-decision-head-${hash(orgId, occupancyId)}`;
+export const blacklistDecisionHeadId = (orgId, occupancyId, restriction = "occupancy.activate") =>
+  `blacklist-decision-head-${restriction === "occupancy.activate"
+    ? hash(orgId, occupancyId) // preserve DB-06 activate head IDs and history
+    : hash(orgId, occupancyId, restriction)}`;
 const subjectKeyOf = (subject) => `${subject.subjectType}|${subject.subjectKey}`;
 const sameSubject = (entry, subject) =>
   entry.subjectType === subject.subjectType &&
@@ -305,6 +307,8 @@ export class BlacklistService {
   // random-ID decision record preserves append-only review history.
   async reviewOccupancy(occupancyId, data, audit, op = null) {
     identifier(occupancyId, "occupancyId");
+    const restriction = data.restriction ?? "occupancy.activate";
+    if (!BLACKLIST_RESTRICTIONS.includes(restriction)) failCode("PARAM_ERROR", "复核范围无效");
     if (!["allow", "deny"].includes(data.decision)) failCode("PARAM_ERROR", "复核决定无效");
     const reason = text(data.reason, "复核理由");
     const entryIds = uniqueStrings(data.entryIds, "entryIds", { allowEmpty: false });
@@ -327,11 +331,12 @@ export class BlacklistService {
       };
       return [subjectKeyOf(subject), subject];
     })).values()];
-    const headId = blacklistDecisionHeadId(this.orgId, occupancyId);
+    const headId = blacklistDecisionHeadId(this.orgId, occupancyId, restriction);
     const decisionId = randomUUID();
     const body = {
       decisionId,
       occupancyId,
+      restriction,
       decision: data.decision,
       entryIds: sortedIds,
       entryRevisions: sortedRevisions,
@@ -354,8 +359,8 @@ export class BlacklistService {
           failCode("NOT_FOUND", "部分名单记录不存在或不可见", 404);
         if (current.revision !== pair.revision)
           failCode("REVISION_CONFLICT", "名单版本已变化，请重新复核", 409);
-        if (!blacklistActiveAt(current, now) || !current.restrictions.includes("occupancy.activate"))
-          failCode("INVALID_STATE", "仅可复核当前命中激活限制的名单", 409);
+        if (!blacklistActiveAt(current, now) || !current.restrictions.includes(restriction))
+          failCode("INVALID_STATE", "仅可复核当前命中该操作限制的名单", 409);
         if (current.endsAt !== null && (expiresAt === null || current.endsAt < expiresAt))
           expiresAt = current.endsAt;
       }
@@ -363,6 +368,7 @@ export class BlacklistService {
       const common = {
         orgId: this.orgId,
         occupancyId,
+        restriction,
         entryIds: sortedIds,
         entryRevisions: sortedRevisions,
         decision: data.decision,
@@ -404,7 +410,13 @@ export class BlacklistService {
     if (!person) failCode("NOT_FOUND", "人员档案不存在或不可见", 404);
     const subjects = [{ subjectType: "person", subjectKey: personId }];
     const refs = [ref("persons", personId)];
-    if (person.userId) subjects.push({ subjectType: "user", subjectKey: person.userId });
+    if (person.userId) {
+      subjects.push({ subjectType: "user", subjectKey: person.userId });
+      // The exact binding snapshot owns the user ref. DB-05 activation checks
+      // its current status in the same transaction; a concurrent disable or
+      // rebind therefore conflicts instead of using an earlier login decision.
+      refs.push(ref("users", person.userId));
+    }
     let application = null;
     if (identityApplicationId) {
       identifier(identityApplicationId, "identityApplicationId");
@@ -443,7 +455,7 @@ export class BlacklistService {
         entry.restrictions.includes(restriction) &&
         subjects.some((subject) => sameSubject(entry, subject)))
       .sort((a, b) => a._id.localeCompare(b._id));
-    const headId = blacklistDecisionHeadId(this.orgId, occupancyId);
+    const headId = blacklistDecisionHeadId(this.orgId, occupancyId, restriction);
     return {
       personId,
       identityApplicationId,
@@ -490,7 +502,8 @@ export class BlacklistService {
     const head = state[`blacklist_decisions/${token.headId}`];
     const entryIds = hits.map((e) => e._id);
     const entryRevisions = hits.map((e) => e.revision);
-    const exact = head && JSON.stringify(head.entryIds) === JSON.stringify(entryIds) &&
+    const exact = head && (head.restriction ?? "occupancy.activate") === token.restriction &&
+      JSON.stringify(head.entryIds) === JSON.stringify(entryIds) &&
       JSON.stringify(head.entryRevisions) === JSON.stringify(entryRevisions);
     const unexpired = head && (head.expiresAt === null || now < head.expiresAt);
     if (exact && unexpired && head.decision === "allow")

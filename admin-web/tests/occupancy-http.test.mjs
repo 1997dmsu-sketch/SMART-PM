@@ -41,7 +41,9 @@ before(async () => {
   admin = await login();
   const orgs = new OrgService(app.store);
   for (const [username, role, permissions] of [
-    ["occupancy-reviewer", "admin", ["identity.review"]],
+    ["occupancy-reviewer", "admin", [
+      "identity.review", "blacklist.review", "blacklist.manage", "blacklist.read",
+    ]],
     ["occupancy-viewer", "viewer", []],
   ]) {
     await app.accounts.save({
@@ -145,4 +147,40 @@ test("DB-05 HTTP flow: idempotent cycle, identity-gated activation, member, list
   const job = await request(`occupancy-materializations/${ended.data.data.materializationJobId}`);
   assert.equal(job.status, 200);
   assert.equal(job.data.data.state, "pending");
+});
+
+test("DB-05 HTTP create review returns an opaque retry reference and keeps list reasons private", async () => {
+  const primary = await approvedPerson("HTTP 创建复核主租客", "110101199001013013");
+  const entry = await post("blacklist", {
+    subjectType: "person", personId: primary.personId, reason: "HTTP 创建复核敏感理由",
+    evidenceFileIds: [], restrictions: ["occupancy.create"],
+    startsAt: Date.now() - 1000, endsAt: null,
+  }, { auth: reviewer });
+  assert.equal(entry.status, 201);
+  const body = {
+    primaryPersonId: primary.personId, startsAt: Date.now() - 1000, endsAt: null,
+  };
+  const blocked = await post(`rooms/${roomId}/occupancy-cycles`, body);
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.data.error.code, "BLACKLIST_REVIEW_REQUIRED");
+  assert.equal(blocked.data.error.restriction, "occupancy.create");
+  assert.ok(blocked.data.error.occupancyId);
+  assert.ok(!("reason" in blocked.data.error) && !("evidenceFileIds" in blocked.data.error));
+  const applicationRef = blocked.data.error.occupancyId;
+  const reviewed = await post(`occupancies/${applicationRef}/blacklist-review`, {
+    restriction: "occupancy.create", decision: "allow", reason: "HTTP 允许本次创建",
+    entryIds: [entry.data.data.entryId], entryRevisions: [1],
+  }, { auth: reviewer });
+  assert.equal(reviewed.status, 200);
+  assert.equal(reviewed.data.data.restriction, "occupancy.create");
+  const created = await post(`rooms/${roomId}/occupancy-cycles`, {
+    ...body, occupancyId: applicationRef,
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.data.data.occupancyId, applicationRef);
+  const activated = await post(`occupancies/${applicationRef}/activate`, {
+    expectedRevision: 1, identityApplicationId: primary.applicationId,
+  });
+  assert.equal(activated.status, 200);
+  assert.equal(activated.data.data.effectiveState, "active");
 });

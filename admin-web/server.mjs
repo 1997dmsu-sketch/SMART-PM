@@ -66,12 +66,16 @@ function assetLocators(asset) {
 }
 function matchFileAsset(assets, candidates) {
   const wanted = candidates.filter((v) => typeof v === "string" && v);
-  return (
-    assets.find((a) => {
-      const locators = assetLocators(a);
-      return wanted.some((w) => locators.includes(w));
-    }) || null
-  );
+  // F02（复审）：同一路径可能被重复登记为 public 与 private。旧实现用 find()
+  // 只取首条命中，public 副本排在前面时会完全遮蔽 private 记录，使四处拦截点
+  // 与 /uploads/* 静态拦截的私密判定被整体绕过（匿名下载返回 200）。改为
+  // 「最严取胜」：收集全部命中，任一命中为 private 即返回该 private 记录。
+  const hits = assets.filter((a) => {
+    const locators = assetLocators(a);
+    return wanted.some((w) => locators.includes(w));
+  });
+  if (!hits.length) return null;
+  return hits.find((a) => a.visibility === "private") || hits[0];
 }
 
 // 只取 cloudPath / 相对路径「末段文件名」解析扩展名，绝不解析

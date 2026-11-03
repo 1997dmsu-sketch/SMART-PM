@@ -37,48 +37,65 @@ const ALL_MIMES = [
 // purpose 决定大小 / mime / visibility / 权限点（§2.1、§5）。
 // visibility 完全由服务端派生，不接受客户端入参；identity-document 与 evidence
 // 强制 private，客户端传 public 无效。
+//
+// 复审（DB-07 二次审查）要求「区分私密文件的上传与读取权限」：二者不再共用
+// 同一个权限点。规则如下——
+//   writePermission：私密文件「写入」（上传/登记/关联/解绑/归档）所需权限点；
+//     为 null 时回落到组织成员角色——仅组织管理员（membership.role==="admin"）
+//     可写私密文件。写入按「角色」管控，与 DB-02/03 的组织角色模型一致。
+//   readPermission：私密文件「读取」（下载/列表可见/关联可见）所需权限点；
+//     为 null 时回落到组织管理员角色。读取按「权限点」管控，与 DB-04/06 的
+//     证件审查 / 黑名单读取权限模型一致。
+// 因此：无 readPermission 的组织管理员可上传证件、却无权下载他人证件；持有
+// readPermission 的审阅员可下载、但（非管理员）无权上传——读写权限彻底分立。
 export const PURPOSES = {
   "listing-image": {
     maxSize: 5 * MB,
     accept: IMAGE_MIMES,
     visibility: "public",
     private: false,
-    permission: null,
+    writePermission: null,
+    readPermission: null,
   },
   "content-image": {
     maxSize: 5 * MB,
     accept: IMAGE_MIMES,
     visibility: "public",
     private: false,
-    permission: null,
+    writePermission: null,
+    readPermission: null,
   },
   "vr-attachment": {
     maxSize: 50 * MB,
     accept: ["application/zip", "text/html"],
     visibility: "public",
     private: false,
-    permission: null,
+    writePermission: null,
+    readPermission: null,
   },
   "identity-document": {
     maxSize: 5 * MB,
     accept: [...IMAGE_MIMES, "application/pdf"],
     visibility: "private",
     private: true,
-    permission: "identity.review",
+    writePermission: null, // 写入：组织管理员角色
+    readPermission: "identity.review", // 读取：证件审查权限点（DB-04）
   },
   evidence: {
     maxSize: 50 * MB,
     accept: ALL_MIMES,
     visibility: "private",
     private: true,
-    permission: "blacklist.read",
+    writePermission: null, // 写入：组织管理员角色
+    readPermission: "blacklist.read", // 读取：黑名单读取权限点（DB-06）
   },
   other: {
     maxSize: 5 * MB,
     accept: ALL_MIMES,
     visibility: "public",
     private: false,
-    permission: null,
+    writePermission: null,
+    readPermission: null,
   },
 };
 
@@ -292,14 +309,20 @@ export class FileService {
 
   // 权限分级（§5 / §9.2）：server 层用 {write:false} 调 requireMembership 后再
   // authorize() 做第一道，服务层按 purpose/visibility 做第二道，使 editor 能
-  // 写 public、private 收紧到 admin（或显式权限点）。
+  // 写 public、private 收紧到组织管理员角色。
+  //
+  // 这是「写入」闸口（上传/登记/关联/解绑/归档）。复审要求写入与读取分立：
+  // 写入按【组织成员角色】管控（permission 为 null 时仅 membership.role==="admin"
+  // 可写私密），不消耗 readPermission；读取由 authorizeDownload / canReadFile
+  // 按 readPermission 另行判定。若某 purpose 声明了专属 writePermission，则
+  // 任何角色（含 admin）都必须先持有该权限点，admin 仅作为未声明时的回落。
   assertActorRole(privateRequired, permission = null) {
     const role = this.actor.role;
     if (privateRequired) {
-      // F01（复审）：purpose 声明了显式权限点时，任何角色（含 admin）都必须持有
-      // 该权限点，与 DB-04/06 的证件/黑名单权限模型一致；admin 仅在 purpose 未
-      // 声明权限点时才作为回落。旧实现先判 role === "admin" 直接 return，使无
-      // identity.review 的管理员也能下载证件。
+      // 写入权限点优先（仅当 purpose 显式声明 writePermission）。本表当前
+      // 各私密 purpose 的 writePermission 均为 null，故私密写入一律回落到
+      // 组织管理员角色——与「读」所需的 identity.review / blacklist.read 彻底
+      // 分开，避免「能读就能写 / 能写就能读」的越权。
       if (permission) {
         if ((this.actor.permissions || []).includes(permission)) return;
         failCode("FORBIDDEN", `缺少权限点 ${permission}，无法操作私密文件`, 403);
@@ -391,7 +414,7 @@ export class FileService {
         ? originalName.slice(0, 180)
         : `${randomUUID()}.${sniffed.ext}`;
 
-    this.assertActorRole(policy.private, policy.permission);
+    this.assertActorRole(policy.private, policy.writePermission);
     // visibility 由 purpose 派生，完全忽略客户端传入值。
     const visibility = policy.visibility;
 
@@ -546,7 +569,7 @@ export class FileService {
         inferred.visibility;
       if (!["public", "private"].includes(visibility))
         failCode("PARAM_ERROR", "密级无法判定，需人工复核后显式指定 visibility");
-      this.assertActorRole(visibility === "private", policy.permission);
+      this.assertActorRole(visibility === "private", policy.writePermission);
       const orgId = item.orgId === undefined ? null : item.orgId;
       const objectKey = item.objectKey || inferred.objectKey || url;
       const storage = item.storage || inferred.storage || "local";
@@ -633,27 +656,17 @@ export class FileService {
     return results.length === 1 ? results[0] : results;
   }
 
-  // F03（复审）：列表不得泄露私密文件的存储路径与原始文件名。未持有该 purpose
-  // 权限点的调用者只看到非敏感字段；判定与 F01 同源，避免两处规则漂移。
-  projectAsset(row, actor = this.actor) {
-    if (row.visibility !== "private") return row;
-    const permission = PURPOSES[row.purpose]?.permission;
-    const allowed = permission
-      ? (actor.permissions || []).includes(permission)
-      : actor.role === "admin";
-    if (allowed) return row;
-    return {
-      _id: row._id,
-      orgId: row.orgId,
-      purpose: row.purpose,
-      visibility: row.visibility,
-      status: row.status,
-      storage: row.storage,
-      size: row.size,
-      mimeType: row.mimeType,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    };
+  // 读取可见性判定（复审「读写权限分立」+「分页前过滤」共用）：调用者能否
+  // 查看该文件？公开文件一律可见；私密文件需持有该 purpose 的 readPermission，
+  // 未声明 readPermission 的私密文件回落到组织管理员角色。返回布尔，供
+  // list() 在分页前剔除无权查看的记录、以及链接列表过滤复用，避免私密元数据
+  // 经列表/关联泄露（F03），也避免无权记录占用分页槽位。
+  canReadFile(file, actor = this.actor) {
+    if (!file || file.visibility !== "private") return true;
+    const readPermission = PURPOSES[file.purpose]?.readPermission;
+    if (readPermission)
+      return (actor.permissions || []).includes(readPermission);
+    return actor.role === "admin";
   }
 
   // 列表：orgId 过滤先于分页（§3、store.mjs:130-135）。
@@ -682,6 +695,9 @@ export class FileService {
       const ids = new Set(links.map((l) => l.fileId));
       rows = rows.filter((r) => ids.has(r._id));
     }
+    // 复审「分页前过滤」：无权查看的私密文件（缺 readPermission 且非组织管理员）
+    // 在分页切片之前剔除，既不泄露私密元数据（F03），也不占用分页槽位。
+    rows = rows.filter((r) => this.canReadFile(r));
     rows.sort((a, b) => (a._id < b._id ? -1 : a._id > b._id ? 1 : 0));
     let start = 0;
     if (cursor) {
@@ -689,7 +705,7 @@ export class FileService {
       if (start === 0) failCode("PARAM_ERROR", "分页游标无效或已过期");
     }
     const slice = rows.slice(start, start + limit + 1);
-    const data = slice.slice(0, limit).map((r) => this.projectAsset(r));
+    const data = slice.slice(0, limit);
     return {
       data,
       nextCursor: slice.length > limit ? data[data.length - 1]._id : undefined,
@@ -726,7 +742,7 @@ export class FileService {
     if (!file) failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
     if (file.status !== "ready")
       failCode("FILE_NOT_READY", "文件尚未就绪", 409);
-    this.assertActorRole(file.visibility === "private", PURPOSES[file.purpose]?.permission);
+    this.assertActorRole(file.visibility === "private", PURPOSES[file.purpose]?.writePermission);
     assertAttachUsage(file, entityType, usage);
 
     const entity = await this.findEntity(entityType, entityId);
@@ -819,7 +835,7 @@ export class FileService {
       (r) => r._id === link.fileId,
     );
     const requireAdmin = file?.visibility === "private";
-    this.assertActorRole(requireAdmin, PURPOSES[file?.purpose]?.permission);
+    this.assertActorRole(requireAdmin, PURPOSES[file?.purpose]?.writePermission);
 
     let result;
     await this.store.transact(
@@ -877,13 +893,12 @@ export class FileService {
     if (!file || !this.own(file)) await denied();
     if (file.status !== "ready") await denied();
     if (file.visibility === "private") {
-      const permission = PURPOSES[file.purpose]?.permission;
-      // F01（复审）：显式权限点优先于角色。purpose 声明了权限点（如
-      // identity-document → identity.review）时，仅凭 admin 角色不再放行；
-      // 未声明权限点的私密文件仍回落到 admin。未授权一律 404 与不存在同态。
-      const allowed = permission
-        ? (actor.permissions || []).includes(permission)
-        : actor.role === "admin";
+      const readPermission = PURPOSES[file.purpose]?.readPermission;
+      // 读取权限独立于写入（复审）：purpose 声明了 readPermission（如
+      // identity-document → identity.review）时，仅凭组织管理员角色不再放行，
+      // 必须持有该读取权限点；未声明 readPermission 的私密文件回落到组织管理员。
+      // 未授权一律 404 与不存在同态（防枚举）。
+      const allowed = this.canReadFile(file, actor);
       if (!allowed) await denied();
     }
 
@@ -917,7 +932,7 @@ export class FileService {
     );
     if (!file) failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
     const requireAdmin = file.visibility === "private";
-    this.assertActorRole(requireAdmin, PURPOSES[file.purpose]?.permission);
+    this.assertActorRole(requireAdmin, PURPOSES[file.purpose]?.writePermission);
 
     let result;
     await this.store.transact(

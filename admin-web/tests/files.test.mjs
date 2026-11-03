@@ -14,7 +14,7 @@
 //          白名单外实体类型 → PARAM_ERROR
 //   §11.6  registerLegacy 命中集合 = objectKey ∪ legacyUrls ∪ cloudFileId
 //   §10 #5  跨组织隔离：B 组织实例读不到 A 组织的文件（FILE_NOT_FOUND 同态）
-//   §10 #6 / §11.4  下载鉴权：public 任意成员可读；private 仅 admin/权限点
+//   §10 #6 / §11.4  下载鉴权：public 任意成员可读；private 读取需 readPermission/组织管理员（写入仅限组织管理员角色，读写权限分立）
 //   §10 #7  editor 可上传 public；editor 上传 private → FORBIDDEN
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -123,8 +123,9 @@ test("§10 #2 purpose=nas 上传 503 且文件表零新增", async (t) => {
 test("§10 #8 identity-document 强制 private + private/ 前缀，客户端无法改写", async (t) => {
   const { dir, store, cleanup } = await mkStore();
   t.after(cleanup);
-  // F01（复审）：identity-document 声明了 identity.review 权限点，上传必须持有。
-  const svc = makeService(store, dir, { perms: ["identity.review"] });
+  // 复审「读写权限分立」：私密文件「写入」仅限组织管理员角色（writePermission
+  // 为 null → 回落 role==="admin"），无需 identity.review；该权限点只管「读取」。
+  const svc = makeService(store, dir, { role: "admin" });
   const res = await svc.upload({ bytes: PNG, purpose: "identity-document", originalName: "id.png" });
   assert.equal(res.visibility, "private");
   assert.equal(res.status, "ready");
@@ -138,8 +139,8 @@ test("§10 #8 identity-document 强制 private + private/ 前缀，客户端无�
 test("§10 #8b 私密文件 attach 到展示 usage → PURPOSE_FORBIDDEN", async (t) => {
   const { dir, store, cleanup } = await mkStore();
   t.after(cleanup);
-  // F01（复审）：上传证件须持有 identity.review 权限点。
-  const svc = makeService(store, dir, { perms: ["identity.review"] });
+  // 写入按组织管理员角色（无需 identity.review）。
+  const svc = makeService(store, dir, { role: "admin" });
   const priv = await svc.upload({ bytes: PNG, purpose: "identity-document" });
   for (const usage of ["cover", "gallery", "vr"]) {
     await assert.rejects(
@@ -308,13 +309,16 @@ test("§10 #5 跨组织隔离：B 组织实例读不到 A 组织的文件", asyn
   assert.equal(ok.file._id, up.fileId);
 });
 
-test("§10 #6 下载鉴权：public 任意成员可读，private 仅 admin/权限点", async (t) => {
+test("§10 #6 下载鉴权：public 任意成员可读，private 仅 readPermission/组织管理员", async (t) => {
   const { dir, store, cleanup } = await mkStore();
   t.after(cleanup);
-  // F01（复审）：上传证件须持有 identity.review 权限点。
-  const admin = makeService(store, dir, { role: "admin", perms: ["identity.review"] });
+  // 复审「读写权限分立」：私密文件「写入」按组织管理员角色（无需 readPermission），
+  // 「读取」按 readPermission（identity.review）或组织管理员角色。
+  const admin = makeService(store, dir, { role: "admin", perms: [] });
   const pub = await admin.upload({ bytes: PNG, purpose: "content-image" });
+  // 管理员可上传证件：写入仅限角色，无需 identity.review。
   const priv = await admin.upload({ bytes: PNG, purpose: "identity-document" });
+  assert.equal(priv.visibility, "private");
   const viewer = { actorType: "adminAccount", actorId: "v", role: "viewer", permissions: [] };
   // viewer 读 public → 200
   const okPub = await admin.authorizeDownload(pub.fileId, viewer);
@@ -324,20 +328,20 @@ test("§10 #6 下载鉴权：public 任意成员可读，private 仅 admin/权�
     admin.authorizeDownload(priv.fileId, viewer),
     hasCode("FILE_NOT_FOUND"),
   );
-  // 持有对应权限点的 viewer 可放行
+  // 持有 readPermission 的 viewer 可放行
   const privileged = { actorType: "adminAccount", actorId: "v2", role: "viewer", permissions: ["identity.review"] };
   const okPriv = await admin.authorizeDownload(priv.fileId, privileged);
   assert.equal(okPriv.file._id, priv.fileId);
-  // 持有对应权限点的 admin 可放行
-  const okAdmin = await admin.authorizeDownload(priv.fileId, admin.actor);
-  assert.equal(okAdmin.file._id, priv.fileId);
-  // F01（复审）：无 identity.review 的 admin 不得下载证件（与 DB-04/06 一致，
-  // 旧实现凭 role==="admin" 无条件放行）。未授权与不存在同态 → FILE_NOT_FOUND。
-  const bareAdmin = { actorType: "adminAccount", actorId: "a2", role: "admin", permissions: [] };
+  // 复审要点：无 readPermission 的组织管理员「可上传、但不可下载」——
+  // 读写权限彻底分立，不再凭 role==="admin" 无条件放行读取。
   await assert.rejects(
-    admin.authorizeDownload(priv.fileId, bareAdmin),
+    admin.authorizeDownload(priv.fileId, admin.actor),
     hasCode("FILE_NOT_FOUND"),
   );
+  // 同时持有 readPermission 的组织管理员可放行
+  const adminWithPerm = makeService(store, dir, { role: "admin", perms: ["identity.review"] });
+  const okAdmin = await adminWithPerm.authorizeDownload(priv.fileId, adminWithPerm.actor);
+  assert.equal(okAdmin.file._id, priv.fileId);
 });
 
 test("§10 #7 editor 可上传 public；editor 上传 private → FORBIDDEN", async (t) => {

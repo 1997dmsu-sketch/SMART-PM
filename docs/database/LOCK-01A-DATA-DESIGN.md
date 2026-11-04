@@ -1,7 +1,7 @@
 # LOCK-01A 数据结构评审稿（海康 DS-K1T671BM）
 
 - 适用任务：LOCK-01A
-- 版本：第二轮，回应 `LOCK-01A-REVIEW` 的 F02/F03
+- 版本：第三轮，回应 `LOCK-01A-REVIEW` 第二轮的 F03（设备全局所有权 / op_id）与 F05（未知错误）
 - 范围：仅结构设计，**不建表、不迁移、不写生产数据**
 - 基线：`docs/db-01-design`；依赖 DB-05（入住）、DB-07（私密文件）
 - 厂商枚举：`provider = "hikvision"`（全项目唯一写法）
@@ -12,8 +12,9 @@
 2. 授权归属 `orgId`，绑定人员、房间/入住周期（`occupancyId`+`cycleId`）、设备与有效期。
 3. 业务授权事实（grant）与厂商凭证（credential）分离；厂商成功不等于授权永久有效。
 4. **不依赖云数据库唯一索引**：唯一性由"固定 ID 占位记录 + 事务内条件写"保证（§2）。
-5. 幂等键按 `orgId + route + actor/keyDigest` 作用域化，同时保存 `requestDigest`。
-6. 人脸原图/特征/密钥不入普通列表、日志与响应。
+5. **设备所有权全局唯一**：一台物理设备的 claim 不按组织拆分；跨组织只能走审计转移。
+6. 幂等键由客户端 `idempotencyKey` 生成，与 `orgId`/`route`/`actorId` 共同决定 op_id，同时保存 `requestDigest`。
+7. 人脸原图/特征/密钥不入普通列表、日志与响应。
 
 ## 2. 固定 ID / claim 协议（替代唯一索引）
 
@@ -21,13 +22,18 @@
 
 | 对象 | 固定 ID 构造 | 摘要域 / 密钥 | 唯一性机制 |
 | --- | --- | --- | --- |
-| 设备 | `device_claim:{orgId}:{provider}:{HMAC-K1(规范化序列号)}` | `KEYED_DIGEST/device`，`keyVersion` 随记录保存 | 事务内 upsert-if-absent；序列号原值另存密文，不参与查询 |
-| 授权 | `grant_slot:{orgId}:{personId}:{deviceId}:{cycleId}` | 纯 ID 拼接，无摘要 | slot 记录保存 `activeClaimId`；同一 slot 只允许一个 effective grant |
-| 幂等 | `op_id:{orgId}:{route}:{actorKeyDigest}` + `requestDigest` | `KEYED_DIGEST/op` | 同 op_id 同 digest → 重放原结果；同 op_id 不同 digest → 冲突 |
+| 设备 | `provider-device:{provider}:{digestRealm}:{HMAC-K1(规范化设备标识)}` | `KEYED_DIGEST/device`，`keyVersion` 随记录 | 全局只允许一个 claim；claim 记录唯一 `ownerOrgId`；序列号原值另存密文 |
+| 授权 | `grant-slot:{orgId}:{personId}:{deviceId}:{cycleId}` | 纯 ID 拼接 | slot 记录 `activeClaimId`；同一 slot 一个 effective grant；仅 `ownerOrgId` 可建 |
+| 幂等 | `op_id = claimId("device-operation", orgId + "|" + route + "|" + actorId, HMAC-K2(idempotencyKey))`，并保存 `requestDigest` | `KEYED_DIGEST/op`，K2 版本随记录 | 同 op_id 同 digest → 重放；同 op_id 不同 digest → 冲突；不同 idempotencyKey → 不同 op_id，允许新操作 |
 
 约束说明：
 
-- 固定 ID 输入必须先规范化（trim、大小写、ID 形态）；非法输入拒绝，不做模糊匹配。
+- **设备所有权全局唯一**：`provider-device` claim **不含 `orgId`**，claim 记录保存唯一 `ownerOrgId`。同一序列号在 A、B 两家并发登记时，只允许一家成为 owner，另一家失败关闭且不写设备。
+- **跨组织转移必须审计**：解绑 → 变更 `ownerOrgId` → 记 `transferredAt/fromOrgId/toOrgId/auditId`；存在有效 grant 或未关闭 job 时拒绝转移；转移后旧组织 grant 立即业务失效并生成撤权任务。
+- **需要共享时不得重复登记**：另建 `device_org_bindings`，由设备 owner 显式授权、可撤销；授权关系单独审计。
+- **幂等键规范**：`idempotencyKey` 由客户端生成，长度 16–128，字符集 `[A-Za-z0-9._:-]`；保存期限不短于任务历史保留期；保存期内同键同 `requestDigest` 重放原结果、同键不同 digest 冲突；超过保存期视为新操作并写审计，**不静默重放旧结果**。`actorId` 需区分用户/系统/代理类型。
+- 固定 ID 只使用安全字符（hex/base32 摘要 + 受限分段），**不直接拼接未约束的 `orgId`/`route`**。
+- `digestRealm` 区分环境（demo/test/live），防止测试设备与生产 claim 串号。
 - `digestDomain` 与 `keyVersion` 写入记录，支持密钥轮换与历史重算。
 - 固定 ID 记录集合：`device_claims`、`grant_slot_claims`、`operation_keys`；与业务集合同事务写。
 - 释放规则：grant 结束/退租时 slot 记录写 `releasedAt` 并保留历史；换租或新周期用新 `cycleId` 生成新 slot；并发重建由 revision 条件写失败关闭。
@@ -40,17 +46,18 @@
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `_id` | string | 平台稳定设备 ID |
-| `claimId` | string | `device_claim` 固定 ID（查重） |
-| `orgId` / `communityId` / `buildingId` | string | 归属链 |
+| `claimId` | string | `provider-device` 全局固定 ID |
+| `ownerOrgId` | string | 设备唯一所有者组织；跨组织转移需审计 |
+| `digestRealm` / `keyVersion` | string/int | 环境域与摘要密钥版本 |
 | `provider` | enum | `hikvision` |
 | `providerDeviceCiphertext` | string | 序列号/平台资源 ID 密文，不参与索引、不下发客户端 |
-| `digestDomain` / `keyVersion` | string/int | 摘要域与密钥版本 |
+| `orgId` / `communityId` / `buildingId` | string | 归属链（用于展示与授权，不作为所有权） |
 | `deviceType` / `model` / `firmwareVersion` / `gatewayId` | string | 型号与固件 |
 | `capabilities` | object | `{ face, remoteUnlock }` |
 | `status` | enum | `draft\|active\|offline\|disabled\|archived` |
 | `revision` / 时间戳 | — | 乐观锁与审计 |
 
-非唯一索引：`orgId`、`orgId+status`。状态机：`draft→active→(offline↔active)→disabled→archived`。
+非唯一索引：`orgId`、`orgId+status`、`ownerOrgId`。状态机：`draft→active→(offline↔active)→disabled→archived`。
 
 ### 3.2 `face_credentials`
 
@@ -70,8 +77,8 @@
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `_id` / `orgId` / `personId` / `deviceId` | string | 主体 |
-| `slotId` / `claimId` | string | `grant_slot` 固定 ID 与占位记录 |
+| `_id` / `orgId` / `personId` / `deviceId` | string | 主体；`orgId` 必须等于设备 `ownerOrgId` |
+| `slotId` / `claimId` | string | `grant-slot` 固定 ID 与占位记录 |
 | `occupancyId` / `cycleId` | string | 入住周期 |
 | `grantSource` / `approverId` | string | 来源与批准人 |
 | `validFrom` / `validUntil` | datetime | 有效期 |
@@ -80,7 +87,7 @@
 | `executionMode` / `evidenceScope` | enum | 模拟与真实设备证据必须区分 |
 | `revision` | int | 乐观锁 |
 
-唯一性：由 §2 的 `grant_slot` 保证"同一 slot 一个 effective"；结束/换租写 `releasedAt` 并保历史。
+唯一性：由 §2 的 `grant-slot` 保证"同一 slot 一个 effective"；只有设备 `ownerOrgId` 能创建/downstream；设备转移时旧组织所有 grant 立即 `revoked` 并生成撤权任务。
 
 ### 3.4 `device_operation_jobs`
 
@@ -88,8 +95,8 @@
 | --- | --- | --- |
 | `_id` / `orgId` / `deviceId` / `grantId` | string | 归属 |
 | `operation` | enum | `face.enroll\|face.update\|face.revoke\|face.query` |
-| `opId` | string | `op_id` 固定 ID（作用域化幂等键） |
-| `requestDigest` | string | 请求摘要 |
+| `opId` | string | `device-operation` 固定 ID（含客户端幂等键摘要） |
+| `requestDigest` | string | 规范化业务输入摘要 |
 | `providerRequestId` | string? | 厂商请求 ID |
 | `state` | enum | `queued\|sending\|awaiting_result\|succeeded\|retryable_failed\|terminal_failed\|cancelled` |
 | `attempts` / `nextAttemptAt` | int/datetime | 重试 |
@@ -107,7 +114,7 @@
 | --- | --- | --- |
 | `deviceId` | `_id` | 迁移映射表，不改历史开门记录 |
 | `platform` | `provider="hikvision"` | 受控枚举收敛；旧 tuya/ttlock 不在本任务范围 |
-| `lockId` / `macAddress` | `providerDeviceCiphertext` + `claimId` | 序列号加密，claim 摘要查重 |
+| `lockId` / `macAddress` | `providerDeviceCiphertext` + 全局 `claimId` | 序列号加密，claim 全局去重 |
 | `houseId` | 归属链 + grant 的 `occupancyId/cycleId` | 从"房子"升级为"入住周期授权" |
 | `enableRemote` | `capabilities.remoteUnlock` | 能力位，不等于授权 |
 | （无） | `device_access_grants` | 新增业务授权事实，取代 houses 数组判断 |
@@ -143,14 +150,20 @@ DB-07 现有 `PURPOSES` 无 `face-biometric`，**尚未实现**，不能在 LOCK
 
 1. 同一 slot 并发创建 → 只允许一个成功，另一个按 revision 失败关闭。
 2. 同 op_id 同 requestDigest → 重放原结果；不同 digest → 冲突。
-3. 同设备序列号并发 upsert `device_claim` → 只产生一条 claim。
+3. **同一序列号在组织 A、B 并发登记 → 只产生一个 owner，另一方失败关闭且不写设备。**
 4. 摘要密钥轮换后旧记录可按 keyVersion 重算、不误判冲突。
 5. slot 释放/换租/新周期重建 → 旧记录保留 `releasedAt`，不覆盖。
 6. mock 执行的记录 `evidenceScope=simulated`，不得写成 `device_verified`。
+7. **跨组织转移：存在有效 grant 或未关闭 job 时拒绝；否则审计迁移，旧组织 grant 立即 revoked 并生成撤权任务。**
+8. **同一 actor、同一 route、不同 `idempotencyKey` → 生成不同 op_id，两次操作都允许。**
+9. **`idempotencyKey` 非法字符/超长 → 拒绝；超过保存期再提交 → 视为新操作并审计，不静默重放。**
+10. **未知厂商错误 → `UNKNOWN_RESULT`，不自动重试，对账后才到终态。**
 
 ## 8. 待集成时确定
 
-1. `device_claim` 是否同时保留可逆密文与摘要（建议：摘要查重 + 密文展示）。
-2. `face_credentials` 是否保留历史多版本。
-3. slot 释放后是否允许同 cycle 重建（建议禁止，新周期新 slot）。
-4. `executionMode` 是否随 grant 复制到 job（建议复制，便于审计）。
+1. 设备是否允许跨组织共享（建议不共享；确需共享用 `device_org_bindings`）。
+2. `device_claims` 是否同时保留可逆密文与摘要（建议：摘要查重 + 密文展示）。
+3. `face_credentials` 是否保留历史多版本。
+4. slot 释放后是否允许同 cycle 重建（建议禁止，新周期新 slot）。
+5. `executionMode` 是否随 grant 复制到 job（建议复制，便于审计）。
+6. `digestRealm` 粒度（env 或 env+region）。

@@ -1,7 +1,7 @@
 # LOCK-01A FaceAccessProvider 接口契约（海康 DS-K1T671BM）
 
 - 适用任务：LOCK-01A
-- 版本：第三轮，回应 `LOCK-01A-REVIEW` 第二轮的 F03（op_id 缺客户端幂等键）与 F05（未知错误）
+- 版本：第四轮，回应 `LOCK-01A-REVIEW` 第三轮的 F06（op_id 缺 actorType）
 - 范围：统一接口契约与错误分类；**不含实现**，不修改共享 `server.mjs`/`store.mjs`
 - 厂商枚举：`hikvision`（全项目唯一写法）
 
@@ -65,14 +65,14 @@ type FaceAccessError =
 
 ## 5. 幂等与任务状态机
 
-- 固定 ID：`op_id = claimId("device-operation", orgId + "|" + route + "|" + actorId, HMAC-K2(idempotencyKey))`；同时保存 `requestDigest`（规范化业务输入）。
+- 固定 ID：`op_id = claimId("device-operation", orgId + "|" + route + "|" + actorType + "|" + actorId, HMAC-K2(idempotencyKey))`；同时保存 `requestDigest`（规范化业务输入，含 actorType）。
 - 语义：
   - 同 `idempotencyKey` + 同 `requestDigest` → 重放原结果；
   - 同 `idempotencyKey` + 不同 `requestDigest` → `CONFLICT`；
-  - 不同 `idempotencyKey` → 不同 `op_id`，**必须允许新操作**（同一操作者同路由可多次合法操作）。
+  - 不同 `idempotencyKey` 或不同 `actorType` → 不同 `op_id`，**必须允许新操作**（同一操作者同路由可多次合法操作；user/system/agent 互不重放）。
 - `idempotencyKey` 规范：长度 16–128，字符集 `[A-Za-z0-9._:-]`；长度或字符非法直接拒绝。
 - 保存期限不短于任务历史保留期；超期后同键再提交视为新操作并写审计，**不得静默重放旧结果**。
-- `actorId` 需带 `actorType`（user/system/agent），避免不同主体摘要碰撞。
+- `actorType`（user/system/agent）参与 `op_id` 作用域与 `requestDigest` 规范化，避免不同主体摘要碰撞。
 - 外部网络调用在数据库事务之外：先落 `queued` 任务再发送；`sending` 之后的结果只允许回写 `succeeded/retryable_failed/terminal_failed/awaiting_result`。
 - 双 worker 争抢由任务租约（`leaseOwner + leaseExpiresAt`）保证一次有效下发。
 - 厂商成功后 DB 回写失败可恢复：靠 op_id 去重，不重复创建厂商凭证。
@@ -113,3 +113,4 @@ type FaceAccessError =
 8. **同一 actor、同一 route、不同 `idempotencyKey` → 两次操作都执行，不误判为重复。**
 9. **非法或超长 `idempotencyKey` → 拒绝；超保存期同键再提交 → 新操作 + 审计。**
 10. **`queryOperation` 对账成功后不得重复下发（enroll/revoke 均验证）。**
+11. **同一 `actorId`、不同 `actorType`、相同 `idempotencyKey` → 生成不同 op_id，互不重放。**

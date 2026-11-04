@@ -1,7 +1,7 @@
 # LOCK-01A 数据结构评审稿（海康 DS-K1T671BM）
 
 - 适用任务：LOCK-01A
-- 版本：第三轮，回应 `LOCK-01A-REVIEW` 第二轮的 F03（设备全局所有权 / op_id）与 F05（未知错误）
+- 版本：第四轮，回应 `LOCK-01A-REVIEW` 第三轮的 F06（op_id 缺 actorType）
 - 范围：仅结构设计，**不建表、不迁移、不写生产数据**
 - 基线：`docs/db-01-design`；依赖 DB-05（入住）、DB-07（私密文件）
 - 厂商枚举：`provider = "hikvision"`（全项目唯一写法）
@@ -13,7 +13,7 @@
 3. 业务授权事实（grant）与厂商凭证（credential）分离；厂商成功不等于授权永久有效。
 4. **不依赖云数据库唯一索引**：唯一性由"固定 ID 占位记录 + 事务内条件写"保证（§2）。
 5. **设备所有权全局唯一**：一台物理设备的 claim 不按组织拆分；跨组织只能走审计转移。
-6. 幂等键由客户端 `idempotencyKey` 生成，与 `orgId`/`route`/`actorId` 共同决定 op_id，同时保存 `requestDigest`。
+6. 幂等键由客户端 `idempotencyKey` 生成，与 `orgId`/`route`/`actorType`/`actorId` 共同决定 op_id，同时保存 `requestDigest`（含 actorType）。
 7. 人脸原图/特征/密钥不入普通列表、日志与响应。
 
 ## 2. 固定 ID / claim 协议（替代唯一索引）
@@ -24,7 +24,7 @@
 | --- | --- | --- | --- |
 | 设备 | `provider-device:{provider}:{digestRealm}:{HMAC-K1(规范化设备标识)}` | `KEYED_DIGEST/device`，`keyVersion` 随记录 | 全局只允许一个 claim；claim 记录唯一 `ownerOrgId`；序列号原值另存密文 |
 | 授权 | `grant-slot:{orgId}:{personId}:{deviceId}:{cycleId}` | 纯 ID 拼接 | slot 记录 `activeClaimId`；同一 slot 一个 effective grant；仅 `ownerOrgId` 可建 |
-| 幂等 | `op_id = claimId("device-operation", orgId + "|" + route + "|" + actorId, HMAC-K2(idempotencyKey))`，并保存 `requestDigest` | `KEYED_DIGEST/op`，K2 版本随记录 | 同 op_id 同 digest → 重放；同 op_id 不同 digest → 冲突；不同 idempotencyKey → 不同 op_id，允许新操作 |
+| 幂等 | `op_id = claimId("device-operation", orgId + "|" + route + "|" + actorType + "|" + actorId, HMAC-K2(idempotencyKey))`，并保存 `requestDigest` | `KEYED_DIGEST/op`，K2 版本随记录 | 同 op_id 同 digest → 重放；同 op_id 不同 digest → 冲突；不同 idempotencyKey → 不同 op_id，允许新操作；不同 actorType 同样生成不同 op_id |
 
 约束说明：
 
@@ -158,6 +158,7 @@ DB-07 现有 `PURPOSES` 无 `face-biometric`，**尚未实现**，不能在 LOCK
 8. **同一 actor、同一 route、不同 `idempotencyKey` → 生成不同 op_id，两次操作都允许。**
 9. **`idempotencyKey` 非法字符/超长 → 拒绝；超过保存期再提交 → 视为新操作并审计，不静默重放。**
 10. **未知厂商错误 → `UNKNOWN_RESULT`，不自动重试，对账后才到终态。**
+11. **同一 `actorId`、不同 `actorType`、相同 `idempotencyKey` → 生成不同 op_id，互不重放。**
 
 ## 8. 待集成时确定
 

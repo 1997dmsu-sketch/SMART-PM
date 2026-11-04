@@ -1,9 +1,9 @@
 # LOCK-01：海康 DS-K1T671BM 门禁人脸录入接入任务卡
 
-状态：已返工，待 Codex 复审（第一轮 F01–F04）  
+状态：二轮返工已提交，待 Codex 第三轮复审（F03/F05）  
 负责人：代理 AI（2026-11-04 认领）  
 审查人：Codex  
-交付：分支 `docs/lock-01-hikvision-face`，PR #7，返工 head `6a7eea9`  
+交付：分支 `docs/lock-01-hikvision-face`，PR #7，返工 head `369c4f5`  
 优先级：一期 MVP 后端集成前置调研  
 生产权限：禁止  
 

@@ -57,3 +57,53 @@
 3. 用固定 claim/slot/operation ID 重写唯一性与幂等设计。
 4. 补 demo/test/live Provider 选择和失败关闭契约。
 5. 提交新 head 后复审；暂不开始 LOCK-01B、申请生产密钥、上传真实人脸或连接 `DS-K1T671BM`。
+
+## 第二轮复审：6a7eea9
+
+结论：F01 的证据分级整改通过，F02、F04 已关闭；F03 的固定占位方向正确，但设备跨组织唯一性和操作幂等 ID 仍不安全，另有未知厂商错误自动重试风险。LOCK-01A 文档暂不批准进入 LOCK-01B。
+
+### F01 整改通过，型号资料仍是外部前置条件
+
+能力报告已明确区分“海康生态存在”与“`DS-K1T671BM` + 目标固件已验证”，后者为 0 条；通用 FDLib、事件和多模态资料不再被写成目标设备能力，路线保持未定，删除端点和 `blackFD` 语义也已纠正。页面抓取记录了 URL、日期、状态、字节和摘要。
+
+这关闭了首审的错误外推问题，但不表示目标设备接口已经确认。Q1/Q3/Q4/Q5/Q6 仍未关闭，现阶段不能实现 `HikvisionFaceAccessProvider` 或进入真实联调。项目负责人仍需提供精确型号规格、固件版本和对应官方指南。
+
+### F02 已关闭
+
+四份文档统一使用 `provider="hikvision"`；`hkvision` 和无出处 `-4043` 已删除。错误码表在取得官方资料前保持为空。
+
+### F03 [P1] 仍需返工：设备 claim 允许跨组织重复控制同一物理设备
+
+位置：`LOCK-01A-DATA-DESIGN.md:22-34`。
+
+设备固定 ID 为 `device_claim:{orgId}:{provider}:{HMAC(序列号)}`。由于包含 `orgId`，同一海康序列号可在组织 A、B 各生成一条不同 claim，两个租户都可能向同一物理门禁下发人员和撤权任务。这不是普通“组织内名称可复用”，而是物理控制端点所有权冲突。
+
+修复：明确设备是否允许多组织共享。默认应使用全局固定占位，例如 `provider-device:{provider}:{digestRealm}:{HMAC(规范化设备标识)}`，claim 保存唯一 ownerOrgId；转移组织必须走受审计的解绑/迁移事务，存在有效 grant/job 时拒绝。若业务确需共享设备，应另建受控 `device_org_bindings`，由设备 owner 明确授权，不能靠重复登记实现。补 A/B 同序列号并发登记只允许一个 owner 的测试。
+
+### F03 [P1] 仍需返工：op_id 公式没有客户端 idempotencyKey
+
+位置：`LOCK-01A-CONTRACT.md:11-17,62-67`，`LOCK-01A-DATA-DESIGN.md:22-34,85-99`。
+
+上下文声明了 `idempotencyKey`，但固定 ID 公式写成 `op_id:{orgId}:{route}:{actorKeyDigest}`。若 `actorKeyDigest` 只是操作者摘要，同一操作者在同一路由的第二次合法操作会永远命中第一次操作；若其含义是“actor/keyDigest”，文档也没有定义 keyDigest 的输入，无法安全实现。
+
+修复：给出无歧义公式，例如 `op_id = claimId("device-operation", orgId + "|" + route + "|" + actorId, HMAC(idempotencyKey))`，并把 `requestDigest` 绑定规范化业务输入。明确 idempotencyKey 长度、字符、保存期限、过期后行为和 actor 类型；同键同请求重放、同键不同请求冲突，不同键必须允许新操作。固定 ID 本身只使用安全字符，不直接拼接未经约束的 orgId/route。
+
+### F05 [P1] 未知厂商错误不应自动进入 RETRYABLE
+
+位置：`LOCK-01A-CONTRACT.md:38-60`。
+
+文档在官方码表为空时允许“未知即 `RETRYABLE` 或 `UNKNOWN_RESULT`”。对人脸新增/删除这类外部副作用，未知响应自动重试可能重复创建凭证，或在撤权已成功后反复调用。仅靠本地幂等键不能证明海康端幂等。
+
+修复：未知厂商码、解析失败和发送后断连默认进入 `UNKNOWN_RESULT/awaiting_result`，先通过官方查询接口或人工对账解析；只有官方明确可重试、且已确认请求未执行或厂商支持幂等时才进入 `RETRYABLE`。把“连接前失败”和“可能已发送”分开，分别测试。
+
+### F04 已关闭
+
+Provider 选择已按 demo/test/live 明确：mock 只能在非生产显式选择，live 只能使用配置完整的 Hikvision Provider，缺配置失败关闭；记录持久化 executionMode/provider/evidenceScope，模拟结果不能标记真实设备生效。
+
+### 第二轮核对
+
+- 四份文档相对链接有效，`git show --check` 与 `git diff --check` 通过。
+- 本轮仍为纯文档审查，没有连接设备、云环境或真实人脸数据。
+- 可保留当前证据分级、Provider 模式边界、私密权限、退租立即失效和异步撤权设计。
+
+返工只需修改设计文档并提供新 head；不要开始 LOCK-01B 或真实设备联调。

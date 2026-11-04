@@ -107,3 +107,33 @@ Provider 选择已按 demo/test/live 明确：mock 只能在非生产显式选�
 - 可保留当前证据分级、Provider 模式边界、私密权限、退租立即失效和异步撤权设计。
 
 返工只需修改设计文档并提供新 head；不要开始 LOCK-01B 或真实设备联调。
+
+## 第三轮复审：369c4f5
+
+结论：设备全局所有权和未知结果处理已通过；幂等键已进入 op_id，但公式遗漏 `actorType`，与文档自身的主体隔离要求不一致。修正这一处后可结束 LOCK-01A 的本地设计复审；目标型号资料仍是进入 LOCK-01B 的外部前置条件。
+
+### 设备所有权整改通过
+
+设备 claim 已改为不含 orgId 的全局 `provider-device` 固定占位，记录唯一 `ownerOrgId`；A/B 同序列号并发登记只允许一个 owner。跨组织转移要求审计，并在存在有效 grant 或未关闭 job 时拒绝；共享设备必须通过单独 binding，不能重复登记。该项关闭。
+
+### 未知厂商结果整改通过
+
+连接前明确未发送才可 `RETRYABLE`；发送后断连、超时、解析失败和未知官方码统一进入 `UNKNOWN_RESULT/awaiting_result`，先查询或人工对账，禁止自动重试。新增了录入和撤权对账后不得重复下发的测试要求。该项关闭。
+
+### F06 [P1] op_id 仍遗漏 actorType
+
+位置：`LOCK-01A-CONTRACT.md:10-17,68-75`，`LOCK-01A-DATA-DESIGN.md:22-36`。
+
+上下文新增了 `actorType: user|system|agent`，说明也写“actorId 需带 actorType，避免不同主体摘要碰撞”；但实际公式仍为：
+
+`claimId("device-operation", orgId + "|" + route + "|" + actorId, HMAC-K2(idempotencyKey))`
+
+因此 user `abc` 与 system `abc` 在相同组织、路由和客户端键下仍生成同一 op_id。后提交的一方可能错误重放前者结果或得到冲突，审计主体也会混淆。
+
+修复：公式的 scope 明确加入 actorType，例如 `orgId|route|actorType|actorId`；规范化 requestDigest 时也记录 actorType。补同 actorId、不同 actorType、相同 idempotencyKey 生成不同 op_id 且互不重放的测试。契约和数据设计必须使用完全相同的公式。
+
+### 第三轮核对
+
+- `hikvision` 枚举、Provider demo/live 边界、固定设备 claim、grant slot 和未知结果策略保持正确。
+- `git show --check`、提交差异检查通过；本轮仍无业务代码、云端或设备操作。
+- Q1/Q3/Q4/Q5/Q6 尚未关闭，`DS-K1T671BM` 精确能力为 0 条已验证；公式修复通过只代表本地设计可用，不授权开发真实 Hikvision Provider。

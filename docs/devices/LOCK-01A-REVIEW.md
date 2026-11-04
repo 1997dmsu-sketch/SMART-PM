@@ -137,3 +137,36 @@ Provider 选择已按 demo/test/live 明确：mock 只能在非生产显式选�
 - `hikvision` 枚举、Provider demo/live 边界、固定设备 claim、grant slot 和未知结果策略保持正确。
 - `git show --check`、提交差异检查通过；本轮仍无业务代码、云端或设备操作。
 - Q1/Q3/Q4/Q5/Q6 尚未关闭，`DS-K1T671BM` 精确能力为 0 条已验证；公式修复通过只代表本地设计可用，不授权开发真实 Hikvision Provider。
+
+## 第四轮复审：125c6af
+
+结论：**LOCK-01A 本地设计复审通过。** F01–F06 均已关闭，本轮未发现新的文档设计阻塞项。通过范围仅包括厂商无关的数据边界、Provider 契约、安全状态机和后续验收要求；不表示 `DS-K1T671BM` 接口能力已经确认，也不授权连接真实设备。
+
+### F06 已关闭
+
+契约和数据设计已统一使用：
+
+`claimId("device-operation", orgId + "|" + route + "|" + actorType + "|" + actorId, HMAC-K2(idempotencyKey))`
+
+`actorType` 同时参与 op_id 作用域和 requestDigest 规范化；不同 actorType、相同 actorId 和幂等键会生成不同操作占位，互不重放。测试清单已补对应竞争用例。
+
+### 本地设计通过范围
+
+- `hikvision` 受控枚举及 demo/test/live 失败关闭边界。
+- 全局物理设备 claim、唯一 ownerOrgId、审计转移和可选共享 binding。
+- 入住周期绑定的 grant slot、退租立即业务失效和异步撤权。
+- 作用域化幂等键、requestDigest、任务租约和不可变日志。
+- 未知发送结果进入 awaiting_result，完成查询/人工对账前不自动重试。
+- 人脸文件私密用途、审核权与私密读取权分离、模拟证据不得冒充真实设备结果。
+
+### 进入后续阶段的前置条件
+
+Q1/Q3/Q4/Q5/Q6 仍为外部阻塞项。开始真实 `HikvisionFaceAccessProvider` 前必须取得并复核：
+
+1. `DS-K1T671BM` 精确规格和目标固件版本。
+2. 对应该型号/固件的官方人员、人脸、权限和事件接口指南。
+3. 认证方式、是否允许设备直连、是否必须 HikCentral，以及图片质量要求。
+
+在资料到位前，可以把当前文档作为后续集成设计输入，但不得猜测端点、编写宣称可用的真实海康适配器、申请生产密钥、上传真实人脸或连接设备。LOCK-01B 若先行，只能实现厂商无关服务层与 Mock Provider，并保持 live 失败关闭；真实 Provider 部分继续阻塞。
+
+第四轮为纯文档复审：`git show --check` 和差异检查通过，未运行云端、设备或真实人脸测试。

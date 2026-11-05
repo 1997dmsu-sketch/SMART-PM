@@ -7,6 +7,7 @@
 | AI-A 文档证据 | `HK-AI-01-EVIDENCE-MATRIX.md` | 立即开始 | 两份私密 ISAPI 资料 |
 | AI-B 设备探针 | `HK-AI-02-CAPABILITY-PROBE.md` | 开发与离线测试 | 11月6日后才能执行真实只读探针 |
 | AI-C 数据库隐私 | `HK-AI-03-DB-PRIVATE-FACE.md` | 立即开始 | DB-02～DB-07 分支 |
+| AI-D0 契约证据准备 | `HK-AI-04A-CONTRACT-EVIDENCE-PREP.md` | Kimi 立即开始 | AI-A 文档与 LOCK-01A 契约 |
 | AI-D 门禁后端 | `HK-AI-04-FACE-SERVICE-MOCK.md` | 先固定契约/Mock；集成后完成 | AI-C 集成基线 |
 | AI-E 后台前端 | `HK-AI-05-ADMIN-FLOW.md` | API 契约冻结后开始 | AI-D 契约 |
 | AI-F 企业微信看板 | `DEV-AI-01-WECOM-BOARD.md` | Workburry 立即开始 | 无海康设备依赖 |
@@ -18,6 +19,7 @@
 | AI-A / HK-AI-01 | 文档阶段已入基线（`9149fd4`） | `docs/hk-isapi-evidence` | `8136b90177a0a49b59d211db01975a87d781b61a` | 等待完整铭牌/固件、厂商适用性答复及目标设备 capability；公开仓库不保存水印资料 |
 | AI-B / HK-AI-02 | 整改已提交，待 Codex 复审（`59b6437`，基线 `f90f199`） | `feat/hk-isapi-capability-probe` | `8136b90` | 五项真实执行阻断已修复并离线回归（55 项）；复审通过前，即使真人已批准也禁止设置 `HIKVISION_PROBE_ALLOW_READ=true` |
 | AI-C / HK-AI-03 | DeepSeek Harness 已认领，阶段 2 进行中（`8592763`） | `feat/db-mvp-integration` | `b9ee061`（`feat/db-05-occupancies`） | 九项 HTTP 测试与两项资源回归未完成；复审通过前不进入阶段 3 |
+| AI-D0 / HK-AI-04A | Kimi 已分配，可立即开始 | `docs/hk-ai-04-contract-evidence` | `docs/lock-01-fast-track` | 仅整理契约与证据；完成后由 Codex 复审，不得代替 AI-C 基线或真实能力验证 |
 | AI-D / HK-AI-04 | 待认领 | — | 等待 AI-C 集成基线 | 可先阅读契约和准备独立 Mock 模块 |
 | AI-E / HK-AI-05 | 待认领 | — | 等待 AI-D API 契约 | API 冻结后开始 |
 | AI-F / DEV-AI-01 | Workburry 已分配 | `feat/wecom-dev-board` | `docs/lock-01-fast-track@1358ef5` | 真实发送等待企业微信应用/群机器人配置；Mock 开发可立即开始 |
@@ -31,6 +33,7 @@ AI-A 在收到原包前可以先完成证据矩阵结构、已有资料登记映
 | AI-A 文档证据 | Kimi | Codex |
 | AI-B 设备探针 | DeepSeek Harness | Codex |
 | AI-C 数据库隐私 | DeepSeek Harness | Codex |
+| AI-D0 契约证据准备 | Kimi | Codex |
 | AI-D 门禁后端 | DeepSeek Harness | Codex |
 | AI-E 后台前端 | Workburry | Codex |
 | AI-F 企业微信开发看板 | Workburry | Codex |

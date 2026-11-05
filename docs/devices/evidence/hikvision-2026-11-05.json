@@ -1,0 +1,198 @@
+{
+  "pack": "hikvision-acs-isapi-evidence",
+  "version": "2026-11-05",
+  "task": "LOCK-01A",
+  "device": "DS-K1T671BM",
+  "scope": "generic-access-control-terminal",
+  "scopeNote": "所有来源均为“门禁一体机”通用文档，未绑定 DS-K1T671BM 型号或固件；不得据此认定型号能力。",
+  "fetchedAt": "2026-11-05T03:35:00Z",
+  "fetchedBy": "LOCK-01A 调研（人工抓取快照）",
+  "sources": [
+    {
+      "id": "S1",
+      "name": "门禁一体机（ISAPI 全文，1.1–1.27）",
+      "type": "static-html",
+      "url": "https://open.hikvision.com/hardware/v2/08协议透传/门禁一体机.html",
+      "http": 200,
+      "bytes": 401080,
+      "sha256": "30f733d229806143115e4ab22de2ff567a907b1b7fc361cc949a495bc53898b7",
+      "accessedAt": "2026-11-05T03:38:00Z"
+    },
+    {
+      "id": "S2",
+      "name": "人员管理(以人为中心)",
+      "type": "doc-service-markdown",
+      "url": "https://open.hikvision.com/docs/docId?productId=5cda567cf47ae80dd41a54b3&version=%2F16e18c75bd644f1dbf9e8301d6fc9b73&curNodeId=6d952a6cf7894484a6b43c04b865f52f",
+      "nodeId": "6d952a6cf7894484a6b43c04b865f52f",
+      "productVersion": "设备网络SDK",
+      "productLineId": "5cda567cf47ae80dd41a54b3",
+      "http": 200,
+      "bytes": 45320,
+      "sha256": "ff0cd5a57be003cfde5bc2fced435694b0954abc1612df9e32aa4047f636b9fa",
+      "accessedAt": "2026-11-05T03:40:00Z"
+    },
+    {
+      "id": "S3",
+      "name": "附录D2.1 门禁事件（事件类型码 + 通知信封）",
+      "type": "doc-service-markdown",
+      "url": "https://open.hikvision.com/docs/docId?productId=5cda567cf47ae80dd41a54b3&version=%2F16e18c75bd644f1dbf9e8301d6fc9b73&curNodeId=fbbe7f3b06b047e0b89aacb5f44b0e69",
+      "nodeId": "fbbe7f3b06b047e0b89aacb5f44b0e69",
+      "productVersion": "设备网络SDK",
+      "http": 200,
+      "bytes": 20998,
+      "sha256": "774ae31729495b03b61cda042f0b020b31028bd4c399da753ab202a2f02d25d6",
+      "accessedAt": "2026-11-05T03:42:00Z"
+    }
+  ],
+  "reproduce": {
+    "method": "GET",
+    "template": "https://open.hikvision.com/api/open/cqsservice/cqs/doc/getById?id=<nodeId>&path=",
+    "auth": "none-observed-at-fetch-time",
+    "response": "{ code: 0, data: { content: \"<markdown>\" } }",
+    "caveat": "该接口在抓取时无需登录，属厂商站点实现现状，可能随时变更；不代表官方承诺，仅用于人工核对。"
+  },
+  "claims": [
+    {
+      "id": "C1",
+      "q": "Q5",
+      "statement": "支持由第三方平台下发人脸：faceURL 或 modelData 二选一，图片可二进制随 JSON 下发",
+      "status": "documented",
+      "scope": "generic-acs-terminal",
+      "evidence": ["S1"],
+      "counterCondition": "若 BM 的 /ISAPI/AccessControl/capabilities 未返回“人脸库管理”，则该结论不适用于 BM"
+    },
+    {
+      "id": "C2",
+      "q": "Q5",
+      "statement": "人脸图片硬指标：JPG/JPEG、≤200KB、宽高 ≤400 万、建议 640×480、两眼间距 >40px、白底无逆光无 PS",
+      "status": "documented",
+      "scope": "generic-acs-terminal",
+      "evidence": ["S2"],
+      "counterCondition": "若 BM 固件文档给出不同阈值，以型号文档为准"
+    },
+    {
+      "id": "C3",
+      "q": "Q5",
+      "statement": "必须先下发人员工号，再绑定人脸",
+      "status": "documented",
+      "scope": "generic-acs-terminal",
+      "evidence": ["S2"],
+      "counterCondition": "个别固件允许人脸库独立下发（blackFD 场景），需型号确认"
+    },
+    {
+      "id": "C4",
+      "q": "Q3/Q5",
+      "statement": "人脸端点共 7 个（建库/数量/查询/新增/设置/修改/删除），删除有两条路径",
+      "status": "documented",
+      "scope": "generic-acs-terminal",
+      "evidence": ["S1"],
+      "counterCondition": "若 BM 不支持 FDSetUp.deleteFP，则只剩 FDSearch/Delete 一条删除路径"
+    },
+    {
+      "id": "C5",
+      "q": "Q5",
+      "statement": "支持 PicFeaturePoints（6 类，归一化 0–1000），用于提升跨设备建模成功率",
+      "status": "documented",
+      "scope": "generic-acs-terminal",
+      "evidence": ["S1"],
+      "counterCondition": "若 BM 固件不接受该字段，需退回纯图片下发并承担建模失败率"
+    },
+    {
+      "id": "C6",
+      "q": "Q6",
+      "statement": "删除人员级联删除卡/指纹/人脸，且为异步：需轮询 DeleteProcess 至 success",
+      "status": "documented",
+      "scope": "generic-acs-terminal",
+      "evidence": ["S1", "S2"],
+      "counterCondition": "若实现走平台 OpenAPI，删除语义可能不同"
+    },
+    {
+      "id": "C7",
+      "q": "Q3",
+      "statement": "门禁事件支持订阅式通知：event_acs / OnEventNotify，含 eventId/eventType/happenTime/status",
+      "status": "documented",
+      "scope": "generic-acs-terminal",
+      "evidence": ["S3"],
+      "counterCondition": "若 BM 仅支持 SDK 回调而不支持 ISAPI 订阅，则需另设接收端"
+    },
+    {
+      "id": "C8",
+      "q": "Q3",
+      "statement": "可用 GET /ISAPI/AccessControl/capabilities 自证设备能力位",
+      "status": "documented",
+      "scope": "generic-acs-terminal",
+      "evidence": ["S1"],
+      "counterCondition": "能力位命名随固件变化，需按实际返回解析"
+    },
+    {
+      "id": "C9",
+      "q": "Q1",
+      "statement": "DS-K1T671BM 支持上述全部端点",
+      "status": "unverified",
+      "scope": "device-specific",
+      "evidence": [],
+      "counterCondition": "拿到测试机后实测 capabilities 即为反证点"
+    },
+    {
+      "id": "C10",
+      "q": "Q4",
+      "statement": "设备侧 ISAPI 的认证方式（Digest / 账号 / 是否需先登 SDK）",
+      "status": "unverified",
+      "scope": "device-specific",
+      "evidence": [],
+      "counterCondition": "若必须经 SDK 登录才能访问 ISAPI，路线 A 成本显著上升"
+    },
+    {
+      "id": "C11",
+      "q": "Q6",
+      "statement": "是否必须经综合安防平台（HikCentral）才能被第三方管理",
+      "status": "unverified",
+      "scope": "project",
+      "evidence": [],
+      "counterCondition": "厂商书面答复或 HikCentral 授权条款"
+    },
+    {
+      "id": "C12",
+      "q": "Q8",
+      "statement": "错误码表、限频、离线与并发行为",
+      "status": "unverified",
+      "scope": "device-specific",
+      "evidence": [],
+      "counterCondition": "型号手册错误码章节"
+    }
+  ],
+  "endpoints": {
+    "face": [
+      { "action": "createLibrary", "method": "POST", "path": "/ISAPI/Intelligent/FDLib?format=json" },
+      { "action": "count", "method": "GET", "path": "/ISAPI/Intelligent/FDLib/Count?format=json" },
+      { "action": "search", "method": "POST", "path": "/ISAPI/Intelligent/FDLib/FDSearch?format=json" },
+      { "action": "add", "method": "POST", "path": "/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json" },
+      { "action": "setUp", "method": "PUT", "path": "/ISAPI/Intelligent/FDLib/FDSetUp?format=json" },
+      { "action": "modify", "method": "PUT", "path": "/ISAPI/Intelligent/FDLib/FDSearch?format=json&FDID=<FDID>&FPID=<FPID>&faceLibType=<faceLibType>" },
+      { "action": "delete", "method": "PUT", "path": "/ISAPI/Intelligent/FDLib/FDSearch/Delete?format=json&FDID=<FDID>&faceLibType=<FDType>" }
+    ],
+    "person": [
+      { "action": "count", "method": "GET", "path": "/ISAPI/AccessControl/UserInfo/Count?format=json&type=<type>" },
+      { "action": "search", "method": "POST", "path": "/ISAPI/AccessControl/UserInfo/Search?format=json" },
+      { "action": "setUp", "method": "PUT", "path": "/ISAPI/AccessControl/UserInfo/SetUp?format=json" },
+      { "action": "modify", "method": "PUT", "path": "/ISAPI/AccessControl/UserInfo/Modify?format=json" },
+      { "action": "record", "method": "POST", "path": "/ISAPI/AccessControl/UserInfo/Record?format=json" },
+      { "action": "delete", "method": "PUT", "path": "/ISAPI/AccessControl/UserInfoDetail/Delete?format=json" },
+      { "action": "deleteProgress", "method": "GET", "path": "/ISAPI/AccessControl/UserInfoDetail/DeleteProcess?format=json" }
+    ],
+    "capabilities": [
+      { "action": "acsCapabilities", "method": "GET", "path": "/ISAPI/AccessControl/capabilities" }
+    ],
+    "events": [
+      { "action": "subscribeOrNotify", "protocol": "event_acs / OnEventNotify" }
+    ]
+  },
+  "openQuestions": [
+    "Q1 BM 精确型号与固件版本，以及型号专用 ISAPI 指南",
+    "Q4 设备侧 ISAPI 认证方式与 IP 白名单",
+    "Q6 是否必须依赖 HikCentral",
+    "Q8 错误码、限频、离线与并发行为",
+    "Q10 人脸数据存储地域与删除机制",
+    "Q11 接口费用、配额与设备许可"
+  ]
+}

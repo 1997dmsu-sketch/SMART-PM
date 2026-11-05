@@ -9,6 +9,7 @@
 | AI-C 数据库隐私 | `HK-AI-03-DB-PRIVATE-FACE.md` | 立即开始 | DB-02～DB-07 分支 |
 | AI-D 门禁后端 | `HK-AI-04-FACE-SERVICE-MOCK.md` | 先固定契约/Mock；集成后完成 | AI-C 集成基线 |
 | AI-E 后台前端 | `HK-AI-05-ADMIN-FLOW.md` | API 契约冻结后开始 | AI-D 契约 |
+| AI-F 企业微信看板 | `DEV-AI-01-WECOM-BOARD.md` | Workburry 立即开始 | 无海康设备依赖 |
 
 ## 认领状态
 
@@ -19,6 +20,7 @@
 | AI-C / HK-AI-03 | 待认领 | — | 任务卡指定 DB 分支 | 无真人依赖，可立即开始 |
 | AI-D / HK-AI-04 | 待认领 | — | 等待 AI-C 集成基线 | 可先阅读契约和准备独立 Mock 模块 |
 | AI-E / HK-AI-05 | 待认领 | — | 等待 AI-D API 契约 | API 冻结后开始 |
+| AI-F / DEV-AI-01 | Workburry 已分配 | `feat/wecom-dev-board` | `docs/lock-01-fast-track@1358ef5` | 真实发送等待企业微信应用/群机器人配置；Mock 开发可立即开始 |
 
 AI-A 在收到原包前可以先完成证据矩阵结构、已有资料登记映射和待核对清单；不得把二手摘要当作逐页核对完成。
 
@@ -31,6 +33,7 @@ AI-A 在收到原包前可以先完成证据矩阵结构、已有资料登记映
 | AI-C 数据库隐私 | DeepSeek Harness | Codex |
 | AI-D 门禁后端 | DeepSeek Harness | Codex |
 | AI-E 后台前端 | Workburry | Codex |
+| AI-F 企业微信开发看板 | Workburry | Codex |
 
 Codex 另行认领 ISAPI 路线、系统架构、安全边界、关键状态机和所有阶段复审，详见 `HK-AI-OWNERSHIP-AND-BUDGET.md`。
 

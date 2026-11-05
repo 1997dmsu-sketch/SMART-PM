@@ -52,6 +52,7 @@ Workburry 已分配：
 2. 测试数据生成、fixture 清单、文档索引和人工验收表整理。
 3. 页面空状态、加载状态、错误提示和常规响应式适配。
 4. 根据已批准接口补充常规客户端调用，不设计权限和状态机。
+5. `DEV-AI-01-WECOM-BOARD.md`：企业微信开发看板的常规页面、GitHub 任务状态汇总、Mock 消息预览和定时推送适配层。
 
 Workburry 不负责：权限决策、设备网络、密钥、幂等、任务重试、未知结果处理、真实设备写入和数据库迁移。
 
@@ -65,6 +66,7 @@ Workburry 不负责：权限决策、设备网络、密钥、幂等、任务重�
 | `face-biometric` 私密文件 | DeepSeek Harness | Codex | DB 集成提交后 |
 | 人脸服务层和 Mock | DeepSeek Harness | Codex | 契约先由 Codex确认 |
 | 后台页面常规实现 | Workburry | Codex | API 契约冻结后 |
+| 企业微信开发看板 MVP | Workburry | Codex | 立即开始；真实推送需配置复审 |
 | ISAPI 路线决策 | Codex | 项目负责人确认 | 真人资料＋只读探针结果 |
 | 边缘代理安全架构 | Codex | DeepSeek 可提供实现建议 | 路线决策后 |
 | 真实 Hikvision Provider | DeepSeek Harness | Codex | 路线批准＋隔离网络就绪 |

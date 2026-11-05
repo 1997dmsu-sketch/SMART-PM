@@ -13,7 +13,7 @@
 // - NAS 未实现时任何路径都不回退到公开路径。
 import { randomUUID, createHash } from "node:crypto";
 import { failCode } from "./model.mjs";
-import { imageSize } from "./image-size.mjs";
+import { inspectImage } from "./image-size.mjs";
 import { OpReplay, pageParams } from "./property-v2.mjs";
 import { operationKeyId } from "./claims.mjs";
 import {
@@ -56,11 +56,9 @@ const ALL_MIMES = [
  */
 export function publicAsset(record) {
   if (!record) return record;
+  // 复审：普通接口不返回任何摘要（连前缀也不返回），审计关联一律用 fileId。
   const { checksum, ...rest } = record;
-  return {
-    ...rest,
-    checksumPrefix: typeof checksum === "string" ? checksum.slice(0, 16) : null,
-  };
+  return rest;
 }
 
 // 人脸图片尺寸策略（服务端二次校验，扩展名与声明 MIME 均不作为依据）。
@@ -73,8 +71,8 @@ export const FACE_MAX_DIMENSION = 4096;
  * 返回 { width, height }；不合规直接抛 PARAM_ERROR（fail closed）。
  */
 export function assertFaceImage(bytes) {
-  const size = imageSize(bytes);
-  if (!size) failCode("PARAM_ERROR", "无法解析人脸图片尺寸（需为 JPEG 或 PNG）");
+  const size = inspectImage(bytes);
+  if (!size) failCode("PARAM_ERROR", "人脸图片完整性校验失败（需为完整的 JPEG 或 PNG）");
   const { width, height } = size;
   if (
     width < FACE_MIN_DIMENSION ||
@@ -350,16 +348,36 @@ export class FileService {
     ];
   }
 
-  authCheck(state, { requireAdmin = false } = {}) {
+  authCheck(state, { requireAdmin = false, permission = null } = {}) {
     const org = state[`organizations/${this.orgId}`];
     if (org && org.status !== "active")
       failCode("FORBIDDEN", "组织当前不可用", 403);
-    if (!this.auth) return;
+    if (!this.auth) return null;
     const m = state[`org_memberships/${this.auth.membershipId}`];
     if (!m || m.orgId !== this.orgId || m.status !== "active")
       failCode("FORBIDDEN", "组织成员关系已失效或权限不足", 403);
+    // 权威事务内按**当前**成员记录检查权限点，避免 actor 快照与撤销并发。
+    if (permission && !(m.permissions || []).includes(permission))
+      failCode("FORBIDDEN", `缺少权限点 ${permission}，无法操作该文件`, 403);
     if (requireAdmin && m.role !== "admin")
       failCode("FORBIDDEN", "仅组织管理员可执行此操作", 403);
+    return m;
+  }
+
+  // 读取点重新检查「当前」成员权限：actor 快照可能早于撤销操作，
+  // 私密读取必须以存储中的最新成员记录为准（避免撤销竞态）。
+  async currentPermission(actor, permission) {
+    if (!permission) return true;
+    const membershipId = (actor && actor.membershipId) || this.auth?.membershipId;
+    if (!membershipId) return false;
+    const rows = await this.store.list("org_memberships", this.orgId);
+    const membership = rows.find((row) => row._id === membershipId);
+    return Boolean(
+      membership &&
+        membership.status === "active" &&
+        membership.orgId === this.orgId &&
+        (membership.permissions || []).includes(permission),
+    );
   }
 
   // 权限分级（§5 / §9.2）：server 层用 {write:false} 调 requireMembership 后再
@@ -525,7 +543,10 @@ export class FileService {
     await this.store.transact(
       [ref("file_assets", fileId), ...this.authRefs(), ...opRefs],
       (state) => {
-        this.authCheck(state);
+        this.authCheck(state, {
+          requireAdmin: Boolean(policy.private) && !policy.writePermission,
+          permission: policy.writePermission,
+        });
         return [{ collection: "file_assets", id: fileId, data: staged }];
       },
       audit,
@@ -962,7 +983,12 @@ export class FileService {
       // identity-document → identity.readPrivate）时，仅凭组织管理员角色不再放行，
       // 必须持有该读取权限点；未声明 readPermission 的私密文件回落到组织管理员。
       // 未授权一律 404 与不存在同态（防枚举）。
-      const allowed = this.canReadFile(file, actor);
+      // 人脸文件：读取点强制按最新成员记录复核（专项权限，admin 不回落）。
+      // 其它私密用途保持既有语义（purpose 声明 readPermission，admin 可回落）。
+      const freshRequired = file.purpose === "face-biometric";
+      const allowed =
+        (!freshRequired || (await this.currentPermission(actor, readPermission))) &&
+        this.canReadFile(file, actor);
       if (!allowed) await denied();
     }
 
@@ -1016,7 +1042,8 @@ export class FileService {
         const now = state[`file_assets/${fileId}`];
         if (!now || now.orgId !== this.orgId || now.purpose !== "face-biometric")
           failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
-        this.authCheck(state, { requireAdmin: true });
+        // 权威事务内按当前成员记录校验审核权限；不要求管理员角色。
+        this.authCheck(state, { permission: "device.face.review" });
         const revision = (now.revision ?? 0) + 1;
         result = { fileId, reviewState: decision, revision };
         const opw = opWrite(state, op, { status: 200, body: result });

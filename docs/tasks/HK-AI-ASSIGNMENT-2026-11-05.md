@@ -21,7 +21,7 @@
 | 任务 | 状态 | 分支 | 基准 | 当前阻碍 |
 |---|---|---|---|---|
 | AI-A / HK-AI-01 | 文档阶段已入基线（`9149fd4`） | `docs/hk-isapi-evidence` | `8136b90177a0a49b59d211db01975a87d781b61a` | 等待完整铭牌/固件、厂商适用性答复及目标设备 capability；公开仓库不保存水印资料 |
-| AI-B / HK-AI-02 | `59b6437` 复审不通过，DeepSeek Harness 定点返工 | `feat/hk-isapi-capability-probe` | `8136b90` | 畸形 Digest 与 `RESPONSE_ERROR` 未 fail-fast，README 凭据/指纹注入仍不合规；复审通过前禁止设置 `HIKVISION_PROBE_ALLOW_READ=true` |
+| AI-B / HK-AI-02 | `f15160d` 代码侧复审通过 | `feat/hk-isapi-capability-probe` | `8136b90` | 三项返工已关闭；等待现场/项目负责人批准、隔离环境和一次性窗口，批准前禁止设置 `HIKVISION_PROBE_ALLOW_READ=true` |
 | AI-C / HK-AI-03 | DeepSeek Harness 已认领，阶段 2 进行中（`8592763`） | `feat/db-mvp-integration` | `b9ee061`（`feat/db-05-occupancies`） | 九项 HTTP 测试与两项资源回归未完成；复审通过前不进入阶段 3 |
 | AI-D0 / HK-AI-04A | 文档阶段通过 Codex 复审（`5148159`） | `docs/hk-ai-04-contract-evidence` | `8b47fb7` | 九项架构裁定见 `HK-AI-04A-REVIEW-2026-11-05.md`；不代表真实能力验证 |
 | AI-D / HK-AI-04 | 可由 DeepSeek Harness 启动独立 Mock 核心 | `feat/hk-face-service-mock` | 等待 AI-C 阶段 2 终审后确定集成提交 | 可先做状态机、Mock 与 fixture；正式集成不得复制资格/文件逻辑，真实 Provider 关闭 |

@@ -3,7 +3,7 @@
 优先级：P0
 执行者：DeepSeek Harness
 复审者：Codex
-状态：离线测试与 dry-run 已通过；`59b6437` 复审不通过，DeepSeek Harness 定点返工，Codex 复审通过前禁止连接设备
+状态：`f15160d` 代码侧复审通过；等待真人批准与一次性执行窗口，批准完成前禁止连接设备
 基准分支：`docs/lock-01-fast-track`
 建议分支：`feat/hk-isapi-capability-probe`
 预计：1～2 个工作日开发；真人网络任务完成后执行

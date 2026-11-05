@@ -7,6 +7,8 @@
 
 第一版演示日期：**2026-11-15（M1 模拟流程演示）**。本次演示使用 Mock Provider 和脱敏测试数据，不以真实海康设备联通作为演示前置条件，也不得展示为生产可用。
 
+详细倒排、人员分工、质量门禁和降级方案见 `DEMO-M1-PLAN-2026-11-15.md`，该计划作为 11月15日前的执行基线。
+
 2026-11-05 新增两份官方 ISAPI 指南，详见 `../devices/HIKVISION-ISAPI-DOCS-2026-11-05.md` 和 `HK-ISAPI-01-DOC-AND-DEVICE-VALIDATION.md`。资料使设备侧 ISAPI 成为首选候选路线，但指南只明确列出近似型号 `DS-K1T671B` 与 `DS-K1T671BM-3XFTD`；现场完整型号、固件和 capability 仍需真人核对。
 
 ## 1. 已审查基线

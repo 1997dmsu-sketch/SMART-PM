@@ -3,6 +3,7 @@
 优先级：P0
 执行者：DeepSeek Harness
 复审者：Codex
+状态：离线测试与 dry-run 已通过 Codex 复审；真实只读执行等待现场负责人和项目负责人批准
 基准分支：`docs/lock-01-fast-track`
 建议分支：`feat/hk-isapi-capability-probe`
 预计：1～2 个工作日开发；真人网络任务完成后执行
@@ -49,7 +50,7 @@ GET /ISAPI/Intelligent/FDLib/Count?format=json
 
 批量部署阶段再迁移到受控私有 CA。任何模式均不得提供“跳过全部 TLS 校验”的运行开关。
 
-当前 `feat/hk-isapi-capability-probe@8ceb8a5` 尚未满足该决策：`rejectUnauthorized: true` 会让现场自签名证书在指纹比较前因证书链不受信而失败。修复后必须用本地自签名 TLS 服务覆盖正确指纹成功、错误指纹失败、无指纹失败、重定向失败四类集成测试，才可执行现场探针。
+历史提交 `8ceb8a5` 曾因系统信任链先于指纹比较而不满足该决策；`f90f199` 已改为预共享指纹校验并用本地自签名 TLS 服务覆盖正确指纹、错误指纹、无指纹、双指纹轮换和重定向。代码门禁已通过，现场执行仍须单独批准。
 
 ## 验收
 
@@ -69,4 +70,8 @@ GET /ISAPI/Intelligent/FDLib/Count?format=json
 执行所需环境变量名称（不含值）：
 未关闭阻碍：
 ```
+
+## Dry-run 复审结论（2026-11-05）
+
+固定提交 `f90f199` 已由 Codex 独立复跑：46/46 离线测试通过；显式移除执行授权、目标、账号、密码、指纹和 CA 环境变量后，CLI 只输出六个固定 GET 计划，未生成 `.raw` 或 `report.json`，工作区无修改。此结论只批准 dry-run，不批准真实设备连接。
 

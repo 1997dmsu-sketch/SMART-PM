@@ -137,6 +137,47 @@ test("不可解析的挑战：中止", async () => {
   assert.equal(result.report.aborted.code, "AUTH_CHALLENGE");
 });
 
+test("畸形 Digest 挑战（缺 realm）：立即中止，后五个端点零调用", async () => {
+  const transport = makeTransport({
+    deviceInfo: () => ({
+      status: 401,
+      headers: { "www-authenticate": 'Digest nonce="only-nonce"' },
+      body: Buffer.from(""),
+    }),
+    acsCapabilities: never,
+  });
+  const result = await runProbe({ config: BASE, transport });
+  assert.equal(transport.calls.length, 1);
+  assert.equal(result.report.aborted.code, "AUTH_CHALLENGE");
+  assert.match(result.report.aborted.reason, /realm/);
+});
+
+test("不支持的 Digest 算法（Authorization 构造失败）：中止", async () => {
+  const transport = makeTransport({
+    deviceInfo: () => ({
+      status: 401,
+      headers: { "www-authenticate": 'Digest realm="r", nonce="n", algorithm=SHA1' },
+      body: Buffer.from(""),
+    }),
+    acsCapabilities: never,
+  });
+  const result = await runProbe({ config: BASE, transport });
+  assert.equal(transport.calls.length, 1);
+  assert.equal(result.report.aborted.code, "AUTH_CHALLENGE");
+});
+
+test("响应流错误 RESPONSE_ERROR：立即中止", async () => {
+  const transport = makeTransport({
+    deviceInfo: () => {
+      throw new HttpError("RESPONSE_ERROR", "stream reset");
+    },
+    acsCapabilities: never,
+  });
+  const result = await runProbe({ config: BASE, transport });
+  assert.equal(transport.calls.length, 1);
+  assert.equal(result.report.aborted.code, "RESPONSE_ERROR");
+});
+
 for (const [label, error, code] of [
   ["证书/TLS 错误", new HttpError("NETWORK", "self-signed certificate"), "NETWORK"],
   ["超时", new HttpError("TIMEOUT", "请求超时"), "TIMEOUT"],

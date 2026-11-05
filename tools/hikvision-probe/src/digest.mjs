@@ -19,9 +19,12 @@ const ALGORITHMS = {
 };
 
 export class DigestError extends Error {
-  constructor(message) {
+  constructor(message, code = "AUTH_CHALLENGE") {
     super(message);
     this.name = "DigestError";
+    // 复审：challenge 解析失败、缺字段、不支持的算法、Authorization 构造失败
+    // 都必须映射为致命认证错误，由编排器立即中止。
+    this.code = code;
   }
 }
 

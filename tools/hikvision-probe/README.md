@@ -1,4 +1,4 @@
-# 海康只读 capability 探针（HK-AI-02）
+﻿# 海康只读 capability 探针（HK-AI-02）
 
 默认 **dry-run**：不设置 `HIKVISION_PROBE_ALLOW_READ=true` 时，程序只打印将要访问的白名单端点，**不发起任何网络请求**。
 
@@ -23,25 +23,40 @@ GET /ISAPI/Intelligent/FDLib/Count?format=json
 
 ```bash
 cd tools/hikvision-probe
-node --test 'test/*.test.mjs'     # 55 项离线测试（Windows 跳过 3 项 POSIX 权限用例），无需设备
+node --test 'test/*.test.mjs'     # 58 项离线测试（Linux 57 通过 + 1 跳过；Windows 55 通过 + 3 跳过），无需设备
 node cli.mjs                      # dry-run：只打印计划
 ```
 
-现场执行（**必须经项目负责人确认隔离网络并签署批准栏后**）。密码不写进命令历史，
-用无回显读取注入；本试点固定使用指纹模式，**必须**提供预批准型号与叶证书指纹：
+现场执行（**必须经项目负责人确认隔离网络并签署批准栏后**）。
+
+凭据、现场标识与指纹**一律不写进命令行**：先关闭命令历史，再逐项受控输入（密码与指纹
+无回显），执行结束后清除全部本次注入的变量：
 
 ```bash
-read -rsp '设备密码: ' HIKVISION_PROBE_PASSWORD; echo
-export HIKVISION_PROBE_PASSWORD
+set +o history                       # 本次会话不记录到 shell 历史
+
+read -rp  '设备地址: '        HIKVISION_PROBE_HOST
+read -rp  '设备账号: '        HIKVISION_PROBE_USERNAME
+read -rp  '批准型号: '        HIKVISION_PROBE_EXPECTED_MODEL
+read -rsp '设备密码: '        HIKVISION_PROBE_PASSWORD; echo
+read -rsp '叶证书指纹: '      HIKVISION_PROBE_FINGERPRINT256; echo
+
+export HIKVISION_PROBE_HOST HIKVISION_PROBE_USERNAME \
+       HIKVISION_PROBE_EXPECTED_MODEL HIKVISION_PROBE_PASSWORD \
+       HIKVISION_PROBE_FINGERPRINT256
+export HIKVISION_PROBE_ALLOWED_HOSTS="$HIKVISION_PROBE_HOST"
 export HIKVISION_PROBE_ALLOW_READ=true
-export HIKVISION_PROBE_HOST=192.168.1.64
-export HIKVISION_PROBE_ALLOWED_HOSTS=192.168.1.64
-export HIKVISION_PROBE_USERNAME='<设备账号>'
-export HIKVISION_PROBE_EXPECTED_MODEL='DS-K1T671BM'
-export HIKVISION_PROBE_FINGERPRINT256='<线下核验的当前指纹>[,<下一枚>]'
+
 node cli.mjs
-unset HIKVISION_PROBE_PASSWORD HIKVISION_PROBE_ALLOW_READ
+
+unset HIKVISION_PROBE_HOST HIKVISION_PROBE_USERNAME HIKVISION_PROBE_EXPECTED_MODEL \
+      HIKVISION_PROBE_PASSWORD HIKVISION_PROBE_FINGERPRINT256 \
+      HIKVISION_PROBE_ALLOWED_HOSTS HIKVISION_PROBE_ALLOW_READ
+set -o history                       # 恢复命令历史
 ```
+
+> 若通过 CI/密钥注入执行，等价约束：值只能来自受控秘密存储或 `0600` 文件，
+> 不得作为命令行参数、不得出现在脚本模板与日志中；结束后同样清理。
 
 执行顺序固定：先 `deviceInfo` 校验完整型号，一致后才继续其余五个端点；任何安全/传输
 错误立即中止，不会"跑完全部再看结果"。
@@ -97,12 +112,12 @@ unset HIKVISION_PROBE_PASSWORD HIKVISION_PROBE_ALLOW_READ
 5. 把 `report.json` 回填 HK-AI-01 证据矩阵的"目标设备 capability"列。
 6. 分析完成后删除临时目录；原始响应不入库、不外发。
 
-## 测试覆盖（55 项，Windows 下 3 项 POSIX 权限用例跳过）
+## 测试覆盖（58 项）
 
 - Digest：RFC 2617 标准向量、qop 退化、挑战解析、nonce 递增
 - **真实 TLS**：本地自签名服务 + 正确/错误/缺失指纹、双指纹轮换、重定向、体积、超时
 - 白名单：路径逐字匹配、穿越、查询串、主机、端口、方法
-- **fail-fast**：型号缺失/不一致/解析为空 → 只发 1 次请求即中止；第二次 401、不可解析挑战、指纹错误、重定向、超时、超限、内容类型异常 → 中止后续端点
+- **fail-fast**：型号缺失/不一致/解析为空 → 只发 1 次请求即中止；第二次 401、畸形 Digest、不支持的算法、Authorization 构造失败、`RESPONSE_ERROR`、指纹错误、重定向、超时、超限、内容类型异常 → 中止后续端点
 - **输出目录**：既有 0755 目录被收紧为 0700；报告/原始响应 0600；权限失败即终止
 - 探针：dry-run 零请求、401→挑战→重试、空能力/畸形 JSON 不中断、越权主机拒绝、缺凭据拒绝
 - 报告/脱敏：IP/MAC/序列号/账号/realm/nonce 不出现

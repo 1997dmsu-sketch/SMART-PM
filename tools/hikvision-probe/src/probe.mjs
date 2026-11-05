@@ -33,6 +33,8 @@ const FATAL_CODES = new Set([
   "TOO_LARGE",
   "CONTENT_TYPE",
   "NETWORK",
+  // 复审：连接建立后的响应流/读取错误同样必须中止后续请求。
+  "RESPONSE_ERROR",
 ]);
 
 function fatal(code, message) {

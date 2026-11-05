@@ -1,15 +1,15 @@
-# HK-AI-02 完成说明（整改第五轮：fail-fast）
+﻿# HK-AI-02 完成说明（整改第六轮：59b6437 退回返工）
 
 ```text
 完成：HK-AI-02（52227b6 复审五项整改）
 分支/提交：feat/hk-isapi-capability-probe
 只读白名单：6 个 GET 端点（未变）
-测试结果：55 项，全部通过（Windows 下 3 项 POSIX 权限用例跳过；Linux 应全跑）
+测试结果：58 项（Linux 57 通过 + 1 跳过；Windows 55 通过 + 3 跳过）
 真实设备是否执行：否（复审通过前禁止；现场仍需批准栏）
 执行所需环境变量名称：ALLOW_READ / HOST / ALLOWED_HOSTS / PORT / ALLOWED_PORTS /
   USERNAME / PASSWORD / EXPECTED_MODEL / FINGERPRINT256 / OUT_DIR / TIMEOUT_MS /
   MAX_BYTES / SALT（CA_PEM 仅批量部署迁移时使用）
-未关闭阻碍：无（等待 Codex 复审）；真实型号标签仍以现场读数为准
+未关闭阻碍：等待 Codex 复审（59b6437 曾因三项缺陷退回）；真实型号标签仍以现场读数为准
 ```
 
 ## 针对 `52227b6` 的五项整改

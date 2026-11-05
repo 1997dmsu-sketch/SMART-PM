@@ -1,4 +1,4 @@
-# 海康只读 capability 探针（HK-AI-02）
+﻿# 海康只读 capability 探针（HK-AI-02）
 
 默认 **dry-run**：不设置 `HIKVISION_PROBE_ALLOW_READ=true` 时，程序只打印将要访问的白名单端点，**不发起任何网络请求**。
 
@@ -23,7 +23,7 @@ GET /ISAPI/Intelligent/FDLib/Count?format=json
 
 ```bash
 cd tools/hikvision-probe
-node --test 'test/*.test.mjs'     # 35 项离线测试，无需设备
+node --test 'test/*.test.mjs'     # 44 项离线测试（含真实本地自签名 TLS），无需设备
 node cli.mjs                      # dry-run：只打印计划
 ```
 
@@ -50,7 +50,7 @@ node cli.mjs
 | `HIKVISION_PROBE_USERNAME` | 执行时 | ISAPI 账号 |
 | `HIKVISION_PROBE_PASSWORD` | 执行时 | 仅用于 Digest 计算，不落盘、不进日志 |
 | `HIKVISION_PROBE_CA_PEM` | 否 | 受控 CA 的 PEM 路径（自签名设备必须显式提供） |
-| `HIKVISION_PROBE_FINGERPRINT256` | 否 | 证书 SHA-256 指纹固定（与 CA 二选一或并用） |
+| `HIKVISION_PROBE_FINGERPRINT256` | 否 | 已线下核验的叶证书 SHA-256 指纹，**逗号分隔**，顺序为「当前, 下一枚」，支持轮换 |
 | `HIKVISION_PROBE_OUT_DIR` | 否 | 报告与原始响应目录，默认系统临时目录 |
 | `HIKVISION_PROBE_TIMEOUT_MS` | 否 | 默认 `10000` |
 | `HIKVISION_PROBE_MAX_BYTES` | 否 | 默认 `262144` |
@@ -60,7 +60,7 @@ node cli.mjs
 
 1. **只读**：方法固定 `GET`，白名单外端点无代码路径可达。
 2. **不接受重定向**：任何 3xx 直接判失败，避免被引到其他主机。
-3. **证书**：默认校验证书；自签名场景用受控 CA 或指纹固定，**不提供关闭校验的开关**。
+3. **证书**：默认走系统信任链；自签名场景用**线下核验的 SHA-256 叶证书指纹固定**（可配当前+下一枚，常量时间比较，错误或缺失即终止）。**不提供关闭校验的开关**：要么系统信任链，要么指纹固定。
 4. **超时与体积**：默认 10s、256 KB；超限立即中断。
 5. **脱敏**：报告只保留型号、固件、能力节点、计数；IP 打码为 `x.x`，序列号/MAC/账号不进入报告，realm/nonce/cookie/证书主体不输出。
 6. **原始响应**：写入权限 `600` 的临时目录，仅用于受控分析，**禁止提交 Git**。
@@ -88,9 +88,10 @@ node cli.mjs
 5. 把 `report.json` 回填 HK-AI-01 证据矩阵的"目标设备 capability"列。
 6. 分析完成后删除临时目录；原始响应不入库、不外发。
 
-## 测试覆盖（35 项）
+## 测试覆盖（44 项）
 
 - Digest：RFC 2617 标准向量、qop 退化、挑战解析、nonce 递增
+- **真实 TLS**：本地自签名服务 + 正确/错误/缺失指纹、双指纹轮换、重定向、体积、超时
 - 白名单：路径逐字匹配、穿越、查询串、主机、端口、方法
 - 探针：dry-run 零请求、401→挑战→重试、认证失败、证书错误、超时、空能力、畸形 JSON、近似型号不支持、响应类型不符、越权主机拒绝、缺凭据拒绝
 - 报告/脱敏：IP/MAC/序列号/账号/realm/nonce 不出现
@@ -99,4 +100,5 @@ node cli.mjs
 
 - 真实设备的能力集标签名可能与 fixture 不同；解析器按"任意 `<tag>true</tag>`"收集，不会因未知标签失败，但 `faceLibraryManagement` 的判定依赖名称含 `FaceLibrary`/`FDLib`。
 - 仅实现 Digest；若设备只接受 Basic 或需要先登录 SDK，本工具会明确失败而不是降级。
+- 指纹模式不额外校验证书有效期与主机名（安全边界由预共享指纹承担）；指纹须线下核验，禁止首次连接自动信任。
 - 未做并发；6 个端点串行请求，避免对门禁设备造成额外负载。

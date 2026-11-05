@@ -14,6 +14,7 @@
  */
 import sharp from "sharp";
 import { failCode } from "./model.mjs";
+import { assertNoTrailingPayload } from "./image-container.mjs";
 
 export const FACE_MIN_DIMENSION = 64;
 export const FACE_MAX_DIMENSION = 4096;
@@ -84,6 +85,8 @@ export async function decodeFaceImage(bytes, options = {}) {
   if (bytes.length > FACE_MAX_INPUT_BYTES) {
     failCode("PARAM_ERROR", "人脸图片超过 200KB");
   }
+  // 容器边界先于解码：EOI/IEND 之后不得有任何字节（含伪装载荷）。
+  assertNoTrailingPayload(bytes);
 
   try {
     await acquire();

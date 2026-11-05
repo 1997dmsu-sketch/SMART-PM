@@ -34,7 +34,7 @@ test("伪造头部不再通过（必须真正解码）", async () => {
   fake[1] = 0xd8;
   fake[2] = 0xff;
   fake[3] = 0xc0;
-  await assert.rejects(() => decodeFaceImage(fake), /解码失败|仅支持/);
+  await assert.rejects(() => decodeFaceImage(fake), /结构不完整|解码失败|仅支持/);
 });
 
 test("截断的 JPEG 拒绝", async () => {

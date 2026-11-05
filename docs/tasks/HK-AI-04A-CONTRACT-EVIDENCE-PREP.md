@@ -5,7 +5,7 @@
 复审者：Codex
 建议分支：`docs/hk-ai-04-contract-evidence`
 基准分支：`docs/lock-01-fast-track`
-状态：已分配，可立即开始
+状态：文档阶段已完成并通过 Codex 复审（交付 `5148159`，复审记录 `HK-AI-04A-REVIEW-2026-11-05.md`）
 依赖：HK-AI-01 文档交付、LOCK-01A 契约和 HK-AI-04 任务卡；不等待真实设备
 
 ## 目标

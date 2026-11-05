@@ -3,6 +3,7 @@
 优先级：P0
 执行者：Kimi
 复审者：Codex
+状态：已认领；等待原始资料私密交接
 基准分支：`docs/lock-01-fast-track`
 建议分支：`docs/hk-isapi-evidence`
 预计：1～2 个工作日
@@ -21,6 +22,15 @@
 - `docs/tasks/HK-ISAPI-01-DOC-AND-DEVICE-VALIDATION.md`
 
 原始资料由项目负责人私密提供，不得要求上传到公开 GitHub，不得提交带水印的 PDF/XLSX。
+
+原始包交接校验：
+
+- `ISAPI开发指南_智能门禁_智能门禁一体机20262005122053.zip`
+  - SHA-256：`52d3c19f37ea0757dd042e050e6d012a3fe9547a6da96a9649142266637b9761`
+- `ISAPI开发指南_智能门禁_测温智能门禁一体机20262005122046.zip`
+  - SHA-256：`9888ab2a47a24ded58a9ac591df71fb3bfcee01c34a13e951711be9005390f76`
+
+接收后先校验文件摘要；不一致时停止引用并报告，不自行从公开网络寻找替代版本。
 
 ## 任务
 

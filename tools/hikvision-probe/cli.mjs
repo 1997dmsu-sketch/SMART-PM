@@ -24,7 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { listEndpoints, parseAllowedHosts, parseAllowedPorts } from "./src/allowlist.mjs";
-import { httpsGet } from "./src/http.mjs";
+import { httpsGet, parseFingerprints } from "./src/http.mjs";
 import { runProbe } from "./src/probe.mjs";
 
 const env = process.env;
@@ -50,7 +50,8 @@ async function main() {
     username: env.HIKVISION_PROBE_USERNAME || "",
     password: env.HIKVISION_PROBE_PASSWORD || "",
     ca: await loadCa(),
-    fingerprint256: env.HIKVISION_PROBE_FINGERPRINT256 || "",
+    // 「当前, 下一枚」：现场线下核验后填入；轮换期两枚都接受。
+    fingerprints: parseFingerprints(env.HIKVISION_PROBE_FINGERPRINT256),
     timeoutMs: numberEnv("HIKVISION_PROBE_TIMEOUT_MS", 10_000),
     maxBytes: numberEnv("HIKVISION_PROBE_MAX_BYTES", 262_144),
     salt: env.HIKVISION_PROBE_SALT || "smart-pm-probe",

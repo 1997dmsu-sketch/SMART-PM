@@ -1,14 +1,17 @@
 import https from "node:https";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { redactText } from "./redact.mjs";
 
 /**
  * 只读 HTTPS 客户端。
  *
- * 安全约束：
- * - 只发 GET；不接受重定向（任何 3xx 直接失败，避免被引到其他主机）；
- * - 校验证书（默认 rejectUnauthorized），支持受控 CA 或证书指纹固定；
- * - 连接与整体超时；响应体超过 maxBytes 立即中断；
- * - 错误信息经过脱敏后才向上抛。
+ * TLS 有两种模式，且**没有"跳过校验"的配置**：
+ * 1. 默认模式：系统信任链（rejectUnauthorized=true）。
+ * 2. 指纹固定模式：现场线下核验过的 SHA-256 叶证书指纹（可多枚，支持轮换）。
+ *    握手时临时关闭系统信任链，但随即用**常量时间比较**校验叶证书指纹；
+ *    不匹配或取不到证书立即终止，请求不会发出。
+ *
+ * 其他约束：只发 GET；拒绝 3xx；连接/整体超时；响应体超过 maxBytes 立即中断。
  */
 
 export class HttpError extends Error {
@@ -26,6 +29,36 @@ export function normalizeFingerprint(value) {
   return String(value || "").replace(/[^0-9a-f]/gi, "").toUpperCase();
 }
 
+/**
+ * 解析 `HIKVISION_PROBE_FINGERPRINT256`：逗号分隔，顺序为「当前, 下一枚」。
+ * 任一项不是 64 位十六进制即整体拒绝（fail closed）。
+ */
+export function parseFingerprints(raw) {
+  if (!raw) return [];
+  const list = Array.isArray(raw) ? raw : String(raw).split(",");
+  const parsed = [];
+  for (const item of list) {
+    const normalized = normalizeFingerprint(item);
+    if (!normalized) continue;
+    if (!/^[0-9A-F]{64}$/.test(normalized)) {
+      throw new HttpError("BAD_FINGERPRINT", "证书指纹必须是 64 位十六进制的 SHA-256");
+    }
+    if (!parsed.includes(normalized)) parsed.push(normalized);
+  }
+  return parsed;
+}
+
+/** 常量时间比较；返回命中下标，未命中返回 -1。 */
+export function matchFingerprint(rawCertificate, allowed) {
+  if (!rawCertificate || !allowed?.length) return -1;
+  const actual = createHash("sha256").update(rawCertificate).digest();
+  for (let index = 0; index < allowed.length; index += 1) {
+    const expected = Buffer.from(allowed[index], "hex");
+    if (expected.length === actual.length && timingSafeEqual(actual, expected)) return index;
+  }
+  return -1;
+}
+
 export function assertContentType(headers, expect) {
   const raw = String(headers["content-type"] || "").toLowerCase();
   if (!raw) return ""; // 部分固件不返回 content-type，交给解析层判断
@@ -41,14 +74,12 @@ export function assertContentType(headers, expect) {
  * @param {object} options
  * @param {string} options.host
  * @param {number} [options.port]
- * @param {string} options.path      已包含白名单查询串
+ * @param {string} options.path
  * @param {Record<string,string>} [options.headers]
  * @param {number} [options.timeoutMs]
  * @param {number} [options.maxBytes]
- * @param {string|Buffer} [options.ca]   受控 CA（PEM）
- * @param {string} [options.fingerprint256] 证书 SHA-256 指纹（冒号可有可无）
- * @param {string} [options.servername]
- * @param {object} [options.agent]
+ * @param {string|Buffer} [options.ca]          受控 CA（默认模式下的补充信任根）
+ * @param {string[]} [options.fingerprints]     已线下核验的 SHA-256 叶证书指纹（可多枚）
  */
 export function httpsGet({
   host,
@@ -58,12 +89,16 @@ export function httpsGet({
   timeoutMs = DEFAULT_TIMEOUT_MS,
   maxBytes = DEFAULT_MAX_BYTES,
   ca,
-  fingerprint256,
+  fingerprints = [],
   servername,
   agent,
 }) {
+  const pinned = fingerprints.length > 0;
+
   return new Promise((resolve, reject) => {
     let settled = false;
+    let pinnedSlot = null;
+
     const finish = (error, value) => {
       if (settled) return;
       settled = true;
@@ -78,12 +113,19 @@ export function httpsGet({
       method: "GET",
       headers: { Accept: "*/*", "User-Agent": "smart-pm-hikvision-probe/0.1", ...headers },
       timeout: timeoutMs,
-      rejectUnauthorized: true,
+      // 指纹模式：系统信任链必然拒绝自签名证书，改为自有校验；
+      // 没有指纹时保持系统校验，二者不存在"全部跳过"的中间态。
+      rejectUnauthorized: !pinned,
       agent,
     };
-    if (ca) options.ca = ca;
+    if (pinned) {
+      // 指纹固定时主机名不再作为信任依据（设备通常用 IP 访问）；
+      // 安全边界完全由下面的叶证书指纹比较承担。
+      options.checkServerIdentity = () => undefined;
+    } else if (ca) {
+      options.ca = ca;
+    }
     if (servername) options.servername = servername;
-    if (fingerprint256) options.checkServerIdentity = () => undefined; // 仅跳过主机名校验部分，证书链仍校验
 
     const request = https.request(options, (response) => {
       const status = response.statusCode || 0;
@@ -116,21 +158,30 @@ export function httpsGet({
           status,
           headers: response.headers,
           body: Buffer.concat(chunks),
+          pinnedSlot,
         });
       });
       response.on("error", (error) => finish(new HttpError("RESPONSE_ERROR", redactText(error.message))));
     });
 
-    request.on("socket", (socket) => {
-      socket.once("secureConnect", () => {
-        if (!fingerprint256) return;
-        const certificate = socket.getPeerCertificate?.();
-        const actual = normalizeFingerprint(certificate?.fingerprint256);
-        if (!actual || actual !== normalizeFingerprint(fingerprint256)) {
-          request.destroy(new HttpError("FINGERPRINT_MISMATCH", "证书指纹与固定值不一致"));
-        }
+    if (pinned) {
+      request.on("socket", (socket) => {
+        socket.once("secureConnect", () => {
+          const certificate = socket.getPeerCertificate?.();
+          const slot = matchFingerprint(certificate?.raw, fingerprints);
+          if (slot < 0) {
+            request.destroy(
+              new HttpError(
+                "FINGERPRINT_MISMATCH",
+                certificate?.raw ? "叶证书指纹与固定值不一致" : "未能取得叶证书，拒绝连接",
+              ),
+            );
+            return;
+          }
+          pinnedSlot = slot;
+        });
       });
-    });
+    }
 
     request.on("timeout", () => {
       request.destroy(new HttpError("TIMEOUT", `请求超时（${timeoutMs}ms）`));

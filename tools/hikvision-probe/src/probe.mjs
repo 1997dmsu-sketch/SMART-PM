@@ -43,7 +43,7 @@ export async function runProbe({ config, transport, now = () => new Date().toISO
     timeoutMs: config.timeoutMs,
     maxBytes: config.maxBytes,
     ca: config.ca,
-    fingerprint256: config.fingerprint256,
+    fingerprints: config.fingerprints || [],
   };
 
   const results = [];
@@ -75,6 +75,7 @@ export async function runProbe({ config, transport, now = () => new Date().toISO
       record.status = response.status;
       record.headers = response.headers;
       record.body = response.body;
+      record.pinnedSlot = response.pinnedSlot ?? null;
 
       if (response.status !== 200) {
         const error = new Error(`HTTP ${response.status}`);
@@ -116,7 +117,13 @@ export async function runProbe({ config, transport, now = () => new Date().toISO
       host: maskIp(host),
       port,
       hostFingerprint: fingerprintValue(host, config.salt),
-      caMode: config.fingerprint256 ? "fingerprint-pinned" : config.ca ? "controlled-ca" : "system-store",
+      caMode: (config.fingerprints || []).length
+        ? "fingerprint-pinned"
+        : config.ca
+          ? "controlled-ca"
+          : "system-store",
+      // 命中的是「当前」还是「下一枚」证书，便于轮换期核对；不输出完整指纹。
+      pinnedSlot: results.find((item) => item.id === "deviceInfo")?.pinnedSlot ?? null,
     },
     // 只保留型号/固件类字段；序列号、MAC、设备名等身份信息不进入报告。
     device: {

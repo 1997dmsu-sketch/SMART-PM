@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { X509Certificate } from "node:crypto";
 
 import {
+  certificateValidity,
   httpsGet,
   matchFingerprint,
   normalizeFingerprint,
@@ -72,6 +73,7 @@ test("自签名 TLS：正确指纹 → 200", async () => {
     });
     assert.equal(res.status, 200);
     assert.equal(res.pinnedSlot, 0);
+    assert.equal(res.certExpired, false);
     assert.match(res.body.toString("utf8"), /"ok":true/);
   } finally {
     await server.close();
@@ -201,4 +203,11 @@ test("请求超时：服务端不响应时按 TIMEOUT 失败", async () => {
   } finally {
     await server.close();
   }
+});
+
+test("证书有效期：过期只标记不阻断（复审决定）", () => {
+  assert.equal(certificateValidity({ valid_to: "2020-01-01T00:00:00.000Z" }).expired, true);
+  assert.equal(certificateValidity({ valid_to: "2999-01-01T00:00:00.000Z" }).expired, false);
+  assert.equal(certificateValidity({}).expired, null);
+  assert.equal(certificateValidity(null).expired, null);
 });

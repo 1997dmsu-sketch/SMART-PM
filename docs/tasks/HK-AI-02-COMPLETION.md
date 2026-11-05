@@ -1,10 +1,10 @@
-# HK-AI-02 完成说明（开发 / 离线测试，第二轮整改）
+﻿# HK-AI-02 完成说明（开发 / 离线测试，第二轮整改）
 
 ```text
 完成：HK-AI-02（开发/离线测试；P0 指纹模式已整改）
 分支/提交：feat/hk-isapi-capability-probe（已 rebase 到 docs/lock-01-fast-track@1358ef5）
 只读白名单：6 个 GET 端点（deviceInfo / AccessControl.capabilities / UserInfo.capabilities / FDLib.capabilities / FDLib / FDLib.Count）
-测试结果：44/44 通过（含 8 项真实本地自签名 TLS 集成测试）
+测试结果：45/45 通过（含 9 项真实本地自签名 TLS 集成测试）
 真实设备是否执行：否（复审通过前禁止连接现场设备）
 执行所需环境变量名称：HIKVISION_PROBE_ALLOW_READ / HOST / ALLOWED_HOSTS / PORT / ALLOWED_PORTS /
   USERNAME / PASSWORD / FINGERPRINT256（当前,下一枚）/ OUT_DIR / TIMEOUT_MS / MAX_BYTES / SALT
@@ -19,6 +19,7 @@
 | 指纹错误或缺失 fail closed | 取不到证书或指纹不匹配 → `FINGERPRINT_MISMATCH`，在 `secureConnect` 阶段销毁连接，**请求不会发出**（测试断言服务端未收到请求） |
 | 不提供"跳过全部 TLS 验证"的配置 | 只有两种状态：系统信任链 / 指纹固定；无 `insecure`、`rejectUnauthorized=false` 的环境变量入口 |
 | 当前 + 下一枚双指纹轮换 | `HIKVISION_PROBE_FINGERPRINT256` 逗号分隔，顺序即「当前, 下一枚」；报告 `target.pinnedSlot` 标明命中哪一枚 |
+| 过期证书 | 解析 `valid_to`，过期仅写入报告 `warnings`，**不阻断**（复审决定） |
 | 常量时间比较 | `crypto.timingSafeEqual` 比较 32 字节 SHA-256 摘要，任一长度不符直接不匹配 |
 | 真实 TLS 集成测试，不得只注入模拟错误 | 新增 `test/tls.test.mjs`：本地 HTTPS 服务 + 两份自签名证书 fixture，覆盖正确/错误/缺失指纹、轮换、重定向、体积上限、超时 |
 

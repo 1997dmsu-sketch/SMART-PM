@@ -59,8 +59,7 @@ export function matchFingerprint(rawCertificate, allowed) {
   return -1;
 }
 
-export function assertContentType(headers, expect) {
-  const raw = String(headers["content-type"] || "").toLowerCase();
+export function assertContentType(headers, expect) {  const raw = String(headers["content-type"] || "").toLowerCase();
   if (!raw) return ""; // 部分固件不返回 content-type，交给解析层判断
   const json = raw.includes("json");
   const xml = raw.includes("xml");
@@ -68,6 +67,14 @@ export function assertContentType(headers, expect) {
   const acceptable = expect === "json" ? json || text : xml || json || text;
   if (!acceptable) throw new HttpError("CONTENT_TYPE", `意外的响应类型：${raw}`);
   return raw;
+}
+
+export function certificateValidity(certificate, now = Date.now()) {
+  const raw = certificate?.valid_to;
+  if (!raw) return { validTo: null, expired: null };
+  const validTo = new Date(raw);
+  if (Number.isNaN(validTo.getTime())) return { validTo: null, expired: null };
+  return { validTo: validTo.toISOString(), expired: validTo.getTime() < now };
 }
 
 /**
@@ -98,6 +105,8 @@ export function httpsGet({
   return new Promise((resolve, reject) => {
     let settled = false;
     let pinnedSlot = null;
+    let certExpired = null;
+    let certValidTo = null;
 
     const finish = (error, value) => {
       if (settled) return;
@@ -159,6 +168,8 @@ export function httpsGet({
           headers: response.headers,
           body: Buffer.concat(chunks),
           pinnedSlot,
+          certExpired,
+          certValidTo,
         });
       });
       response.on("error", (error) => finish(new HttpError("RESPONSE_ERROR", redactText(error.message))));
@@ -179,6 +190,11 @@ export function httpsGet({
             return;
           }
           pinnedSlot = slot;
+          // 复审决定：纯指纹模式不校验证书有效期与主机名。
+          // 过期只作为告警上报，绝不阻断（现场自签名设备常带过期证书）。
+          const validity = certificateValidity(certificate);
+          certExpired = validity.expired;
+          certValidTo = validity.validTo;
         });
       });
     }

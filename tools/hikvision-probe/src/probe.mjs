@@ -76,6 +76,7 @@ export async function runProbe({ config, transport, now = () => new Date().toISO
       record.headers = response.headers;
       record.body = response.body;
       record.pinnedSlot = response.pinnedSlot ?? null;
+      record.certExpired = response.certExpired ?? null;
 
       if (response.status !== 200) {
         const error = new Error(`HTTP ${response.status}`);
@@ -154,6 +155,10 @@ export async function runProbe({ config, transport, now = () => new Date().toISO
     blockers: results
       .filter((item) => item.status !== 200 || item.error)
       .map((item) => `${item.id}: ${item.error || `HTTP ${item.status}`}`),
+    // 复审决定：纯指纹模式不校验证书有效期，过期只告警、不阻断。
+    warnings: results.find((item) => item.id === "deviceInfo")?.certExpired
+      ? ["叶证书已过期：指纹匹配通过，按复审决定仅告警，不影响本次探测"]
+      : [],
   };
 
   return { mode: "read-only", plan, report, results };

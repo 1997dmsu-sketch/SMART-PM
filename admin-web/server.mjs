@@ -525,9 +525,12 @@ export async function createApp({
               if (path === "/api/v2/files" && method === "POST") {
                 authorize(account.role, "uploads", true); // 第一道：editor 可写
                 const purpose = url.searchParams.get("purpose") || "content-image";
+                // 复审：未知 purpose 必须在读取请求体前拒绝，避免按兜底上限收包。
+                if (!PURPOSES[purpose])
+                  failCode("PARAM_ERROR", "文件用途无效");
                 const name = url.searchParams.get("name") || "";
                 // 复审：必须在读取请求体**之前**按 purpose 限制大小，不能先收 50MB 再拒绝。
-                const purposeLimit = PURPOSES[purpose]?.maxSize ?? MAX_UPLOAD;
+                const purposeLimit = PURPOSES[purpose].maxSize ?? MAX_UPLOAD;
                 const bytes = await body(req, Math.min(purposeLimit, MAX_UPLOAD), true);
                 const op = fileOp({
                   purpose,

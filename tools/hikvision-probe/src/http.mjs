@@ -1,4 +1,4 @@
-import https from "node:https";
+﻿import https from "node:https";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { redactText } from "./redact.mjs";
 
@@ -34,16 +34,27 @@ export function normalizeFingerprint(value) {
  * 任一项不是 64 位十六进制即整体拒绝（fail closed）。
  */
 export function parseFingerprints(raw) {
-  if (!raw) return [];
-  const list = Array.isArray(raw) ? raw : String(raw).split(",");
+  if (raw === undefined || raw === null) return [];
+  const text = String(raw).trim();
+  if (!text) return [];
+
   const parsed = [];
-  for (const item of list) {
+  for (const item of text.split(",")) {
     const normalized = normalizeFingerprint(item);
-    if (!normalized) continue;
+    // 复审：非空配置里出现空项或不可解析内容必须报错，不能静默忽略。
+    if (!normalized) {
+      throw new HttpError("BAD_FINGERPRINT", "指纹配置包含空项或无法解析的内容");
+    }
     if (!/^[0-9A-F]{64}$/.test(normalized)) {
       throw new HttpError("BAD_FINGERPRINT", "证书指纹必须是 64 位十六进制的 SHA-256");
     }
     if (!parsed.includes(normalized)) parsed.push(normalized);
+  }
+  if (!parsed.length) {
+    throw new HttpError("BAD_FINGERPRINT", "指纹配置非空但无法解析");
+  }
+  if (parsed.length > 2) {
+    throw new HttpError("BAD_FINGERPRINT", "最多配置两枚指纹（当前, 下一枚）");
   }
   return parsed;
 }

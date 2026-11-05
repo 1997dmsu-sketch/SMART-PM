@@ -4,7 +4,7 @@
 完成：HK-AI-02（开发/离线测试；P0 指纹模式已整改）
 分支/提交：feat/hk-isapi-capability-probe（已 rebase 到 docs/lock-01-fast-track@1358ef5）
 只读白名单：6 个 GET 端点（deviceInfo / AccessControl.capabilities / UserInfo.capabilities / FDLib.capabilities / FDLib / FDLib.Count）
-测试结果：45/45 通过（含 9 项真实本地自签名 TLS 集成测试）
+测试结果：46/46 通过（含 10 项真实本地自签名 TLS 集成测试）
 真实设备是否执行：否（复审通过前禁止连接现场设备）
 执行所需环境变量名称：HIKVISION_PROBE_ALLOW_READ / HOST / ALLOWED_HOSTS / PORT / ALLOWED_PORTS /
   USERNAME / PASSWORD / FINGERPRINT256（当前,下一枚）/ OUT_DIR / TIMEOUT_MS / MAX_BYTES / SALT

@@ -1,4 +1,4 @@
-import { test } from "node:test";
+﻿import { test } from "node:test";
 import assert from "node:assert/strict";
 import https from "node:https";
 import { readFile } from "node:fs/promises";
@@ -51,7 +51,14 @@ test("指纹解析：支持冒号格式、去重、拒绝非法长度", () => {
   const parsed = parseFingerprints(`${fpA.slice(0, 32).toLowerCase()}:${fpA.slice(32).toLowerCase()}, ${fpB}`);
   assert.deepEqual(parsed, [fpA, fpB]);
   assert.deepEqual(parseFingerprints(""), []);
+  assert.deepEqual(parseFingerprints("   "), []);
   assert.throws(() => parseFingerprints("abc"), /64 位十六进制/);
+});
+
+test("指纹解析：非空但不可解析、空项、超过两枚均报错", () => {
+  assert.throws(() => parseFingerprints("zz:zz"), /无法解析/);
+  assert.throws(() => parseFingerprints(`${fpA},`), /空项/);
+  assert.throws(() => parseFingerprints(`${fpA},${fpB},${"1".repeat(64)}`), /最多配置两枚/);
 });
 
 test("指纹比较：常量时间匹配当前/下一枚", () => {

@@ -1,10 +1,11 @@
 # HK-AI-02：海康只读 capability 探针
 
-优先级：P0  
-负责人：设备探针 AI  
-基准分支：`docs/lock-01-fast-track`  
-建议分支：`feat/hk-isapi-capability-probe`  
-预计：1～2 个工作日开发；真人网络任务完成后执行  
+优先级：P0
+执行者：DeepSeek Harness
+复审者：Codex
+基准分支：`docs/lock-01-fast-track`
+建议分支：`feat/hk-isapi-capability-probe`
+预计：1～2 个工作日开发；真人网络任务完成后执行
 真人任务开始：2026-11-06。
 
 ## 目标

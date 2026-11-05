@@ -1,10 +1,11 @@
 # HK-AI-03：数据库集成与人脸私密文件
 
-优先级：P0  
-负责人：数据库/隐私 AI  
-基准：`origin/feat/db-05-occupancies` 的 `b9ee061`，人工整合 `origin/feat/db-07-file-assets`  
-建议分支：`feat/db-mvp-integration`  
-预计：4～7 个工作日  
+优先级：P0
+执行者：DeepSeek Harness
+复审者：Codex
+基准：`origin/feat/db-05-occupancies` 的 `b9ee061`，人工整合 `origin/feat/db-07-file-assets`
+建议分支：`feat/db-mvp-integration`
+预计：4～7 个工作日
 真人任务依赖：无，今天可以开始。
 
 ## 目标

@@ -1,10 +1,11 @@
 # HK-AI-01：海康 ISAPI 证据矩阵
 
-优先级：P0  
-负责人：文档证据 AI  
-基准分支：`docs/lock-01-fast-track`  
-建议分支：`docs/hk-isapi-evidence`  
-预计：1～2 个工作日  
+优先级：P0
+执行者：Kimi
+复审者：Codex
+基准分支：`docs/lock-01-fast-track`
+建议分支：`docs/hk-isapi-evidence`
+预计：1～2 个工作日
 真人任务开始：2026-11-06；本任务今天可先完成文档侧工作。
 
 ## 目标

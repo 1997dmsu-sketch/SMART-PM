@@ -1,10 +1,11 @@
 # HK-AI-04：人脸门禁服务层、任务队列与 Mock Provider
 
-优先级：P0  
-负责人：门禁后端 AI  
-基准：HK-AI-03 的 `feat/db-mvp-integration`  
-建议分支：`feat/hk-face-service-mock`  
-预计：4～6 个工作日  
+优先级：P0
+执行者：DeepSeek Harness
+架构与复审：Codex
+基准：HK-AI-03 的 `feat/db-mvp-integration`
+建议分支：`feat/hk-face-service-mock`
+预计：4～6 个工作日
 真人任务依赖：真实 Provider 不开始；服务层设计和 Mock 今天可先准备。
 
 ## 目标

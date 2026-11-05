@@ -1,10 +1,11 @@
 # HK-AI-05：后台人脸审核与设备任务页面
 
-优先级：P1  
-负责人：后台前端 AI  
-基准：HK-AI-04 API 契约冻结提交  
-建议分支：`feat/hk-face-admin`  
-预计：3～5 个工作日  
+优先级：P1
+执行者：Workburry
+复审者：Codex
+基准：HK-AI-04 API 契约冻结提交
+建议分支：`feat/hk-face-admin`
+预计：3～5 个工作日
 真人任务依赖：无；可先基于 Mock 开发。
 
 ## 快速上线范围

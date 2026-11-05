@@ -10,6 +10,18 @@
 | AI-D 门禁后端 | `HK-AI-04-FACE-SERVICE-MOCK.md` | 先固定契约/Mock；集成后完成 | AI-C 集成基线 |
 | AI-E 后台前端 | `HK-AI-05-ADMIN-FLOW.md` | API 契约冻结后开始 | AI-D 契约 |
 
+指定执行模型与复审：
+
+| 任务 | 执行模型 | 复审 |
+|---|---|---|
+| AI-A 文档证据 | Kimi | Codex |
+| AI-B 设备探针 | DeepSeek Harness | Codex |
+| AI-C 数据库隐私 | DeepSeek Harness | Codex |
+| AI-D 门禁后端 | DeepSeek Harness | Codex |
+| AI-E 后台前端 | Workburry | Codex |
+
+Codex 另行认领 ISAPI 路线、系统架构、安全边界、关键状态机和所有阶段复审，详见 `HK-AI-OWNERSHIP-AND-BUDGET.md`。
+
 统一限制：
 
 1. 今天不得连接真实设备。

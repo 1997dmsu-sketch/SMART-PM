@@ -76,6 +76,8 @@
 
 来源：《门禁一体机》ISAPI 全文（1.1–1.27）与《人员管理(以人为中心)》。以下均为**设备侧路径**，与 HCNetSDK 文档中"URL 字符串"参数一致；走 SDK 时由 `NET_DVR_STDXMLConfig` / `NET_DVR_StartRemoteConfig` 承载，走直连时即普通 HTTP 请求。
 
+> 字段级实现参考（必填标记、取值范围、枚举、最小请求体）见 [端点字典](HIKVISION-ISAPI-ENDPOINT-DICTIONARY.md)。
+
 ### 4.1 人脸端点
 
 | 动作 | 方法与路径 |

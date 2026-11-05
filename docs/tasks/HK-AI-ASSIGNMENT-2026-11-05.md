@@ -28,6 +28,8 @@
 | AI-E / HK-AI-05 | 待认领 | — | 等待 AI-D API 契约 | API 冻结后开始 |
 | AI-F / DEV-AI-01 | Workburry 已分配 | `feat/wecom-dev-board` | `docs/lock-01-fast-track@1358ef5` | 真实发送等待企业微信应用/群机器人配置；Mock 开发可立即开始 |
 
+> AI-B 现场批准与执行包：`docs/tasks/HK-AI-02-LIVE-APPROVAL-PACK.md`。批准栏（现场负责人 + 项目负责人 + 执行人）签署前禁止设置 `HIKVISION_PROBE_ALLOW_READ=true`；一次批准只授权一次只读执行。
+
 AI-A 在收到原包前可以先完成证据矩阵结构、已有资料登记映射和待核对清单；不得把二手摘要当作逐页核对完成。
 
 指定执行模型与复审：

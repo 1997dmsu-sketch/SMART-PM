@@ -13,6 +13,7 @@
 // - NAS 未实现时任何路径都不回退到公开路径。
 import { randomUUID, createHash } from "node:crypto";
 import { failCode } from "./model.mjs";
+import { imageSize } from "./image-size.mjs";
 import { OpReplay, pageParams } from "./property-v2.mjs";
 import { operationKeyId } from "./claims.mjs";
 import {
@@ -48,6 +49,47 @@ const ALL_MIMES = [
 //     证件审查 / 黑名单读取权限模型一致。
 // 因此：无 readPermission 的组织管理员可上传证件、却无权下载他人证件；持有
 // readPermission 的审阅员可下载、但（非管理员）无权上传——读写权限彻底分立。
+/**
+ * 对外返回的文件元数据：**不得包含完整 SHA-256**（复审决定：SHA-256 仅用于
+ * 完整性与审计关联，列表/详情/普通日志只暴露前缀）。对象键仍保留，供服务层
+ * 判定用途；它本身不是可下载地址。
+ */
+export function publicAsset(record) {
+  if (!record) return record;
+  const { checksum, ...rest } = record;
+  return {
+    ...rest,
+    checksumPrefix: typeof checksum === "string" ? checksum.slice(0, 16) : null,
+  };
+}
+
+// 人脸图片尺寸策略（服务端二次校验，扩展名与声明 MIME 均不作为依据）。
+// 下限 64px 用于排除缩略图/图标；上限 4096px 防止超大图占用设备建模资源。
+export const FACE_MIN_DIMENSION = 64;
+export const FACE_MAX_DIMENSION = 4096;
+
+/**
+ * 校验人脸图片：必须能解析出 PNG/JPEG 尺寸，且长宽在该用途允许区间内。
+ * 返回 { width, height }；不合规直接抛 PARAM_ERROR（fail closed）。
+ */
+export function assertFaceImage(bytes) {
+  const size = imageSize(bytes);
+  if (!size) failCode("PARAM_ERROR", "无法解析人脸图片尺寸（需为 JPEG 或 PNG）");
+  const { width, height } = size;
+  if (
+    width < FACE_MIN_DIMENSION ||
+    height < FACE_MIN_DIMENSION ||
+    width > FACE_MAX_DIMENSION ||
+    height > FACE_MAX_DIMENSION
+  ) {
+    failCode(
+      "PARAM_ERROR",
+      `人脸图片尺寸需在 ${FACE_MIN_DIMENSION}–${FACE_MAX_DIMENSION}px 之间（当前 ${width}×${height}）`,
+    );
+  }
+  return { width, height, format: size.format };
+}
+
 export const PURPOSES = {
   "listing-image": {
     maxSize: 5 * MB,
@@ -422,6 +464,8 @@ export class FileService {
       failCode("PARAM_ERROR", "文件类型与用途不匹配");
     if (bytes.length > policy.maxSize)
       failCode("PARAM_ERROR", "文件超过该用途的大小上限");
+    // 人脸生物特征：在类型/大小之上再做解码尺寸校验（魔数与 MIME 已由 sniff 判定）。
+    const faceDimensions = purpose === "face-biometric" ? assertFaceImage(bytes) : null;
     const name =
       typeof originalName === "string" && originalName.trim()
         ? originalName.slice(0, 180)
@@ -461,6 +505,13 @@ export class FileService {
       checksum,
       purpose,
       visibility,
+      ...(faceDimensions
+        ? {
+            width: faceDimensions.width,
+            height: faceDimensions.height,
+            reviewState: "pending",
+          }
+        : {}),
       status: "staged",
       uploadedBy: { actorType: this.actor.actorType, actorId: this.actor.actorId },
       legacyUrls: [],
@@ -718,7 +769,7 @@ export class FileService {
       if (start === 0) failCode("PARAM_ERROR", "分页游标无效或已过期");
     }
     const slice = rows.slice(start, start + limit + 1);
-    const data = slice.slice(0, limit);
+    const data = slice.slice(0, limit).map(publicAsset);
     return {
       data,
       nextCursor: slice.length > limit ? data[data.length - 1]._id : undefined,
@@ -929,12 +980,66 @@ export class FileService {
     }
     await this.logAccess("download", fileId, actor, entityRef);
     return {
-      file,
+      file: publicAsset(file),
       contentType: file.mimeType || "application/octet-stream",
       originalName: file.originalName,
       bytes,
       tempUrl,
     };
+  }
+
+  // 人脸审核：只改 reviewState，不读取、不返回任何图像字节。
+  // 审核权限 device.face.review 与私密读取 device.face.readPrivate 正交：
+  // 审核人即使没有 readPrivate 也能通过/驳回，但拿不到原图。
+  async reviewFace({ fileId, decision }, audit, op = null) {
+    await checkOp(this.store, op);
+    if (!["approved", "rejected"].includes(decision))
+      failCode("PARAM_ERROR", "审核结论无效");
+    const file = (await this.store.list("file_assets", this.orgId)).find(
+      (r) => r._id === fileId,
+    );
+    if (!file || !this.own(file) || file.purpose !== "face-biometric")
+      failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
+    if (file.status !== "ready")
+      failCode("PARAM_ERROR", "仅已完成上传的人脸文件可审核");
+    // 审核权限点显式检查（角色本身不隐含）。
+    this.assertActorRole(true, "device.face.review");
+
+    let result;
+    await this.store.transact(
+      [
+        ref("file_assets", fileId),
+        ...this.authRefs(),
+        ...(op ? [ref("operation_keys", op.id)] : []),
+      ],
+      (state) => {
+        const now = state[`file_assets/${fileId}`];
+        if (!now || now.orgId !== this.orgId || now.purpose !== "face-biometric")
+          failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
+        this.authCheck(state, { requireAdmin: true });
+        const revision = (now.revision ?? 0) + 1;
+        result = { fileId, reviewState: decision, revision };
+        const opw = opWrite(state, op, { status: 200, body: result });
+        return [
+          {
+            collection: "file_assets",
+            id: fileId,
+            data: {
+              reviewState: decision,
+              reviewedBy: {
+                actorType: this.actor.actorType,
+                actorId: this.actor.actorId,
+              },
+              reviewedAt: Date.now(),
+              revision,
+            },
+          },
+          ...opw,
+        ];
+      },
+      audit,
+    );
+    return result;
   }
 
   // 显式 retire：只改 file_assets.status，绝不删除物理对象（§2.4 / 需求 8）。

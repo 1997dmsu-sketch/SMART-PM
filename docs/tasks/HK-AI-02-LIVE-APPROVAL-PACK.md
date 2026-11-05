@@ -32,25 +32,24 @@
 
 ## 3. 一次性执行步骤
 
-在仓库根目录执行。先创建本次专用输出目录；该路径不包含设备地址或其他现场标识。变量和读取授权只存在于子 shell，退出、报错或中断时均自动清除，不污染父 shell。
+在仓库根目录执行。先创建本次专用输出目录；该路径不包含设备地址或其他现场标识。变量和读取授权只存在于子 shell，退出、报错或中断时均自动清除，不污染父 shell。`umask` 也在子 shell 内生效，不改变父 shell 默认值。
 
 ```bash
-umask 077
-HIKVISION_PROBE_OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hikvision-probe.XXXXXX")"
+HIKVISION_PROBE_OUT_DIR="$(umask 077; mktemp -d "${TMPDIR:-/tmp}/hikvision-probe.XXXXXX")"
 export HIKVISION_PROBE_OUT_DIR
 
 (
-set +o history                       # 不写入 shell 历史
+# 敏感值只通过 read 输入，不作为命令行进入历史；退出时统一清理。
 cleanup_probe_env() {
   unset HIKVISION_PROBE_HOST HIKVISION_PROBE_PORT \
         HIKVISION_PROBE_USERNAME HIKVISION_PROBE_EXPECTED_MODEL \
         HIKVISION_PROBE_PASSWORD HIKVISION_PROBE_FINGERPRINT256 \
         HIKVISION_PROBE_ALLOWED_HOSTS HIKVISION_PROBE_ALLOWED_PORTS \
         HIKVISION_PROBE_ALLOW_READ
-  set -o history
 }
 trap cleanup_probe_env EXIT
 trap 'exit 130' INT TERM
+umask 077
 
 read -rp  '设备地址: '   HIKVISION_PROBE_HOST
 read -rp  '批准端口: '   HIKVISION_PROBE_PORT
@@ -59,6 +58,12 @@ read -rp  '批准型号: '   HIKVISION_PROBE_EXPECTED_MODEL
 read -rsp '设备密码: '   HIKVISION_PROBE_PASSWORD; echo
 read -rsp '叶证书指纹: ' HIKVISION_PROBE_FINGERPRINT256; echo
 
+# 端口必须非空且为纯数字：空值会让 CLI 回退默认 443/8443，破坏唯一端口约束。
+[ -n "$HIKVISION_PROBE_PORT" ] || { echo '端口不能为空'; exit 1; }
+case "$HIKVISION_PROBE_PORT" in
+  *[!0-9]*) echo '端口必须为数字'; exit 1 ;;
+esac
+
 export HIKVISION_PROBE_HOST HIKVISION_PROBE_PORT HIKVISION_PROBE_USERNAME \
        HIKVISION_PROBE_EXPECTED_MODEL HIKVISION_PROBE_PASSWORD \
        HIKVISION_PROBE_FINGERPRINT256
@@ -66,7 +71,9 @@ export HIKVISION_PROBE_ALLOWED_HOSTS="$HIKVISION_PROBE_HOST"
 export HIKVISION_PROBE_ALLOWED_PORTS="$HIKVISION_PROBE_PORT"
 
 cd tools/hikvision-probe
-node cli.mjs                          # dry-run：必须只打印固定顺序的 6 个 GET
+node cli.mjs; status=$?                # dry-run：必须只打印固定顺序的 6 个 GET
+echo "dry-run exit=$status"
+[ "$status" -eq 0 ] || exit "$status"  # dry-run 失败不得进入真实执行
 
 read -rp 'dry-run 与批准单完全一致时输入 EXECUTE-ONCE: ' PROBE_CONFIRM
 if [ "$PROBE_CONFIRM" != "EXECUTE-ONCE" ]; then
@@ -75,11 +82,13 @@ if [ "$PROBE_CONFIRM" != "EXECUTE-ONCE" ]; then
 fi
 unset PROBE_CONFIRM
 export HIKVISION_PROBE_ALLOW_READ=true
-node cli.mjs; echo "exit=$?"           # 唯一一次真实执行
+node cli.mjs; status=$?                # 唯一一次真实执行
+echo "live exit=$status"
+exit "$status"                         # 退出码如实传给外层
 )                                       # trap 自动清理现场变量
 ```
 
-子 shell 结束后只能分析 `$HIKVISION_PROBE_OUT_DIR` 中的本次输出。不得再次进入子 shell 或重复执行真实探针；任何重跑都需要重新批准。
+子 shell 结束后只能分析 `$HIKVISION_PROBE_OUT_DIR` 中的本次输出。不得再次进入子 shell 或重复执行真实探针；任何重跑都需要重新批准。退出码语义：`0` 成功、`1` 存在端点失败、`2` 启动/配置/权限错误；非 0 时不得重跑。
 
 ## 4. 停止条件（任一触发即停止，不再重试）
 

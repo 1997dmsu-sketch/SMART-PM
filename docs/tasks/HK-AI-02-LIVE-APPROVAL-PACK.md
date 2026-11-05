@@ -45,11 +45,18 @@ cleanup_probe_env() {
         HIKVISION_PROBE_USERNAME HIKVISION_PROBE_EXPECTED_MODEL \
         HIKVISION_PROBE_PASSWORD HIKVISION_PROBE_FINGERPRINT256 \
         HIKVISION_PROBE_ALLOWED_HOSTS HIKVISION_PROBE_ALLOWED_PORTS \
-        HIKVISION_PROBE_ALLOW_READ
+        HIKVISION_PROBE_ALLOW_READ HIKVISION_PROBE_CA_PEM \
+        HIKVISION_PROBE_TIMEOUT_MS HIKVISION_PROBE_MAX_BYTES
 }
 trap cleanup_probe_env EXIT
 trap 'exit 130' INT TERM
 umask 077
+
+# 防止父 shell 遗留授权或配置改变本次批准参数。dry-run 前必须显式移除读取授权；
+# 本试点只使用证书指纹模式，并固定复审通过的超时与响应上限。
+unset HIKVISION_PROBE_ALLOW_READ HIKVISION_PROBE_CA_PEM
+export HIKVISION_PROBE_TIMEOUT_MS=10000
+export HIKVISION_PROBE_MAX_BYTES=262144
 
 read -rp  '设备地址: '   HIKVISION_PROBE_HOST
 read -rp  '批准端口: '   HIKVISION_PROBE_PORT
@@ -71,6 +78,7 @@ export HIKVISION_PROBE_ALLOWED_HOSTS="$HIKVISION_PROBE_HOST"
 export HIKVISION_PROBE_ALLOWED_PORTS="$HIKVISION_PROBE_PORT"
 
 cd tools/hikvision-probe
+[ -z "${HIKVISION_PROBE_ALLOW_READ+x}" ] || { echo 'dry-run 前读取授权未清除'; exit 1; }
 node cli.mjs; status=$?                # dry-run：必须只打印固定顺序的 6 个 GET
 echo "dry-run exit=$status"
 [ "$status" -eq 0 ] || exit "$status"  # dry-run 失败不得进入真实执行

@@ -24,6 +24,8 @@
 ## C. Dry-run
 
 - [ ] 从仓库根目录按批准包 §3 启动
+- [ ] dry-run 前已显式清除 `HIKVISION_PROBE_ALLOW_READ` 和 `HIKVISION_PROBE_CA_PEM`
+- [ ] 超时固定为10000ms，响应上限固定为262144字节
 - [ ] 输出恰好为6个固定 GET，方法、顺序、路径和查询串完全一致
 - [ ] dry-run 没有 DNS/TCP/TLS/HTTP 请求
 - [ ] dry-run 退出码为 `0`；非 0 时未进入真实执行

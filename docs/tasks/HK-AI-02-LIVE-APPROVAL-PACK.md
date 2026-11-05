@@ -3,6 +3,7 @@
 - 代码状态：`f15160d` 代码侧复审通过（58 项测试、fail-fast 已关闭三个阻断）
 - 本包用途：现场批准、一次性执行、证据回填与无残留清理
 - **红线**：批准栏未全部签署前，任何人不得设置 `HIKVISION_PROBE_ALLOW_READ=true`；即使签字完成，也只允许一次只读执行
+- 当天打印勾选版：`HK-AI-02-LIVE-DAY-CHECKLIST-A4.md`
 
 ## 1. 执行前检查（全部为“是”才可继续）
 
@@ -31,33 +32,54 @@
 
 ## 3. 一次性执行步骤
 
+在仓库根目录执行。先创建本次专用输出目录；该路径不包含设备地址或其他现场标识。变量和读取授权只存在于子 shell，退出、报错或中断时均自动清除，不污染父 shell。
+
 ```bash
+umask 077
+HIKVISION_PROBE_OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hikvision-probe.XXXXXX")"
+export HIKVISION_PROBE_OUT_DIR
+
+(
 set +o history                       # 不写入 shell 历史
+cleanup_probe_env() {
+  unset HIKVISION_PROBE_HOST HIKVISION_PROBE_PORT \
+        HIKVISION_PROBE_USERNAME HIKVISION_PROBE_EXPECTED_MODEL \
+        HIKVISION_PROBE_PASSWORD HIKVISION_PROBE_FINGERPRINT256 \
+        HIKVISION_PROBE_ALLOWED_HOSTS HIKVISION_PROBE_ALLOWED_PORTS \
+        HIKVISION_PROBE_ALLOW_READ
+  set -o history
+}
+trap cleanup_probe_env EXIT
+trap 'exit 130' INT TERM
 
 read -rp  '设备地址: '   HIKVISION_PROBE_HOST
+read -rp  '批准端口: '   HIKVISION_PROBE_PORT
 read -rp  '设备账号: '   HIKVISION_PROBE_USERNAME
 read -rp  '批准型号: '   HIKVISION_PROBE_EXPECTED_MODEL
 read -rsp '设备密码: '   HIKVISION_PROBE_PASSWORD; echo
 read -rsp '叶证书指纹: ' HIKVISION_PROBE_FINGERPRINT256; echo
 
-export HIKVISION_PROBE_HOST HIKVISION_PROBE_USERNAME \
+export HIKVISION_PROBE_HOST HIKVISION_PROBE_PORT HIKVISION_PROBE_USERNAME \
        HIKVISION_PROBE_EXPECTED_MODEL HIKVISION_PROBE_PASSWORD \
        HIKVISION_PROBE_FINGERPRINT256
 export HIKVISION_PROBE_ALLOWED_HOSTS="$HIKVISION_PROBE_HOST"
+export HIKVISION_PROBE_ALLOWED_PORTS="$HIKVISION_PROBE_PORT"
 
-node cli.mjs                          # 先 dry-run：必须只打印 6 个 GET
+cd tools/hikvision-probe
+node cli.mjs                          # dry-run：必须只打印固定顺序的 6 个 GET
+
+read -rp 'dry-run 与批准单完全一致时输入 EXECUTE-ONCE: ' PROBE_CONFIRM
+if [ "$PROBE_CONFIRM" != "EXECUTE-ONCE" ]; then
+  echo '未执行真实探针'
+  exit 1
+fi
+unset PROBE_CONFIRM
 export HIKVISION_PROBE_ALLOW_READ=true
 node cli.mjs; echo "exit=$?"           # 唯一一次真实执行
+)                                       # trap 自动清理现场变量
 ```
 
-执行后立即：
-
-```bash
-unset HIKVISION_PROBE_HOST HIKVISION_PROBE_USERNAME HIKVISION_PROBE_EXPECTED_MODEL \
-      HIKVISION_PROBE_PASSWORD HIKVISION_PROBE_FINGERPRINT256 \
-      HIKVISION_PROBE_ALLOWED_HOSTS HIKVISION_PROBE_ALLOW_READ
-set -o history
-```
+子 shell 结束后只能分析 `$HIKVISION_PROBE_OUT_DIR` 中的本次输出。不得再次进入子 shell 或重复执行真实探针；任何重跑都需要重新批准。
 
 ## 4. 停止条件（任一触发即停止，不再重试）
 
@@ -77,15 +99,16 @@ set -o history
 1. 只从 `report.json` 读取：`device.model`、`device.firmwareVersion`、`capabilities.*`、`counts.*`、`aborted`、`checks`；
 2. 回填 `HK-AI-01` 证据矩阵的“目标设备 capability”列，标注“已由 `f15160d` 探针实测”；
 3. 若 `capabilities` 为空或能力位缺失，如实写“设备未返回”，**不得推断为支持**；
-4. 原始响应不复制进仓库；如需保留，转入受控离线介质并登记编号。
+4. 原始响应不复制进仓库或聊天工具；本次分析完成后按 §6 删除。
 
 ## 6. 清理与无残留证明
 
 ```bash
-ls -la "$HIKVISION_PROBE_OUT_DIR"     # 确认只剩待删除文件
-# 删除 raw 与 report（或转移到离线介质后再删）
-rm -rf "$HIKVISION_PROBE_OUT_DIR"
-ls "$HIKVISION_PROBE_OUT_DIR"          # 应报不存在
+test -n "$HIKVISION_PROBE_OUT_DIR" && test -d "$HIKVISION_PROBE_OUT_DIR"
+ls -la "$HIKVISION_PROBE_OUT_DIR"     # 复核本次待删除文件
+rm -rf -- "$HIKVISION_PROBE_OUT_DIR"  # 只删除本次 mktemp 创建的目录
+test ! -e "$HIKVISION_PROBE_OUT_DIR"  # 必须成功
+unset HIKVISION_PROBE_OUT_DIR
 git status --porcelain                 # 应为空
 ```
 
@@ -95,7 +118,7 @@ git status --porcelain                 # 应为空
 |---|---|
 | 是否只执行一次 | ☐ 是 / ☐ 否（说明原因） |
 | 是否触发停止条件 | ☐ 否 / ☐ 是（哪一条） |
-| 原始响应是否已删除 | ☐ 是 / ☐ 转入离线介质（编号：______） |
+| 原始响应与报告是否已删除 | ☐ 是 / ☐ 否（未删除不得关闭工单） |
 | 工作区是否无 Git 变更 | ☐ 是 / ☐ 否 |
 
 ## 7. 批准签字栏

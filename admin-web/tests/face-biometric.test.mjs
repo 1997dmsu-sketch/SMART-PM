@@ -58,6 +58,14 @@ test("assertFaceImage：区间内通过，过小/过大拒绝", async () => {
   await assert.rejects(async () => assertFaceImage(await jpegOf(5000, 100)), /尺寸需在/);
 });
 
+test("解码超时后槽位可恢复（不会永久占用）", async () => {
+  const jpeg = await jpegOf(640, 480);
+  await assert.rejects(() => decodeFaceImage(jpeg, { timeoutMs: 1 }), /超时/);
+  await new Promise((resolve) => setTimeout(resolve, 80)); // 等底层任务结束并释放槽位
+  const ok = await decodeFaceImage(jpeg, { timeoutMs: 3000 });
+  assert.equal(ok.width, 640);
+});
+
 test("publicAsset 不返回任何摘要", () => {
   const masked = publicAsset({ _id: "file-1", checksum: "a".repeat(64), purpose: "face-biometric" });
   assert.equal("checksum" in masked, false);

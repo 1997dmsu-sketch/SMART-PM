@@ -526,7 +526,9 @@ export async function createApp({
                 authorize(account.role, "uploads", true); // 第一道：editor 可写
                 const purpose = url.searchParams.get("purpose") || "content-image";
                 const name = url.searchParams.get("name") || "";
-                const bytes = await body(req, MAX_UPLOAD, true);
+                // 复审：必须在读取请求体**之前**按 purpose 限制大小，不能先收 50MB 再拒绝。
+                const purposeLimit = PURPOSES[purpose]?.maxSize ?? MAX_UPLOAD;
+                const bytes = await body(req, Math.min(purposeLimit, MAX_UPLOAD), true);
                 const op = fileOp({
                   purpose,
                   name,

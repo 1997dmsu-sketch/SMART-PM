@@ -1,0 +1,7 @@
+{
+  "FDLibCapabilities": {
+    "faceDataRecord": true,
+    "faceDataSearch": true,
+    "faceDataDelete": true
+  }
+}

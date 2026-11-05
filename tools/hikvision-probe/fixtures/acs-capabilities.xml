@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AccessControlCapabilities version="2.0">
+  <isSupportFaceLibrary>true</isSupportFaceLibrary>
+  <isSupportFaceData>true</isSupportFaceData>
+  <isSupportCard>true</isSupportCard>
+  <isSupportFingerprint>false</isSupportFingerprint>
+  <isSupportEventSubscribe>true</isSupportEventSubscribe>
+</AccessControlCapabilities>

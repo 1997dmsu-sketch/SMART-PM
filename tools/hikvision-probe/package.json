@@ -1,0 +1,14 @@
+{
+  "name": "@smart-pm/hikvision-probe",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "海康门禁只读 capability 探针：默认 dry-run，显式授权后才发送只读请求",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "probe": "node cli.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "UserInfoCapabilities": {
+    "employeeNo": true,
+    "face": true,
+    "card": true,
+    "fingerprint": false
+  }
+}

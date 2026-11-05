@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DeviceInfo version="2.0">
+  <deviceName>Gate-608</deviceName>
+  <deviceID>88</deviceID>
+  <model>DS-K1T671BM</model>
+  <serialNumber>SN1234567890</serialNumber>
+  <macAddress>aa-bb-cc-dd-ee-ff</macAddress>
+  <firmwareVersion>V3.2.1</firmwareVersion>
+  <firmwareReleasedDate>build 240315</firmwareReleasedDate>
+  <encoderVersion>V1.0</encoderVersion>
+  <deviceType>AccessControl</deviceType>
+</DeviceInfo>

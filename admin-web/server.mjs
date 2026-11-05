@@ -657,6 +657,25 @@ export async function createApp({
                   ),
                 );
               }
+              // POST /api/v2/files/{id}/face-review：人脸审核。
+              // 权限由服务层按当前成员记录校验 device.face.review（不再要求 admin），
+              // 角色 authorize 不参与，避免专职审核员被 editor/viewer 角色挡住。
+              const faceReviewMatch = path.match(
+                /^\/api\/v2\/files\/([^/]+)\/face-review$/,
+              );
+              if (faceReviewMatch && method === "POST") {
+                const data = await body(req);
+                return ok(
+                  await files.reviewFace(
+                    {
+                      fileId: decodeURIComponent(faceReviewMatch[1]),
+                      decision: data.decision,
+                    },
+                    auditV2("人脸审核"),
+                    fileOp(data),
+                  ),
+                );
+              }
               fail("接口不存在", 404);
             }
             if (path === "/api/v2/property/catalog" && method === "GET") {

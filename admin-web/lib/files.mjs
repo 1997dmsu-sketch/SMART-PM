@@ -13,7 +13,6 @@
 // - NAS 未实现时任何路径都不回退到公开路径。
 import { randomUUID, createHash } from "node:crypto";
 import { failCode } from "./model.mjs";
-import { inspectImage } from "./image-size.mjs";
 import { OpReplay, pageParams } from "./property-v2.mjs";
 import { operationKeyId } from "./claims.mjs";
 import {
@@ -61,19 +60,23 @@ export function publicAsset(record) {
   return rest;
 }
 
-// 人脸图片尺寸策略（服务端二次校验，扩展名与声明 MIME 均不作为依据）。
-// 下限 64px 用于排除缩略图/图标；上限 4096px 防止超大图占用设备建模资源。
-export const FACE_MIN_DIMENSION = 64;
-export const FACE_MAX_DIMENSION = 4096;
+// 人脸图片：由 sharp 真正解码像素并施加字节/像素/内存/时间上限
+// （见 lib/face-image.mjs）。尺寸区间 64–4096px 在此二次把关。
+import {
+  FACE_MIN_DIMENSION,
+  FACE_MAX_DIMENSION,
+  decodeFaceImage,
+} from "./face-image.mjs";
+
+export { FACE_MIN_DIMENSION, FACE_MAX_DIMENSION };
 
 /**
- * 校验人脸图片：必须能解析出 PNG/JPEG 尺寸，且长宽在该用途允许区间内。
- * 返回 { width, height }；不合规直接抛 PARAM_ERROR（fail closed）。
+ * 解码并校验人脸图片；不合规直接抛 PARAM_ERROR（fail closed）。
+ * @returns {Promise<{width:number,height:number,format:string}>}
  */
-export function assertFaceImage(bytes) {
-  const size = inspectImage(bytes);
-  if (!size) failCode("PARAM_ERROR", "人脸图片完整性校验失败（需为完整的 JPEG 或 PNG）");
-  const { width, height } = size;
+export async function assertFaceImage(bytes) {
+  const decoded = await decodeFaceImage(bytes);
+  const { width, height } = decoded;
   if (
     width < FACE_MIN_DIMENSION ||
     height < FACE_MIN_DIMENSION ||
@@ -85,7 +88,7 @@ export function assertFaceImage(bytes) {
       `人脸图片尺寸需在 ${FACE_MIN_DIMENSION}–${FACE_MAX_DIMENSION}px 之间（当前 ${width}×${height}）`,
     );
   }
-  return { width, height, format: size.format };
+  return { width, height, format: decoded.format };
 }
 
 export const PURPOSES = {
@@ -483,7 +486,8 @@ export class FileService {
     if (bytes.length > policy.maxSize)
       failCode("PARAM_ERROR", "文件超过该用途的大小上限");
     // 人脸生物特征：在类型/大小之上再做解码尺寸校验（魔数与 MIME 已由 sniff 判定）。
-    const faceDimensions = purpose === "face-biometric" ? assertFaceImage(bytes) : null;
+    const faceDimensions =
+      purpose === "face-biometric" ? await assertFaceImage(bytes) : null;
     const name =
       typeof originalName === "string" && originalName.trim()
         ? originalName.slice(0, 180)

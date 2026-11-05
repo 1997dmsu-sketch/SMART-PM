@@ -14,7 +14,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@cloudbase/node-sdk": "3.18.7"
+    "@cloudbase/node-sdk": "3.18.7",
+    "sharp": "0.35.5"
   },
   "overrides": {
     "axios": "0.34.0",

@@ -14,6 +14,7 @@ const collections = [
   "unique_claims",
   "lifecycle_guards",
   "operation_keys",
+  // DB-04/05：身份、黑名单、入住周期（本分支基线）
   "auth_identities",
   "persons",
   "identity_domains",
@@ -28,6 +29,10 @@ const collections = [
   "occupancy_applications",
   "room_primary_slots",
   "occupancy_materializations",
+  // DB-07：统一文件资源（追加，不改变既有集合语义）
+  "file_assets",
+  "file_links",
+  "file_access_log",
 ];
 export function seed() {
   return {
@@ -115,6 +120,9 @@ export function seed() {
     ],
     property_catalog: [],
     admin_audit: [],
+    file_assets: [],
+    file_links: [],
+    file_access_log: [],
   };
 }
 export class LocalStore {
@@ -134,6 +142,11 @@ export class LocalStore {
       await this.persist(this.data);
     }
     this.data.property_catalog ||= [];
+    // DB-07: on-demand initialization for existing local data files that
+    // predate the file collections (same pattern as property_catalog above).
+    this.data.file_assets ||= [];
+    this.data.file_links ||= [];
+    this.data.file_access_log ||= [];
     return this;
   }
   async persist(data) {

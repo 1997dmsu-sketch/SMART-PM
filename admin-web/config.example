@@ -12,3 +12,21 @@ TENCENTCLOUD_SECRETKEY=
 ADMIN_USERNAME=
 ADMIN_NAME=系统管理员
 ADMIN_PASSWORD=
+
+# --- DB-07 文件资源与 NAS 扩展接口（值只从环境变量读取，不入库、不进日志）---
+# 默认存储后端：留空时 demo=local、live=cloud；可取 local / cloud / nas。
+# nas 仅预留接口，未实现即返回 STORAGE_UNAVAILABLE，绝不回退到公开路径。
+FILE_STORAGE_DEFAULT=
+# 按 purpose 覆盖存储后端的示例（私密资料指定 NAS → 未实现即 503，不回退）：
+# FILE_STORAGE_IDENTITY_DOCUMENT=nas
+# NAS 开关：仅当值为 true 且适配器实现后才可能可用；DB-07 未实现，恒不可用。
+NAS_ENABLED=false
+NAS_HOST=
+NAS_SHARE=
+NAS_BASE_PATH=
+NAS_USERNAME=
+NAS_PASSWORD=
+# 资料保留期限：留空表示不自动清理任何物理文件（Q03 未定，禁止先删原件）。
+FILE_RETENTION_DAYS=
+# 未登记旧图片的兼容策略：deny=未登记一律拒绝；allow=显式可配置值。
+FILE_LEGACY_IMAGE_FALLBACK=deny

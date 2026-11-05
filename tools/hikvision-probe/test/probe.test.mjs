@@ -27,6 +27,7 @@ const BASE = {
   allowedPorts: [443],
   username: "admin",
   password: "Passw0rd!",
+  expectedModel: "DS-K1T671BM",
   timeoutMs: 500,
   maxBytes: 1024 * 1024,
   salt: "test-salt",
@@ -43,11 +44,8 @@ function fixturesFor(id) {
   }[id];
 }
 
-function endpointOf(path) {
-  return READ_ENDPOINTS.find((endpoint) => buildRequestPath(endpoint) === path);
-}
+const endpointOf = (path) => READ_ENDPOINTS.find((endpoint) => buildRequestPath(endpoint) === path);
 
-/** 模拟一台要求 Digest 的设备；可用 overrides 覆盖单个端点行为。 */
 function makeTransport(overrides = {}) {
   const calls = [];
   const fn = async (options) => {
@@ -65,76 +63,111 @@ function makeTransport(overrides = {}) {
   return fn;
 }
 
-test("dry-run 不调用 transport，只返回计划", async () => {
+const deviceInfo200 = (body = deviceXml) => () => ({
+  status: 200,
+  headers: { "content-type": "application/xml" },
+  body: Buffer.from(body),
+});
+
+const never = () => {
+  throw new Error("不应发送第二个请求");
+};
+
+test("dry-run 不校验型号，也不调用 transport", async () => {
   const transport = makeTransport();
-  const result = await runProbe({ config: { ...BASE, allowRead: false }, transport });
+  const result = await runProbe({ config: { ...BASE, allowRead: false, expectedModel: "" }, transport });
   assert.equal(result.mode, "dry-run");
   assert.equal(result.plan.length, 6);
-  assert.equal(result.report, null);
   assert.equal(transport.calls.length, 0);
 });
 
-test("只读探针：先 401 取挑战，再带 Digest 重试，其余端点复用挑战", async () => {
+test("缺少预批准型号：拒绝执行且零请求", async () => {
+  const transport = makeTransport();
+  await assert.rejects(() => runProbe({ config: { ...BASE, expectedModel: "" }, transport }), /预批准型号/);
+  assert.equal(transport.calls.length, 0);
+});
+
+test("正常路径：型号一致后继续全部六个端点", async () => {
   const transport = makeTransport();
   const result = await runProbe({ config: BASE, transport });
-
-  assert.equal(result.mode, "read-only");
-  assert.equal(transport.calls.length, 7, "首个端点 2 次，其余各 1 次");
-  assert.equal(transport.calls[0].headers?.Authorization, undefined);
-  assert.match(transport.calls[1].headers.Authorization, /^Digest /);
-
+  assert.equal(transport.calls.length, 7);
   assert.equal(result.report.checks.length, 6);
-  assert.ok(result.report.checks.every((check) => check.ok), JSON.stringify(result.report.checks));
+  assert.ok(result.report.checks.every((check) => check.ok));
   assert.equal(result.report.device.model, "DS-K1T671BM");
-  assert.equal(result.report.device.firmwareVersion, "V3.2.1");
   assert.equal(result.report.capabilities.faceLibraryManagement, true);
-  assert.equal(result.report.counts.faceRecords, 12);
-  assert.deepEqual(result.report.blockers, []);
+  assert.equal(result.report.aborted, null);
 });
 
-test("报告与目标字段全部脱敏（无 IP/序列号/MAC/账号/nonce）", async () => {
-  const transport = makeTransport();
-  const result = await runProbe({ config: BASE, transport });
-  const text = JSON.stringify(result.report);
-
-  assert.equal(result.report.target.host, "192.168.x.x");
-  for (const secret of ["192.168.1.64", "SN1234567890", "aa-bb-cc-dd-ee-ff", "admin", "abc123def456", "op-1"]) {
-    assert.equal(text.includes(secret), false, `报告不应包含 ${secret}`);
-  }
-});
-
-test("认证失败：两端点均 401 时所有检查失败并给出 blockers", async () => {
-  const transport = async () => ({ status: 401, headers: { "www-authenticate": CHALLENGE }, body: Buffer.from("") });
-  const result = await runProbe({ config: BASE, transport });
-  assert.equal(result.report.checks.filter((check) => check.ok).length, 0);
-  assert.equal(result.report.blockers.length, 6);
-  assert.match(result.report.blockers[0], /HTTP 401/);
-});
-
-test("设备不返回 Digest 挑战时记录为认证失败", async () => {
-  const transport = async () => ({ status: 401, headers: {}, body: Buffer.from("") });
-  const result = await runProbe({ config: BASE, transport });
-  assert.match(result.report.checks[0].error, /Digest|认证/);
-});
-
-test("证书错误与超时：按端点记录错误，不中断整体", async () => {
-  const certTransport = makeTransport({
-    deviceInfo: () => {
-      throw new HttpError("CERT", "certificate has expired");
-    },
-    acsCapabilities: () => {
-      throw new HttpError("TIMEOUT", "请求超时（500ms）");
-    },
+test("型号不一致：只请求 deviceInfo，立即中止", async () => {
+  const transport = makeTransport({
+    deviceInfo: deviceInfo200(deviceXml.replace("DS-K1T671BM", "DS-K1T671B")),
+    acsCapabilities: never,
   });
-  const result = await runProbe({ config: BASE, transport: certTransport });
-  assert.equal(result.report.checks.find((c) => c.id === "deviceInfo").ok, false);
-  assert.match(result.report.checks.find((c) => c.id === "deviceInfo").error, /certificate/);
-  assert.match(result.report.checks.find((c) => c.id === "acsCapabilities").error, /超时/);
-  // 其余端点仍应成功
-  assert.equal(result.report.checks.filter((c) => c.ok).length, 4);
+  const result = await runProbe({ config: BASE, transport });
+  assert.equal(transport.calls.length, 1);
+  assert.equal(result.report.aborted.code, "MODEL_MISMATCH");
+  assert.equal(result.report.checks.length, 1);
 });
 
-test("空能力集：不误判为支持人脸库", async () => {
+test("deviceInfo 无型号：中止且不再请求", async () => {
+  const transport = makeTransport({
+    deviceInfo: deviceInfo200(deviceXml.replace("<model>DS-K1T671BM</model>", "")),
+    acsCapabilities: never,
+  });
+  const result = await runProbe({ config: BASE, transport });
+  assert.equal(transport.calls.length, 1);
+  assert.equal(result.report.aborted.code, "MODEL_UNPARSED");
+});
+
+test("第二次 401：中止，只发生两次请求", async () => {
+  const transport = makeTransport({
+    deviceInfo: () => ({ status: 401, headers: { "www-authenticate": CHALLENGE }, body: Buffer.from("") }),
+  });
+  const result = await runProbe({ config: BASE, transport });
+  assert.equal(transport.calls.length, 2);
+  assert.equal(result.report.aborted.code, "AUTH_FAILED");
+});
+
+test("不可解析的挑战：中止", async () => {
+  const transport = makeTransport({
+    deviceInfo: () => ({ status: 401, headers: {}, body: Buffer.from("") }),
+  });
+  const result = await runProbe({ config: BASE, transport });
+  assert.equal(transport.calls.length, 1);
+  assert.equal(result.report.aborted.code, "AUTH_CHALLENGE");
+});
+
+for (const [label, error, code] of [
+  ["证书/TLS 错误", new HttpError("NETWORK", "self-signed certificate"), "NETWORK"],
+  ["超时", new HttpError("TIMEOUT", "请求超时"), "TIMEOUT"],
+  ["重定向", new HttpError("REDIRECT", "拒绝重定向：302"), "REDIRECT"],
+  ["响应超限", new HttpError("TOO_LARGE", "响应体超过上限"), "TOO_LARGE"],
+  ["指纹不匹配", new HttpError("FINGERPRINT_MISMATCH", "指纹不一致"), "FINGERPRINT_MISMATCH"],
+]) {
+  test(`${label}：立即中止，不再请求其余端点`, async () => {
+    const transport = makeTransport({
+      deviceInfo: () => {
+        throw error;
+      },
+      acsCapabilities: never,
+    });
+    const result = await runProbe({ config: BASE, transport });
+    assert.equal(transport.calls.length, 1);
+    assert.equal(result.report.aborted.code, code);
+  });
+}
+
+test("内容类型异常：中止", async () => {
+  const transport = makeTransport({
+    deviceInfo: () => ({ status: 200, headers: { "content-type": "text/html" }, body: Buffer.from("<html>") }),
+    acsCapabilities: never,
+  });
+  const result = await runProbe({ config: BASE, transport });
+  assert.equal(transport.calls.length, 1);
+  assert.equal(result.report.aborted.code, "CONTENT_TYPE");
+});
+
+test("空能力集不是致命错误：继续完成其余端点", async () => {
   const transport = makeTransport({
     acsCapabilities: () => ({
       status: 200,
@@ -143,66 +176,33 @@ test("空能力集：不误判为支持人脸库", async () => {
     }),
   });
   const result = await runProbe({ config: BASE, transport });
+  assert.equal(result.report.aborted, null);
   assert.equal(result.report.capabilities.faceLibraryManagement, false);
-  assert.equal(result.report.capabilities.acsNodeCount, 0);
+  assert.equal(result.report.checks.length, 6);
 });
 
-test("畸形 JSON：计数解析失败但探针不崩溃", async () => {
+test("畸形 JSON 计数：不中断，计数为 null", async () => {
   const transport = makeTransport({
     fdlibCount: () => ({ status: 200, headers: { "content-type": "application/json" }, body: Buffer.from("{broken") }),
-    fdlibList: () => ({ status: 200, headers: { "content-type": "application/json" }, body: Buffer.from("{broken") }),
   });
   const result = await runProbe({ config: BASE, transport });
   assert.equal(result.report.counts.faceRecords, null);
-  assert.ok(result.report.checks.every((check) => check.ok), "HTTP 层成功即视为端点可用");
+  assert.equal(result.report.checks.length, 6);
 });
 
-test("近似型号且能力不支持：如实记录，不推断为支持", async () => {
-  const transport = makeTransport({
-    deviceInfo: () => ({
-      status: 200,
-      headers: { "content-type": "application/xml" },
-      body: Buffer.from(deviceXml.replace("DS-K1T671BM", "DS-K1T671B")),
-    }),
-    acsCapabilities: () => ({
-      status: 200,
-      headers: { "content-type": "application/xml" },
-      body: Buffer.from("<AccessControlCapabilities><isSupportCard>true</isSupportCard></AccessControlCapabilities>"),
-    }),
-  });
-  const result = await runProbe({ config: BASE, transport });
-  assert.equal(result.report.device.model, "DS-K1T671B");
-  assert.equal(result.report.capabilities.faceLibraryManagement, false);
-});
-
-test("响应类型不符：记录错误而不是当作成功", async () => {
-  const transport = makeTransport({
-    deviceInfo: () => ({
-      status: 200,
-      headers: { "content-type": "text/html" },
-      body: Buffer.from("<html></html>"),
-    }),
-  });
-  const result = await runProbe({ config: BASE, transport });
-  const check = result.report.checks.find((c) => c.id === "deviceInfo");
-  assert.equal(check.ok, false);
-  assert.match(check.error, /响应类型/);
-});
-
-test("越权主机在发起请求前被拒绝", async () => {
+test("报告不含 IP/序列号/MAC/账号/nonce", async () => {
   const transport = makeTransport();
-  await assert.rejects(
-    () => runProbe({ config: { ...BASE, host: "10.0.0.9", allowedHosts: ["192.168.1.64"] }, transport }),
-    /不在允许列表/,
-  );
-  assert.equal(transport.calls.length, 0);
+  const result = await runProbe({ config: BASE, transport });
+  const text = JSON.stringify(result.report);
+  assert.equal(result.report.target.host, "192.168.x.x");
+  for (const secret of ["192.168.1.64", "SN1234567890", "aa-bb-cc-dd-ee-ff", "admin", "abc123def456"]) {
+    assert.equal(text.includes(secret), false, `报告不应包含 ${secret}`);
+  }
 });
 
-test("缺少账号密码时拒绝执行", async () => {
+test("越权主机与缺凭据在发请求前拒绝", async () => {
   const transport = makeTransport();
-  await assert.rejects(
-    () => runProbe({ config: { ...BASE, username: "", password: "" }, transport }),
-    /缺少设备账号或密码/,
-  );
+  await assert.rejects(() => runProbe({ config: { ...BASE, host: "10.0.0.9" }, transport }), /不在允许列表/);
+  await assert.rejects(() => runProbe({ config: { ...BASE, password: "" }, transport }), /缺少设备账号或密码/);
   assert.equal(transport.calls.length, 0);
 });

@@ -11,13 +11,36 @@ import { parseCapabilities, parseCount, parseDeviceInfo, parseFdLibList } from "
 import { fingerprintValue, maskIp } from "./redact.mjs";
 
 /**
- * 探针编排。
+ * 探针编排（fail-fast）。
  *
- * - `config.allowRead !== true` 时只返回计划，**不调用 transport**；
- * - 每个端点先按白名单逐字校验，再发请求；
- * - 首次 401 时解析 Digest 挑战并重试一次，之后复用挑战做预认证；
- * - 认证失败、超时、过大响应、类型不符都记为该端点失败，不中断其余端点。
+ * 现场规则（复审 52227b6）：
+ * - 必须先声明预批准型号 `expectedModel`；缺失即拒绝执行（不发出任何请求）；
+ * - `deviceInfo` 返回后立即精确比对完整型号，空/不一致 → **不再发第二个请求**；
+ * - 仅"首次 401 Digest challenge"允许重试一次；第二次 401、不可解析 challenge、
+ *   指纹错误、重定向、超时、响应超限、内容类型异常、网络/TLS 错误 → 立即中止；
+ * - 其它 HTTP 状态码记为端点失败但继续（例如某个 capacity 端点不支持）。
  */
+
+const FATAL_CODES = new Set([
+  "MISSING_EXPECTED_MODEL",
+  "MODEL_UNPARSED",
+  "MODEL_MISMATCH",
+  "AUTH_CHALLENGE",
+  "AUTH_FAILED",
+  "FINGERPRINT_MISMATCH",
+  "REDIRECT",
+  "TIMEOUT",
+  "TOO_LARGE",
+  "CONTENT_TYPE",
+  "NETWORK",
+]);
+
+function fatal(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
 export async function runProbe({ config, transport, now = () => new Date().toISOString() }) {
   const plan = READ_ENDPOINTS.map((endpoint) => ({
     id: endpoint.id,
@@ -32,9 +55,11 @@ export async function runProbe({ config, transport, now = () => new Date().toISO
   const host = assertAllowedHost(config.host, config.allowedHosts);
   const port = assertAllowedPort(config.port, config.allowedPorts);
   if (!config.username || !config.password) {
-    const error = new Error("缺少设备账号或密码环境变量");
-    error.code = "MISSING_CREDENTIALS";
-    throw error;
+    throw fatal("MISSING_CREDENTIALS", "缺少设备账号或密码环境变量");
+  }
+  const expectedModel = String(config.expectedModel || "").trim();
+  if (!expectedModel) {
+    throw fatal("MISSING_EXPECTED_MODEL", "缺少预批准型号 HIKVISION_PROBE_EXPECTED_MODEL，拒绝执行");
   }
 
   const base = {
@@ -49,27 +74,44 @@ export async function runProbe({ config, transport, now = () => new Date().toISO
   const results = [];
   let challenge = null;
   let nonceCount = 0;
+  let aborted = null;
 
   for (const endpoint of READ_ENDPOINTS) {
     assertAllowedRequest({ method: "GET", endpointId: endpoint.id, path: endpoint.path, query: endpoint.query });
     const path = buildRequestPath(endpoint);
-    const record = { id: endpoint.id, path, status: 0, headers: {}, body: Buffer.alloc(0), contentType: "", error: "" };
+    const record = {
+      id: endpoint.id,
+      path,
+      status: 0,
+      headers: {},
+      body: Buffer.alloc(0),
+      contentType: "",
+      error: "",
+      fatal: false,
+    };
 
     try {
-      let response = await transport(challenge
-        ? { ...base, path, headers: { Authorization: authHeader(endpoint, path) } }
-        : { ...base, path });
+      let response = await transport(
+        challenge
+          ? { ...base, path, headers: { Authorization: authHeader(endpoint, path) } }
+          : { ...base, path },
+      );
 
       if (response.status === 401) {
         const parsed = parseChallenge(response.headers["www-authenticate"]);
         if (!parsed) {
-          const error = new Error("设备要求认证，但未返回可解析的 Digest 挑战");
-          error.code = "AUTH_CHALLENGE";
-          throw error;
+          throw fatal("AUTH_CHALLENGE", "设备要求认证，但未返回可解析的 Digest 挑战");
         }
         challenge = parsed;
         nonceCount = 0;
-        response = await transport({ ...base, path, headers: { Authorization: authHeader(endpoint, path) } });
+        response = await transport({
+          ...base,
+          path,
+          headers: { Authorization: authHeader(endpoint, path) },
+        });
+        if (response.status === 401) {
+          throw fatal("AUTH_FAILED", "第二次 401：Digest 认证失败，拒绝继续");
+        }
       }
 
       record.status = response.status;
@@ -84,9 +126,28 @@ export async function runProbe({ config, transport, now = () => new Date().toISO
         throw error;
       }
       record.contentType = assertContentType(response.headers, endpoint.expect);
-      if (endpoint.id === "deviceInfo") record.parsed = parseDeviceInfo(response.body.toString("utf8"));
+
+      if (endpoint.id === "deviceInfo") {
+        record.parsed = parseDeviceInfo(response.body.toString("utf8"));
+        const model = String(record.parsed.model || "").trim();
+        if (!model) {
+          throw fatal("MODEL_UNPARSED", "deviceInfo 未返回可解析的完整型号");
+        }
+        if (model !== expectedModel) {
+          throw fatal(
+            "MODEL_MISMATCH",
+            `设备型号「${model}」与预批准型号「${expectedModel}」不一致，已中止`,
+          );
+        }
+      }
     } catch (error) {
       record.error = error.message || String(error);
+      if (error?.code && FATAL_CODES.has(error.code)) {
+        record.fatal = true;
+        aborted = { endpoint: endpoint.id, code: error.code, reason: record.error };
+        results.push(record);
+        break;
+      }
     }
 
     results.push(record);
@@ -114,6 +175,7 @@ export async function runProbe({ config, transport, now = () => new Date().toISO
 
   const report = {
     generatedAt: now(),
+    aborted,
     target: {
       host: maskIp(host),
       port,
@@ -123,7 +185,6 @@ export async function runProbe({ config, transport, now = () => new Date().toISO
         : config.ca
           ? "controlled-ca"
           : "system-store",
-      // 命中的是「当前」还是「下一枚」证书，便于轮换期核对；不输出完整指纹。
       pinnedSlot: results.find((item) => item.id === "deviceInfo")?.pinnedSlot ?? null,
     },
     // 只保留型号/固件类字段；序列号、MAC、设备名等身份信息不进入报告。
@@ -149,13 +210,16 @@ export async function runProbe({ config, transport, now = () => new Date().toISO
       id: item.id,
       status: item.status,
       ok: item.status === 200 && !item.error,
+      fatal: item.fatal,
       contentType: item.contentType,
       error: item.error,
     })),
-    blockers: results
-      .filter((item) => item.status !== 200 || item.error)
-      .map((item) => `${item.id}: ${item.error || `HTTP ${item.status}`}`),
-    // 复审决定：纯指纹模式不校验证书有效期，过期只告警、不阻断。
+    blockers: [
+      ...(aborted ? [`ABORTED @${aborted.endpoint}: ${aborted.reason}`] : []),
+      ...results
+        .filter((item) => !item.fatal && (item.status !== 200 || item.error))
+        .map((item) => `${item.id}: ${item.error || `HTTP ${item.status}`}`),
+    ],
     warnings: results.find((item) => item.id === "deviceInfo")?.certExpired
       ? ["叶证书已过期：指纹匹配通过，按复审决定仅告警，不影响本次探测"]
       : [],

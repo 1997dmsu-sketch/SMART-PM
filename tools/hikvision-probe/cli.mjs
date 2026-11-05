@@ -13,15 +13,17 @@
  *   HIKVISION_PROBE_ALLOWED_PORTS   默认 443,8443
  *   HIKVISION_PROBE_USERNAME        设备账号
  *   HIKVISION_PROBE_PASSWORD        设备密码（只用于 Digest 计算，不落盘）
+ *   HIKVISION_PROBE_EXPECTED_MODEL  预批准的完整设备型号（缺失则拒绝执行）
  *   HIKVISION_PROBE_CA_PEM          受控 CA 文件路径
- *   HIKVISION_PROBE_FINGERPRINT256  证书 SHA-256 指纹（固定）
+ *   HIKVISION_PROBE_FINGERPRINT256  证书 SHA-256 指纹（当前, 下一枚；试点固定使用）
  *   HIKVISION_PROBE_OUT_DIR         报告与原始响应目录（默认系统临时目录）
  *   HIKVISION_PROBE_TIMEOUT_MS      默认 10000
  *   HIKVISION_PROBE_MAX_BYTES       默认 262144
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ensurePrivateDir, writePrivateFile } from "./src/fs-safe.mjs";
 
 import { listEndpoints, parseAllowedHosts, parseAllowedPorts } from "./src/allowlist.mjs";
 import { httpsGet, parseFingerprints } from "./src/http.mjs";
@@ -49,6 +51,8 @@ async function main() {
     allowedPorts: parseAllowedPorts(env.HIKVISION_PROBE_ALLOWED_PORTS),
     username: env.HIKVISION_PROBE_USERNAME || "",
     password: env.HIKVISION_PROBE_PASSWORD || "",
+    // 预批准的完整型号；缺失即拒绝执行（复审 52227b6）。
+    expectedModel: env.HIKVISION_PROBE_EXPECTED_MODEL || "",
     ca: await loadCa(),
     // 「当前, 下一枚」：现场线下核验后填入；轮换期两枚都接受。
     fingerprints: parseFingerprints(env.HIKVISION_PROBE_FINGERPRINT256),
@@ -69,16 +73,21 @@ async function main() {
   }
 
   const outDir = env.HIKVISION_PROBE_OUT_DIR || join(tmpdir(), `hikvision-probe-${Date.now()}`);
-  await mkdir(outDir, { recursive: true, mode: 0o700 });
+  // 既有目录不会被 mkdir 的 mode 收紧，必须显式 chmod 并回读校验；失败即终止。
+  await ensurePrivateDir(outDir);
 
   for (const item of result.results) {
     if (!item.body?.length) continue;
     const safeName = item.id.replace(/[^a-z0-9_-]/gi, "_");
-    await writeFile(join(outDir, `${safeName}.raw`), item.body, { mode: 0o600 });
+    await writePrivateFile(join(outDir, `${safeName}.raw`), item.body);
   }
 
   const reportPath = join(outDir, "report.json");
-  await writeFile(reportPath, JSON.stringify(result.report, null, 2), "utf8");
+  await writePrivateFile(reportPath, JSON.stringify(result.report, null, 2));
+
+  if (result.report.aborted) {
+    console.log(`探针已中止：${result.report.aborted.endpoint} — ${result.report.aborted.reason}`);
+  }
 
   const ok = result.report.checks.filter((check) => check.ok).length;
   console.log(`只读探针完成：${ok}/${result.report.checks.length} 个端点成功`);

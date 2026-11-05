@@ -17,7 +17,7 @@
 | 任务 | 状态 | 分支 | 基准 | 当前阻碍 |
 |---|---|---|---|---|
 | AI-A / HK-AI-01 | 文档阶段已入基线（`9149fd4`） | `docs/hk-isapi-evidence` | `8136b90177a0a49b59d211db01975a87d781b61a` | 等待完整铭牌/固件、厂商适用性答复及目标设备 capability；公开仓库不保存水印资料 |
-| AI-B / HK-AI-02 | 整改已提交，待 Codex 复审（`59b6437`，基线 `f90f199`） | `feat/hk-isapi-capability-probe` | `8136b90` | 五项真实执行阻断已修复并离线回归（55 项）；复审通过前，即使真人已批准也禁止设置 `HIKVISION_PROBE_ALLOW_READ=true` |
+| AI-B / HK-AI-02 | `59b6437` 复审不通过，DeepSeek Harness 定点返工 | `feat/hk-isapi-capability-probe` | `8136b90` | 畸形 Digest 与 `RESPONSE_ERROR` 未 fail-fast，README 凭据/指纹注入仍不合规；复审通过前禁止设置 `HIKVISION_PROBE_ALLOW_READ=true` |
 | AI-C / HK-AI-03 | DeepSeek Harness 已认领，阶段 2 进行中（`8592763`） | `feat/db-mvp-integration` | `b9ee061`（`feat/db-05-occupancies`） | 九项 HTTP 测试与两项资源回归未完成；复审通过前不进入阶段 3 |
 | AI-D0 / HK-AI-04A | Kimi 已分配，可立即开始 | `docs/hk-ai-04-contract-evidence` | `docs/lock-01-fast-track` | 仅整理契约与证据；完成后由 Codex 复审，不得代替 AI-C 基线或真实能力验证 |
 | AI-D / HK-AI-04 | 待认领 | — | 等待 AI-C 集成基线 | 可先阅读契约和准备独立 Mock 模块 |

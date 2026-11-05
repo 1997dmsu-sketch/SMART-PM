@@ -1,0 +1,4894 @@
+{
+  "schemaVersion": "hk-isapi-evidence/v1",
+  "artifact": "HK-AI-01",
+  "generatedAt": "2026-11-05",
+  "targetModel": "DS-K1T671BM",
+  "targetModelExactDocumentationMatch": false,
+  "providerReleaseApproved": false,
+  "allowDeviceOperations": false,
+  "routeDecision": "undecided",
+  "scope": "仅文档证据整理；无真实设备、真实云或生产数据操作",
+  "pageBasis": "所有页码均为 PDF 文件页序号（含封面），不是正文印刷页码",
+  "documents": [
+    {
+      "id": "standard",
+      "title": "智能门禁一体机 ISAPI 开发指南",
+      "archiveName": "ISAPI开发指南_智能门禁_智能门禁一体机20262005122053.zip",
+      "archiveSha256": "52d3c19f37ea0757dd042e050e6d012a3fe9547a6da96a9649142266637b9761",
+      "pdfSha256": "91f539bd463b28b664a6cee1f87bdc17c585404bf893bf3fc785f98e5b0c2c97",
+      "pdfPages": 1016,
+      "explicitModels": [
+        "DS-K1T671",
+        "DS-K1T671A",
+        "DS-K1T671B"
+      ],
+      "exactTargetModelListed": false
+    },
+    {
+      "id": "temperature",
+      "title": "测温智能门禁一体机 ISAPI 开发指南",
+      "archiveName": "ISAPI开发指南_智能门禁_测温智能门禁一体机20262005122046.zip",
+      "archiveSha256": "9888ab2a47a24ded58a9ac591df71fb3bfcee01c34a13e951711be9005390f76",
+      "pdfSha256": "c2953ba53ec78f5437ed18d190ffa7706c0405d53866465a82ea072f6b22135f",
+      "pdfPages": 824,
+      "explicitModels": [
+        "DS-K1T671AM-3XF",
+        "DS-K1T671ATM-3XF",
+        "DS-K1T671BM-3XFTD"
+      ],
+      "exactTargetModelListed": false
+    }
+  ],
+  "modelApplicability": [
+    {
+      "model": "DS-K1T671B",
+      "document": "standard",
+      "listed": true,
+      "relationshipToTarget": "近似型号，不能替代裸目标型号证据"
+    },
+    {
+      "model": "DS-K1T671BM-3XFTD",
+      "document": "temperature",
+      "listed": true,
+      "relationshipToTarget": "带后缀测温型号，不能替代裸目标型号证据"
+    },
+    {
+      "model": "DS-K1T671BM",
+      "document": null,
+      "listed": false,
+      "relationshipToTarget": "项目登记的裸目标型号；两份指南均未精确列出"
+    }
+  ],
+  "evidenceLevels": {
+    "documentation": "present 表示在已提供指南中定位到端点；workflow-only 不等于有详细 schema",
+    "targetCapability": "unverified 表示尚未从完整目标型号/固件读取并核验",
+    "realCall": "not-executed 表示本任务未进行真实设备调用"
+  },
+  "evidenceSummary": {
+    "documentedCandidateEndpoints": 27,
+    "targetCapabilityVerified": 0,
+    "realCallsExecuted": 0
+  },
+  "communication": {
+    "authentication": "RFC 7616 HTTP Digest；指南称设备默认开启 HTTPS",
+    "unverified": [
+      "目标证书与信任链",
+      "实际 HTTPS 端口",
+      "Digest 算法与qop",
+      "设备账号最小权限",
+      "事件来源认证与防重放"
+    ],
+    "sources": [
+      {
+        "document": "standard",
+        "section": "§3.3.1 认证、§3.3.2 用户权限、§3.3.3 信息加密",
+        "pages": [
+          7
+        ],
+        "pageBasis": "PDF 页（含封面）"
+      },
+      {
+        "document": "temperature",
+        "section": "§3.3.1 认证、§3.3.2 用户权限、§3.3.3 信息加密",
+        "pages": [
+          7
+        ],
+        "pageBasis": "PDF 页（含封面）"
+      }
+    ]
+  },
+  "ai02ReadOnlyCandidateEndpointIds": [
+    "SYS-DEVICE-INFO",
+    "AC-CAPABILITIES",
+    "USER-CAPABILITIES",
+    "FD-CAPABILITIES",
+    "FD-LIST",
+    "FD-COUNT-ALL"
+  ],
+  "endpoints": [
+    {
+      "id": "SYS-DEVICE-INFO",
+      "domain": "device",
+      "method": "GET",
+      "path": "/ISAPI/System/deviceInfo",
+      "purpose": "读取型号、固件、硬件等身份信息；响应中的设备唯一标识必须脱敏",
+      "consumers": [
+        "HK-AI-02",
+        "HK-AI-04"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "schema",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": null,
+          "node": "not-specified-in-cited-section",
+          "requirement": "不得推测独立能力节点；仍须认证并通过真实只读调用确认"
+        }
+      ],
+      "fieldRefs": [
+        "DeviceInfo.model",
+        "DeviceInfo.firmwareVersion",
+        "DeviceInfo.firmwareReleasedDate",
+        "DeviceInfo.hardwareVersion"
+      ],
+      "conditions": [
+        "AI-02 仅使用无查询参数的基础路径；不得请求其他控制器或记录敏感标识原文"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.1.7.2 获取设备信息参数",
+          "pages": [
+            255,
+            256
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.1.6.2 获取设备信息参数",
+          "pages": [
+            210,
+            211
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "SYS-CAPABILITIES",
+      "domain": "event",
+      "method": "GET",
+      "path": "/ISAPI/System/capabilities",
+      "purpose": "读取系统能力；事件订阅前检查 isSupportSubscribeEvent",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "workflow-only",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": null,
+          "node": "not-specified-in-cited-section",
+          "requirement": "不得推测独立能力节点；仍须认证并通过真实只读调用确认"
+        }
+      ],
+      "fieldRefs": [
+        "System.isSupportSubscribeEvent"
+      ],
+      "conditions": [],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.1.2 订阅布防",
+          "pages": [
+            20
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.1.2 订阅布防",
+          "pages": [
+            20
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "AC-CAPABILITIES",
+      "domain": "access-control",
+      "method": "GET",
+      "path": "/ISAPI/AccessControl/capabilities",
+      "purpose": "检查人员、人脸和人员删除总能力，以及 employeeNo 字符约束",
+      "consumers": [
+        "HK-AI-02",
+        "HK-AI-04"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "workflow-only",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": null,
+          "node": "not-specified-in-cited-section",
+          "requirement": "不得推测独立能力节点；仍须认证并通过真实只读调用确认"
+        }
+      ],
+      "fieldRefs": [
+        "AccessControl.isSupportUserInfo",
+        "AccessControl.isSupportFDLib",
+        "AccessControl.isSupportUserInfoDetailDelete",
+        "AccessControl.EmployeeNoInfo.employeeNo",
+        "AccessControl.EmployeeNoInfo.characterType",
+        "AccessControl.EmployeeNoInfo.isSupportCompress"
+      ],
+      "conditions": [],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.2.2.1、§8.12.5.2.1",
+          "pages": [
+            100,
+            113
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.2.2.1、§8.7.5.2.1",
+          "pages": [
+            90,
+            103
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "USER-CAPABILITIES",
+      "domain": "person",
+      "method": "GET",
+      "path": "/ISAPI/AccessControl/UserInfo/capabilities?format=json",
+      "purpose": "读取人员操作、分页、列表和容量能力",
+      "consumers": [
+        "HK-AI-02",
+        "HK-AI-04"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportUserInfo",
+          "requirement": "== true"
+        }
+      ],
+      "fieldRefs": [
+        "UserInfo.supportFunction",
+        "UserInfo.maxRecordNum",
+        "UserInfoCap.UserInfoSearchCond.maxResults",
+        "UserInfoSearchCond.EmployeeNoList.maxSize"
+      ],
+      "conditions": [
+        "maxRecordNum 在通用能力 schema 中为可选；目标缺失时不得按 0 或无限制处理，必须保留实际响应供复核"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.67；§8.12.2.2.2",
+          "pages": [
+            547,
+            548,
+            549,
+            550,
+            551,
+            552,
+            101
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.31；§8.7.2.2.2",
+          "pages": [
+            455,
+            456,
+            457,
+            458,
+            459,
+            460,
+            91
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "USER-COUNT",
+      "domain": "person",
+      "method": "GET",
+      "path": "/ISAPI/AccessControl/UserInfo/Count?format=json",
+      "purpose": "查询已添加人员数量及已绑定人脸人员数量",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportUserInfo",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/AccessControl/UserInfo/capabilities?format=json",
+          "node": "supportFunction",
+          "requirement": "contains get"
+        }
+      ],
+      "fieldRefs": [
+        "UserInfoCount.userNumber",
+        "UserInfoCount.bindFaceUserNumber"
+      ],
+      "conditions": [],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.68 获取人员数量",
+          "pages": [
+            556,
+            557
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.32 获取人员数量",
+          "pages": [
+            464,
+            465
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "USER-SEARCH",
+      "domain": "person",
+      "method": "POST",
+      "path": "/ISAPI/AccessControl/UserInfo/Search?format=json",
+      "purpose": "按人员 ID 等条件分页查询人员",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": true,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportUserInfo",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/AccessControl/UserInfo/capabilities?format=json",
+          "node": "supportFunction",
+          "requirement": "contains get"
+        }
+      ],
+      "fieldRefs": [
+        "UserInfoSearchCond.searchResultPosition",
+        "UserInfoSearchCond.maxResults",
+        "UserInfoSearchCond.EmployeeNoList[].employeeNo",
+        "UserInfo.employeeNo",
+        "UserInfo.Valid"
+      ],
+      "conditions": [
+        "maxResults 与 EmployeeNoList 上限以实际 capability 为准，不能写死通用 schema 示例值"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.72 查询人员信息；§8.12.2.2.2",
+          "pages": [
+            563,
+            564,
+            101
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.36 查询人员信息；§8.7.2.2.2",
+          "pages": [
+            470,
+            471,
+            91
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "USER-RECORD",
+      "domain": "person",
+      "method": "POST",
+      "path": "/ISAPI/AccessControl/UserInfo/Record?format=json",
+      "purpose": "新增人员；已存在时文档说明会报错",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": true,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportUserInfo",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/AccessControl/UserInfo/capabilities?format=json",
+          "node": "supportFunction",
+          "requirement": "contains post"
+        }
+      ],
+      "fieldRefs": [
+        "UserInfo.employeeNo",
+        "UserInfo.name",
+        "UserInfo.userType",
+        "UserInfo.Valid",
+        "UserInfo.doorRight",
+        "UserInfo.RightPlan"
+      ],
+      "conditions": [
+        "先查询门禁总能力和人员能力；人员存在时不得把新增当修改",
+        "项目不得使用 administrator 规避门权限与有效期校验"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.71 添加人员信息；§8.12.2.2.4",
+          "pages": [
+            560,
+            561,
+            562,
+            102
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.35 添加人员信息；§8.7.2.2.4",
+          "pages": [
+            468,
+            469,
+            470,
+            92
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "USER-SETUP",
+      "domain": "person",
+      "method": "PUT",
+      "path": "/ISAPI/AccessControl/UserInfo/SetUp?format=json",
+      "purpose": "设置人员：文档描述为不存在则新增、存在则修改",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": true,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportUserInfo",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/AccessControl/UserInfo/capabilities?format=json",
+          "node": "supportFunction",
+          "requirement": "contains setUp"
+        }
+      ],
+      "fieldRefs": [
+        "UserInfo.employeeNo",
+        "UserInfo.userType",
+        "UserInfo.Valid",
+        "UserInfo.doorRight",
+        "UserInfo.RightPlan"
+      ],
+      "conditions": [
+        "upsert 语义不等于厂商幂等保证；发送后未知结果必须先查询对账"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.73 设置人员信息；§8.12.2.2.3",
+          "pages": [
+            567,
+            568,
+            101,
+            102
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.37 设置人员信息；§8.7.2.2.3",
+          "pages": [
+            475,
+            476,
+            91,
+            92
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "USER-MODIFY",
+      "domain": "person",
+      "method": "PUT",
+      "path": "/ISAPI/AccessControl/UserInfo/Modify?format=json",
+      "purpose": "修改已存在人员；不存在时文档说明会报错",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": true,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportUserInfo",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/AccessControl/UserInfo/capabilities?format=json",
+          "node": "supportFunction",
+          "requirement": "contains put"
+        }
+      ],
+      "fieldRefs": [
+        "UserInfo.employeeNo",
+        "UserInfo.userType",
+        "UserInfo.Valid",
+        "UserInfo.doorRight",
+        "UserInfo.RightPlan"
+      ],
+      "conditions": [],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.70 修改人员信息；§8.12.2.2.5",
+          "pages": [
+            558,
+            559,
+            560,
+            102
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.34 修改人员信息；§8.7.2.2.5",
+          "pages": [
+            466,
+            467,
+            468,
+            92,
+            93
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "USER-DETAIL-DELETE",
+      "domain": "person",
+      "method": "PUT",
+      "path": "/ISAPI/AccessControl/UserInfoDetail/Delete?format=json",
+      "purpose": "按人员明细发起删除；成功响应只表示开始执行",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": true,
+      "documentationDetail": "workflow-only",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportUserInfoDetailDelete",
+          "requirement": "== true"
+        }
+      ],
+      "fieldRefs": [
+        "UserInfo.employeeNo"
+      ],
+      "conditions": [
+        "本指南未定位到此端点的独立详细 schema，不得套用 UserInfo/Delete 的空列表语义",
+        "完成后必须轮询 DeleteProcess 并回查人员与人脸残留"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.2.2.6 人员删除",
+          "pages": [
+            103
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.2.2.6 人员删除",
+          "pages": [
+            93,
+            94
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "USER-DETAIL-DELETE-PROCESS",
+      "domain": "person",
+      "method": "GET",
+      "path": "/ISAPI/AccessControl/UserInfoDetail/DeleteProcess",
+      "purpose": "循环查询人员明细删除进度；路径按指南保留，不自行添加 format=json",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "workflow-only",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportUserInfoDetailDelete",
+          "requirement": "== true"
+        }
+      ],
+      "fieldRefs": [],
+      "conditions": [
+        "未定位到独立响应 schema；processing/success/failed 枚举不得从指纹删除接口照搬",
+        "轮询完成仍需人员和人脸查询对账"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.2.2.6 人员删除",
+          "pages": [
+            103
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.2.2.6 人员删除",
+          "pages": [
+            93,
+            94
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FD-CAPABILITIES",
+      "domain": "face",
+      "method": "GET",
+      "path": "/ISAPI/Intelligent/FDLib/capabilities?format=json",
+      "purpose": "读取人脸操作能力与最大人脸记录数",
+      "consumers": [
+        "HK-AI-02",
+        "HK-AI-04"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "workflow-only",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportFDLib",
+          "requirement": "== true"
+        }
+      ],
+      "fieldRefs": [
+        "FDLib.supportFunction",
+        "FDLib.FDRecordDataMaxNum"
+      ],
+      "conditions": [
+        "未定位到独立详细 capability schema；supportFunction 与 FDRecordDataMaxNum 均须以目标设备原始响应复核"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.5.2.2–8.12.5.2.6",
+          "pages": [
+            114,
+            115,
+            116,
+            117
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.5.2.2–8.7.5.2.6",
+          "pages": [
+            104,
+            105,
+            106,
+            107
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FD-LIST",
+      "domain": "face-library",
+      "method": "GET",
+      "path": "/ISAPI/Intelligent/FDLib?format=json",
+      "purpose": "确认设备已存在的人脸库，再选择 FDID 与库类型",
+      "consumers": [
+        "HK-AI-02",
+        "HK-AI-04"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "workflow-only",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportFDLib",
+          "requirement": "== true"
+        }
+      ],
+      "fieldRefs": [
+        "FDID",
+        "faceLibType"
+      ],
+      "conditions": [
+        "未定位到独立详细响应 schema；不得凭通用流程固定库类型",
+        "可见光 FDID=1 只是流程说明，目标设备仍须读取确认"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.5.2.1 判断是否支持人脸管理",
+          "pages": [
+            113
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.5.2.1 判断是否支持人脸管理",
+          "pages": [
+            103
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FD-CREATE",
+      "domain": "face-library",
+      "method": "POST",
+      "path": "/ISAPI/Intelligent/FDLib?format=json",
+      "purpose": "在确认库不存在时创建人脸库；仅登记候选，不进入首期自动流程",
+      "consumers": [
+        "库创建没有单独 capability 节点和详细 schema；必须另行审批，禁止自动建库",
+        "不得把 blackFD 厂商名单库语义等同项目黑名单"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": true,
+      "documentationDetail": "workflow-only",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportFDLib",
+          "requirement": "== true"
+        }
+      ],
+      "fieldRefs": [
+        "FDID",
+        "faceLibType"
+      ],
+      "conditions": [],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.5.2.1 判断是否支持人脸管理",
+          "pages": [
+            113
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.5.2.1 判断是否支持人脸管理",
+          "pages": [
+            103
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FD-COUNT-ALL",
+      "domain": "face-capacity",
+      "method": "GET",
+      "path": "/ISAPI/Intelligent/FDLib/Count?format=json",
+      "purpose": "查询全部人脸库记录数和容量信息",
+      "consumers": [
+        "HK-AI-02",
+        "HK-AI-04"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportFDLib",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/Intelligent/FDLib/capabilities?format=json",
+          "node": "supportFunction",
+          "requirement": "contains get"
+        }
+      ],
+      "fieldRefs": [
+        "FDRecordDataInfo[].recordDataNumber",
+        "FDRecordDataInfo[].FDID",
+        "FDRecordDataInfo[].faceLibType",
+        "FDCapacity.maxRecordDataNumber",
+        "FDCapacity.remainRecordDataNumber"
+      ],
+      "conditions": [],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.1 获取人脸库中人脸记录总数；§8.12.5.2.2",
+          "pages": [
+            334,
+            114
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.1 获取人脸库中人脸记录总数；§8.7.5.2.2",
+          "pages": [
+            303,
+            104
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FD-COUNT-BY-LIB",
+      "domain": "face-capacity",
+      "method": "GET",
+      "path": "/ISAPI/Intelligent/FDLib/Count?format=json&FDID=<FDID>&faceLibType=<faceLibType>",
+      "purpose": "查询指定人脸库记录数",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportFDLib",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/Intelligent/FDLib/capabilities?format=json",
+          "node": "supportFunction",
+          "requirement": "contains get"
+        }
+      ],
+      "fieldRefs": [
+        "FDID",
+        "faceLibType",
+        "FDRecordDataInfo[].recordDataNumber"
+      ],
+      "conditions": [
+        "FDID 与 faceLibType 必须来自已核实的库信息，不得固定写死"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.2 获取指定人脸库人脸记录总数",
+          "pages": [
+            335
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.2 获取指定人脸库人脸记录总数",
+          "pages": [
+            304
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FD-SEARCH",
+      "domain": "face",
+      "method": "POST",
+      "path": "/ISAPI/Intelligent/FDLib/FDSearch?format=json",
+      "purpose": "分页查询人脸记录，用于录入对账和撤权残留检查",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": true,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportFDLib",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/Intelligent/FDLib/capabilities?format=json",
+          "node": "supportFunction",
+          "requirement": "contains get"
+        }
+      ],
+      "fieldRefs": [
+        "FDSearch.searchResultPosition",
+        "FDSearch.maxResults",
+        "FDSearch.FDID",
+        "FDSearch.FPID",
+        "FDSearch.faceLibType"
+      ],
+      "conditions": [
+        "查询响应可能含人脸 URL 或模型数据，日志与 fixture 必须移除敏感内容"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.8 查找人脸库中的人脸数据；§8.12.5.2.2",
+          "pages": [
+            343,
+            344,
+            345,
+            346,
+            114
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.8 查找人脸库中的人脸数据；§8.7.5.2.2",
+          "pages": [
+            312,
+            313,
+            314,
+            315,
+            104
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FD-RECORD",
+      "domain": "face",
+      "method": "POST",
+      "path": "/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json",
+      "purpose": "新增人脸记录；已存在时文档说明会报错",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": true,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportFDLib",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/Intelligent/FDLib/capabilities?format=json",
+          "node": "supportFunction",
+          "requirement": "contains post"
+        }
+      ],
+      "fieldRefs": [
+        "FaceDataRecord.faceURL",
+        "FaceDataRecord.modelData",
+        "FaceDataRecord.FDID",
+        "FaceDataRecord.FPID",
+        "FaceDataRecord.faceLibType",
+        "FaceDataRecord.name",
+        "FaceDataRecord.bornTime",
+        "FaceDataRecord.img"
+      ],
+      "conditions": [
+        "先下发人员并确认目标库存在",
+        "FPID 对门禁业务必填并与 employeeNo 关联",
+        "faceURL 与 modelData 二选一；图片二进制传输方式须 capability 和实测确认"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.3 添加人脸数据；§8.12.5.2.4",
+          "pages": [
+            336,
+            337,
+            338,
+            115,
+            116
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.3 添加人脸数据；§8.7.5.2.4",
+          "pages": [
+            305,
+            306,
+            307,
+            105,
+            106
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FD-MODIFY",
+      "domain": "face",
+      "method": "PUT",
+      "path": "/ISAPI/Intelligent/FDLib/FDModify?format=json",
+      "purpose": "修改已存在人脸记录",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": true,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportFDLib",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/Intelligent/FDLib/capabilities?format=json",
+          "node": "supportFunction",
+          "requirement": "contains put"
+        }
+      ],
+      "fieldRefs": [
+        "FaceDataRecord.faceURL",
+        "FaceDataRecord.modelData",
+        "FaceDataRecord.FDID",
+        "FaceDataRecord.FPID",
+        "FaceDataRecord.faceLibType",
+        "FaceDataRecord.img"
+      ],
+      "conditions": [
+        "按 FPID 判断记录是否存在；发送后未知结果先查询，不自动重试"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.4 修改人脸数据；§8.12.5.2.5",
+          "pages": [
+            338,
+            339,
+            340,
+            116
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.4 修改人脸数据；§8.7.5.2.5",
+          "pages": [
+            307,
+            308,
+            309,
+            106
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FD-SETUP",
+      "domain": "face",
+      "method": "PUT",
+      "path": "/ISAPI/Intelligent/FDLib/FDSetUp?format=json",
+      "purpose": "设置人脸：文档描述为不存在则新增、存在则修改",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": true,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportFDLib",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/Intelligent/FDLib/capabilities?format=json",
+          "node": "supportFunction",
+          "requirement": "contains setUp"
+        }
+      ],
+      "fieldRefs": [
+        "FaceDataRecord.faceURL",
+        "FaceDataRecord.modelData",
+        "FaceDataRecord.FDID",
+        "FaceDataRecord.FPID",
+        "FaceDataRecord.faceLibType",
+        "FaceDataRecord.img"
+      ],
+      "conditions": [
+        "upsert 语义不等于可安全盲重试；仍须唯一任务与查询对账"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.9 添加人脸数据（不存在则新增）；§8.12.5.2.3",
+          "pages": [
+            347,
+            348,
+            115
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.9 添加人脸数据（不存在则新增）；§8.7.5.2.3",
+          "pages": [
+            316,
+            317,
+            105
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FD-DELETE",
+      "domain": "face",
+      "method": "PUT",
+      "path": "/ISAPI/Intelligent/FDLib/FDSearch/Delete?format=json&FDID=<FDID>&faceLibType=<FDType>",
+      "purpose": "删除指定库中的指定人脸记录；文档流程称响应成功表示已删除",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": true,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportFDLib",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/Intelligent/FDLib/capabilities?format=json",
+          "node": "supportFunction",
+          "requirement": "contains delete"
+        }
+      ],
+      "fieldRefs": [
+        "FDID",
+        "faceLibType",
+        "FDSearchDelete.FPID[].value",
+        "FDSearchDelete.FPID[].rowKey"
+      ],
+      "conditions": [
+        "FPID 列表为空在门禁产品中不处理；Provider 应拒绝空列表",
+        "删除不存在的人脸在集成流程中称不报错，仍须查询确认最终无残留"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.6 删除人脸库中的人脸数据；§8.12.5.2.6",
+          "pages": [
+            341,
+            342,
+            117
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.6 删除人脸库中的人脸数据；§8.7.5.2.6",
+          "pages": [
+            310,
+            311,
+            107
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "EVENT-ALERT-STREAM",
+      "domain": "event",
+      "method": "GET",
+      "path": "/ISAPI/Event/notification/alertStream",
+      "purpose": "建立非订阅 HTTP/HTTPS 长连接，接收设备全部事件",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": null,
+          "node": "not-specified-in-cited-section",
+          "requirement": "不得推测独立能力节点；仍须认证并通过真实只读调用确认"
+        }
+      ],
+      "fieldRefs": [
+        "EventNotificationAlert.eventType"
+      ],
+      "conditions": [
+        "Connection: keep-alive；连接为设备到客户端的单向事件流",
+        "超过心跳时间未收到消息应主动断开并重建；不得假设事件已鉴权、防重放"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.1、§4.4.1.1；§13.1.5.2",
+          "pages": [
+            19,
+            220
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.1、§4.4.1.1；§11.1.4.1",
+          "pages": [
+            19,
+            179
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "EVENT-SUBSCRIBE-CAP",
+      "domain": "event",
+      "method": "GET",
+      "path": "/ISAPI/Event/notification/subscribeEventCap",
+      "purpose": "读取订阅事件类型、心跳与订阅管理能力",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/System/capabilities",
+          "node": "isSupportSubscribeEvent",
+          "requirement": "== true"
+        }
+      ],
+      "fieldRefs": [
+        "SubscribeEventCap.heartbeat",
+        "SubscribeEventCap.eventMode",
+        "SubscribeEventCap.EventList[].type"
+      ],
+      "conditions": [],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.1.5.6 获取布防订阅能力",
+          "pages": [
+            229,
+            230,
+            231
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.1.4.5 获取布防订阅能力",
+          "pages": [
+            186,
+            187,
+            188
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "EVENT-SUBSCRIBE",
+      "domain": "event",
+      "method": "POST",
+      "path": "/ISAPI/Event/notification/subscribeEvent",
+      "purpose": "建立订阅长连接，仅接收订阅列表事件",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": true,
+      "documentationDetail": "schema-and-workflow",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/System/capabilities",
+          "node": "isSupportSubscribeEvent",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/Event/notification/subscribeEventCap",
+          "node": "EventList",
+          "requirement": "按实际支持类型订阅"
+        }
+      ],
+      "fieldRefs": [
+        "SubscribeEvent.heartbeat",
+        "SubscribeEvent.eventMode",
+        "SubscribeEvent.EventList[].type",
+        "SubscribeEventResponse.id",
+        "SubscribeEventResponse.FailedEventList"
+      ],
+      "conditions": [
+        "Connection: keep-alive；检查 FailedEventList，不能仅凭连接建立认定全部订阅成功",
+        "心跳 eventType=heartBeat；超时断开重建不等于业务事件可自动重放"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.1.2；§13.1.5.5",
+          "pages": [
+            20,
+            21,
+            224,
+            225,
+            226,
+            227,
+            228,
+            229
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.1.2；§11.1.4.4",
+          "pages": [
+            20,
+            21,
+            181,
+            182,
+            183,
+            184,
+            185,
+            186
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "EVENT-HTTPHOSTS-CAP",
+      "domain": "event-push",
+      "method": "GET",
+      "path": "/ISAPI/Event/notification/httpHosts/capabilities",
+      "purpose": "确认设备是否支持监听主机参数配置",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "workflow-only",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": null,
+          "node": "not-specified-in-cited-section",
+          "requirement": "不得推测独立能力节点；仍须认证并通过真实只读调用确认"
+        }
+      ],
+      "fieldRefs": [
+        "HttpHostNotificationCap"
+      ],
+      "conditions": [],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.2.1 集成流程",
+          "pages": [
+            22,
+            23
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.2.1 集成流程",
+          "pages": [
+            22,
+            23
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "EVENT-HTTPHOSTS-GET",
+      "domain": "event-push",
+      "method": "GET",
+      "path": "/ISAPI/Event/notification/httpHosts?security=<security>&iv=<iv>",
+      "purpose": "读取监听主机配置；敏感认证参数不得进入日志",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": false,
+      "documentationDetail": "workflow-only",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/Event/notification/httpHosts/capabilities",
+          "node": "HttpHostNotificationCap",
+          "requirement": "成功返回该根节点"
+        }
+      ],
+      "fieldRefs": [],
+      "conditions": [
+        "该路径含敏感查询参数，未来实现必须专门脱敏；本任务不定义参数值",
+        "不属于 AI-02 首批只读白名单"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.2.1 集成流程",
+          "pages": [
+            23
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.2.1 集成流程",
+          "pages": [
+            23
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "EVENT-HTTPHOSTS-PUT",
+      "domain": "event-push",
+      "method": "PUT",
+      "path": "/ISAPI/Event/notification/httpHosts?security=<security>&iv=<iv>",
+      "purpose": "配置设备主动推送的监听主机；仅为路线候选，不在首期自动配置",
+      "consumers": [
+        "HK-AI-04",
+        "future-provider-after-approval"
+      ],
+      "candidateOnly": true,
+      "allowedNow": false,
+      "writeOperation": true,
+      "documentationDetail": "workflow-only",
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      },
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/Event/notification/httpHosts/capabilities",
+          "node": "HttpHostNotificationCap",
+          "requirement": "成功返回该根节点"
+        }
+      ],
+      "fieldRefs": [],
+      "conditions": [
+        "设备主动连接平台并 POST 事件；监听方式不产生心跳",
+        "认证、防重放、目标地址 allowlist 与配置覆盖风险未关闭前不得调用"
+      ],
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.2.1–§4.4.2.2",
+          "pages": [
+            23,
+            24
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.2.1–§4.4.2.2",
+          "pages": [
+            23,
+            24
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    }
+  ],
+  "forbiddenEndpoints": [
+    {
+      "id": "FORBID-FDLIB-DELETE-ALL",
+      "method": "DELETE",
+      "path": "/ISAPI/Intelligent/FDLib?format=json",
+      "reason": "删除设备内所有人脸库及其中全部人脸；任何首期 Provider/探针均禁止",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.5.2.6 人脸删除",
+          "pages": [
+            117
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.5.2.6 人脸删除",
+          "pages": [
+            107
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ],
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      }
+    },
+    {
+      "id": "FORBID-USERINFO-BULK-DELETE",
+      "method": "PUT",
+      "path": "/ISAPI/AccessControl/UserInfo/Delete?format=json",
+      "reason": "UserInfoDelCond.EmployeeNoList 缺失或为空表示删除全部人员并删除关联凭证；首期整体禁用，且不得与 UserInfoDetail/Delete 混用",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.69 删除人员信息",
+          "pages": [
+            557
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.33 删除人员信息",
+          "pages": [
+            465
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ],
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      }
+    }
+  ],
+  "deferredEndpoints": [
+    {
+      "id": "DEFER-FDSEARCH-PUT-ALTERNATIVE",
+      "method": "PUT",
+      "path": "/ISAPI/Intelligent/FDLib/FDSearch?format=json&FDID=<FDID>&FPID=<FPID>&faceLibType=<faceLibType>",
+      "reason": "详细 schema 中另有修改已存在人脸记录的候选形式；集成流程采用 FDModify。首期不并行实现两种修改路线，待 capability 与厂商确认后再选",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.7 修改人脸数据（不存在则报错）",
+          "pages": [
+            342,
+            343,
+            344
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.7 修改人脸数据（不存在则报错）",
+          "pages": [
+            311,
+            312,
+            313
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ],
+      "capabilityPrerequisites": [
+        {
+          "endpoint": "GET /ISAPI/AccessControl/capabilities",
+          "node": "isSupportFDLib",
+          "requirement": "== true"
+        },
+        {
+          "endpoint": "GET /ISAPI/Intelligent/FDLib/capabilities?format=json",
+          "node": "supportFunction",
+          "requirement": "contains put",
+          "note": "该替代路径未在集成流程单列，须单独验证"
+        }
+      ],
+      "evidence": {
+        "documentation": "present",
+        "targetCapability": "unverified",
+        "realCall": "not-executed"
+      }
+    }
+  ],
+  "fields": [
+    {
+      "id": "DeviceInfo.model",
+      "domain": "device",
+      "path": "DeviceInfo.model",
+      "direction": "response",
+      "type": "string",
+      "requirement": "required",
+      "documentedConstraint": "通用 DeviceInfo schema",
+      "projectGuardrail": "只保存必要身份与版本信息；序列号、MAC 等不进入报告或 fixture",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.1.7.2",
+          "pages": [
+            255,
+            256
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.1.6.2",
+          "pages": [
+            210,
+            211
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "DeviceInfo.firmwareVersion",
+      "domain": "device",
+      "path": "DeviceInfo.firmwareVersion",
+      "direction": "response",
+      "type": "string",
+      "requirement": "required",
+      "documentedConstraint": "通用 DeviceInfo schema",
+      "projectGuardrail": "只保存必要身份与版本信息；序列号、MAC 等不进入报告或 fixture",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.1.7.2",
+          "pages": [
+            255,
+            256
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.1.6.2",
+          "pages": [
+            210,
+            211
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "DeviceInfo.firmwareReleasedDate",
+      "domain": "device",
+      "path": "DeviceInfo.firmwareReleasedDate",
+      "direction": "response",
+      "type": "string",
+      "requirement": "optional",
+      "documentedConstraint": "通用 DeviceInfo schema",
+      "projectGuardrail": "只保存必要身份与版本信息；序列号、MAC 等不进入报告或 fixture",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.1.7.2",
+          "pages": [
+            255,
+            256
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.1.6.2",
+          "pages": [
+            210,
+            211
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "DeviceInfo.hardwareVersion",
+      "domain": "device",
+      "path": "DeviceInfo.hardwareVersion",
+      "direction": "response",
+      "type": "string",
+      "requirement": "optional",
+      "documentedConstraint": "通用 DeviceInfo schema",
+      "projectGuardrail": "只保存必要身份与版本信息；序列号、MAC 等不进入报告或 fixture",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.1.7.2",
+          "pages": [
+            255,
+            256
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.1.6.2",
+          "pages": [
+            210,
+            211
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "AccessControl.isSupportUserInfo",
+      "domain": "capability",
+      "path": "isSupportUserInfo",
+      "direction": "response",
+      "type": "boolean",
+      "requirement": "conditional",
+      "documentedConstraint": "true 才进入对应流程",
+      "projectGuardrail": "缺失或 false 均失败关闭，不得调用对应写接口",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.2.2.1、§8.12.2.2.6、§8.12.5.2.1",
+          "pages": [
+            100,
+            103,
+            113
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.2.2.1、§8.7.2.2.6、§8.7.5.2.1",
+          "pages": [
+            90,
+            93,
+            94,
+            103
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "AccessControl.isSupportFDLib",
+      "domain": "capability",
+      "path": "isSupportFDLib",
+      "direction": "response",
+      "type": "boolean",
+      "requirement": "conditional",
+      "documentedConstraint": "true 才进入对应流程",
+      "projectGuardrail": "缺失或 false 均失败关闭，不得调用对应写接口",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.2.2.1、§8.12.2.2.6、§8.12.5.2.1",
+          "pages": [
+            100,
+            103,
+            113
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.2.2.1、§8.7.2.2.6、§8.7.5.2.1",
+          "pages": [
+            90,
+            93,
+            94,
+            103
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "AccessControl.isSupportUserInfoDetailDelete",
+      "domain": "capability",
+      "path": "isSupportUserInfoDetailDelete",
+      "direction": "response",
+      "type": "boolean",
+      "requirement": "conditional",
+      "documentedConstraint": "true 才进入对应流程",
+      "projectGuardrail": "缺失或 false 均失败关闭，不得调用对应写接口",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.2.2.1、§8.12.2.2.6、§8.12.5.2.1",
+          "pages": [
+            100,
+            103,
+            113
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.2.2.1、§8.7.2.2.6、§8.7.5.2.1",
+          "pages": [
+            90,
+            93,
+            94,
+            103
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "AccessControl.EmployeeNoInfo.employeeNo",
+      "domain": "capability",
+      "path": "EmployeeNoInfo.employeeNo",
+      "direction": "response",
+      "type": "capability-node",
+      "requirement": "conditional",
+      "documentedConstraint": "共同判定人员 ID 长度与字符范围",
+      "projectGuardrail": "目标返回值未取得前，不决定稳定 personId 到 employeeNo 的最终编码",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.2.2.1",
+          "pages": [
+            100
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.2.2.1",
+          "pages": [
+            90
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "AccessControl.EmployeeNoInfo.characterType",
+      "domain": "capability",
+      "path": "EmployeeNoInfo.characterType",
+      "direction": "response",
+      "type": "capability-node",
+      "requirement": "conditional",
+      "documentedConstraint": "共同判定人员 ID 长度与字符范围",
+      "projectGuardrail": "目标返回值未取得前，不决定稳定 personId 到 employeeNo 的最终编码",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.2.2.1",
+          "pages": [
+            100
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.2.2.1",
+          "pages": [
+            90
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "AccessControl.EmployeeNoInfo.isSupportCompress",
+      "domain": "capability",
+      "path": "EmployeeNoInfo.isSupportCompress",
+      "direction": "response",
+      "type": "capability-node",
+      "requirement": "conditional",
+      "documentedConstraint": "共同判定人员 ID 长度与字符范围",
+      "projectGuardrail": "目标返回值未取得前，不决定稳定 personId 到 employeeNo 的最终编码",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.2.2.1",
+          "pages": [
+            100
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.2.2.1",
+          "pages": [
+            90
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.supportFunction",
+      "domain": "capability",
+      "path": "UserInfo.supportFunction",
+      "direction": "response",
+      "type": "string-list",
+      "requirement": "required",
+      "documentedConstraint": "文档候选：post/delete/put/get/setUp/batchPut",
+      "projectGuardrail": "每个操作分别检查，不能以总能力替代",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.67；§8.12.2.2.2",
+          "pages": [
+            547,
+            548,
+            549,
+            550,
+            551,
+            552,
+            101
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.31；§8.7.2.2.2",
+          "pages": [
+            455,
+            456,
+            457,
+            458,
+            459,
+            460,
+            91
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.maxRecordNum",
+      "domain": "capability",
+      "path": "UserInfo.maxRecordNum",
+      "direction": "response",
+      "type": "integer",
+      "requirement": "optional",
+      "documentedConstraint": "集成流程与通用能力 schema 均定义为最大人员数量；schema 明确为可选",
+      "projectGuardrail": "不以通用示例值推断目标容量；缺失不得按 0 或无限制",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.67；§8.12.2.2.2",
+          "pages": [
+            547,
+            548,
+            549,
+            550,
+            551,
+            552,
+            101
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.31；§8.7.2.2.2",
+          "pages": [
+            455,
+            456,
+            457,
+            458,
+            459,
+            460,
+            91
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfoCap.UserInfoSearchCond.maxResults",
+      "domain": "capability",
+      "path": "UserInfoSearchCond.maxResults",
+      "direction": "response",
+      "type": "range",
+      "requirement": "conditional",
+      "documentedConstraint": "通用能力 schema 示例范围 1–100",
+      "projectGuardrail": "实际上限取目标 capability",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.67；§8.12.2.2.2",
+          "pages": [
+            547,
+            548,
+            549,
+            550,
+            551,
+            552,
+            101
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.31；§8.7.2.2.2",
+          "pages": [
+            455,
+            456,
+            457,
+            458,
+            459,
+            460,
+            91
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfoSearchCond.EmployeeNoList.maxSize",
+      "domain": "capability",
+      "path": "UserInfoSearchCond.EmployeeNoList.maxSize",
+      "direction": "response",
+      "type": "integer",
+      "requirement": "conditional",
+      "documentedConstraint": "通用能力 schema 示例为 56",
+      "projectGuardrail": "实际批量上限取目标 capability",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.67；§8.12.2.2.2",
+          "pages": [
+            547,
+            548,
+            549,
+            550,
+            551,
+            552,
+            101
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.31；§8.7.2.2.2",
+          "pages": [
+            455,
+            456,
+            457,
+            458,
+            459,
+            460,
+            91
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.employeeNo",
+      "domain": "person",
+      "path": "UserInfo.employeeNo",
+      "direction": "request/response",
+      "type": "string",
+      "requirement": "required",
+      "documentedConstraint": "通用新增 schema 为 1–32；默认字母数字，特殊字符随产品变化",
+      "projectGuardrail": "以稳定 personId 的受控映射生成，不使用手机号；最终格式由 EmployeeNoInfo 决定",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.71；§13.5.14.70",
+          "pages": [
+            560,
+            561,
+            562,
+            558
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.35；§11.5.8.34",
+          "pages": [
+            468,
+            469,
+            470,
+            466
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.name",
+      "domain": "person",
+      "path": "UserInfo.name",
+      "direction": "request/response",
+      "type": "string",
+      "requirement": "optional",
+      "documentedConstraint": "通用新增 schema 为 0–128",
+      "projectGuardrail": "仅传业务必要名称，不进入普通日志",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.71；§13.5.14.70",
+          "pages": [
+            560,
+            561,
+            562,
+            558
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.35；§11.5.8.34",
+          "pages": [
+            468,
+            469,
+            470,
+            466
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.userType",
+      "domain": "person",
+      "path": "UserInfo.userType",
+      "direction": "request/response",
+      "type": "enum",
+      "requirement": "required-on-record",
+      "documentedConstraint": "含 normal/visitor/blackList/maintenance/patient/custom1..5/administrator",
+      "projectGuardrail": "住户流程不使用 administrator；blackList 不自动映射项目黑名单",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.71；§13.5.14.70",
+          "pages": [
+            560,
+            561,
+            562,
+            558
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.35；§11.5.8.34",
+          "pages": [
+            468,
+            469,
+            470,
+            466
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.Valid",
+      "domain": "person",
+      "path": "UserInfo.Valid",
+      "direction": "request/response",
+      "type": "object",
+      "requirement": "required-on-record",
+      "documentedConstraint": "人员有效期对象",
+      "projectGuardrail": "必须绑定 grant 的 validFrom/validUntil，不以下发成功替代业务周期校验",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.71、§13.5.14.70",
+          "pages": [
+            561,
+            558
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.35、§11.5.8.34",
+          "pages": [
+            469,
+            466
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.Valid.enable",
+      "domain": "person",
+      "path": "Valid.enable",
+      "direction": "request/response",
+      "type": "boolean",
+      "requirement": "required-on-record",
+      "documentedConstraint": "true 时 beginTime 必须严格小于 endTime；false 表示长期有效",
+      "projectGuardrail": "明确设备时区/NTP；禁止默认长期有效覆盖租期",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.71、§13.5.14.70",
+          "pages": [
+            561,
+            558
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.35、§11.5.8.34",
+          "pages": [
+            469,
+            466
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.Valid.beginTime",
+      "domain": "person",
+      "path": "Valid.beginTime",
+      "direction": "request/response",
+      "type": "datetime",
+      "requirement": "required-on-record",
+      "documentedConstraint": "即使 enable=false 仍须传合法时间",
+      "projectGuardrail": "明确设备时区/NTP；禁止默认长期有效覆盖租期",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.71、§13.5.14.70",
+          "pages": [
+            561,
+            558
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.35、§11.5.8.34",
+          "pages": [
+            469,
+            466
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.Valid.endTime",
+      "domain": "person",
+      "path": "Valid.endTime",
+      "direction": "request/response",
+      "type": "datetime",
+      "requirement": "required-on-record",
+      "documentedConstraint": "即使 enable=false 仍须传合法时间",
+      "projectGuardrail": "明确设备时区/NTP；禁止默认长期有效覆盖租期",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.71、§13.5.14.70",
+          "pages": [
+            561,
+            558
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.35、§11.5.8.34",
+          "pages": [
+            469,
+            466
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.Valid.timeType",
+      "domain": "person",
+      "path": "Valid.timeType",
+      "direction": "request/response",
+      "type": "enum",
+      "requirement": "required-on-record",
+      "documentedConstraint": "local|UTC；缺省 local",
+      "projectGuardrail": "明确设备时区/NTP；禁止默认长期有效覆盖租期",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.71、§13.5.14.70",
+          "pages": [
+            561,
+            558
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.35、§11.5.8.34",
+          "pages": [
+            469,
+            466
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.doorRight",
+      "domain": "permission",
+      "path": "UserInfo.doorRight",
+      "direction": "request/response",
+      "type": "string",
+      "requirement": "optional",
+      "documentedConstraint": "逗号分隔门权限；空表示无门权限；仅传它而不传 RightPlan 表示长期拥有对应门权限",
+      "projectGuardrail": "项目存在租期，不得单独下发形成长期权限",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.71；§13.5.14.70",
+          "pages": [
+            560,
+            561,
+            562,
+            558
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.35；§11.5.8.34",
+          "pages": [
+            468,
+            469,
+            470,
+            466
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.RightPlan",
+      "domain": "permission",
+      "path": "UserInfo.RightPlan[]",
+      "direction": "request/response",
+      "type": "array",
+      "requirement": "conditional",
+      "documentedConstraint": "不能脱离 doorRight 单独下发",
+      "projectGuardrail": "门号与计划模板必须来自经审批映射",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.71；§13.5.14.70",
+          "pages": [
+            560,
+            561,
+            562,
+            558
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.35；§11.5.8.34",
+          "pages": [
+            468,
+            469,
+            470,
+            466
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.RightPlan[].doorNo",
+      "domain": "permission",
+      "path": "RightPlan[].doorNo",
+      "direction": "request/response",
+      "type": "integer",
+      "requirement": "conditional",
+      "documentedConstraint": "门编号（锁 ID）",
+      "projectGuardrail": "与项目 device/door 映射核对，不以房间号代替",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.71；§13.5.14.70",
+          "pages": [
+            560,
+            561,
+            562,
+            558
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.35；§11.5.8.34",
+          "pages": [
+            468,
+            469,
+            470,
+            466
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfo.RightPlan[].planTemplateNo",
+      "domain": "permission",
+      "path": "RightPlan[].planTemplateNo",
+      "direction": "request/response",
+      "type": "string",
+      "requirement": "conditional",
+      "documentedConstraint": "同门多模板按或处理；65535/65534/65533 为特殊模板",
+      "projectGuardrail": "特殊模板不得未经审批默认使用",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.71；§13.5.14.70",
+          "pages": [
+            560,
+            561,
+            562,
+            558
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.35；§11.5.8.34",
+          "pages": [
+            468,
+            469,
+            470,
+            466
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfoSearchCond.searchResultPosition",
+      "domain": "person-query",
+      "path": "UserInfoSearchCond.searchResultPosition",
+      "direction": "request",
+      "type": "integer",
+      "requirement": "required",
+      "documentedConstraint": "查询结果起始位置",
+      "projectGuardrail": "分页直到结果完整，避免只查第一页",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.72",
+          "pages": [
+            563,
+            564
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.36",
+          "pages": [
+            470,
+            471
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfoSearchCond.maxResults",
+      "domain": "person-query",
+      "path": "UserInfoSearchCond.maxResults",
+      "direction": "request",
+      "type": "integer",
+      "requirement": "required",
+      "documentedConstraint": "单次最大记录数；上限由 capability 决定",
+      "projectGuardrail": "不写死 100",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.72",
+          "pages": [
+            563,
+            564
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.36",
+          "pages": [
+            470,
+            471
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfoSearchCond.EmployeeNoList[].employeeNo",
+      "domain": "person-query",
+      "path": "UserInfoSearchCond.EmployeeNoList[].employeeNo",
+      "direction": "request",
+      "type": "string",
+      "requirement": "conditional",
+      "documentedConstraint": "按人员 ID 列表查询；列表上限由 capability 决定",
+      "projectGuardrail": "只查询当前目标人员，避免无边界全量拉取",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.72",
+          "pages": [
+            563,
+            564
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.36",
+          "pages": [
+            470,
+            471
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfoCount.userNumber",
+      "domain": "person-capacity",
+      "path": "UserInfoCount.userNumber",
+      "direction": "response",
+      "type": "integer",
+      "requirement": "required/optional",
+      "documentedConstraint": "人员总数或绑定人脸人员数",
+      "projectGuardrail": "仅作容量和对账信号，不替代逐人员查询",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.68",
+          "pages": [
+            556,
+            557
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.32",
+          "pages": [
+            464,
+            465
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "UserInfoCount.bindFaceUserNumber",
+      "domain": "person-capacity",
+      "path": "UserInfoCount.bindFaceUserNumber",
+      "direction": "response",
+      "type": "integer",
+      "requirement": "required/optional",
+      "documentedConstraint": "人员总数或绑定人脸人员数",
+      "projectGuardrail": "仅作容量和对账信号，不替代逐人员查询",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.5.14.68",
+          "pages": [
+            556,
+            557
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.5.8.32",
+          "pages": [
+            464,
+            465
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDLib.supportFunction",
+      "domain": "capability",
+      "path": "supportFunction",
+      "direction": "response",
+      "type": "string-list",
+      "requirement": "conditional",
+      "documentedConstraint": "get/setUp/post/put/delete 分别人脸操作；未定位独立根节点 schema",
+      "projectGuardrail": "逐操作检查，缺失即禁止对应调用",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.5.2.2–8.12.5.2.6",
+          "pages": [
+            114,
+            115,
+            116,
+            117
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.5.2.2–8.7.5.2.6",
+          "pages": [
+            104,
+            105,
+            106,
+            107
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDLib.FDRecordDataMaxNum",
+      "domain": "capability",
+      "path": "FDRecordDataMaxNum",
+      "direction": "response",
+      "type": "integer",
+      "requirement": "conditional",
+      "documentedConstraint": "集成流程称返回设备最大人脸数量；未定位独立根节点 schema",
+      "projectGuardrail": "以目标原始响应复核，不采用其他产品容量",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§8.12.5.2.2–8.12.5.2.6",
+          "pages": [
+            114,
+            115,
+            116,
+            117
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§8.7.5.2.2–8.7.5.2.6",
+          "pages": [
+            104,
+            105,
+            106,
+            107
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDID",
+      "domain": "face-library",
+      "path": "FDID",
+      "direction": "request/response",
+      "type": "string",
+      "requirement": "required-in-face-record",
+      "documentedConstraint": "人脸库 ID；可见光库流程示例为 1，深度模式另有库",
+      "projectGuardrail": "必须读取目标库信息后选择，不写死",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.2、§13.4.1.3",
+          "pages": [
+            335,
+            336,
+            337
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.2、§11.4.1.3",
+          "pages": [
+            304,
+            305,
+            306
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "faceLibType",
+      "domain": "face-library",
+      "path": "faceLibType",
+      "direction": "request/response",
+      "type": "enum",
+      "requirement": "required-in-face-record",
+      "documentedConstraint": "文档出现 blackFD/staticFD/infraredFD",
+      "projectGuardrail": "blackFD 是厂商名单库语义，不等同项目黑名单；类型由目标库决定",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.2、§13.4.1.3",
+          "pages": [
+            335,
+            336,
+            337
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.2、§11.4.1.3",
+          "pages": [
+            304,
+            305,
+            306
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FaceDataRecord.FDID",
+      "domain": "face",
+      "path": "FDID",
+      "direction": "request",
+      "type": "string",
+      "requirement": "required",
+      "documentedConstraint": "目标人脸库 ID；新增请求字段位于请求根对象",
+      "projectGuardrail": "与 FDID 全局映射一致",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.2、§13.4.1.3",
+          "pages": [
+            335,
+            336,
+            337
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.2、§11.4.1.3",
+          "pages": [
+            304,
+            305,
+            306
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FaceDataRecord.faceLibType",
+      "domain": "face",
+      "path": "faceLibType",
+      "direction": "request",
+      "type": "enum",
+      "requirement": "required",
+      "documentedConstraint": "目标库类型；新增请求字段位于请求根对象",
+      "projectGuardrail": "与目标库实际类型一致",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.2、§13.4.1.3",
+          "pages": [
+            335,
+            336,
+            337
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.2、§11.4.1.3",
+          "pages": [
+            304,
+            305,
+            306
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FaceDataRecord.FPID",
+      "domain": "face",
+      "path": "FPID",
+      "direction": "request/response",
+      "type": "string",
+      "requirement": "business-required-for-access-control",
+      "documentedConstraint": "通用 schema 标 optional，但注明门禁业务必填；与非视频 employeeNo 一致；新增请求字段位于请求根对象",
+      "projectGuardrail": "建立 employeeNo↔FPID 持久映射；不得因通用 optional 而省略",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.3；§8.12.5.2.5",
+          "pages": [
+            337,
+            116
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.3；§8.7.5.2.5",
+          "pages": [
+            306,
+            106
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FaceDataRecord.faceURL",
+      "domain": "face-media",
+      "path": "faceURL",
+      "direction": "request",
+      "type": "string",
+      "requirement": "one-of-with-modelData",
+      "documentedConstraint": "与 modelData 二选一；请求字段位于请求根对象",
+      "projectGuardrail": "禁止公网不可控 URL 与日志原值；目标设备能否访问须实测",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.3、§13.4.1.4",
+          "pages": [
+            336,
+            337,
+            338,
+            339
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.3、§11.4.1.4",
+          "pages": [
+            305,
+            306,
+            307,
+            308
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FaceDataRecord.modelData",
+      "domain": "face-media",
+      "path": "modelData",
+      "direction": "request",
+      "type": "string",
+      "requirement": "one-of-with-faceURL",
+      "documentedConstraint": "目标模型数据；与 faceURL 二选一；请求字段位于请求根对象",
+      "projectGuardrail": "按私密生物特征处理，不进入日志、普通响应或公开 fixture",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.3、§13.4.1.4",
+          "pages": [
+            336,
+            337,
+            338,
+            339
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.3、§11.4.1.4",
+          "pages": [
+            305,
+            306,
+            307,
+            308
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FaceDataRecord.img",
+      "domain": "face-media",
+      "path": "multipart:img",
+      "direction": "request",
+      "type": "binary",
+      "requirement": "conditional",
+      "documentedConstraint": "表单图片二进制；示例 Content-Type 为 image/jpeg",
+      "projectGuardrail": "格式、大小、分辨率、质量和是否必须该表单方式均待 capability/实测",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.3、§13.4.1.4",
+          "pages": [
+            338,
+            339
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.3、§11.4.1.4",
+          "pages": [
+            307,
+            308
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FaceDataRecord.name",
+      "domain": "face",
+      "path": "name",
+      "direction": "request",
+      "type": "string",
+      "requirement": "required-in-generic-record-schema",
+      "documentedConstraint": "通用新增 schema 标必填；请求字段位于请求根对象",
+      "projectGuardrail": "仅使用必要人员显示名；实际目标要求需 capability/实测",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.3",
+          "pages": [
+            337
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.3",
+          "pages": [
+            306
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FaceDataRecord.bornTime",
+      "domain": "face",
+      "path": "bornTime",
+      "direction": "request",
+      "type": "date/string",
+      "requirement": "required-in-generic-record-schema",
+      "documentedConstraint": "通用新增 schema 标必填；请求字段位于请求根对象",
+      "projectGuardrail": "不得据此额外采集生日；先请厂商确认是否可省略及目标实际校验，禁止编造占位值",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.3",
+          "pages": [
+            337
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.3",
+          "pages": [
+            306
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDRecordDataInfo[].recordDataNumber",
+      "domain": "face-capacity",
+      "path": "FDRecordDataInfo[].recordDataNumber",
+      "direction": "response",
+      "type": "integer",
+      "requirement": "optional",
+      "documentedConstraint": "指定库已添加人脸数量",
+      "projectGuardrail": "可选字段缺失不得按 0；与 FDRecordDataMaxNum 区分并保留原始脱敏证据",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.1、§13.4.1.2",
+          "pages": [
+            334,
+            335
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.1、§11.4.1.2",
+          "pages": [
+            303,
+            304
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDRecordDataInfo[].FDID",
+      "domain": "face-capacity",
+      "path": "FDRecordDataInfo[].FDID",
+      "direction": "response",
+      "type": "string",
+      "requirement": "optional",
+      "documentedConstraint": "人脸库 ID",
+      "projectGuardrail": "可选字段缺失不得按 0；与 FDRecordDataMaxNum 区分并保留原始脱敏证据",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.1、§13.4.1.2",
+          "pages": [
+            334,
+            335
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.1、§11.4.1.2",
+          "pages": [
+            303,
+            304
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDRecordDataInfo[].faceLibType",
+      "domain": "face-capacity",
+      "path": "FDRecordDataInfo[].faceLibType",
+      "direction": "response",
+      "type": "enum",
+      "requirement": "optional",
+      "documentedConstraint": "人脸库类型",
+      "projectGuardrail": "可选字段缺失不得按 0；与 FDRecordDataMaxNum 区分并保留原始脱敏证据",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.1、§13.4.1.2",
+          "pages": [
+            334,
+            335
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.1、§11.4.1.2",
+          "pages": [
+            303,
+            304
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDCapacity.maxRecordDataNumber",
+      "domain": "face-capacity",
+      "path": "FDCapacity.maxRecordDataNumber",
+      "direction": "response",
+      "type": "integer",
+      "requirement": "optional",
+      "documentedConstraint": "容量信息中的最大记录条数",
+      "projectGuardrail": "可选字段缺失不得按 0；与 FDRecordDataMaxNum 区分并保留原始脱敏证据",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.1、§13.4.1.2",
+          "pages": [
+            334,
+            335
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.1、§11.4.1.2",
+          "pages": [
+            303,
+            304
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDCapacity.remainRecordDataNumber",
+      "domain": "face-capacity",
+      "path": "FDCapacity.remainRecordDataNumber",
+      "direction": "response",
+      "type": "integer",
+      "requirement": "optional",
+      "documentedConstraint": "容量信息中的剩余记录条数",
+      "projectGuardrail": "可选字段缺失不得按 0；与 FDRecordDataMaxNum 区分并保留原始脱敏证据",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.1、§13.4.1.2",
+          "pages": [
+            334,
+            335
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.1、§11.4.1.2",
+          "pages": [
+            303,
+            304
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDSearch.searchResultPosition",
+      "domain": "face-query",
+      "path": "FDSearch.searchResultPosition",
+      "direction": "request",
+      "type": "integer",
+      "requirement": "required",
+      "documentedConstraint": "查询结果起始位置",
+      "projectGuardrail": "用于操作后对账；响应敏感字段必须脱敏",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.8",
+          "pages": [
+            345,
+            346
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.8",
+          "pages": [
+            314,
+            315
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDSearch.maxResults",
+      "domain": "face-query",
+      "path": "FDSearch.maxResults",
+      "direction": "request",
+      "type": "integer",
+      "requirement": "required",
+      "documentedConstraint": "通用查询 schema 范围 1–100",
+      "projectGuardrail": "用于操作后对账；响应敏感字段必须脱敏",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.8",
+          "pages": [
+            345,
+            346
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.8",
+          "pages": [
+            314,
+            315
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDSearch.FDID",
+      "domain": "face-query",
+      "path": "FDSearch.FDID",
+      "direction": "request",
+      "type": "string",
+      "requirement": "required",
+      "documentedConstraint": "可用逗号分隔多个库；项目默认只查目标库",
+      "projectGuardrail": "用于操作后对账；响应敏感字段必须脱敏",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.8",
+          "pages": [
+            345,
+            346
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.8",
+          "pages": [
+            314,
+            315
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDSearch.FPID",
+      "domain": "face-query",
+      "path": "FDSearch.FPID",
+      "direction": "request",
+      "type": "string",
+      "requirement": "optional",
+      "documentedConstraint": "按单个人脸记录查询",
+      "projectGuardrail": "用于操作后对账；响应敏感字段必须脱敏",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.8",
+          "pages": [
+            345,
+            346
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.8",
+          "pages": [
+            314,
+            315
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDSearch.faceLibType",
+      "domain": "face-query",
+      "path": "FDSearch.faceLibType",
+      "direction": "request",
+      "type": "enum",
+      "requirement": "required",
+      "documentedConstraint": "目标库类型",
+      "projectGuardrail": "用于操作后对账；响应敏感字段必须脱敏",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.8",
+          "pages": [
+            345,
+            346
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.8",
+          "pages": [
+            314,
+            315
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDSearchDelete.FPID[].value",
+      "domain": "face-delete",
+      "path": "FPID[].value",
+      "direction": "request",
+      "type": "string",
+      "requirement": "required-in-list-item",
+      "documentedConstraint": "人脸记录 ID；空数组在门禁产品中不处理",
+      "projectGuardrail": "Provider 必须拒绝空列表并限定目标人员",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.6；§8.12.5.2.6",
+          "pages": [
+            341,
+            342,
+            117
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.6；§8.7.5.2.6",
+          "pages": [
+            310,
+            311,
+            107
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "FDSearchDelete.FPID[].rowKey",
+      "domain": "face-delete",
+      "path": "FPID[].rowKey",
+      "direction": "request",
+      "type": "string",
+      "requirement": "optional/product-dependent",
+      "documentedConstraint": "部分轻量产品必填，用于提高查询效率",
+      "projectGuardrail": "是否必填以目标 capability/实测为准，不编造",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§13.4.1.6；§8.12.5.2.6",
+          "pages": [
+            341,
+            342,
+            117
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§11.4.1.6；§8.7.5.2.6",
+          "pages": [
+            310,
+            311,
+            107
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "System.isSupportSubscribeEvent",
+      "domain": "event",
+      "path": "isSupportSubscribeEvent",
+      "direction": "response",
+      "type": "boolean",
+      "requirement": "conditional",
+      "documentedConstraint": "true 才支持订阅",
+      "projectGuardrail": "false 或缺失时不建立订阅连接",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.1、§13.1.5.5–§13.1.5.6",
+          "pages": [
+            19,
+            20,
+            224,
+            229,
+            230
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.1、§11.1.4.4–§11.1.4.5",
+          "pages": [
+            19,
+            20,
+            181,
+            186,
+            187
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "EventNotificationAlert.eventType",
+      "domain": "event",
+      "path": "EventNotificationAlert.eventType",
+      "direction": "event",
+      "type": "string",
+      "requirement": "conditional",
+      "documentedConstraint": "事件类型；heartBeat 表示心跳",
+      "projectGuardrail": "心跳与业务事件分开处理；事件仍需鉴权、防重放和组织/设备匹配",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.1、§13.1.5.5–§13.1.5.6",
+          "pages": [
+            19,
+            20,
+            224,
+            229,
+            230
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.1、§11.1.4.4–§11.1.4.5",
+          "pages": [
+            19,
+            20,
+            181,
+            186,
+            187
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "SubscribeEventCap.heartbeat",
+      "domain": "event",
+      "path": "heartbeat",
+      "direction": "capability/request/response",
+      "type": "range",
+      "requirement": "conditional",
+      "documentedConstraint": "能力返回心跳范围；通用 schema 示例 1–180 秒",
+      "projectGuardrail": "以目标能力为准；订阅连接成功不等于所有事件订阅成功",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.1、§13.1.5.5–§13.1.5.6",
+          "pages": [
+            19,
+            20,
+            224,
+            229,
+            230
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.1、§11.1.4.4–§11.1.4.5",
+          "pages": [
+            19,
+            20,
+            181,
+            186,
+            187
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "SubscribeEventCap.eventMode",
+      "domain": "event",
+      "path": "eventMode",
+      "direction": "capability/request/response",
+      "type": "enum",
+      "requirement": "conditional",
+      "documentedConstraint": "all/list 等由能力返回",
+      "projectGuardrail": "以目标能力为准；订阅连接成功不等于所有事件订阅成功",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.1、§13.1.5.5–§13.1.5.6",
+          "pages": [
+            19,
+            20,
+            224,
+            229,
+            230
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.1、§11.1.4.4–§11.1.4.5",
+          "pages": [
+            19,
+            20,
+            181,
+            186,
+            187
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "SubscribeEventCap.EventList[].type",
+      "domain": "event",
+      "path": "EventList[].type",
+      "direction": "capability/request/response",
+      "type": "enum-list",
+      "requirement": "conditional",
+      "documentedConstraint": "实际可订阅事件类型",
+      "projectGuardrail": "以目标能力为准；订阅连接成功不等于所有事件订阅成功",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.1、§13.1.5.5–§13.1.5.6",
+          "pages": [
+            19,
+            20,
+            224,
+            229,
+            230
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.1、§11.1.4.4–§11.1.4.5",
+          "pages": [
+            19,
+            20,
+            181,
+            186,
+            187
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "SubscribeEvent.heartbeat",
+      "domain": "event",
+      "path": "heartbeat",
+      "direction": "capability/request/response",
+      "type": "integer",
+      "requirement": "conditional",
+      "documentedConstraint": "订阅心跳间隔，须在能力范围内",
+      "projectGuardrail": "以目标能力为准；订阅连接成功不等于所有事件订阅成功",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.1、§13.1.5.5–§13.1.5.6",
+          "pages": [
+            19,
+            20,
+            224,
+            229,
+            230
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.1、§11.1.4.4–§11.1.4.5",
+          "pages": [
+            19,
+            20,
+            181,
+            186,
+            187
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "SubscribeEvent.eventMode",
+      "domain": "event",
+      "path": "eventMode",
+      "direction": "capability/request/response",
+      "type": "enum",
+      "requirement": "conditional",
+      "documentedConstraint": "list 时按事件列表订阅",
+      "projectGuardrail": "以目标能力为准；订阅连接成功不等于所有事件订阅成功",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.1、§13.1.5.5–§13.1.5.6",
+          "pages": [
+            19,
+            20,
+            224,
+            229,
+            230
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.1、§11.1.4.4–§11.1.4.5",
+          "pages": [
+            19,
+            20,
+            181,
+            186,
+            187
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "SubscribeEvent.EventList[].type",
+      "domain": "event",
+      "path": "EventList[].type",
+      "direction": "capability/request/response",
+      "type": "enum",
+      "requirement": "conditional",
+      "documentedConstraint": "门禁事件等必须来自能力列表",
+      "projectGuardrail": "以目标能力为准；订阅连接成功不等于所有事件订阅成功",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.1、§13.1.5.5–§13.1.5.6",
+          "pages": [
+            19,
+            20,
+            224,
+            229,
+            230
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.1、§11.1.4.4–§11.1.4.5",
+          "pages": [
+            19,
+            20,
+            181,
+            186,
+            187
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "SubscribeEventResponse.id",
+      "domain": "event",
+      "path": "id",
+      "direction": "capability/request/response",
+      "type": "integer/string",
+      "requirement": "conditional",
+      "documentedConstraint": "设备返回的订阅 ID",
+      "projectGuardrail": "以目标能力为准；订阅连接成功不等于所有事件订阅成功",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.1、§13.1.5.5–§13.1.5.6",
+          "pages": [
+            19,
+            20,
+            224,
+            229,
+            230
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.1、§11.1.4.4–§11.1.4.5",
+          "pages": [
+            19,
+            20,
+            181,
+            186,
+            187
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "SubscribeEventResponse.FailedEventList",
+      "domain": "event",
+      "path": "FailedEventList",
+      "direction": "capability/request/response",
+      "type": "array",
+      "requirement": "conditional",
+      "documentedConstraint": "存在时表示存在订阅失败事件",
+      "projectGuardrail": "以目标能力为准；订阅连接成功不等于所有事件订阅成功",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.1、§13.1.5.5–§13.1.5.6",
+          "pages": [
+            19,
+            20,
+            224,
+            229,
+            230
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.1、§11.1.4.4–§11.1.4.5",
+          "pages": [
+            19,
+            20,
+            181,
+            186,
+            187
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    },
+    {
+      "id": "HttpHostNotificationCap",
+      "domain": "event-push",
+      "path": "HttpHostNotificationCap",
+      "direction": "response",
+      "type": "xml-root",
+      "requirement": "conditional",
+      "documentedConstraint": "成功返回该根节点表示支持监听主机配置",
+      "projectGuardrail": "只证明配置能力，不证明推送认证、防重放或许可",
+      "sources": [
+        {
+          "document": "standard",
+          "section": "§4.4.2.1",
+          "pages": [
+            23
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        },
+        {
+          "document": "temperature",
+          "section": "§4.4.2.1",
+          "pages": [
+            23
+          ],
+          "pageBasis": "PDF 页（含封面）"
+        }
+      ]
+    }
+  ],
+  "errorCodes": [
+    {
+      "domain": "general",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "notSupport",
+      "errorCode": "0x40000001",
+      "description": "设备不支持",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 159
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "general",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "lowPrivilege",
+      "errorCode": "0x40000002",
+      "description": "没有足够的权限进行此操作",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 160
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "authentication",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "badAuthorization",
+      "errorCode": "0x40000003",
+      "description": "认证不通过",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 161
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "general",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "methodNotAllowed",
+      "errorCode": "0x40000004",
+      "description": "HTTP方法不允许",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 162
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "general",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "invalidOperation",
+      "errorCode": "0x40000006",
+      "description": "接口输入指令非法操作(例如：设备不支持的通道号,不支持的硬件等下发会返回无效操作)",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 164
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "general",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "notActivated",
+      "errorCode": "0x40000007",
+      "description": "设备未激活",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 165
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "general",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "invalidContent",
+      "errorCode": "0x4000000A",
+      "description": "非法的报文内容",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 168
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "general",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "maxSessionUserLink",
+      "errorCode": "0x4000000B",
+      "description": "达到最大用户连接",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 169
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-media",
+      "statusCode": "3",
+      "statusDescription": "Device Error",
+      "subStatusCode": "fileSizeExceedError",
+      "errorCode": "0x30006010",
+      "description": "文件太大，包括升级包等太大。人脸下发等操作时, 设备对图片大小有限制，人脸图片太大时(目前为200KB)，可能会返回失败，手动抓拍时，图片过大",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 149
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "addFaceRecordFailed",
+      "errorCode": "0x400010C1",
+      "description": "人脸记录添加失败",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 395
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "deleteFaceRecordFailed",
+      "errorCode": "0x400010C2",
+      "description": "人脸记录删除失败",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 396
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "modifyFaceRecordFailed",
+      "errorCode": "0x400010C3",
+      "description": "人脸记录修改失败",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 397
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "queryFaceRecordFailed",
+      "errorCode": "0x400010C4",
+      "description": "人脸记录查询失败",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 398
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-media",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "faceLowQulity",
+      "errorCode": "0x40006010",
+      "description": "人脸质量较差：人脸采集时可能发生",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1736
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-media",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "faceResolutionOrRatioError",
+      "errorCode": "0x40006011",
+      "description": "人脸分辨率或宽高比异常：人脸下发时可能发生",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1737
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "faceDataNotExist",
+      "errorCode": "0x40006012",
+      "description": "用户人脸数据不存在:一般按人员查找人脸时，可能发生",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1738
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-media",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "facePicWearingMask",
+      "errorCode": "0x40006016",
+      "description": "人脸图片佩戴口罩",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1742
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-media",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "facePicAngleError",
+      "errorCode": "0x40006017",
+      "description": "人脸图片角度错误",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1743
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "event",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "subscribeTypeErr",
+      "errorCode": "0x4000a016",
+      "description": "订阅的metaData类型,设备不支持",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1904
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "event",
+      "statusCode": "4",
+      "statusDescription": "Invalid Operation",
+      "subStatusCode": "subscribeIDErr",
+      "errorCode": "0x4000a017",
+      "description": "订阅链接的ID不存在,建议重新订阅。",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1905
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "general",
+      "statusCode": "5",
+      "statusDescription": "Invalid  Format",
+      "subStatusCode": "badJsonFormat",
+      "errorCode": "0x50000002",
+      "description": "JSON格式错误",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1923
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "general",
+      "statusCode": "5",
+      "statusDescription": "Invalid  Format",
+      "subStatusCode": "badURLFormat",
+      "errorCode": "0x50000003",
+      "description": "URL格式错误",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1924
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "general",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "badParameters",
+      "errorCode": "0x60000001",
+      "description": "参数错误（例如：必选节点没下发话）",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1925
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "general",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "badJsonContent",
+      "errorCode": "0x60000017",
+      "description": "JSON报文错误",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1947
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "general",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "MessageParametersLack",
+      "errorCode": "0x60000019",
+      "description": "报文参数缺少",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1949
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "query",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "invalidSearchConditions",
+      "errorCode": "0x6000001A",
+      "description": "检索条件失效,请重新检索",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1950
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "general",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "beyondARGSRangeLimit",
+      "errorCode": "0x60000025",
+      "description": "超出参数范围限制",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1961
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-capacity",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "faceLibraryNumError",
+      "errorCode": "0x6000002D",
+      "description": "超过人脸库最大个数",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1969
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-capacity",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "faceImagesNumError",
+      "errorCode": "0x6000002E",
+      "description": "超过人脸图片最大张数",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1970
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-media",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "faceDataAnalysisError",
+      "errorCode": "0x6000002F",
+      "description": "图片数据识别失败",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1971
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "faceDataPIDError",
+      "errorCode": "0x60000030",
+      "description": "人脸数据PID无效",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1972
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-library",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "faceLibraryIDError",
+      "errorCode": "0x60000031",
+      "description": "人脸库ID无效",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1973
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-media",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "multipleFaceObjectError",
+      "errorCode": "0x60000035",
+      "description": "多张人脸目标错误（导入人脸库的图片中存在多个有效目标,且没有坐标区分）",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 1977
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "event",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "eventNotSupport",
+      "errorCode": "0x60001024",
+      "description": "订阅事件不支持",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2112
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "permission",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "holidayGroupDownload",
+      "errorCode": "0x60006009",
+      "description": "假日组下载失败",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2366
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "deleteNoExistFace",
+      "errorCode": "0x60006015",
+      "description": "删除的人脸不存在",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2378
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "event",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "deployExceedMax",
+      "errorCode": "0x60006018",
+      "description": "布防超过最大连接数",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2381
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "person",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "employeeNoNotExist",
+      "errorCode": "0x6000601f",
+      "description": "工号不存在",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2388
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "person",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "employeeNoAlreadyExist",
+      "errorCode": "0x60006020",
+      "description": "工号已存在",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2389
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "person",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "illegalEmployeeNo",
+      "errorCode": "0x60006036",
+      "description": "工号错误",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2411
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-media",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "faceDataLenShort",
+      "errorCode": "0x6000603c",
+      "description": "人脸数据长度小于1K",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2417
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "permission",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "planNumberOverlap",
+      "errorCode": "0x6000604A",
+      "description": "计划编号冲突：类似周、假日、假日组、计划模版编号非法",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2431
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-media",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "pictureFaceDetectZero",
+      "errorCode": "0x6000604C",
+      "description": "图片中不存在人脸图片：人脸下发时可能发生",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2433
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-media",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "faceTypeError",
+      "errorCode": "0x6000604D",
+      "description": "下发的人脸错误：人脸下发时可能发生",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2434
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "person-capacity",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "deviceUserFull",
+      "errorCode": "0x60007000",
+      "description": "人员已满（人员数量已达上限）",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2440
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-capacity",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "deviceFaceFull",
+      "errorCode": "0x60007001",
+      "description": "人脸已满（人脸数量已达上限）",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2441
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "person",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "deviceUserAlreadyExist",
+      "errorCode": "0x60007002",
+      "description": "人员已存在（新增人员时）",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2442
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "person",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "deviceUserNotExist",
+      "errorCode": "0x60007003",
+      "description": "人员不存在（删除人员时,修改人员时,基于人员ID查询卡、人脸时）",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2443
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "deviceUserAlreadyExistFace",
+      "errorCode": "0x60007004",
+      "description": "人员ID已存在一张人脸（新增人脸时）",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2444
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    },
+    {
+      "domain": "face-media",
+      "statusCode": "6",
+      "statusDescription": "Invalid Content",
+      "subStatusCode": "invalidFaceRegion",
+      "errorCode": "0x60007012",
+      "description": "人脸区域不合法",
+      "source": {
+        "document": "error-codes",
+        "sha256": "5edde32c2622197261877b4a7243e18e6d145af0bac5a8976c6ef0af271b21f6",
+        "xlsxRow": 2455
+      },
+      "retryability": "undetermined",
+      "internalMapping": "UNMAPPED",
+      "mappingRule": "没有具体接口、请求是否执行及目标固件上下文，不得映射 RETRYABLE/TERMINAL 或自动重试"
+    }
+  ],
+  "humanChecks": [
+    {
+      "id": "H01",
+      "owner": "项目负责人",
+      "question": "完整铭牌型号与全部后缀是什么？是否实际为测温或带后缀型号？",
+      "evidenceRequired": "脱敏铭牌照片与设备管理页；序列号/MAC/激活码/二维码/账号仅保留必要末位",
+      "blocks": "型号适用性与文档选择",
+      "status": "open"
+    },
+    {
+      "id": "H02",
+      "owner": "项目负责人/厂商",
+      "question": "目标固件、构建日期、硬件版本、区域版本及推荐固件是什么？",
+      "evidenceRequired": "设备管理页脱敏截图与厂商书面回复",
+      "blocks": "能力基线与复现",
+      "status": "open"
+    },
+    {
+      "id": "H03",
+      "owner": "海康支持",
+      "question": "裸型号 DS-K1T671BM 是否书面适用普通指南，还是必须使用其他型号指南？",
+      "evidenceRequired": "明确完整型号、固件与指南版本对应关系的书面答复",
+      "blocks": "把文档证据升级为目标型号证据",
+      "status": "open"
+    },
+    {
+      "id": "H04",
+      "owner": "探针执行人",
+      "question": "实际 AccessControl/capabilities 返回哪些人员、人脸、删除与 employeeNo 节点？",
+      "evidenceRequired": "隔离设备只读响应及脱敏报告",
+      "blocks": "人员与人脸流程准入",
+      "status": "open"
+    },
+    {
+      "id": "H05",
+      "owner": "探针执行人",
+      "question": "实际 UserInfo/capabilities 的 supportFunction、maxRecordNum、分页和列表上限是什么？",
+      "evidenceRequired": "隔离设备只读响应及脱敏报告",
+      "blocks": "人员操作与容量",
+      "status": "open"
+    },
+    {
+      "id": "H06",
+      "owner": "探针执行人",
+      "question": "实际 FDLib/capabilities 的 supportFunction 与 FDRecordDataMaxNum 是什么？",
+      "evidenceRequired": "隔离设备只读响应及脱敏报告",
+      "blocks": "人脸操作与容量",
+      "status": "open"
+    },
+    {
+      "id": "H07",
+      "owner": "海康支持/现场",
+      "question": "应选择哪个 FDID 与 faceLibType？是否需要建库？深度模式是否涉及双库？",
+      "evidenceRequired": "FDLib 列表、识别模式能力与厂商书面说明",
+      "blocks": "人脸库路线",
+      "status": "open"
+    },
+    {
+      "id": "H08",
+      "owner": "海康支持",
+      "question": "人脸图片格式、大小、分辨率、宽高比、角度、质量和下发频率是什么？",
+      "evidenceRequired": "目标型号/固件书面约束与隔离实测",
+      "blocks": "录入实现与离线 fixture",
+      "status": "open"
+    },
+    {
+      "id": "H09",
+      "owner": "现场网络/安全",
+      "question": "HTTPS 端口、证书信任、设备时间/NTP、Digest 算法与最小权限账号是什么？",
+      "evidenceRequired": "受控配置记录与认证测试；不得提供密码、nonce 或证书私钥",
+      "blocks": "安全连接",
+      "status": "open"
+    },
+    {
+      "id": "H10",
+      "owner": "海康支持/现场",
+      "question": "UserInfoDetail/Delete 的请求和进度响应 schema 是什么？删除人员是否级联删除人脸？",
+      "evidenceRequired": "适用接口说明、删除进度响应与删除前后人员/人脸回查",
+      "blocks": "撤权闭环",
+      "status": "open"
+    },
+    {
+      "id": "H11",
+      "owner": "项目/厂商",
+      "question": "门号、doorRight、RightPlan 与计划模板如何映射？是否确需特殊模板？",
+      "evidenceRequired": "经审批的门/模板映射与权限验证",
+      "blocks": "避免长期或超范围权限",
+      "status": "open"
+    },
+    {
+      "id": "H12",
+      "owner": "海康支持/测试",
+      "question": "新增人脸通用 schema 中 name/bornTime 等字段是否对目标设备确实必填？能否省略非必要个人信息？",
+      "evidenceRequired": "目标 capability、厂商书面答复与最小化测试",
+      "blocks": "隐私最小化与请求兼容性",
+      "status": "open"
+    },
+    {
+      "id": "H13",
+      "owner": "海康支持/安全",
+      "question": "alertStream、subscribeEvent、httpHosts 的认证、事件唯一 ID、时间窗、防重放与重连行为是什么？",
+      "evidenceRequired": "官方说明、脱敏事件样本与异常测试",
+      "blocks": "事件验签与对账",
+      "status": "open"
+    },
+    {
+      "id": "H14",
+      "owner": "商务/海康支持",
+      "question": "是否需要设备许可、平台许可或合作伙伴权限？并发连接与调用配额是什么？",
+      "evidenceRequired": "书面许可、配额和费用说明",
+      "blocks": "立项与容量",
+      "status": "open"
+    },
+    {
+      "id": "H15",
+      "owner": "现场网络",
+      "question": "是否有未承载生产通行的隔离设备、独立 VLAN/局域网与同网段边缘主机？",
+      "evidenceRequired": "隔离拓扑、访问控制、断网和人工开门预案",
+      "blocks": "任何真实读写验证",
+      "status": "open"
+    },
+    {
+      "id": "H16",
+      "owner": "隐私/运营",
+      "question": "测试人员同意、私密人脸保存期限、测试门、撤销验证与清理签字是否准备？",
+      "evidenceRequired": "书面同意、测试记录及人员/人脸/权限无残留签字",
+      "blocks": "真实写联调",
+      "status": "open"
+    }
+  ],
+  "consumerRules": {
+    "HK-AI-02": "仅可把 ai02ReadOnlyCandidateEndpointIds 作为只读候选；默认 dry-run，显式真人批准后才可连接隔离设备，其他端点不得调用",
+    "HK-AI-04": "只能制作脱敏离线 fixture；不得把通用 schema 示例值或本矩阵标记为目标设备真实响应",
+    "future-provider": "providerReleaseApproved=false 且 allowDeviceOperations=false；路线、目标 capability、真实只读验证、写联调审批未完成前不得实现真实写调用"
+  }
+}

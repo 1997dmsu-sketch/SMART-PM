@@ -3,7 +3,7 @@
 优先级：P0
 执行者：Kimi
 复审者：Codex
-状态：文档阶段已完成并通过 Codex 复审；等待目标设备 capability 与真人证据
+状态：文档阶段已完成、通过 Codex 复审并入文档基线（`d791612` / `9149fd4`）；等待目标设备 capability 与真人证据
 基准分支：`docs/lock-01-fast-track`
 建议分支：`docs/hk-isapi-evidence`
 预计：1～2 个工作日

@@ -89,6 +89,19 @@ export const PURPOSES = {
     writePermission: null, // 写入：组织管理员角色
     readPermission: "blacklist.read", // 读取：黑名单读取权限点（DB-06）
   },
+  // HK-AI-03：人脸生物特征。约束由任务卡与设备侧 ISAPI 文档共同决定：
+  // - 只能 private，永远不得进入公开图片/内容/VR/房源/静态 /uploads 路由；
+  // - 仅 JPEG/PNG，单文件 ≤200KB（与《人员管理(以人为中心)》人脸图片要求一致）；
+  // - 写入需 device.face.submit，读取需 device.face.readPrivate；
+  //   审核动作（device.face.review）不隐含读原图权限，由服务层单独校验。
+  "face-biometric": {
+    maxSize: 200 * 1024,
+    accept: ["image/jpeg", "image/png"],
+    visibility: "private",
+    private: true,
+    writePermission: "device.face.submit",
+    readPermission: "device.face.readPrivate",
+  },
   other: {
     maxSize: 5 * MB,
     accept: ALL_MIMES,

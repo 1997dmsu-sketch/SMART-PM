@@ -92,6 +92,11 @@ export class OrgService {
       "blacklist.manage",
       "blacklist.read",
       "blacklist.review",
+      // HK-AI-03：人脸生物特征文件三权分立——提交、审核、私密读取互不隐含。
+      // 角色（admin）不再单方面蕴含任一权限；必须显式授予。
+      "device.face.submit",
+      "device.face.review",
+      "device.face.readPrivate",
     ];
     if (
       !Array.isArray(permissions) ||

@@ -14,6 +14,7 @@ import {
   nextRevision,
   operationKey,
   validateRecord,
+  validateDigestDomainRecord,
 } from "../lib/face-service/collections.mjs";
 
 test("集合名冻结为八张，且可识别", () => {
@@ -21,6 +22,7 @@ test("集合名冻结为八张，且可识别", () => {
     "access_devices",
     "device_access_grants",
     "device_claims",
+    "device_digest_domains",
     "device_operation_jobs",
     "device_operation_logs",
     "face_credentials",
@@ -167,4 +169,12 @@ test("domain head 不含版本：换钥后仍读取同一条记录", () => {
   const versioned = deviceDigestDomainKey({ provider: "hikvision", digestRealm: "prod-a" });
   assert.equal(head, versioned);
   assert.equal(head.includes(":1"), false);
+});
+
+test("device_digest_domains：head 与版本历史记录校验", () => {
+  assert.equal(validateDigestDomainRecord({ kind: "head", provider: "hikvision", digestRealm: "prod-a", keyVersion: 1 }).kind, "head");
+  assert.equal(validateDigestDomainRecord({ kind: "version", provider: "hikvision", digestRealm: "prod-a", keyVersion: 2 }).keyVersion, 2);
+  assert.throws(() => validateDigestDomainRecord({ kind: "other", provider: "p", digestRealm: "r", keyVersion: 1 }), /kind/);
+  assert.throws(() => validateDigestDomainRecord({ kind: "head", provider: "", digestRealm: "r", keyVersion: 1 }), /provider/);
+  assert.throws(() => validateDigestDomainRecord({ kind: "head", provider: "p", digestRealm: "r", keyVersion: 0 }), /keyVersion/);
 });

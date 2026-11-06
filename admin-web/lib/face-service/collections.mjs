@@ -25,6 +25,8 @@ export const COLLECTIONS = Object.freeze({
   DEVICE_CLAIMS: "device_claims",
   GRANT_SLOT_CLAIMS: "grant_slot_claims",
   OPERATION_KEYS: "operation_keys",
+  // 全局部署域记录：跨组织共享，不能按 orgId 隔离，否则换钥保护可被绕过。
+  DEVICE_DIGEST_DOMAINS: "device_digest_domains",
 });
 
 const ORG_SCOPED = new Set([
@@ -167,6 +169,21 @@ function assertId(value, field) {
   if (typeof value !== "string" || value.length === 0 || value.length > 128) {
     throw schemaError(`${field} 必须是 1–128 位字符串`);
   }
+}
+
+/**
+ * device_digest_domains：全局记录，id 使用 deviceDigestDomainKey()（head）
+ * 或 deviceDigestDomainVersionKey()（版本历史）。head 保存当前 keyVersion。
+ */
+export function validateDigestDomainRecord(record) {
+  if (!record || typeof record !== "object") throw schemaError("摘要域记录必须是对象");
+  if (!["head", "version"].includes(record.kind)) throw schemaError("kind 必须是 head/version");
+  if (typeof record.provider !== "string" || !record.provider) throw schemaError("provider 必填");
+  if (typeof record.digestRealm !== "string" || !record.digestRealm) throw schemaError("digestRealm 必填");
+  if (!Number.isInteger(record.keyVersion) || record.keyVersion < 1) {
+    throw schemaError("keyVersion 必须是正整数");
+  }
+  return record;
 }
 
 export function schemaError(message) {

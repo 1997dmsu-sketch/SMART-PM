@@ -760,34 +760,54 @@ export class FileService {
 
   // 列表：orgId 过滤先于分页（§3、store.mjs:130-135）。
   /**
-   * 引用校验：只确认“可引用的私密人脸文件”，不返回图片、URL、摘要或存储位置。
-   * 权限使用 device.face.submit，不要求 readPrivate；实际读取仍走 authorizeDownload。
+   * 引用校验（不返回图片、URL、摘要或存储位置）。
+   * 返回的 refs 必须加入调用方同一事务：file + organization + membership。
+   * 权限不足、跨组织、非人脸/非私密/不可用文件一律 404（与不存在同态）。
    */
-  async prepareReference(fileId, { purpose = "face-biometric" } = {}) {
-    this.assertActorRole(true, "device.face.submit");
+  async prepareReference(fileId) {
+    const permissions = this.actor?.permissions || [];
+    if (!permissions.includes("device.face.submit") || !this.auth?.membershipId) {
+      failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
+    }
     const file = (await this.store.list("file_assets", this.orgId)).find((row) => row._id === fileId);
-    if (!file || !this.own(file) || file.purpose !== purpose || file.status !== "ready" ||
-        file.visibility !== "private") {
+    if (!file || !this.own(file) || file.purpose !== "face-biometric" || file.status !== "ready" ||
+        file.visibility !== "private" || !["image/jpeg", "image/png"].includes(file.mimeType) ||
+        (file.size ?? 0) > 200 * 1024) {
       failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
     }
     return {
       fileId,
       orgId: this.orgId,
-      purpose,
+      purpose: "face-biometric",
       revision: file.revision,
       mimeType: file.mimeType,
       size: file.size,
+      refs: [
+        { collection: "file_assets", id: fileId },
+        { collection: "organizations", id: this.orgId },
+        { collection: "org_memberships", id: this.auth.membershipId },
+      ],
     };
   }
 
-  /** 事务内复核引用：文件版本变化或不再可引用时失败关闭（409/404）。 */
+  /**
+   * 事务内复核：最新 membership + device.face.submit、purpose/visibility/status、
+   * MIME/大小、revision。任一不满足按不可见 404；版本变化 409。
+   */
   assertReference(state, reference) {
-    const file = state[`file_assets/${reference?.fileId}`];
-    if (!file || !this.own(file) || file.purpose !== reference.purpose ||
-        file.status !== "ready" || file.visibility !== "private") {
-      failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
+    const deny = () => failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
+    try {
+      this.authCheck(state, { permission: "device.face.submit" });
+    } catch {
+      deny();
     }
-    if (file.revision !== reference.revision) {
+    const file = state[`file_assets/${reference?.fileId}`];
+    if (!file || !this.own(file) || file.purpose !== "face-biometric" || file.status !== "ready" ||
+        file.visibility !== "private" || !["image/jpeg", "image/png"].includes(file.mimeType) ||
+        (file.size ?? 0) > 200 * 1024) {
+      deny();
+    }
+    if (Number(file.revision) !== Number(reference.revision)) {
       failCode("FILE_CHANGED", "文件已变化，请重新提交", 409);
     }
     return { fileId: reference.fileId, revision: file.revision };

@@ -821,12 +821,14 @@ export class FileService {
   assertBinding(state, binding) {
     const deny = () => failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
     const file = state["file_assets/" + binding?.fileId];
+    const policy = PURPOSES["face-biometric"];
     if (!file || !this.own(file) || file.purpose !== "face-biometric" || file.status !== "ready" ||
-        file.visibility !== "private" || !["image/jpeg", "image/png"].includes(file.mimeType) ||
-        (file.size ?? 0) > 200 * 1024) {
+        file.visibility !== "private" || !policy.accept.includes(file.mimeType) ||
+        (file.size ?? 0) > policy.maxSize) {
       deny();
     }
-    if (Number(file.revision) !== Number(binding.revision)) {
+    if (!Number.isInteger(file.revision) || !Number.isInteger(binding?.revision) ||
+        file.revision !== binding.revision) {
       failCode("FILE_CHANGED", "文件已变化，请重新提交", 409);
     }
     return { fileId: binding.fileId, revision: file.revision };

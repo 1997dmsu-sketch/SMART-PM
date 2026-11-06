@@ -1,9 +1,14 @@
-import { test } from "node:test";
+﻿import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
   COLLECTIONS,
   deviceClaimKey,
+  deviceClaimConfig,
+  deviceDigest,
+  deviceDigestDomainKey,
+  assertDigestDomain,
+  normalizeDeviceSerial,
   grantSlotKey,
   isKnownCollection,
   nextRevision,
@@ -70,11 +75,55 @@ test("nextRevision 递增且从 1 起", () => {
   assert.equal(nextRevision({ revision: 3 }), 4);
 });
 
-test("设备占用与 grant slot 键稳定且不串用", () => {
-  assert.equal(deviceClaimKey("dev-1"), "device:dev-1");
-  assert.equal(grantSlotKey("dev-1", "grant-1"), "slot:dev-1:grant-1");
-  assert.notEqual(deviceClaimKey("dev-1"), deviceClaimKey("dev-2"));
-  assert.throws(() => deviceClaimKey(""), /deviceId/);
+test("K1 配置校验：Base64 32 字节、正整数版本、非空 realm", () => {
+  const key = Buffer.alloc(32, 7);
+  const env = {
+    DEVICE_CLAIM_HMAC_KEY_B64: key.toString("base64"),
+    DEVICE_CLAIM_KEY_VERSION: "1",
+    DEVICE_DIGEST_REALM: "prod-a",
+  };
+  assert.deepEqual(deviceClaimConfig(env), { key, version: 1, realm: "prod-a" });
+  assert.throws(() => deviceClaimConfig({ ...env, DEVICE_CLAIM_HMAC_KEY_B64: "" }), /32 字节/);
+  assert.throws(() => deviceClaimConfig({ ...env, DEVICE_CLAIM_HMAC_KEY_B64: Buffer.alloc(16).toString("base64") }), /32 字节/);
+  assert.throws(() => deviceClaimConfig({ ...env, DEVICE_CLAIM_KEY_VERSION: "0" }), /正整数/);
+  assert.throws(() => deviceClaimConfig({ ...env, DEVICE_DIGEST_REALM: "" }), /REALM/);
+});
+
+test("设备 claim：HMAC-SHA256、序列号规范化、版本参与摘要", () => {
+  const key = Buffer.alloc(32, 7);
+  const config = { key, version: 1 };
+  assert.equal(normalizeDeviceSerial("  ab-12 "), "AB-12");
+  assert.equal(deviceDigest("AB-12", config), deviceDigest(" ab-12 ", config));
+  assert.notEqual(deviceDigest("AB-12", config), deviceDigest("AB-12", { key, version: 2 }));
+  const claim = deviceClaimKey({ digestRealm: "prod-a", serial: "AB-12", key, version: 1 });
+  assert.match(claim, /^provider-device:hikvision:prod-a:[0-9a-f]{64}$/);
+});
+
+test("device_digest_domains：换钥后版本不匹配即失败关闭", () => {
+  const domainKey = deviceDigestDomainKey({ digestRealm: "prod-a", version: 1 });
+  assert.equal(domainKey, "device-digest-domain:hikvision:prod-a:1");
+  assert.doesNotThrow(() => assertDigestDomain({ keyVersion: 1 }, { version: 1 }));
+  assert.throws(() => assertDigestDomain({ keyVersion: 1 }, { version: 2 }), (e) => e.code === "DOMAIN_MISMATCH");
+});
+
+test("grant slot 固定键：org+person+device+cycle，缺一不可", () => {
+  assert.equal(
+    grantSlotKey({ orgId: "o", personId: "p", deviceId: "d", cycleId: "c" }),
+    "grant-slot:o:p:d:c",
+  );
+  assert.throws(() => grantSlotKey({ orgId: "o", personId: "p", deviceId: "d" }), /cycleId/);
+  assert.notEqual(
+    grantSlotKey({ orgId: "o", personId: "p", deviceId: "d", cycleId: "c1" }),
+    grantSlotKey({ orgId: "o", personId: "p", deviceId: "d", cycleId: "c2" }),
+  );
+});
+
+test("K1 与 K2 分离：设备摘要不等于 operation key", () => {
+  const key = Buffer.alloc(32, 7);
+  const digest = deviceDigest("AB-12", { key, version: 1 });
+  const op = operationKey({ orgId: "o", method: "enroll", actorType: "user", actorId: "a", idempotencyKey: "k" });
+  assert.notEqual(digest, op);
+  assert.equal(op.startsWith("op:"), true);
 });
 
 test("操作幂等键包含组织/方法/actor/幂等键", () => {

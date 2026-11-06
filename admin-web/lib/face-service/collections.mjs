@@ -1,4 +1,4 @@
-/**
+﻿/**
  * HK-AI-04 人脸门禁集合定义与键规则（接线第 1 步：只定义，不建表、不访问 store）。
  *
  * 冻结集合（复审 72a093a 认可）：
@@ -8,6 +8,7 @@
  *
  * 组织域记录带 orgId；可变记录带 revision；设备唯一占用由 device_claims 保证。
  */
+import { createHmac } from "node:crypto";
 import {
   GRANT_STATE,
   IMAGE_STATE,
@@ -87,17 +88,60 @@ export function nextRevision(record) {
   return current + 1;
 }
 
-/** 全局设备占用键：一台物理设备只能有一个 owner。 */
-export function deviceClaimKey(deviceId) {
-  assertId(deviceId, "deviceId");
-  return `device:${deviceId}`;
+
+
+/** K1 配置：Base64 32 字节密钥、正整数版本、独立部署域。缺失/非法一律失败关闭。 */
+export function deviceClaimConfig(env = process.env) {
+  const encoded = env.DEVICE_CLAIM_HMAC_KEY_B64 || "";
+  let key = null;
+  try { key = Buffer.from(encoded, "base64"); } catch { key = null; }
+  if (!key || key.length !== 32) throw schemaError("DEVICE_CLAIM_HMAC_KEY_B64 必须是 Base64 编码的 32 字节密钥");
+  const version = Number(env.DEVICE_CLAIM_KEY_VERSION);
+  if (!Number.isInteger(version) || version < 1) throw schemaError("DEVICE_CLAIM_KEY_VERSION 必须是正整数");
+  const realm = String(env.DEVICE_DIGEST_REALM || "").trim();
+  if (!realm) throw schemaError("DEVICE_DIGEST_REALM 必填");
+  return { key, version, realm };
 }
 
-/** 入住周期 grant slot：同一设备同一 grant 只有一个有效槽位。 */
-export function grantSlotKey(deviceId, grantId) {
-  assertId(deviceId, "deviceId");
-  assertId(grantId, "grantId");
-  return `slot:${deviceId}:${grantId}`;
+/** 规范化设备标识：去首尾空白并统一大写。 */
+export function normalizeDeviceSerial(serial) {
+  const normalized = String(serial ?? "").trim().toUpperCase();
+  if (!normalized) throw schemaError("设备序列号不能为空");
+  return normalized;
+}
+
+/** HMAC-SHA256(keyVersion + 规范化序列号)，K1 与 K2（operation key）完全分离。 */
+export function deviceDigest(serial, { key, version }) {
+  return createHmac("sha256", key)
+    .update(`${version}:${normalizeDeviceSerial(serial)}`)
+    .digest("hex");
+}
+
+export function deviceClaimKey({ provider = "hikvision", digestRealm, serial, key, version }) {
+  if (!digestRealm) throw schemaError("digestRealm 必填");
+  return `provider-device:${provider}:${digestRealm}:${deviceDigest(serial, { key, version })}`;
+}
+
+/** 记录 realm+provider 首次使用的密钥版本，防止换钥后同一设备被重复登记。 */
+export function deviceDigestDomainKey({ provider = "hikvision", digestRealm, version }) {
+  if (!digestRealm) throw schemaError("digestRealm 必填");
+  return `device-digest-domain:${provider}:${digestRealm}:${version}`;
+}
+
+export function assertDigestDomain(existing, { version }) {
+  if (existing && existing.keyVersion !== version) {
+    const error = schemaError(`设备摘要域已绑定密钥版本 ${existing.keyVersion}，当前配置为 ${version}`);
+    error.code = "DOMAIN_MISMATCH";
+    throw error;
+  }
+}
+
+/** 冻结的 grant slot 键：同一人+设备+入住周期只允许一个有效槽位。 */
+export function grantSlotKey({ orgId, personId, deviceId, cycleId }) {
+  for (const [field, value] of Object.entries({ orgId, personId, deviceId, cycleId })) {
+    assertId(value, field);
+  }
+  return `grant-slot:${orgId}:${personId}:${deviceId}:${cycleId}`;
 }
 
 /** 操作幂等键：与 Mock 终审一致的 org + 方法 + actor + idempotencyKey。 */

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * HK-AI-04 服务层（集合接线，无 HTTP）。
  *
  * 流程严格分离：
@@ -200,7 +200,7 @@ export class FaceCredentialService {
   }
 
   // 3. 创建授权：资格事务 + device/slot claim + grant/job。
-  async createGrant({ credentialId, occupancyId, identityApplicationId }, { idempotencyKey } = {}) {
+  async createGrant({ credentialId, occupancyId, cycleId, identityApplicationId }, { idempotencyKey } = {}) {
     await this.#require("device.access.manage");
     if (!credentialId || !occupancyId || !identityApplicationId) {
       failCode("PARAM_ERROR", "credentialId/occupancyId/identityApplicationId 必填", 400);
@@ -215,8 +215,8 @@ export class FaceCredentialService {
     const requestDigest = digestOf({ credentialId, occupancyId, identityApplicationId });
     const grantId = `grant-${digestOf(opKey).slice(0, 24)}`;
     const jobId = `job-${digestOf(`${opKey}:enroll`).slice(0, 24)}`;
-    const claimId = deviceClaimKey(credential.deviceId);
-    const slotId = grantSlotKey(credential.deviceId, grantId);
+    const claimId = `device-claim:${credential.deviceId}`;
+    const slotId = grantSlotKey({ orgId: this.orgId, personId: credential.personId, deviceId: credential.deviceId, cycleId: cycleId || occupancyId });
     let result = null;
 
     await this.blacklist.withEligibility(

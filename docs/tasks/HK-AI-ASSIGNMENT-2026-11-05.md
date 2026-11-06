@@ -24,7 +24,7 @@
 | AI-B / HK-AI-02 | `f15160d` 代码侧复审通过 | `feat/hk-isapi-capability-probe` | `8136b90` | 三项返工已关闭；等待现场/项目负责人批准、隔离环境和一次性窗口，批准前禁止设置 `HIKVISION_PROBE_ALLOW_READ=true` |
 | AI-C / HK-AI-03 | `44d27a6` 终审暂不通过，DeepSeek Harness 仅补测试 | `feat/db-mvp-integration` | `b9ee061`（`feat/db-05-occupancies`） | 九项权限/隐私 HTTP 主体通过；未知 purpose 未证明读体前拒绝，解码资源测试绕过 HTTP 未证明快速503；阶段3继续关闭 |
 | AI-D0 / HK-AI-04A | 文档阶段通过 Codex 复审（`5148159`） | `docs/hk-ai-04-contract-evidence` | `8b47fb7` | 九项架构裁定见 `HK-AI-04A-REVIEW-2026-11-05.md`；不代表真实能力验证 |
-| AI-D / HK-AI-04 | 今日由 DeepSeek Harness 启动独立 Mock 核心 | `feat/hk-face-service-mock` | AI-C 测试提交后开始；正式集成等待阶段2终审 | 今日先交路由/DTO、状态投影、Mock接口与失败关闭测试；真实 Provider 关闭 |
+| AI-D / HK-AI-04 | `6b9c7ac` 骨架可运行、契约复审未通过 | `feat/hk-face-service-mock` | 等待契约修订复审及 AI-C 阶段2终审 | 按 `HK-AI-04-REVIEW-6B9C7AC-2026-11-06.md` 修正 Provider、三轴状态、权限和幂等；暂不接线 |
 | AI-E / HK-AI-05 | 今日由 Workburry 启动页面壳 | `feat/hk-face-admin` | 先用合成 fixture；等待 AI-D DTO 后绑定 | 今日交设备/申请/任务/审计页面壳，持续显示 Mock 标识 |
 | AI-F / DEV-AI-01 | Workburry 已分配，演示前降为 P1 | `feat/wecom-dev-board` | `docs/lock-01-fast-track@1358ef5` | 暂不占用 AI-E 关键路径；真实发送仍等待企业微信配置 |
 
@@ -60,5 +60,5 @@ Codex 另行认领 ISAPI 路线、系统架构、安全边界、关键状态机�
 
 - **AI-B**：`59b6437` 完成 `52227b6` 五项整改——`EXPECTED_MODEL` 前置校验、fail-fast 编排（第二次 401/挑战不可解析/指纹/重定向/超时/超限/类型异常即中止）、README 无回显凭据示例、输出目录强制 0700 与报告 0600、文档计数统一为 55 项。离线回归 55 项（Windows 跳过 3 项 POSIX 权限用例）。**待 Codex 复审；复审通过前不得连接真实设备。**
 - **AI-C**：已认领并推进到阶段 2，分支 `feat/db-mvp-integration`。已完成：DB-02～DB-07 集成（`b0bd26a`）、`face-biometric` 用途与三项权限（`7e9cf3d`）、权限即时复核与严格容器校验（`5468466`）、sharp 真实解码与审核 HTTP 路由（`36e5e68`）、上传预限流/总期限/有界并发（`b4dc783`）、未知 purpose 预拒绝（`4d410aa`）、尾随载荷精确检查（`8592763`；`4d410aa`、`8592763` 已复审通过）。**剩余：九项人脸 HTTP 测试与两项资源回归；完成后申请阶段 2 终审。**
-- **AI-D**：仍待认领，等待 AI-C 阶段 2 基线；可先阅读 `HK-AI-04-FACE-SERVICE-MOCK.md` 与 `LOCK-01A-CONTRACT.md` 准备独立 Mock。
+- **AI-D**：DeepSeek Harness 已提交独立 Mock 骨架 `6b9c7ac`；当前按复审记录修订契约，等待复审通过后再接线。
 

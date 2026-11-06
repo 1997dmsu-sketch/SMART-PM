@@ -339,6 +339,20 @@ test("反向：B 先提交同事件被拒，A 随后仍能匹配", async () => {
   assert.equal((await p.verifyEvent(event, context)).action, "enroll");
 });
 
+test("错误设备被拒后，同组织改为正确设备仍可匹配（拒绝不污染幂等）", async () => {
+  const p = new MockFaceAccessProvider();
+  const created = await p.enrollFace(enrollInput, context);
+
+  const wrong = eventInput({ jobId: created.jobId, deviceId: "device-2" });
+  assert.deepEqual(await p.verifyEvent(wrong, context), { rejected: true, reasonCode: "SCOPE_MISMATCH" });
+
+  // 同一 eventId + version，仅设备修正 → 应正常匹配，而不是 CONFLICT
+  const fixed = eventInput({ jobId: created.jobId, deviceId: "device-1" });
+  const matched = await p.verifyEvent(fixed, context);
+  assert.equal(matched.action, "enroll");
+  assert.equal(matched.matchedJobId, created.jobId);
+});
+
 test("live：Provider 调用与事件一律 NOT_CONFIGURED", async () => {
   const live = { ...context, executionMode: "live" };
   const p = new MockFaceAccessProvider();

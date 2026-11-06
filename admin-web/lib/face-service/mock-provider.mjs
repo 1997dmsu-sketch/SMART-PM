@@ -43,6 +43,7 @@ export class MockFaceAccessProvider {
     this.jobs = new Map(); // jobId -> job record
     this.events = new Map(); // eventId -> {digest, version, result}
     this.maxVersions = new Map(); // org|device|job -> 最高已受理版本
+    this.rejections = new Map(); // org|eventId -> 拒绝审计（不参与幂等）
     this.people = new Map();
     this.seq = 0;
     this.calls = [];
@@ -97,8 +98,10 @@ export class MockFaceAccessProvider {
     const cacheKey = `${context.orgId}|${event.eventId}`;
 
     if (!bound) {
+      // rejected 只记入独立审计，不写入 accepted 幂等缓存、不更新最高版本；
+      // 否则同组织后续改成正确设备会被误判为“同 ID 不同摘要”CONFLICT。
       const result = { rejected: true, reasonCode: job ? "SCOPE_MISMATCH" : "JOB_NOT_FOUND" };
-      this.events.set(cacheKey, { digest, version: event.version, result });
+      this.rejections.set(cacheKey, { digest, version: event.version, reasonCode: result.reasonCode });
       return result;
     }
 

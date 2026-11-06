@@ -1,9 +1,21 @@
 /**
- * HK-AI-04 DTO 与状态枚举（精确契约修订 72a093a）。
+ * HK-AI-04 DTO（精确契约 cc569a8）。
  *
- * 四轴状态互不串写；Provider 方法使用冻结的 FaceAccessContext：
- *   { orgId, deviceId, grantId?, validFrom, validUntil }
+ * 冻结 FaceAccessContext（六个字段，逐字段校验）：
+ *   actorId / actorType(user|system|agent) / orgId / permissions:Set<string>
+ *   / idempotencyKey(16–128 [A-Za-z0-9._:-]) / executionMode(demo|test|live)
+ *
+ * Provider 方法一律双参数：method(input, context)。
+ * 业务字段归 input；opId/requestDigest 由服务端派生，不接受客户端自由输入。
  */
+
+export const ACTOR_TYPES = Object.freeze(["user", "system", "agent"]);
+export const EXECUTION_MODES = Object.freeze(["demo", "test", "live"]);
+
+export const EVIDENCE_SCOPE = Object.freeze({
+  SIMULATED: "simulated",
+  DEVICE_VERIFIED: "device_verified",
+});
 
 export const REVIEW_STATE = Object.freeze({
   DRAFT: "draft",
@@ -13,7 +25,6 @@ export const REVIEW_STATE = Object.freeze({
   REVOKED: "revoked",
 });
 
-// 仅此三种；不新增 uploaded / quality_failed。
 export const IMAGE_STATE = Object.freeze({
   PENDING: "pending",
   VERIFIED: "verified",
@@ -46,6 +57,7 @@ export const PROVIDER_ERROR_KIND = Object.freeze({
 });
 
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{16,128}$/;
 
 export function assertOpaqueId(value, field) {
   if (typeof value !== "string" || !OPAQUE_ID.test(value)) {
@@ -54,37 +66,78 @@ export function assertOpaqueId(value, field) {
   return value;
 }
 
-/** 冻结的访问上下文。validFrom/validUntil 为毫秒时间戳，左闭右开。 */
 export function assertFaceAccessContext(context) {
-  const { orgId, deviceId, grantId, validFrom, validUntil } = context || {};
-  assertOpaqueId(orgId, "context.orgId");
-  assertOpaqueId(deviceId, "context.deviceId");
-  if (grantId !== undefined) assertOpaqueId(grantId, "context.grantId");
-  if (!Number.isFinite(validFrom) || !Number.isFinite(validUntil)) {
-    throw dtoError("context.validFrom/validUntil 必须是毫秒时间戳");
+  const { actorId, actorType, orgId, permissions, idempotencyKey, executionMode } = context || {};
+  assertOpaqueId(actorId, "context.actorId");
+  if (!ACTOR_TYPES.includes(actorType)) {
+    throw dtoError("context.actorType 必须是 user/system/agent");
   }
-  if (validFrom >= validUntil) throw dtoError("context 有效期必须 validFrom < validUntil");
-  return { orgId, deviceId, grantId, validFrom, validUntil };
+  assertOpaqueId(orgId, "context.orgId");
+  if (!(permissions instanceof Set)) {
+    throw dtoError("context.permissions 必须是 Set<string>");
+  }
+  for (const permission of permissions) {
+    if (typeof permission !== "string" || !permission) {
+      throw dtoError("context.permissions 只能包含非空字符串");
+    }
+  }
+  if (typeof idempotencyKey !== "string" || !IDEMPOTENCY_KEY.test(idempotencyKey)) {
+    throw dtoError("context.idempotencyKey 必须是 16–128 位 [A-Za-z0-9._:-]");
+  }
+  if (!EXECUTION_MODES.includes(executionMode)) {
+    throw dtoError("context.executionMode 必须是 demo/test/live");
+  }
+  return { actorId, actorType, orgId, permissions, idempotencyKey, executionMode };
 }
 
-export function assertFaceCredentialInput(input) {
-  const { context, personId, faceFileId, opId, requestDigest } = input || {};
-  const ctx = assertFaceAccessContext(context);
+export function assertEnrollInput(input) {
+  const { personId, deviceId, grantId, sourceFileId, validFrom, validUntil } = input || {};
   assertOpaqueId(personId, "personId");
-  assertOpaqueId(faceFileId, "faceFileId");
-  assertOpaqueId(opId, "opId");
-  if (!requestDigest) throw dtoError("requestDigest 必填");
-  return { context: ctx, personId, faceFileId, opId, requestDigest };
+  assertOpaqueId(deviceId, "deviceId");
+  assertOpaqueId(grantId, "grantId");
+  assertOpaqueId(sourceFileId, "sourceFileId");
+  if (!Number.isFinite(validFrom) || !Number.isFinite(validUntil)) {
+    throw dtoError("validFrom/validUntil 必须是毫秒时间戳");
+  }
+  if (validFrom >= validUntil) throw dtoError("有效期必须 validFrom < validUntil");
+  return { personId, deviceId, grantId, sourceFileId, validFrom, validUntil };
+}
+
+export function assertUpdateInput(input) {
+  const { credentialId, sourceFileId } = input || {};
+  assertOpaqueId(credentialId, "credentialId");
+  assertOpaqueId(sourceFileId, "sourceFileId");
+  return { credentialId, sourceFileId };
 }
 
 export function assertRevokeInput(input) {
-  const { context, personId, opId, requestDigest } = input || {};
-  const ctx = assertFaceAccessContext(context);
-  if (!ctx.grantId) throw dtoError("撤权必须提供 context.grantId");
-  assertOpaqueId(personId, "personId");
-  assertOpaqueId(opId, "opId");
-  if (!requestDigest) throw dtoError("requestDigest 必填");
-  return { context: ctx, personId, opId, requestDigest };
+  const { grantId, credentialId } = input || {};
+  assertOpaqueId(grantId, "grantId");
+  assertOpaqueId(credentialId, "credentialId");
+  return { grantId, credentialId };
+}
+
+export function assertQueryInput(input) {
+  const { jobId } = input || {};
+  assertOpaqueId(jobId, "jobId");
+  return { jobId };
+}
+
+/** 最小合成事件：固定测试域、目标 job/device、递增版本、时间窗、Mock 签名。 */
+export function assertEventInput(input, { now = Date.now(), windowMs = 5 * 60 * 1000 } = {}) {
+  const { domain, eventId, jobId, deviceId, version, occurredAt, signature } = input || {};
+  if (domain !== "mock.test") throw dtoError("事件必须来自固定测试域 mock.test");
+  assertOpaqueId(eventId, "eventId");
+  assertOpaqueId(jobId, "jobId");
+  assertOpaqueId(deviceId, "deviceId");
+  if (!Number.isInteger(version) || version < 1) throw dtoError("version 必须是递增正整数");
+  if (!Number.isFinite(occurredAt) || Math.abs(now - occurredAt) > windowMs) {
+    throw dtoError("occurredAt 超出允许时间窗");
+  }
+  if (typeof signature !== "string" || signature !== `mock-sig:${domain}:${eventId}:${version}`) {
+    throw dtoError("Mock 事件签名无效");
+  }
+  return { domain, eventId, jobId, deviceId, version, occurredAt, signature };
 }
 
 export function displayState(record) {
@@ -97,14 +150,31 @@ export function displayState(record) {
   return "draft";
 }
 
-/**
- * 展示 DTO：审核队列用 scope="review"（最小姐），
- * 私密详情用 scope="private"（需 device.face.readPrivate）。
- * 两者都不含图片字节与摘要。
- */
-export function publicReviewItem(record, { scope = "review" } = {}) {
+/** Q01 展示 DTO：grant/job 投影；evidenceScope 只允许 simulated/device_verified。 */
+export function publicAccessState({ grant, job, cleanupPending = false } = {}) {
+  const grantState = grant?.state ?? null;
+  const jobState = job?.state ?? null;
+  let state = "draft";
+  if (grantState === GRANT_STATE.REVOKED || grantState === GRANT_STATE.EXPIRED) state = "revoked";
+  else if (jobState === JOB_STATE.TERMINAL_FAILED) state = "failed";
+  else if (jobState === JOB_STATE.AWAITING_RESULT) state = "awaiting_result";
+  else if (grantState === GRANT_STATE.EFFECTIVE && jobState === JOB_STATE.SUCCEEDED) state = "active";
+  else if (grantState === GRANT_STATE.EFFECTIVE) state = "pending_sync";
+  const evidenceScope =
+    job?.evidenceScope === EVIDENCE_SCOPE.DEVICE_VERIFIED
+      ? EVIDENCE_SCOPE.DEVICE_VERIFIED
+      : EVIDENCE_SCOPE.SIMULATED;
+  return {
+    grantState,
+    jobState,
+    displayState: state,
+    evidenceScope,
+    cleanupPending: cleanupPending === true,
+  };
+}
+
+export function publicReviewItem(record) {
   if (!record) return null;
-  if (!["review", "private"].includes(scope)) throw dtoError("scope 仅支持 review/private");
   return {
     credentialId: record._id || record.credentialId,
     orgId: record.orgId,
@@ -112,25 +182,24 @@ export function publicReviewItem(record, { scope = "review" } = {}) {
     reviewState: record.reviewState,
     imageState: record.imageState,
     displayState: displayState(record),
-    evidenceScope: scope,
+    evidenceScope: record.evidenceScope === EVIDENCE_SCOPE.DEVICE_VERIFIED
+      ? EVIDENCE_SCOPE.DEVICE_VERIFIED
+      : EVIDENCE_SCOPE.SIMULATED,
     cleanupPending: record.cleanupPending === true,
     submittedAt: record.submittedAt,
     revision: record.revision,
   };
 }
 
-export function publicJob(job) {
+/** 任务查询输出：不含 opId、摘要。 */
+export function publicJobResult(job) {
   if (!job) return null;
   return {
-    jobId: job._id || job.jobId,
-    credentialId: job.credentialId,
-    deviceId: job.deviceId,
-    grantId: job.grantId,
-    action: job.action,
+    jobId: job.jobId || job._id,
     state: job.state,
-    displayState: job.state,
-    attempts: job.attempts,
-    updatedAt: job.updatedAt,
+    attempts: job.attempts ?? 0,
+    lastSuccessAt: job.lastSuccessAt ?? null,
+    failureReason: job.failureReason ? String(job.failureReason).slice(0, 120) : null,
   };
 }
 

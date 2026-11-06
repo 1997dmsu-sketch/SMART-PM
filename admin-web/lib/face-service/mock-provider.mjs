@@ -1,14 +1,27 @@
 /**
- * Mock FaceAccessProvider（仅 demo/test；精确契约 72a093a）。
+ * Mock FaceAccessProvider（精确契约 cc569a8）。
  *
- * 冻结方法：enrollFace / updateFace / revokeFace / queryOperation / verifyEvent。
- * - 所有业务方法要求 FaceAccessContext（orgId/deviceId/validFrom/validUntil；
- *   撤权还要求 grantId）；
- * - queryOperation 按 jobId 查询；
- * - verifyEvent 必须提供签名，缺失即拒绝，不使用默认签名；
- * - 幂等：opId + requestDigest；同键不同摘要返回冻结错误 CONFLICT。
+ * 双参数签名：enrollFace(input, context) / updateFace / revokeFace /
+ * queryOperation / verifyEvent。context 逐字段校验（见 dto.assertFaceAccessContext）。
+ *
+ * - executionMode=live → NOT_CONFIGURED；
+ * - 幂等键由 context.idempotencyKey + 规范化 input 派生；同键同摘要重放，
+ *   同键不同摘要 CONFLICT；
+ * - jobId 与 operation key 是不同对象，不做 jobId=opId 回退；
+ * - 事件：固定测试域、递增版本、时间窗、Mock 签名；同 ID 同摘要重放，
+ *   同 ID 不同摘要 CONFLICT；只返回 matchedJobId/action 或 rejected，不回显 payload。
  */
-import { assertFaceAccessContext, assertFaceCredentialInput, assertRevokeInput } from "./dto.mjs";
+import { createHash } from "node:crypto";
+
+import {
+  assertEnrollInput,
+  assertEventInput,
+  assertFaceAccessContext,
+  assertQueryInput,
+  assertRevokeInput,
+  assertUpdateInput,
+  publicJobResult,
+} from "./dto.mjs";
 
 export const MOCK_SCENARIOS = Object.freeze([
   "success",
@@ -20,14 +33,17 @@ export const MOCK_SCENARIOS = Object.freeze([
   "duplicate_callback",
 ]);
 
+const digestOf = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
 export class MockFaceAccessProvider {
   constructor({ scenario = "success" } = {}) {
     if (!MOCK_SCENARIOS.includes(scenario)) throw new Error(`未知 Mock 场景：${scenario}`);
     this.scenario = scenario;
-    this.ops = new Map(); // opId -> {digest, state, jobId, result}
-    this.jobs = new Map(); // jobId -> {opId, state, digest}
+    this.operations = new Map(); // idempotencyKey -> {digest, result, jobId}
+    this.jobs = new Map(); // jobId -> job record
+    this.events = new Map(); // eventId -> {digest, version, result}
     this.people = new Map();
-    this.events = new Map();
+    this.seq = 0;
     this.calls = [];
   }
 
@@ -35,80 +51,102 @@ export class MockFaceAccessProvider {
     return { ok: this.scenario !== "device_offline", scenario: this.scenario };
   }
 
-  async enrollFace(input) {
-    const parsed = assertFaceCredentialInput(input);
-    return this.#run("enroll", parsed, () => {
-      this.people.set(parsed.personId, { faceFileId: parsed.faceFileId });
-      return { status: "succeeded", providerRef: `mock-${parsed.personId}` };
-    });
-  }
-
-  async updateFace(input) {
-    const parsed = assertFaceCredentialInput(input);
-    return this.#run("update", parsed, () => {
-      this.people.set(parsed.personId, { faceFileId: parsed.faceFileId });
-      return { status: "succeeded", providerRef: `mock-${parsed.personId}` };
-    });
-  }
-
-  async revokeFace(input) {
-    const parsed = assertRevokeInput(input);
-    return this.#run("revoke", parsed, () => {
-      this.people.delete(parsed.personId);
+  async enrollFace(input, context) {
+    const ctx = assertFaceAccessContext(context);
+    const parsed = assertEnrollInput(input);
+    return this.#run("create", parsed, ctx, () => {
+      this.people.set(parsed.personId, { sourceFileId: parsed.sourceFileId });
       return { status: "succeeded" };
     });
   }
 
-  /** 按 jobId 查询任务状态。 */
-  async queryOperation({ jobId }) {
-    const job = this.jobs.get(jobId);
-    if (!job) return { jobId, state: "unknown" };
-    return { jobId, opId: job.opId, state: job.state };
+  async updateFace(input, context) {
+    const ctx = assertFaceAccessContext(context);
+    const parsed = assertUpdateInput(input);
+    return this.#run("update", parsed, ctx, () => ({ status: "succeeded" }));
   }
 
-  /** 设备回调：必须带签名；同 eventId 重放返回同一结果。 */
-  async verifyEvent({ context, eventId, payload, signature }) {
-    assertFaceAccessContext(context);
-    if (!signature) {
-      throw providerError("SIGNATURE_REQUIRED", "post_send", "回调缺少签名");
+  async revokeFace(input, context) {
+    const ctx = assertFaceAccessContext(context);
+    const parsed = assertRevokeInput(input);
+    return this.#run("delete", parsed, ctx, () => {
+      return { status: "succeeded" };
+    });
+  }
+
+  async queryOperation(input, context) {
+    const ctx = assertFaceAccessContext(context);
+    const { jobId } = assertQueryInput(input);
+    if (ctx.executionMode === "live") return this.#notConfigured();
+    const job = this.jobs.get(jobId);
+    if (!job) return { jobId, state: "unknown", attempts: 0, lastSuccessAt: null, failureReason: null };
+    return publicJobResult(job);
+  }
+
+  async verifyEvent(input, context) {
+    const ctx = assertFaceAccessContext(context);
+    if (ctx.executionMode === "live") return this.#notConfigured();
+    const event = assertEventInput(input);
+    const digest = digestOf(event);
+
+    const existing = this.events.get(event.eventId);
+    if (existing) {
+      if (existing.digest !== digest) {
+        throw providerError("CONFLICT", "post_send", "同事件 ID 不同摘要");
+      }
+      return existing.result; // 同 ID 同摘要重放
     }
-    if (this.scenario === "post_send_unknown") {
-      throw providerError("UNKNOWN_RESULT", "post_send", "回调内容不可判定");
-    }
-    if (this.events.has(eventId)) return this.events.get(eventId);
-    const result = { eventId, state: "awaiting_result", payload };
-    this.events.set(eventId, result);
+
+    const job = this.jobs.get(event.jobId);
+    const result = job
+      ? { matchedJobId: event.jobId, action: job.action }
+      : { matchedJobId: event.jobId, rejected: true };
+    this.events.set(event.eventId, { digest, version: event.version, result });
     return result;
   }
 
-  #run(action, input, execute) {
-    const { opId, requestDigest } = input;
-    const existing = this.ops.get(opId);
+  #notConfigured() {
+    const error = new Error("live 模式未配置真实 Provider");
+    error.code = "NOT_CONFIGURED";
+    throw error;
+  }
+
+  #run(action, input, context, execute) {
+    if (context.executionMode === "live") return this.#notConfigured();
+
+    const digest = digestOf(input);
+    const existing = this.operations.get(context.idempotencyKey);
     if (existing) {
-      if (existing.digest !== requestDigest) {
-        throw providerError("CONFLICT", "pre_send", "同键不同请求摘要");
-      }
-      return existing.result; // 同键同摘要：重放
+      if (existing.digest !== digest) throw providerError("CONFLICT", "pre_send", "同键不同请求摘要");
+      return existing.result;
     }
 
-    const jobId = input.jobId || opId; // 骨架约定：一次操作对应一个 job
-    this.calls.push({ action, opId, jobId });
+    const jobId = `job-${(this.seq += 1)}`;
+    this.calls.push({ action, jobId });
 
     if (this.scenario === "device_offline") throw providerError("DEVICE_OFFLINE", "pre_send", "设备离线");
     if (this.scenario === "pre_send_fail") throw providerError("PROVIDER_ERROR", "pre_send", "发送前失败");
-    if (this.scenario === "terminal_fail") throw providerError("DEVICE_REJECTED", "post_send", "设备拒绝");
-    if (this.scenario === "revoke_fail" && action === "revoke") {
-      throw providerError("DEVICE_REJECTED", "post_send", "撤权失败");
-    }
     if (this.scenario === "post_send_unknown") {
-      this.ops.set(opId, { digest: requestDigest, state: "awaiting_result", jobId, result: null });
-      this.jobs.set(jobId, { opId, state: "awaiting_result", digest: requestDigest });
+      this.jobs.set(jobId, { jobId, action, state: "awaiting_result", attempts: 1, failureReason: "result_unknown" });
+      this.operations.set(context.idempotencyKey, { digest, jobId, result: null });
       throw providerError("UNKNOWN_RESULT", "post_send", "发送后结果未知");
     }
+    if (this.scenario === "terminal_fail" || (this.scenario === "revoke_fail" && action === "delete")) {
+      this.jobs.set(jobId, { jobId, action, state: "terminal_failed", attempts: 1, failureReason: "device_rejected" });
+      this.operations.set(context.idempotencyKey, { digest, jobId, result: null });
+      throw providerError("DEVICE_REJECTED", "post_send", "设备拒绝");
+    }
 
-    const result = execute();
-    this.ops.set(opId, { digest: requestDigest, state: "succeeded", jobId, result });
-    this.jobs.set(jobId, { opId, state: "succeeded", digest: requestDigest });
+    const result = { ...execute(), jobId };
+    this.jobs.set(jobId, {
+      jobId,
+      action,
+      state: "succeeded",
+      attempts: 1,
+      lastSuccessAt: Date.now(),
+      failureReason: null,
+    });
+    this.operations.set(context.idempotencyKey, { digest, jobId, result });
     return result;
   }
 }
@@ -120,9 +158,9 @@ function providerError(code, phase, message) {
   return error;
 }
 
-/** 对外统一分类：RETRYABLE / TERMINAL / UNKNOWN_RESULT（冻结）。 */
 export function classifyProviderError(error) {
   if (!error || typeof error !== "object") return "TERMINAL";
+  if (error.code === "NOT_CONFIGURED") return "NOT_CONFIGURED";
   if (error.code === "UNKNOWN_RESULT") return "UNKNOWN_RESULT";
   if (error.phase === "post_send") return "TERMINAL";
   if (error.phase === "pre_send" && ["DEVICE_OFFLINE", "PROVIDER_ERROR"].includes(error.code)) {

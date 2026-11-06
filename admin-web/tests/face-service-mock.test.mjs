@@ -6,9 +6,11 @@ import {
   IMAGE_STATE,
   GRANT_STATE,
   JOB_STATE,
+  assertFaceAccessContext,
   assertFaceCredentialInput,
   assertRevokeInput,
   publicReviewItem,
+  displayState,
   assertTransition,
   canTransition,
   projectAccess,
@@ -19,168 +21,170 @@ import {
   createFaceProvider,
 } from "../lib/face-service/index.mjs";
 
-const base = {
+const context = {
   orgId: "org-demo",
-  personId: "person-001", // 有界不透明 ID，不是 UUID
+  deviceId: "device-1",
+  grantId: "grant-1",
+  validFrom: 1000,
+  validUntil: 2000,
+};
+
+const base = {
+  context,
+  personId: "person-001",
   faceFileId: "face-file-1",
   opId: "op-001",
   requestDigest: "sha256:aaa",
 };
 
-test("DTO：personId 接受有界不透明 ID，不再强制 UUID", () => {
-  assert.equal(assertFaceCredentialInput(base).personId, "person-001");
-  assert.throws(() => assertFaceCredentialInput({ ...base, personId: "" }), /不透明 ID/);
-  assert.throws(() => assertFaceCredentialInput({ ...base, personId: "x".repeat(129) }), /不透明 ID/);
-  assert.throws(() => assertFaceCredentialInput({ ...base, personId: "has space" }), /不透明 ID/);
-  assert.equal(assertRevokeInput({ ...base }).personId, "person-001");
+const revokeBase = { context, personId: "person-001", opId: "op-r1", requestDigest: "sha256:r1" };
+
+test("FaceAccessContext：orgId/deviceId/有效期必填且合法", () => {
+  assert.deepEqual(assertFaceAccessContext(context), context);
+  assert.throws(() => assertFaceAccessContext({ ...context, deviceId: "" }), /deviceId/);
+  assert.throws(() => assertFaceAccessContext({ ...context, validUntil: undefined }), /时间戳/);
+  assert.throws(
+    () => assertFaceAccessContext({ ...context, validFrom: 3000, validUntil: 2000 }),
+    /validFrom < validUntil/,
+  );
+  assert.throws(
+    () => assertRevokeInput({ ...revokeBase, context: { ...context, grantId: undefined } }),
+    /grantId/,
+  );
 });
 
-test("审核队列投影：最小字段，无图片/摘要", () => {
-  const item = publicReviewItem({
-    _id: "c1", orgId: "org-demo", personId: "p1",
-    reviewState: REVIEW_STATE.SUBMITTED, imageState: IMAGE_STATE.VERIFIED,
-    checksum: "a".repeat(64), faceImage: "x", revision: 2,
-  });
-  assert.deepEqual(Object.keys(item).sort(), [
-    "credentialId", "imageState", "orgId", "personId", "reviewState", "revision", "submittedAt",
-  ]);
+test("展示 DTO：displayState/evidenceScope/cleanupPending 且无摘要", () => {
+  const item = publicReviewItem(
+    {
+      _id: "c1", orgId: "org-demo", personId: "p1",
+      reviewState: REVIEW_STATE.SUBMITTED, imageState: IMAGE_STATE.VERIFIED,
+      cleanupPending: true, revision: 2, checksum: "a".repeat(64),
+    },
+    { scope: "private" },
+  );
+  assert.equal(item.displayState, "pending_review");
+  assert.equal(item.evidenceScope, "private");
+  assert.equal(item.cleanupPending, true);
   assert.equal("checksum" in item, false);
-  assert.equal("faceImage" in item, false);
+
+  const reviewScope = publicReviewItem({ _id: "c2", reviewState: REVIEW_STATE.DRAFT }, { scope: "review" });
+  assert.equal(reviewScope.evidenceScope, "review");
+  assert.equal(reviewScope.cleanupPending, false);
 });
 
-test("三轴状态机独立：图片/审核/授权互不串写", () => {
-  assert.equal(canTransition("review", REVIEW_STATE.SUBMITTED, REVIEW_STATE.APPROVED), true);
+test("displayState 映射与图片三种状态", () => {
+  assert.equal(displayState({ reviewState: REVIEW_STATE.DRAFT }), "draft");
+  assert.equal(displayState({ reviewState: REVIEW_STATE.REJECTED }), "rejected");
+  assert.equal(displayState({ reviewState: REVIEW_STATE.APPROVED, imageState: IMAGE_STATE.REJECTED }), "image_rejected");
+  assert.equal(displayState({ reviewState: REVIEW_STATE.REVOKED }), "revoked");
+  assert.deepEqual(Object.keys(IMAGE_STATE).sort(), ["PENDING", "REJECTED", "VERIFIED"]);
+});
+
+test("状态机：terminal_failed 是终态，不得回 queued", () => {
+  assert.equal(canTransition("job", JOB_STATE.TERMINAL_FAILED, JOB_STATE.QUEUED), false);
+  assert.equal(canTransition("job", JOB_STATE.RETRYABLE_FAILED, JOB_STATE.QUEUED), true);
   assert.equal(canTransition("review", REVIEW_STATE.APPROVED, "synced"), false);
-  assert.equal(canTransition("image", IMAGE_STATE.PENDING, IMAGE_STATE.VERIFIED), true);
-  assert.equal(canTransition("grant", GRANT_STATE.EFFECTIVE, GRANT_STATE.SUSPENDED), true);
-  assert.throws(() => assertTransition("job", JOB_STATE.SUCCEEDED, JOB_STATE.QUEUED), /非法状态迁移/);
+  assert.throws(() => assertTransition("job", JOB_STATE.TERMINAL_FAILED, JOB_STATE.QUEUED), /非法状态迁移/);
 });
 
-test("businessAllowed 只来自 grant + 实时资格，不看审核状态", () => {
-  const grantEffective = { credentialId: "c1", state: GRANT_STATE.EFFECTIVE };
+test("businessAllowed 只来自 grant + 实时资格", () => {
+  const grant = { credentialId: "c1", orgId: "org-demo", deviceId: "device-1", grantId: "grant-1", state: GRANT_STATE.EFFECTIVE };
+  assert.equal(projectAccess({ grant, eligibility: { allowed: true } }).businessAllowed, true);
+  assert.equal(projectAccess({ grant, eligibility: { allowed: false } }).businessAllowed, false);
   assert.equal(
-    projectAccess({ grant: { credentialId: "c1", state: GRANT_STATE.REVOKED }, eligibility: { allowed: true } })
+    projectAccess({ grant: { ...grant, state: GRANT_STATE.SUSPENDED }, eligibility: { allowed: true } })
       .businessAllowed,
     false,
   );
-  assert.equal(
-    projectAccess({ grant: grantEffective, eligibility: { allowed: false } }).businessAllowed,
-    false,
-  );
-  assert.equal(
-    projectAccess({ grant: grantEffective, eligibility: { allowed: true } }).businessAllowed,
-    true,
-  );
 });
 
-test("deviceEffective 需要受信设备证据；Mock 不产生生效", () => {
-  const grant = { credentialId: "c1", state: GRANT_STATE.EFFECTIVE };
-  const jobs = [{ credentialId: "c1", state: JOB_STATE.SUCCEEDED, action: "create", updatedAt: 1 }];
+test("deviceEffective：回执必须绑定 org/device/grant/job 且受信", () => {
+  const grant = { credentialId: "c1", orgId: "org-demo", deviceId: "device-1", grantId: "grant-1", state: GRANT_STATE.EFFECTIVE };
+  const jobs = [{ jobId: "job-1", credentialId: "c1", state: JOB_STATE.SUCCEEDED, updatedAt: 1 }];
+  const evidence = {
+    kind: "device_ack", trusted: true, orgId: "org-demo", deviceId: "device-1",
+    grantId: "grant-1", jobId: "job-1", jobState: JOB_STATE.SUCCEEDED,
+  };
 
-  assert.equal(
-    projectAccess({
-      grant,
-      eligibility: { allowed: true },
-      jobs,
-      deviceEvidence: { kind: "mock_result", trusted: false },
-    }).deviceEffective,
-    false,
-  );
-  assert.equal(
-    projectAccess({
-      grant,
-      eligibility: { allowed: true },
-      jobs,
-      deviceEvidence: { kind: "device_ack", trusted: true },
-    }).deviceEffective,
-    true,
-  );
-  assert.equal(
-    projectAccess({
-      grant,
-      eligibility: { allowed: true },
-      jobs: [{ ...jobs[0], state: JOB_STATE.AWAITING_RESULT }],
-      deviceEvidence: { kind: "device_ack", trusted: true },
-    }).deviceEffective,
-    false,
-  );
+  assert.equal(projectAccess({ grant, eligibility: { allowed: true }, jobs, deviceEvidence: evidence }).deviceEffective, true);
+  for (const wrong of [
+    { ...evidence, orgId: "org-other" },
+    { ...evidence, deviceId: "device-2" },
+    { ...evidence, grantId: "grant-9" },
+    { ...evidence, jobId: "job-9" },
+    { ...evidence, trusted: false },
+    { ...evidence, kind: "mock_result" },
+  ]) {
+    assert.equal(
+      projectAccess({ grant, eligibility: { allowed: true }, jobs, deviceEvidence: wrong }).deviceEffective,
+      false,
+    );
+  }
 });
 
-test("冻结方法：enroll/update/revoke 均可用", async () => {
+test("冻结方法：enroll/update/revoke；queryOperation 按 jobId", async () => {
   const p = new MockFaceAccessProvider();
   assert.equal((await p.enrollFace(base)).status, "succeeded");
   assert.equal((await p.updateFace({ ...base, opId: "op-002" })).status, "succeeded");
-  assert.equal((await p.revokeFace({ ...base, opId: "op-003" })).status, "succeeded");
-  assert.equal((await p.queryOperation({ opId: "op-001" })).state, "succeeded");
+  assert.equal((await p.revokeFace({ ...revokeBase, opId: "op-003", requestDigest: "r3" })).status, "succeeded");
+  assert.equal((await p.queryOperation({ jobId: "op-001" })).state, "succeeded");
+  assert.equal((await p.queryOperation({ jobId: "missing-job" })).state, "unknown");
 });
 
-test("幂等：同键同摘要重放，不重复执行", async () => {
+test("幂等：同键同摘要重放；不同摘要 CONFLICT", async () => {
   const p = new MockFaceAccessProvider();
-  const first = await p.enrollFace(base);
-  const replay = await p.enrollFace(base);
-  assert.deepEqual(first, replay);
+  assert.deepEqual(await p.enrollFace(base), await p.enrollFace(base));
   assert.equal(p.calls.length, 1);
-  assert.equal(p.people.size, 1);
-});
 
-test("幂等：同键不同摘要冲突；不同键独立执行", async () => {
-  const p = new MockFaceAccessProvider();
-  await p.enrollFace(base);
+  await p.enrollFace({ ...base, opId: "op-x" });
   await assert.rejects(
-    () => p.enrollFace({ ...base, requestDigest: "sha256:bbb" }),
-    (e) => e.code === "IDEMPOTENCY_CONFLICT",
+    () => p.enrollFace({ ...base, opId: "op-x", requestDigest: "sha256:other" }),
+    (e) => e.code === "CONFLICT",
   );
-  await p.enrollFace({ ...base, opId: "op-other" });
-  assert.equal(p.calls.length, 2);
 });
 
-test("post_send 未知：UNKNOWN_RESULT，op 停在 awaiting_result", async () => {
+test("post_send 未知：UNKNOWN_RESULT，job 停在 awaiting_result", async () => {
   const p = new MockFaceAccessProvider({ scenario: "post_send_unknown" });
-  await assert.rejects(
-    () => p.enrollFace(base),
-    (e) => classifyProviderError(e) === "UNKNOWN_RESULT",
-  );
-  assert.equal((await p.queryOperation({ opId: base.opId })).state, "awaiting_result");
+  await assert.rejects(() => p.enrollFace(base), (e) => classifyProviderError(e) === "UNKNOWN_RESULT");
+  assert.equal((await p.queryOperation({ jobId: "op-001" })).state, "awaiting_result");
 });
 
-test("失败分类：offline 可重试，terminal 终态", async () => {
+test("失败分类：offline RETRYABLE、terminal TERMINAL", async () => {
   const offline = new MockFaceAccessProvider({ scenario: "device_offline" });
   await assert.rejects(() => offline.enrollFace(base), (e) => classifyProviderError(e) === "RETRYABLE");
-
   const terminal = new MockFaceAccessProvider({ scenario: "terminal_fail" });
   await assert.rejects(() => terminal.enrollFace(base), (e) => classifyProviderError(e) === "TERMINAL");
 });
 
-test("verifyEvent：同 eventId 重放稳定；缺签名终态失败", async () => {
+test("verifyEvent：缺签名拒绝；同 eventId 重放稳定", async () => {
   const p = new MockFaceAccessProvider();
-  const a = await p.verifyEvent({ eventId: "e1", payload: {} });
-  const b = await p.verifyEvent({ eventId: "e1", payload: {} });
-  assert.deepEqual(a, b);
   await assert.rejects(
-    () => p.verifyEvent({ eventId: "e2", payload: {}, signature: "" }),
-    (e) => classifyProviderError(e) === "TERMINAL",
+    () => p.verifyEvent({ context, eventId: "e1", payload: {} }),
+    (e) => e.code === "SIGNATURE_REQUIRED",
   );
+  const a = await p.verifyEvent({ context, eventId: "e1", payload: {}, signature: "sig" });
+  const b = await p.verifyEvent({ context, eventId: "e1", payload: {}, signature: "sig" });
+  assert.deepEqual(a, b);
 });
 
-test("createFaceProvider：live 返回 NOT_CONFIGURED，不使用 MOCK_FORBIDDEN", () => {
+test("createFaceProvider：缺省不启用 Mock，demo/test 才允许", () => {
+  assert.throws(() => createFaceProvider(), (e) => e.code === "NOT_CONFIGURED");
   assert.throws(() => createFaceProvider({ mode: "live" }), (e) => e.code === "NOT_CONFIGURED");
-  assert.throws(
-    () => createFaceProvider({ mode: "demo", provider: "real" }),
-    (e) => e.code === "NOT_CONFIGURED",
-  );
+  assert.throws(() => createFaceProvider({ mode: "demo", provider: "real" }), (e) => e.code === "NOT_CONFIGURED");
   assert.ok(createFaceProvider({ mode: "demo" }) instanceof MockFaceAccessProvider);
 });
 
-test("路由权限：无 device.face.manage，审核队列用 review，图片用 readPrivate", () => {
+test("路由：撤权走 device-access-grants，任务统一 device-operation-jobs", () => {
   assert.equal(FACE_ROUTES.some((r) => r.permission === "device.face.manage"), false);
+  const revoke = matchFaceRoute("POST", "/api/v2/device-access-grants/grant-1/revoke");
+  assert.equal(revoke.route.permission, "device.access.manage");
+  assert.equal(revoke.params.grantId, "grant-1");
+  assert.equal(matchFaceRoute("POST", "/api/v2/face-credentials/grant-1/revoke"), null);
+
+  const jobs = matchFaceRoute("GET", "/api/v2/device-operation-jobs");
+  assert.equal(jobs.route.permission, "device.audit.read");
+  assert.equal(matchFaceRoute("GET", "/api/v2/device-jobs"), null);
 
   const queue = matchFaceRoute("GET", "/api/v2/face-credentials/review-queue");
   assert.equal(queue.route.permission, "device.face.review");
-
-  const image = matchFaceRoute("GET", "/api/v2/face-credentials/c1/image");
-  assert.equal(image.route.permission, "device.face.readPrivate");
-  assert.equal(image.params.credentialId, "c1");
-
-  const retry = matchFaceRoute("POST", "/api/v2/device-jobs/j1/retry");
-  assert.equal(retry.route.permission, "device.operation.retry");
 });

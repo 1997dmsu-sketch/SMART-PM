@@ -1,13 +1,14 @@
-﻿/**
- * Mock FaceAccessProvider（仅 demo/test；契约修订版 f044a04）。
+/**
+ * Mock FaceAccessProvider（仅 demo/test；精确契约 72a093a）。
  *
  * 冻结方法：enrollFace / updateFace / revokeFace / queryOperation / verifyEvent。
- * health 仅作独立健康检查适配，不参与业务方法编号。
- *
- * 幂等语义：opId + requestDigest —— 同键同摘要重放同一结果；
- * 同键不同摘要抛 IDEMPOTENCY_CONFLICT；不同键各自执行。
- * post_send 未知结果不可自动重试，投影为 UNKNOWN_RESULT。
+ * - 所有业务方法要求 FaceAccessContext（orgId/deviceId/validFrom/validUntil；
+ *   撤权还要求 grantId）；
+ * - queryOperation 按 jobId 查询；
+ * - verifyEvent 必须提供签名，缺失即拒绝，不使用默认签名；
+ * - 幂等：opId + requestDigest；同键不同摘要返回冻结错误 CONFLICT。
  */
+import { assertFaceAccessContext, assertFaceCredentialInput, assertRevokeInput } from "./dto.mjs";
 
 export const MOCK_SCENARIOS = Object.freeze([
   "success",
@@ -23,7 +24,8 @@ export class MockFaceAccessProvider {
   constructor({ scenario = "success" } = {}) {
     if (!MOCK_SCENARIOS.includes(scenario)) throw new Error(`未知 Mock 场景：${scenario}`);
     this.scenario = scenario;
-    this.ops = new Map();
+    this.ops = new Map(); // opId -> {digest, state, jobId, result}
+    this.jobs = new Map(); // jobId -> {opId, state, digest}
     this.people = new Map();
     this.events = new Map();
     this.calls = [];
@@ -34,38 +36,45 @@ export class MockFaceAccessProvider {
   }
 
   async enrollFace(input) {
-    return this.#run("enroll", input, () => {
-      this.people.set(input.personId, { faceFileId: input.faceFileId });
-      return { status: "succeeded", providerRef: `mock-${input.personId}` };
+    const parsed = assertFaceCredentialInput(input);
+    return this.#run("enroll", parsed, () => {
+      this.people.set(parsed.personId, { faceFileId: parsed.faceFileId });
+      return { status: "succeeded", providerRef: `mock-${parsed.personId}` };
     });
   }
 
   async updateFace(input) {
-    return this.#run("update", input, () => {
-      this.people.set(input.personId, { faceFileId: input.faceFileId });
-      return { status: "succeeded", providerRef: `mock-${input.personId}` };
+    const parsed = assertFaceCredentialInput(input);
+    return this.#run("update", parsed, () => {
+      this.people.set(parsed.personId, { faceFileId: parsed.faceFileId });
+      return { status: "succeeded", providerRef: `mock-${parsed.personId}` };
     });
   }
 
   async revokeFace(input) {
-    return this.#run("revoke", input, () => {
-      this.people.delete(input.personId);
+    const parsed = assertRevokeInput(input);
+    return this.#run("revoke", parsed, () => {
+      this.people.delete(parsed.personId);
       return { status: "succeeded" };
     });
   }
 
-  async queryOperation({ opId }) {
-    const op = this.ops.get(opId);
-    if (!op) return { opId, state: "unknown" };
-    return { opId, state: op.state, digest: op.digest };
+  /** 按 jobId 查询任务状态。 */
+  async queryOperation({ jobId }) {
+    const job = this.jobs.get(jobId);
+    if (!job) return { jobId, state: "unknown" };
+    return { jobId, opId: job.opId, state: job.state };
   }
 
-  /** 设备回调验签/去重：同一 eventId 重放返回同一结果。 */
-  async verifyEvent({ eventId, payload, signature = "mock-signature" }) {
+  /** 设备回调：必须带签名；同 eventId 重放返回同一结果。 */
+  async verifyEvent({ context, eventId, payload, signature }) {
+    assertFaceAccessContext(context);
+    if (!signature) {
+      throw providerError("SIGNATURE_REQUIRED", "post_send", "回调缺少签名");
+    }
     if (this.scenario === "post_send_unknown") {
       throw providerError("UNKNOWN_RESULT", "post_send", "回调内容不可判定");
     }
-    if (!signature) throw providerError("TERMINAL", "post_send", "回调验签失败");
     if (this.events.has(eventId)) return this.events.get(eventId);
     const result = { eventId, state: "awaiting_result", payload };
     this.events.set(eventId, result);
@@ -74,16 +83,16 @@ export class MockFaceAccessProvider {
 
   #run(action, input, execute) {
     const { opId, requestDigest } = input;
-    if (!opId || !requestDigest) throw providerError("TERMINAL", "pre_send", "缺少 opId/requestDigest");
     const existing = this.ops.get(opId);
     if (existing) {
       if (existing.digest !== requestDigest) {
-        const error = providerError("TERMINAL", "pre_send", "同键不同请求摘要");
-        error.code = "IDEMPOTENCY_CONFLICT";
-        throw error;
+        throw providerError("CONFLICT", "pre_send", "同键不同请求摘要");
       }
-      return existing.result; // 同键同摘要：重放，不再执行
+      return existing.result; // 同键同摘要：重放
     }
+
+    const jobId = input.jobId || opId; // 骨架约定：一次操作对应一个 job
+    this.calls.push({ action, opId, jobId });
 
     if (this.scenario === "device_offline") throw providerError("DEVICE_OFFLINE", "pre_send", "设备离线");
     if (this.scenario === "pre_send_fail") throw providerError("PROVIDER_ERROR", "pre_send", "发送前失败");
@@ -92,13 +101,14 @@ export class MockFaceAccessProvider {
       throw providerError("DEVICE_REJECTED", "post_send", "撤权失败");
     }
     if (this.scenario === "post_send_unknown") {
-      this.ops.set(opId, { digest: requestDigest, state: "awaiting_result", result: null });
+      this.ops.set(opId, { digest: requestDigest, state: "awaiting_result", jobId, result: null });
+      this.jobs.set(jobId, { opId, state: "awaiting_result", digest: requestDigest });
       throw providerError("UNKNOWN_RESULT", "post_send", "发送后结果未知");
     }
 
-    this.calls.push({ action, opId });
     const result = execute();
-    this.ops.set(opId, { digest: requestDigest, state: "succeeded", result });
+    this.ops.set(opId, { digest: requestDigest, state: "succeeded", jobId, result });
+    this.jobs.set(jobId, { opId, state: "succeeded", digest: requestDigest });
     return result;
   }
 }

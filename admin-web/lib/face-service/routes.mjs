@@ -1,6 +1,6 @@
 /**
- * 路由描述表（提案，不注册到 server.mjs；待契约与 AI-C 终审通过后接线）。
- * 权限按 f044a04 裁定：不使用 device.face.manage。
+ * 路由描述表（提案，不注册到 server.mjs）。
+ * 路径按 72a093a 裁定：撤权走 device-access-grants，任务统一 device-operation-jobs。
  */
 
 export const FACE_ROUTES = Object.freeze([
@@ -31,29 +31,29 @@ export const FACE_ROUTES = Object.freeze([
     permission: "device.face.readPrivate",
   },
   {
-    id: "face-grant-revoke",
+    id: "device-grant-revoke",
     method: "POST",
-    path: "/api/v2/face-credentials/:credentialId/revoke",
+    path: "/api/v2/device-access-grants/:grantId/revoke",
     permission: "device.access.manage",
     idempotent: true,
   },
   {
-    id: "device-job-list",
+    id: "device-operation-job-list",
     method: "GET",
-    path: "/api/v2/device-jobs",
+    path: "/api/v2/device-operation-jobs",
     permission: "device.audit.read",
   },
   {
-    id: "device-job-retry",
+    id: "device-operation-job-retry",
     method: "POST",
-    path: "/api/v2/device-jobs/:jobId/retry",
+    path: "/api/v2/device-operation-jobs/:jobId/retry",
     permission: "device.operation.retry",
     idempotent: true,
   },
   {
-    id: "device-job-reconcile",
+    id: "device-operation-job-reconcile",
     method: "POST",
-    path: "/api/v2/device-jobs/:jobId/reconcile",
+    path: "/api/v2/device-operation-jobs/:jobId/reconcile",
     permission: "device.operation.reconcile",
     idempotent: true,
   },

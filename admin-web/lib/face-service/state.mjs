@@ -1,11 +1,9 @@
 /**
- * 三轴状态机与访问投影（契约修订版 f044a04）。
+ * 三轴状态机与访问投影（精确契约修订 72a093a）。
  *
- * 关键约束：
- * - 凭证审核、图片质量、设备授权是三套独立状态，禁止互相写入；
- * - businessAllowed 只由 grant 状态 + 实时资格快照决定；
- * - deviceEffective 只由 grant + 成功 job + 受信设备证据投影；
- *   Mock 永远不能产生真实设备生效结论。
+ * - businessAllowed：只由 grant effective + 实时资格快照决定；
+ * - deviceEffective：grant + 成功 job + **绑定到组织/设备/grant/job 的受信回执**；
+ * - terminal_failed 是终态：只能人工对账后创建新 job，不能原地回 queued。
  */
 import { GRANT_STATE, IMAGE_STATE, JOB_STATE, REVIEW_STATE } from "./dto.mjs";
 
@@ -37,7 +35,8 @@ const JOB_TRANSITIONS = {
   [JOB_STATE.AWAITING_RESULT]: [JOB_STATE.SUCCEEDED, JOB_STATE.RETRYABLE_FAILED, JOB_STATE.TERMINAL_FAILED],
   [JOB_STATE.RETRYABLE_FAILED]: [JOB_STATE.QUEUED, JOB_STATE.CANCELLED],
   [JOB_STATE.SUCCEEDED]: [],
-  [JOB_STATE.TERMINAL_FAILED]: [JOB_STATE.QUEUED], // 仅人工对账后重排
+  // 终态：不得回到 queued；重试/对账由人工创建新 job。
+  [JOB_STATE.TERMINAL_FAILED]: [],
   [JOB_STATE.CANCELLED]: [],
 };
 
@@ -64,12 +63,24 @@ export function assertTransition(axis, from, to) {
   }
 }
 
+function evidenceBound(evidence, { grant, job }) {
+  if (!evidence || evidence.kind !== "device_ack" || evidence.trusted !== true) return false;
+  if (!grant || !job) return false;
+  return (
+    evidence.orgId === grant.orgId &&
+    evidence.deviceId === grant.deviceId &&
+    evidence.grantId === (grant.grantId || grant._id) &&
+    evidence.jobId === (job.jobId || job._id) &&
+    evidence.jobState === JOB_STATE.SUCCEEDED
+  );
+}
+
 /**
  * @param {object} input
- * @param {object} input.grant       device_access_grants 记录
- * @param {object} input.eligibility 实时资格快照：实名、入住、名单、房间/组织状态
+ * @param {object} input.grant       device_access_grants 记录（含 orgId/deviceId）
+ * @param {object} input.eligibility 实时资格快照 {allowed:boolean, reason?}
  * @param {object[]} [input.jobs]
- * @param {object} [input.deviceEvidence] 受信设备回执 {kind:"device_ack", trusted:true}
+ * @param {object} [input.deviceEvidence] 受信回执，必须与 org/device/grant/job 绑定
  */
 export function projectAccess({ grant, eligibility, jobs = [], deviceEvidence = null }) {
   const grantEffective = grant?.state === GRANT_STATE.EFFECTIVE;
@@ -80,15 +91,14 @@ export function projectAccess({ grant, eligibility, jobs = [], deviceEvidence = 
   const deviceEffective = Boolean(
     businessAllowed &&
       latestJob?.state === JOB_STATE.SUCCEEDED &&
-      deviceEvidence?.kind === "device_ack" &&
-      deviceEvidence?.trusted === true,
+      evidenceBound(deviceEvidence, { grant, job: latestJob }),
   );
   return {
     credentialId: grant?.credentialId,
     grantState: grant?.state ?? null,
     businessAllowed,
     deviceEffective,
-    latestJob: latestJob ? { state: latestJob.state, action: latestJob.action } : null,
+    latestJob: latestJob ? { jobId: latestJob.jobId, state: latestJob.state, action: latestJob.action } : null,
     alert:
       businessAllowed &&
       (latestJob?.state === JOB_STATE.AWAITING_RESULT || latestJob?.state === JOB_STATE.TERMINAL_FAILED),

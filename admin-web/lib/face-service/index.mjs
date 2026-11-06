@@ -1,8 +1,8 @@
 /**
  * HK-AI-04 服务层入口（骨架）。
  *
- * live 模式未配置真实 Provider 时返回 NOT_CONFIGURED（冻结错误码），
- * 不新增 MOCK_FORBIDDEN 等公共契约之外的状态。
+ * 必须显式传入 mode="demo" 或 mode="test" 才会启用 Mock；
+ * 缺省、live 或未知 provider 一律 NOT_CONFIGURED（冻结错误码）。
  */
 export * from "./dto.mjs";
 export * from "./state.mjs";
@@ -12,13 +12,9 @@ export * from "./mock-provider.mjs";
 import { MockFaceAccessProvider } from "./mock-provider.mjs";
 
 export function createFaceProvider({ mode, provider = "mock", scenario = "success" } = {}) {
-  if (mode === "live") {
-    const error = new Error("live 模式未配置真实 Provider");
-    error.code = "NOT_CONFIGURED";
-    throw error;
-  }
-  if (provider !== "mock") {
-    const error = new Error(`未知 provider：${provider}`);
+  const mockAllowed = mode === "demo" || mode === "test";
+  if (!mockAllowed || provider !== "mock") {
+    const error = new Error("未配置真实 Provider；Mock 仅允许 demo/test 显式选择");
     error.code = "NOT_CONFIGURED";
     throw error;
   }

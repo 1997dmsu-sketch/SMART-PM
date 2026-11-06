@@ -1,13 +1,8 @@
 /**
- * HK-AI-04 DTO 与状态枚举（契约修订版 f044a04）。
+ * HK-AI-04 DTO 与状态枚举（精确契约修订 72a093a）。
  *
- * 三条轴严格分离：
- *   1. 凭证审核 reviewState：draft/submitted/approved/rejected/revoked
- *   2. 图片质量 imageState：pending/verified/rejected（独立于审核）
- *   3. 授权 grant：pending/effective/suspended/revoked/expired
- *   4. 任务 job：queued/sending/awaiting_result/succeeded/retryable_failed/
- *      terminal_failed/cancelled
- * 授权是否有效由 grant + 实时资格快照决定，不由凭证状态决定。
+ * 四轴状态互不串写；Provider 方法使用冻结的 FaceAccessContext：
+ *   { orgId, deviceId, grantId?, validFrom, validUntil }
  */
 
 export const REVIEW_STATE = Object.freeze({
@@ -18,6 +13,7 @@ export const REVIEW_STATE = Object.freeze({
   REVOKED: "revoked",
 });
 
+// 仅此三种；不新增 uploaded / quality_failed。
 export const IMAGE_STATE = Object.freeze({
   PENDING: "pending",
   VERIFIED: "verified",
@@ -42,7 +38,6 @@ export const JOB_STATE = Object.freeze({
   CANCELLED: "cancelled",
 });
 
-/** Provider 失败对外分类（冻结）：不得新增公共错误码。 */
 export const PROVIDER_ERROR_KIND = Object.freeze({
   RETRYABLE: "RETRYABLE",
   TERMINAL: "TERMINAL",
@@ -50,7 +45,6 @@ export const PROVIDER_ERROR_KIND = Object.freeze({
   NOT_CONFIGURED: "NOT_CONFIGURED",
 });
 
-// personId 为项目既有“有界不透明 ID”，不强制 UUID。
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 export function assertOpaqueId(value, field) {
@@ -60,34 +54,66 @@ export function assertOpaqueId(value, field) {
   return value;
 }
 
+/** 冻结的访问上下文。validFrom/validUntil 为毫秒时间戳，左闭右开。 */
+export function assertFaceAccessContext(context) {
+  const { orgId, deviceId, grantId, validFrom, validUntil } = context || {};
+  assertOpaqueId(orgId, "context.orgId");
+  assertOpaqueId(deviceId, "context.deviceId");
+  if (grantId !== undefined) assertOpaqueId(grantId, "context.grantId");
+  if (!Number.isFinite(validFrom) || !Number.isFinite(validUntil)) {
+    throw dtoError("context.validFrom/validUntil 必须是毫秒时间戳");
+  }
+  if (validFrom >= validUntil) throw dtoError("context 有效期必须 validFrom < validUntil");
+  return { orgId, deviceId, grantId, validFrom, validUntil };
+}
+
 export function assertFaceCredentialInput(input) {
-  const { orgId, personId, faceFileId, opId, requestDigest } = input || {};
-  if (!orgId) throw dtoError("orgId 必填");
+  const { context, personId, faceFileId, opId, requestDigest } = input || {};
+  const ctx = assertFaceAccessContext(context);
   assertOpaqueId(personId, "personId");
   assertOpaqueId(faceFileId, "faceFileId");
   assertOpaqueId(opId, "opId");
   if (!requestDigest) throw dtoError("requestDigest 必填");
-  return { orgId, personId, faceFileId, opId, requestDigest };
+  return { context: ctx, personId, faceFileId, opId, requestDigest };
 }
 
 export function assertRevokeInput(input) {
-  const { orgId, personId, opId, requestDigest } = input || {};
-  if (!orgId) throw dtoError("orgId 必填");
+  const { context, personId, opId, requestDigest } = input || {};
+  const ctx = assertFaceAccessContext(context);
+  if (!ctx.grantId) throw dtoError("撤权必须提供 context.grantId");
   assertOpaqueId(personId, "personId");
   assertOpaqueId(opId, "opId");
   if (!requestDigest) throw dtoError("requestDigest 必填");
-  return { orgId, personId, opId, requestDigest };
+  return { context: ctx, personId, opId, requestDigest };
 }
 
-/** 审核队列最小投影：审核员（device.face.review）可见，不含图片、摘要与私密字段。 */
-export function publicReviewItem(record) {
+export function displayState(record) {
   if (!record) return null;
+  if (record.reviewState === REVIEW_STATE.REVOKED) return "revoked";
+  if (record.reviewState === REVIEW_STATE.REJECTED) return "rejected";
+  if (record.imageState === IMAGE_STATE.REJECTED) return "image_rejected";
+  if (record.reviewState === REVIEW_STATE.APPROVED) return "approved";
+  if (record.reviewState === REVIEW_STATE.SUBMITTED) return "pending_review";
+  return "draft";
+}
+
+/**
+ * 展示 DTO：审核队列用 scope="review"（最小姐），
+ * 私密详情用 scope="private"（需 device.face.readPrivate）。
+ * 两者都不含图片字节与摘要。
+ */
+export function publicReviewItem(record, { scope = "review" } = {}) {
+  if (!record) return null;
+  if (!["review", "private"].includes(scope)) throw dtoError("scope 仅支持 review/private");
   return {
     credentialId: record._id || record.credentialId,
     orgId: record.orgId,
     personId: record.personId,
     reviewState: record.reviewState,
     imageState: record.imageState,
+    displayState: displayState(record),
+    evidenceScope: scope,
+    cleanupPending: record.cleanupPending === true,
     submittedAt: record.submittedAt,
     revision: record.revision,
   };
@@ -99,8 +125,10 @@ export function publicJob(job) {
     jobId: job._id || job.jobId,
     credentialId: job.credentialId,
     deviceId: job.deviceId,
+    grantId: job.grantId,
     action: job.action,
     state: job.state,
+    displayState: job.state,
     attempts: job.attempts,
     updatedAt: job.updatedAt,
   };

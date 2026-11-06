@@ -1,17 +1,23 @@
-/**
- * HK-AI-04 服务层（集合接线；不注册 HTTP）。
+﻿/**
+ * HK-AI-04 服务层（集合接线，无 HTTP）。
  *
- * 复用：OrgService 等价成员/权限读取、FileService 的私密文件生命周期、
- * BlacklistService.withEligibility 的资格事务、store.transact、operation_keys。
+ * 流程严格分离：
+ *   submit   → 仅创建/更新 credential（不建 grant/job，不调 Provider）
+ *   review   → 仅改 credential 审核状态（不建 grant/job）
+ *   grant    → withEligibility 通过后创建 grant + job + claims
+ *   revoke   → grant 立即 revoked，再建异步清理 job；不查资格
+ *   queryJob → 组织内最小 DTO，跨组织 404
  *
- * 事务边界：Provider 调用一律在 transact 之外；Mock 结果 evidenceScope 恒为 simulated，
- * 不产生 device_verified，也不把 grant 标为真实设备生效。
+ * Provider 只在 transact 之外调用；Mock 证据恒为 simulated，永不 device_verified。
  */
 import { createHash } from "node:crypto";
 
 import { failCode } from "../model.mjs";
+import { PURPOSES } from "../files.mjs";
 import {
   COLLECTIONS,
+  deviceClaimKey,
+  grantSlotKey,
   nextRevision,
   operationKey,
   validateRecord,
@@ -31,11 +37,10 @@ const ref = (collection, id) => ({ collection, id });
 const digestOf = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 export class FaceCredentialService {
-  constructor({ store, orgId, actor, files, blacklist, provider, now = () => Date.now() }) {
+  constructor({ store, orgId, actor, blacklist, provider, now = () => Date.now() }) {
     this.store = store;
     this.orgId = orgId;
     this.actor = actor;
-    this.files = files;
     this.blacklist = blacklist;
     this.provider = provider;
     this.now = now;
@@ -58,7 +63,7 @@ export class FaceCredentialService {
     return membership;
   }
 
-  async #audit(action) {
+  #audit(action) {
     return { actor: this.actor.actorId, actorId: this.actor.actorId, action, orgId: this.orgId };
   }
 
@@ -75,38 +80,42 @@ export class FaceCredentialService {
     });
   }
 
-  /** 提交：权限 → 源文件可见性 → 资格事务（含幂等与 revision 写入）。 */
+  async #find(collection, id) {
+    return (await this.store.list(collection, this.orgId)).find((row) => row._id === id) || null;
+  }
+
+  // 1. 提交：只建 credential。
   async submit(input, { idempotencyKey } = {}) {
     await this.#require("device.face.submit");
     const parsed = assertEnrollInput(input);
     if (!input.occupancyId) failCode("PARAM_ERROR", "occupancyId 必填", 400);
-    const file = (await this.store.list("file_assets", this.orgId)).find(
-      (f) => f._id === parsed.sourceFileId,
-    );
-    if (!file || file.orgId !== this.orgId || file.purpose !== "face-biometric" || file.status !== "ready") {
+
+    const file = await this.#find("file_assets", parsed.sourceFileId);
+    const policy = PURPOSES["face-biometric"];
+    if (
+      !file ||
+      file.orgId !== this.orgId ||
+      file.purpose !== "face-biometric" ||
+      file.status !== "ready" ||
+      file.visibility !== "private"
+    ) {
       failCode("FILE_NOT_FOUND", "源文件不存在或不可见", 404);
+    }
+    if (!policy.accept.includes(file.mimeType) || (file.size ?? 0) > policy.maxSize) {
+      failCode("PARAM_ERROR", "源文件格式或大小不符合人脸用途", 400);
     }
 
     const opKey = await this.#opKey("face.submit", idempotencyKey);
     const requestDigest = digestOf({ ...parsed, occupancyId: input.occupancyId });
     const credentialId = `fc-${digestOf(opKey).slice(0, 24)}`;
-    const audit = await this.#audit("提交人脸凭证");
 
-    return this.blacklist.withEligibility(
-      {
-        personId: parsed.personId,
-        occupancyId: input.occupancyId,
-        restriction: "occupancy.activate",
-      },
+    await this.store.transact(
       [ref(COLLECTIONS.FACE_CREDENTIALS, credentialId), ref(COLLECTIONS.OPERATION_KEYS, opKey)],
-      async (state, eligibility) => {
-        if (!eligibility?.eligible) {
-          failCode(eligibility?.code || "BLACKLIST_DENIED", "资格不满足，无法提交人脸凭证", 403);
-        }
+      (state) => {
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
           if (existing.digest !== requestDigest) failCode("CONFLICT", "同键不同请求摘要", 409);
-          return { writes: [], result: existing.result };
+          return [];
         }
         const now = this.now();
         const record = {
@@ -127,66 +136,40 @@ export class FaceCredentialService {
         };
         validateRecord(COLLECTIONS.FACE_CREDENTIALS, record);
         const result = { credentialId, reviewState: record.reviewState };
-        return {
-          writes: [
-            { collection: COLLECTIONS.FACE_CREDENTIALS, id: credentialId, data: record },
-            {
-              collection: COLLECTIONS.OPERATION_KEYS,
-              id: opKey,
-              data: { orgId: this.orgId, digest: requestDigest, result, createdAt: now },
-            },
-          ],
-          result,
-        };
+        return [
+          { collection: COLLECTIONS.FACE_CREDENTIALS, id: credentialId, data: record },
+          {
+            collection: COLLECTIONS.OPERATION_KEYS,
+            id: opKey,
+            data: { orgId: this.orgId, digest: requestDigest, result, createdAt: now },
+          },
+        ];
       },
-      audit,
+      this.#audit("提交人脸凭证"),
     );
+    return { credentialId, reviewState: REVIEW_STATE.SUBMITTED };
   }
 
-  /** 审核队列：审核权限即可看最小投影，不含图片/摘要。 */
-  async reviewQueue() {
-    await this.#require("device.face.review");
-    const rows = await this.store.list(COLLECTIONS.FACE_CREDENTIALS, this.orgId);
-    return rows
-      .filter((row) => row.reviewState === REVIEW_STATE.SUBMITTED)
-      .map((row) => publicReviewItem(row));
-  }
-
+  // 2. 审核：只改 credential。
   async review(credentialId, { decision, expectedRevision } = {}, { idempotencyKey } = {}) {
     await this.#require("device.face.review");
     if (!["approved", "rejected"].includes(decision)) failCode("PARAM_ERROR", "审核结论无效", 400);
 
-    const credential = (await this.store.list(COLLECTIONS.FACE_CREDENTIALS, this.orgId)).find(
-      (row) => row._id === credentialId,
-    );
+    const credential = await this.#find(COLLECTIONS.FACE_CREDENTIALS, credentialId);
     if (!credential) failCode("NOT_FOUND", "凭证不存在或不可见", 404);
 
     const opKey = await this.#opKey("face.review", idempotencyKey);
     const requestDigest = digestOf({ credentialId, decision, expectedRevision: expectedRevision ?? null });
-    const audit = await this.#audit("审核人脸凭证");
-    const grantId = `grant-${digestOf(opKey).slice(0, 24)}`;
-    const jobId = `job-${digestOf(`${opKey}:job`).slice(0, 24)}`;
+    let result = null;
 
-    const result = await this.blacklist.withEligibility(
-      {
-        personId: credential.personId,
-        occupancyId: credential.occupancyId,
-        restriction: "occupancy.activate",
-      },
-      [
-        ref(COLLECTIONS.FACE_CREDENTIALS, credentialId),
-        ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId),
-        ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId),
-        ref(COLLECTIONS.OPERATION_KEYS, opKey),
-      ],
-      async (state, eligibility) => {
-        if (!eligibility?.eligible) {
-          failCode(eligibility?.code || "BLACKLIST_DENIED", "资格不满足，无法审核", 403);
-        }
+    await this.store.transact(
+      [ref(COLLECTIONS.FACE_CREDENTIALS, credentialId), ref(COLLECTIONS.OPERATION_KEYS, opKey)],
+      (state) => {
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
           if (existing.digest !== requestDigest) failCode("CONFLICT", "同键不同请求摘要", 409);
-          return { writes: [], result: existing.result };
+          result = existing.result;
+          return [];
         }
         const current = state[`${COLLECTIONS.FACE_CREDENTIALS}/${credentialId}`];
         if (!current || current.orgId !== this.orgId) failCode("NOT_FOUND", "凭证不存在或不可见", 404);
@@ -196,138 +179,162 @@ export class FaceCredentialService {
         if (Number.isInteger(expectedRevision) && current.revision !== expectedRevision) {
           failCode("REVISION_CONFLICT", "凭证已被修改，请刷新后重试", 409);
         }
-
-        const now = this.now();
         const nextReview = decision === "approved" ? REVIEW_STATE.APPROVED : REVIEW_STATE.REJECTED;
-        const writes = [
+        result = { credentialId, reviewState: nextReview };
+        return [
           {
             collection: COLLECTIONS.FACE_CREDENTIALS,
             id: credentialId,
-            data: { reviewState: nextReview, revision: nextRevision(current), updatedAt: now },
+            data: { reviewState: nextReview, revision: nextRevision(current), updatedAt: this.now() },
+          },
+          {
+            collection: COLLECTIONS.OPERATION_KEYS,
+            id: opKey,
+            data: { orgId: this.orgId, digest: requestDigest, result, createdAt: this.now() },
           },
         ];
-        const res = { credentialId, reviewState: nextReview, grantId: null, jobId: null };
-
-        if (decision === "approved") {
-          const grant = {
-            orgId: this.orgId,
-            revision: 1,
-            credentialId,
-            personId: current.personId,
-            deviceId: current.deviceId,
-            state: GRANT_STATE.EFFECTIVE,
-            evidenceScope: "simulated",
-            validFrom: current.validFrom,
-            validUntil: current.validUntil,
-            createdAt: now,
-          };
-          const job = {
-            orgId: this.orgId,
-            revision: 1,
-            credentialId,
-            grantId,
-            deviceId: current.deviceId,
-            action: "enroll",
-            state: JOB_STATE.QUEUED,
-            evidenceScope: "simulated",
-            attempts: 0,
-            createdAt: now,
-          };
-          validateRecord(COLLECTIONS.DEVICE_ACCESS_GRANTS, grant);
-          validateRecord(COLLECTIONS.DEVICE_OPERATION_JOBS, job);
-          writes.push({ collection: COLLECTIONS.DEVICE_ACCESS_GRANTS, id: grantId, data: grant });
-          writes.push({ collection: COLLECTIONS.DEVICE_OPERATION_JOBS, id: jobId, data: job });
-          res.grantId = grantId;
-          res.jobId = jobId;
-        }
-        writes.push({
-          collection: COLLECTIONS.OPERATION_KEYS,
-          id: opKey,
-          data: { orgId: this.orgId, digest: requestDigest, result: res, createdAt: now },
-        });
-        return { writes, result: res };
       },
-      audit,
+      this.#audit("审核人脸凭证"),
     );
-
-    // Provider 调用在事务之外；失败只回写 job 状态，不回滚已提交的业务结果。
-    if (result.jobId) await this.#runEnrollJob(result.jobId, result.grantId);
     return result;
   }
 
-  async #runEnrollJob(jobId, grantId) {
-    const job = (await this.store.list(COLLECTIONS.DEVICE_OPERATION_JOBS, this.orgId)).find(
-      (row) => row._id === jobId,
-    );
-    if (!job) return;
-    const credential = (await this.store.list(COLLECTIONS.FACE_CREDENTIALS, this.orgId)).find(
-      (row) => row._id === job.credentialId,
-    );
-    const context = {
-      actorId: this.actor.actorId,
-      actorType: this.actor.actorType || "user",
-      orgId: this.orgId,
-      permissions: new Set(),
-      idempotencyKey: `job-${jobId}`.slice(0, 64).padEnd(16, "0"),
-      executionMode: "test",
-    };
-    try {
-      await this.provider.enrollFace(
-        {
-          personId: credential.personId,
-          deviceId: job.deviceId,
-          grantId,
-          sourceFileId: credential.sourceFileId,
-          validFrom: credential.validFrom,
-          validUntil: credential.validUntil,
-        },
-        context,
-      );
-      await this.#closeJob(jobId, JOB_STATE.SUCCEEDED, "simulated");
-    } catch (error) {
-      const kind = classifyProviderError(error);
-      const state = kind === "UNKNOWN_RESULT" ? JOB_STATE.AWAITING_RESULT : JOB_STATE.TERMINAL_FAILED;
-      await this.#closeJob(jobId, state, "simulated", String(error?.code || kind).slice(0, 120));
+  async reviewQueue() {
+    await this.#require("device.face.review");
+    const rows = await this.store.list(COLLECTIONS.FACE_CREDENTIALS, this.orgId);
+    return rows.filter((row) => row.reviewState === REVIEW_STATE.SUBMITTED).map(publicReviewItem);
+  }
+
+  // 3. 创建授权：资格事务 + device/slot claim + grant/job。
+  async createGrant({ credentialId, occupancyId, identityApplicationId }, { idempotencyKey } = {}) {
+    await this.#require("device.access.manage");
+    if (!credentialId || !occupancyId || !identityApplicationId) {
+      failCode("PARAM_ERROR", "credentialId/occupancyId/identityApplicationId 必填", 400);
     }
-  }
+    const credential = await this.#find(COLLECTIONS.FACE_CREDENTIALS, credentialId);
+    if (!credential) failCode("NOT_FOUND", "凭证不存在或不可见", 404);
+    if (credential.reviewState !== REVIEW_STATE.APPROVED) {
+      failCode("INVALID_STATE", "凭证尚未审核通过", 409);
+    }
 
-  async #closeJob(jobId, state, evidenceScope, failureReason = null) {
-    await this.store.transact(
-      [ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId)],
-      (current) => {
-        const job = current[`${COLLECTIONS.DEVICE_OPERATION_JOBS}/${jobId}`];
-        if (!job) return [];
-        return [
-          {
-            collection: COLLECTIONS.DEVICE_OPERATION_JOBS,
-            id: jobId,
-            data: {
-              state,
-              evidenceScope,
-              attempts: (job.attempts || 0) + 1,
-              lastSuccessAt: state === JOB_STATE.SUCCEEDED ? this.now() : job.lastSuccessAt ?? null,
-              failureReason,
-              revision: nextRevision(job),
-              updatedAt: this.now(),
-            },
-          },
-        ];
+    const opKey = await this.#opKey("face.grant", idempotencyKey);
+    const requestDigest = digestOf({ credentialId, occupancyId, identityApplicationId });
+    const grantId = `grant-${digestOf(opKey).slice(0, 24)}`;
+    const jobId = `job-${digestOf(`${opKey}:enroll`).slice(0, 24)}`;
+    const claimId = deviceClaimKey(credential.deviceId);
+    const slotId = grantSlotKey(credential.deviceId, grantId);
+    let result = null;
+
+    await this.blacklist.withEligibility(
+      {
+        personId: credential.personId,
+        occupancyId,
+        identityApplicationId,
+        restriction: "occupancy.activate",
       },
-      await this.#audit("执行人脸任务"),
+      [
+        ref(COLLECTIONS.FACE_CREDENTIALS, credentialId),
+        ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId),
+        ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId),
+        ref(COLLECTIONS.DEVICE_CLAIMS, claimId),
+        ref(COLLECTIONS.GRANT_SLOT_CLAIMS, slotId),
+        ref(COLLECTIONS.OPERATION_KEYS, opKey),
+      ],
+      (state, eligibility) => {
+        if (!eligibility?.eligible) {
+          const code = eligibility?.code || "BLACKLIST_DENIED";
+          failCode(code, "资格不满足，无法创建门禁授权", code === "BLACKLIST_DENIED" ? 403 : 409);
+        }
+        const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
+        if (existing) {
+          if (existing.digest !== requestDigest) failCode("CONFLICT", "同键不同请求摘要", 409);
+          result = existing.result;
+          return { writes: [], result };
+        }
+        const current = state[`${COLLECTIONS.FACE_CREDENTIALS}/${credentialId}`];
+        if (!current || current.orgId !== this.orgId) failCode("NOT_FOUND", "凭证不存在或不可见", 404);
+        if (current.reviewState !== REVIEW_STATE.APPROVED) {
+          failCode("INVALID_STATE", "凭证尚未审核通过", 409);
+        }
+        const claim = state[`${COLLECTIONS.DEVICE_CLAIMS}/${claimId}`];
+        if (claim && claim.grantId !== grantId) failCode("DEVICE_CLAIMED", "设备已被其他授权占用", 409);
+        const slot = state[`${COLLECTIONS.GRANT_SLOT_CLAIMS}/${slotId}`];
+        if (slot && slot.grantId !== grantId) failCode("GRANT_SLOT_CONFLICT", "授权槽位冲突", 409);
+
+        const now = this.now();
+        const grant = {
+          orgId: this.orgId,
+          revision: 1,
+          credentialId,
+          personId: current.personId,
+          deviceId: current.deviceId,
+          occupancyId,
+          state: GRANT_STATE.EFFECTIVE,
+          evidenceScope: "simulated",
+          validFrom: current.validFrom,
+          validUntil: current.validUntil,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const job = {
+          orgId: this.orgId,
+          revision: 1,
+          credentialId,
+          grantId,
+          deviceId: current.deviceId,
+          action: "enroll",
+          state: JOB_STATE.QUEUED,
+          executionMode: "test",
+          provider: "mock",
+          evidenceScope: "simulated",
+          attempts: 0,
+          createdAt: now,
+        };
+        validateRecord(COLLECTIONS.DEVICE_ACCESS_GRANTS, grant);
+        validateRecord(COLLECTIONS.DEVICE_OPERATION_JOBS, job);
+        result = { grantId, jobId, evidenceScope: "simulated" };
+        return {
+          writes: [
+            { collection: COLLECTIONS.DEVICE_ACCESS_GRANTS, id: grantId, data: grant },
+            { collection: COLLECTIONS.DEVICE_OPERATION_JOBS, id: jobId, data: job },
+            {
+              collection: COLLECTIONS.DEVICE_CLAIMS,
+              id: claimId,
+              data: { orgId: this.orgId, deviceId: current.deviceId, grantId, revision: 1, createdAt: now },
+            },
+            {
+              collection: COLLECTIONS.GRANT_SLOT_CLAIMS,
+              id: slotId,
+              data: { orgId: this.orgId, deviceId: current.deviceId, grantId, revision: 1, createdAt: now },
+            },
+            {
+              collection: COLLECTIONS.OPERATION_KEYS,
+              id: opKey,
+              data: { orgId: this.orgId, digest: requestDigest, result, createdAt: now },
+            },
+          ],
+          result,
+        };
+      },
+      this.#audit("创建门禁授权"),
     );
+
+    if (result?.jobId) await this.#runJob(result.jobId, "enroll");
+    return result;
   }
 
+  // 4. 撤销：不查资格；grant 立即失效；异步清理失败不回滚。
   async revoke(grantId, { idempotencyKey } = {}) {
     await this.#require("device.access.manage");
-    const grant = (await this.store.list(COLLECTIONS.DEVICE_ACCESS_GRANTS, this.orgId)).find(
-      (row) => row._id === grantId,
-    );
+    const grant = await this.#find(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId);
     if (!grant) failCode("NOT_FOUND", "授权不存在或不可见", 404);
+
     const opKey = await this.#opKey("face.revoke", idempotencyKey);
     const requestDigest = digestOf({ grantId });
     const jobId = `job-${digestOf(`${opKey}:revoke`).slice(0, 24)}`;
+    let result = null;
 
-    const result = await this.store.transact(
+    await this.store.transact(
       [
         ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId),
         ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId),
@@ -337,75 +344,139 @@ export class FaceCredentialService {
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
           if (existing.digest !== requestDigest) failCode("CONFLICT", "同键不同请求摘要", 409);
+          result = existing.result;
           return [];
         }
         const current = state[`${COLLECTIONS.DEVICE_ACCESS_GRANTS}/${grantId}`];
         if (!current || current.orgId !== this.orgId) failCode("NOT_FOUND", "授权不存在或不可见", 404);
         const now = this.now();
-        const res = { grantId, jobId };
+        const job = {
+          orgId: this.orgId,
+          revision: 1,
+          credentialId: current.credentialId,
+          grantId,
+          deviceId: current.deviceId,
+          action: "revoke",
+          state: JOB_STATE.QUEUED,
+          executionMode: "test",
+          provider: "mock",
+          evidenceScope: "simulated",
+          attempts: 0,
+          createdAt: now,
+        };
+        validateRecord(COLLECTIONS.DEVICE_OPERATION_JOBS, job);
+        result = { grantId, jobId };
         return [
           {
             collection: COLLECTIONS.DEVICE_ACCESS_GRANTS,
             id: grantId,
-            data: { state: GRANT_STATE.REVOKED, revision: nextRevision(current), updatedAt: now },
-          },
-          {
-            collection: COLLECTIONS.DEVICE_OPERATION_JOBS,
-            id: jobId,
             data: {
-              orgId: this.orgId, revision: 1, credentialId: current.credentialId, grantId,
-              deviceId: current.deviceId, action: "revoke", state: JOB_STATE.QUEUED,
-              evidenceScope: "simulated", attempts: 0, createdAt: now,
+              state: GRANT_STATE.REVOKED,
+              cleanupPending: true,
+              revision: nextRevision(current),
+              updatedAt: now,
             },
           },
+          { collection: COLLECTIONS.DEVICE_OPERATION_JOBS, id: jobId, data: job },
           {
             collection: COLLECTIONS.OPERATION_KEYS,
             id: opKey,
-            data: { orgId: this.orgId, digest: requestDigest, result: res, createdAt: now },
+            data: { orgId: this.orgId, digest: requestDigest, result, createdAt: now },
           },
         ];
       },
-      await this.#audit("撤销人脸授权"),
+      this.#audit("撤销门禁授权"),
     );
 
-    const job = (await this.store.list(COLLECTIONS.DEVICE_OPERATION_JOBS, this.orgId)).find(
-      (row) => row._id === jobId,
-    );
-    if (job) await this.#runRevokeJob(jobId);
-    return { grantId, jobId };
+    if (result?.jobId) await this.#runJob(result.jobId, "revoke");
+    return result;
   }
 
-  async #runRevokeJob(jobId) {
-    const job = (await this.store.list(COLLECTIONS.DEVICE_OPERATION_JOBS, this.orgId)).find(
-      (row) => row._id === jobId,
-    );
+  // 5. 查询任务：org 内最小 DTO。
+  async queryJob(jobId) {
+    await this.#require("device.audit.read");
+    const job = await this.#find(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId);
+    if (!job) failCode("NOT_FOUND", "任务不存在或不可见", 404);
+    return publicJobResult(job);
+  }
+
+  async #runJob(jobId, action) {
+    const job = await this.#find(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId);
     if (!job) return;
+    const credential = await this.#find(COLLECTIONS.FACE_CREDENTIALS, job.credentialId);
+    if (!credential) return;
+    const context = {
+      actorId: this.actor.actorId,
+      actorType: this.actor.actorType || "user",
+      orgId: this.orgId,
+      permissions: new Set(),
+      idempotencyKey: `job-${jobId}`.slice(0, 64).padEnd(16, "0"),
+      executionMode: "test",
+    };
     try {
-      await this.provider.revokeFace(
-        { grantId: job.grantId, credentialId: job.credentialId },
-        {
-          actorId: this.actor.actorId,
-          actorType: this.actor.actorType || "user",
-          orgId: this.orgId,
-          permissions: new Set(),
-          idempotencyKey: `job-${jobId}`.slice(0, 64).padEnd(16, "0"),
-          executionMode: "test",
-        },
-      );
-      await this.#closeJob(jobId, JOB_STATE.SUCCEEDED, "simulated");
+      if (action === "enroll") {
+        await this.provider.enrollFace(
+          {
+            personId: credential.personId,
+            deviceId: job.deviceId,
+            grantId: job.grantId,
+            sourceFileId: credential.sourceFileId,
+            validFrom: credential.validFrom,
+            validUntil: credential.validUntil,
+          },
+          context,
+        );
+      } else {
+        await this.provider.revokeFace(
+          { grantId: job.grantId, credentialId: job.credentialId },
+          context,
+        );
+      }
+      await this.#closeJob(jobId, JOB_STATE.SUCCEEDED, null);
     } catch (error) {
       const kind = classifyProviderError(error);
       const state = kind === "UNKNOWN_RESULT" ? JOB_STATE.AWAITING_RESULT : JOB_STATE.TERMINAL_FAILED;
-      await this.#closeJob(jobId, state, "simulated", String(error?.code || kind).slice(0, 120));
+      await this.#closeJob(jobId, state, String(error?.code || kind).slice(0, 120));
+      if (action === "revoke") {
+        // 清理失败不回滚：grant 保持 revoked，仅标记 cleanupPending。
+        await this.store.transact(
+          [ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, job.grantId)],
+          (current) => {
+            const grant = current[`${COLLECTIONS.DEVICE_ACCESS_GRANTS}/${job.grantId}`];
+            if (!grant) return [];
+            return [{
+              collection: COLLECTIONS.DEVICE_ACCESS_GRANTS,
+              id: job.grantId,
+              data: { cleanupPending: true, revision: nextRevision(grant), updatedAt: this.now() },
+            }];
+          },
+          this.#audit("记录撤权清理待处理"),
+        );
+      }
     }
   }
 
-  async queryJob(jobId) {
-    await this.#require("device.audit.read");
-    const job = (await this.store.list(COLLECTIONS.DEVICE_OPERATION_JOBS, this.orgId)).find(
-      (row) => row._id === jobId,
+  async #closeJob(jobId, state, failureReason) {
+    await this.store.transact(
+      [ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId)],
+      (current) => {
+        const job = current[`${COLLECTIONS.DEVICE_OPERATION_JOBS}/${jobId}`];
+        if (!job) return [];
+        return [{
+          collection: COLLECTIONS.DEVICE_OPERATION_JOBS,
+          id: jobId,
+          data: {
+            state,
+            evidenceScope: "simulated",
+            attempts: (job.attempts || 0) + 1,
+            lastSuccessAt: state === JOB_STATE.SUCCEEDED ? this.now() : job.lastSuccessAt ?? null,
+            failureReason,
+            revision: nextRevision(job),
+            updatedAt: this.now(),
+          },
+        }];
+      },
+      this.#audit("执行人脸任务"),
     );
-    if (!job) failCode("NOT_FOUND", "任务不存在或不可见", 404);
-    return publicJobResult(job);
   }
 }

@@ -103,6 +103,46 @@ export function assertEnrollInput(input) {
   return { personId, deviceId, grantId, sourceFileId, validFrom, validUntil };
 }
 
+const CREATE_GRANT_FIELDS = new Set([
+  "credentialId", "expectedCredentialRevision", "deviceId", "occupancyId",
+  "cycleId", "identityApplicationId", "validFrom", "validUntil",
+]);
+
+/** 提交只绑定人员与人脸来源；不得携带设备/授权字段。 */
+export function assertSubmitInput(input) {
+  const allowed = new Set(["personId", "sourceFileId"]);
+  for (const key of Object.keys(input || {})) {
+    if (!allowed.has(key)) throw dtoError(`submit 不允许字段 ${key}`);
+  }
+  assertOpaqueId(input?.personId, "personId");
+  assertOpaqueId(input?.sourceFileId, "sourceFileId");
+  return { personId: input.personId, sourceFileId: input.sourceFileId };
+}
+
+/** 授权输入冻结：设备、周期与有效期由 createGrant 显式提供。 */
+export function assertCreateGrantInput(input) {
+  for (const key of Object.keys(input || {})) {
+    if (!CREATE_GRANT_FIELDS.has(key)) throw dtoError(`createGrant 不允许字段 ${key}`);
+  }
+  const {
+    credentialId, expectedCredentialRevision, deviceId, occupancyId,
+    cycleId, identityApplicationId, validFrom, validUntil,
+  } = input || {};
+  for (const [field, value] of Object.entries({ credentialId, deviceId, occupancyId, cycleId, identityApplicationId })) {
+    assertOpaqueId(value, field);
+  }
+  if (!Number.isInteger(expectedCredentialRevision) || expectedCredentialRevision < 1) {
+    throw dtoError("expectedCredentialRevision 必须是 ≥1 的整数");
+  }
+  if (!Number.isFinite(validFrom) || !Number.isFinite(validUntil) || validFrom >= validUntil) {
+    throw dtoError("validFrom/validUntil 必须是合法时间区间");
+  }
+  return {
+    credentialId, expectedCredentialRevision, deviceId, occupancyId,
+    cycleId, identityApplicationId, validFrom, validUntil,
+  };
+}
+
 export function assertUpdateInput(input) {
   const allowed = new Set(["credentialId", "sourceFileId", "validUntil"]);
   for (const key of Object.keys(input || {})) {

@@ -249,6 +249,47 @@ export function applyDigestDomain(state, { provider = "hikvision", digestRealm, 
   return [];
 }
 
+export const CLAIM_STATE = Object.freeze({ ACTIVE: "active", RELEASED: "released" });
+
+/** 墓碑释放：只改状态与审计字段，不删除历史。 */
+export function releaseClaim(record, { jobId, now = Date.now() }) {
+  if (!record) throw schemaError("claim/slot 记录不存在");
+  return {
+    state: CLAIM_STATE.RELEASED,
+    releasedAt: now,
+    releasedByJobId: jobId,
+    revision: (Number.isInteger(record.revision) ? record.revision : 0) + 1,
+    updatedAt: now,
+  };
+}
+
+/** 可占用：不存在、已墓碑释放，或声明为 active 但属于本 grant。 */
+export function isReclaimable(record, ownerGrantId) {
+  if (!record) return true;
+  if (record.state === CLAIM_STATE.RELEASED) return true;
+  return record.grantId === ownerGrantId;
+}
+
+/** 确定性 log ID：同一 job 的同一状态迁移只产生一条日志。 */
+export function deterministicLogId(jobId, state, occurrence = 1) {
+  assertId(jobId, "jobId");
+  assertId(state, "state");
+  const seq = Number.isInteger(occurrence) && occurrence > 0 ? occurrence : 1;
+  return `log:${jobId}:${state}:${seq}`;
+}
+
+/** 租约结构：不保存凭据，仅 owner/过期时间/次数。 */
+export function leasePatch({ owner, expiresAt, attempts, revision, now = Date.now() }) {
+  if (!owner) throw schemaError("leaseOwner 必填");
+  return {
+    leaseOwner: owner,
+    leaseExpiresAt: expiresAt,
+    attempts: (attempts ?? 0) + 1,
+    revision: (Number.isInteger(revision) ? revision : 0) + 1,
+    updatedAt: now,
+  };
+}
+
 export function schemaError(message) {
   const error = new Error(message);
   error.code = "PARAM_ERROR";

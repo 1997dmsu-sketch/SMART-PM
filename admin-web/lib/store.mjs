@@ -35,6 +35,12 @@ const collections = [
   "file_access_log",
   // HK-AI-04：全局设备摘要域（跨组织共享）
   "device_digest_domains",
+  "face_credentials",
+  "device_access_grants",
+  "device_operation_jobs",
+  "device_operation_logs",
+  "device_claims",
+  "grant_slot_claims",
 ];
 export function seed() {
   return {
@@ -126,6 +132,12 @@ export function seed() {
     file_links: [],
     file_access_log: [],
   device_digest_domains: [],
+  face_credentials: [],
+  device_access_grants: [],
+  device_operation_jobs: [],
+  device_operation_logs: [],
+  device_claims: [],
+  grant_slot_claims: [],
   };
 }
 export class LocalStore {
@@ -151,6 +163,12 @@ export class LocalStore {
     this.data.file_links ||= [];
     this.data.file_access_log ||= [];
     this.data.device_digest_domains ||= [];
+    this.data.face_credentials ||= [];
+    this.data.device_access_grants ||= [];
+    this.data.device_operation_jobs ||= [];
+    this.data.device_operation_logs ||= [];
+    this.data.device_claims ||= [];
+    this.data.grant_slot_claims ||= [];
     return this;
   }
   async persist(data) {

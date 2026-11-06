@@ -53,7 +53,7 @@ executionMode: demo|test|live
 ## 事件（Mock）
 
 - 固定测试域 `mock.test`、递增 `version`、`occurredAt` 5 分钟时间窗；
-- 签名格式 `mock-sig:<domain>:<eventId>:<version>`；
+- 签名格式 `mock-sig:<domain>:<eventId>:<version>`（**仅用于合成 fixture，不是生产鉴权**）；
 - 事件必须匹配同组织、同设备上的 job；版本必须严格递增；同 ID 同摘要重放，不同摘要 `CONFLICT`；
 - 返回只含 `matchedJobId/action` 或 `rejected`，不回显 payload；
 - `executionMode=live` 一律 `NOT_CONFIGURED`。

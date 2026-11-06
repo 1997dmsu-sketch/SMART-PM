@@ -146,7 +146,7 @@ test("evidenceScope 仅 simulated/device_verified；Q01 展示 DTO 字段齐全"
     cleanupPending: true,
   });
   assert.deepEqual(Object.keys(dto).sort(), ["cleanupPending", "displayState", "evidenceScope", "grantState", "jobState"]);
-  assert.equal(dto.displayState, "active");
+  assert.equal(dto.displayState, "revoking"); // cleanupPending 优先
   assert.equal(dto.cleanupPending, true);
 });
 
@@ -255,7 +255,8 @@ test("事件必须匹配同组织/同设备 job；低版本冲突", async () => 
     eventInput({ eventId: "evt-wrong", jobId: created.jobId, deviceId: "device-2", signature: "mock-sig:mock.test:evt-wrong:1" }),
     context,
   );
-  assert.deepEqual(wrongDevice, { matchedJobId: created.jobId, rejected: true });
+  assert.deepEqual(wrongDevice, { rejected: true, reasonCode: "SCOPE_MISMATCH" });
+  assert.equal("matchedJobId" in wrongDevice, false);
 
   // 正确设备 → matched
   const matched = await p.verifyEvent(eventInput({ jobId: created.jobId, occurredAt: Date.now() }), context);
@@ -268,6 +269,50 @@ test("事件必须匹配同组织/同设备 job；低版本冲突", async () => 
     () => p.verifyEvent({ ...v2, version: 1, signature: "mock-sig:mock.test:evt-2:1" }, context),
     (e) => e.code === "CONFLICT",
   );
+});
+
+test("事件版本按 org+device+job 严格递增：不同 eventId 的 2→1 乱序被拒", async () => {
+  const p = new MockFaceAccessProvider();
+  const created = await p.enrollFace(enrollInput, context);
+
+  const v2 = eventInput({ eventId: "e2", jobId: created.jobId, version: 2, signature: "mock-sig:mock.test:e2:2" });
+  assert.equal((await p.verifyEvent(v2, context)).action, "enroll");
+
+  const v1 = eventInput({ eventId: "e1", jobId: created.jobId, version: 1, signature: "mock-sig:mock.test:e1:1" });
+  await assert.rejects(() => p.verifyEvent(v1, context), (e) => e.code === "CONFLICT");
+});
+
+test("未知 job 的事件只返回 rejected + reasonCode，不含 matchedJobId", async () => {
+  const p = new MockFaceAccessProvider();
+  const out = await p.verifyEvent(eventInput({ jobId: "job-missing" }), context);
+  assert.deepEqual(out, { rejected: true, reasonCode: "JOB_NOT_FOUND" });
+  assert.equal("matchedJobId" in out, false);
+});
+
+test("展示状态：simulated 不得显示 active；cleanupPending 优先 revoking", () => {
+  const activeSim = publicAccessState({
+    grant: { state: GRANT_STATE.EFFECTIVE },
+    job: { state: JOB_STATE.SUCCEEDED, evidenceScope: EVIDENCE_SCOPE.SIMULATED },
+  });
+  assert.equal(activeSim.displayState, "simulated");
+  assert.notEqual(activeSim.displayState, "active");
+
+  const cleanup = publicAccessState({
+    grant: { state: GRANT_STATE.EFFECTIVE },
+    job: { state: JOB_STATE.SUCCEEDED, evidenceScope: EVIDENCE_SCOPE.DEVICE_VERIFIED },
+    cleanupPending: true,
+  });
+  assert.equal(cleanup.displayState, "revoking");
+});
+
+test("updateFace：拒绝未知字段与空变更", async () => {
+  const p = new MockFaceAccessProvider();
+  await assert.rejects(
+    () => p.updateFace({ credentialId: "c1", unexpected: "x" }, context),
+    /不允许字段/,
+  );
+  await assert.rejects(() => p.updateFace({ credentialId: "c1" }, context), /必须提供/);
+  assert.equal((await p.updateFace({ credentialId: "c1", validUntil: 3000 }, context)).status, "succeeded");
 });
 
 test("live：Provider 调用与事件一律 NOT_CONFIGURED", async () => {

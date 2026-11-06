@@ -1,4 +1,4 @@
-/**
+﻿/**
  * HK-AI-04 DTO（精确契约 cc569a8）。
  *
  * 冻结 FaceAccessContext（六个字段，逐字段校验）：
@@ -104,10 +104,24 @@ export function assertEnrollInput(input) {
 }
 
 export function assertUpdateInput(input) {
-  const { credentialId, sourceFileId } = input || {};
+  const allowed = new Set(["credentialId", "sourceFileId", "validUntil"]);
+  for (const key of Object.keys(input || {})) {
+    if (!allowed.has(key)) throw dtoError(`update 不允许字段 ${key}`);
+  }
+  const { credentialId, sourceFileId, validUntil } = input || {};
   assertOpaqueId(credentialId, "credentialId");
-  assertOpaqueId(sourceFileId, "sourceFileId");
-  return { credentialId, sourceFileId };
+  if (sourceFileId === undefined && validUntil === undefined) {
+    throw dtoError("update 必须提供新凭证版本或收紧 validUntil");
+  }
+  if (sourceFileId !== undefined) assertOpaqueId(sourceFileId, "sourceFileId");
+  if (validUntil !== undefined && !Number.isFinite(validUntil)) {
+    throw dtoError("validUntil 必须是毫秒时间戳");
+  }
+  return {
+    credentialId,
+    ...(sourceFileId !== undefined ? { sourceFileId } : {}),
+    ...(validUntil !== undefined ? { validUntil } : {}),
+  };
 }
 
 export function assertRevokeInput(input) {
@@ -154,16 +168,21 @@ export function displayState(record) {
 export function publicAccessState({ grant, job, cleanupPending = false } = {}) {
   const grantState = grant?.state ?? null;
   const jobState = job?.state ?? null;
-  let state = "draft";
-  if (grantState === GRANT_STATE.REVOKED || grantState === GRANT_STATE.EXPIRED) state = "revoked";
-  else if (jobState === JOB_STATE.TERMINAL_FAILED) state = "failed";
-  else if (jobState === JOB_STATE.AWAITING_RESULT) state = "awaiting_result";
-  else if (grantState === GRANT_STATE.EFFECTIVE && jobState === JOB_STATE.SUCCEEDED) state = "active";
-  else if (grantState === GRANT_STATE.EFFECTIVE) state = "pending_sync";
   const evidenceScope =
     job?.evidenceScope === EVIDENCE_SCOPE.DEVICE_VERIFIED
       ? EVIDENCE_SCOPE.DEVICE_VERIFIED
       : EVIDENCE_SCOPE.SIMULATED;
+
+  // cleanupPending 或撤权未终态时 revoking 优先；只有 device_verified 才显示 active。
+  let state = "draft";
+  if (cleanupPending === true) state = "revoking";
+  else if (grantState === GRANT_STATE.REVOKED || grantState === GRANT_STATE.EXPIRED) state = "revoked";
+  else if (jobState === JOB_STATE.TERMINAL_FAILED) state = "failed";
+  else if (jobState === JOB_STATE.AWAITING_RESULT) state = "awaiting_result";
+  else if (grantState === GRANT_STATE.EFFECTIVE && jobState === JOB_STATE.SUCCEEDED) {
+    state = evidenceScope === EVIDENCE_SCOPE.DEVICE_VERIFIED ? "active" : "simulated";
+  } else if (grantState === GRANT_STATE.EFFECTIVE) state = "pending_sync";
+
   return {
     grantState,
     jobState,

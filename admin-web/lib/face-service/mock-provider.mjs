@@ -42,6 +42,7 @@ export class MockFaceAccessProvider {
     this.operations = new Map(); // idempotencyKey -> {digest, result, jobId}
     this.jobs = new Map(); // jobId -> job record
     this.events = new Map(); // eventId -> {digest, version, result}
+    this.maxVersions = new Map(); // org|device|job -> 最高已受理版本
     this.people = new Map();
     this.seq = 0;
     this.calls = [];
@@ -94,19 +95,28 @@ export class MockFaceAccessProvider {
       if (existing.digest !== digest) {
         throw providerError("CONFLICT", "post_send", "同事件 ID 不同摘要");
       }
-      // 严格递增：已受理更高版本后，低版本（即使内容不同）一律冲突。
-      if (event.version < existing.version) {
-        throw providerError("CONFLICT", "post_send", "事件版本必须严格递增");
-      }
-      return existing.result; // 同 ID 同摘要重放
+      return existing.result; // 同 ID 同摘要幂等重放
     }
 
     const job = this.jobs.get(event.jobId);
-    // 事件必须命中同一组织、同一设备上的 job，否则 rejected。
+    // 未知 job / 跨组织 / 错设备：只返回受控 rejected，不带 matchedJobId，
+    // 且不得写入最高版本或推进任务。
     const bound = Boolean(job && job.orgId === context.orgId && job.deviceId === event.deviceId);
-    const result = bound
-      ? { matchedJobId: event.jobId, action: job.action }
-      : { matchedJobId: event.jobId, rejected: true };
+    if (!bound) {
+      const result = { rejected: true, reasonCode: job ? "SCOPE_MISMATCH" : "JOB_NOT_FOUND" };
+      this.events.set(event.eventId, { digest, version: event.version, result });
+      return result;
+    }
+
+    // 版本严格递增按目标 org+device+job 维度，而不是仅同 eventId。
+    const scope = `${context.orgId}|${event.deviceId}|${event.jobId}`;
+    const highest = this.maxVersions.get(scope) || 0;
+    if (event.version <= highest) {
+      throw providerError("CONFLICT", "post_send", "事件版本必须严格递增");
+    }
+
+    const result = { matchedJobId: event.jobId, action: job.action };
+    this.maxVersions.set(scope, event.version);
     this.events.set(event.eventId, { digest, version: event.version, result });
     return result;
   }

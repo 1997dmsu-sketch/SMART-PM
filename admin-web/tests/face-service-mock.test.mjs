@@ -315,6 +315,30 @@ test("updateFace：拒绝未知字段与空变更", async () => {
   assert.equal((await p.updateFace({ credentialId: "c1", validUntil: 3000 }, context)).status, "succeeded");
 });
 
+test("事件缓存按组织隔离：A 匹配后 B 同事件不得复用 matchedJobId", async () => {
+  const p = new MockFaceAccessProvider();
+  const created = await p.enrollFace(enrollInput, context);
+  const event = eventInput({ jobId: created.jobId });
+
+  assert.equal((await p.verifyEvent(event, context)).action, "enroll");
+
+  const b = await p.verifyEvent(event, contextOrgB);
+  assert.deepEqual(b, { rejected: true, reasonCode: "SCOPE_MISMATCH" });
+  assert.equal("matchedJobId" in b, false);
+
+  // A 的原缓存不被 B 覆盖或污染
+  assert.equal((await p.verifyEvent(event, context)).action, "enroll");
+});
+
+test("反向：B 先提交同事件被拒，A 随后仍能匹配", async () => {
+  const p = new MockFaceAccessProvider();
+  const created = await p.enrollFace(enrollInput, context);
+  const event = eventInput({ jobId: created.jobId });
+
+  assert.deepEqual(await p.verifyEvent(event, contextOrgB), { rejected: true, reasonCode: "SCOPE_MISMATCH" });
+  assert.equal((await p.verifyEvent(event, context)).action, "enroll");
+});
+
 test("live：Provider 调用与事件一律 NOT_CONFIGURED", async () => {
   const live = { ...context, executionMode: "live" };
   const p = new MockFaceAccessProvider();

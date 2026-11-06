@@ -90,22 +90,24 @@ export class MockFaceAccessProvider {
     const event = assertEventInput(input);
     const digest = digestOf(event);
 
-    const existing = this.events.get(event.eventId);
+    // 绑定检查必须先于缓存命中：组织 B 提交与组织 A 完全相同的事件时，
+    // 不能读到 A 的 matchedJobId。缓存键也按组织隔离。
+    const job = this.jobs.get(event.jobId);
+    const bound = Boolean(job && job.orgId === context.orgId && job.deviceId === event.deviceId);
+    const cacheKey = `${context.orgId}|${event.eventId}`;
+
+    if (!bound) {
+      const result = { rejected: true, reasonCode: job ? "SCOPE_MISMATCH" : "JOB_NOT_FOUND" };
+      this.events.set(cacheKey, { digest, version: event.version, result });
+      return result;
+    }
+
+    const existing = this.events.get(cacheKey);
     if (existing) {
       if (existing.digest !== digest) {
         throw providerError("CONFLICT", "post_send", "同事件 ID 不同摘要");
       }
-      return existing.result; // 同 ID 同摘要幂等重放
-    }
-
-    const job = this.jobs.get(event.jobId);
-    // 未知 job / 跨组织 / 错设备：只返回受控 rejected，不带 matchedJobId，
-    // 且不得写入最高版本或推进任务。
-    const bound = Boolean(job && job.orgId === context.orgId && job.deviceId === event.deviceId);
-    if (!bound) {
-      const result = { rejected: true, reasonCode: job ? "SCOPE_MISMATCH" : "JOB_NOT_FOUND" };
-      this.events.set(event.eventId, { digest, version: event.version, result });
-      return result;
+      return existing.result; // 同组织同 ID 同摘要幂等重放
     }
 
     // 版本严格递增按目标 org+device+job 维度，而不是仅同 eventId。
@@ -117,7 +119,7 @@ export class MockFaceAccessProvider {
 
     const result = { matchedJobId: event.jobId, action: job.action };
     this.maxVersions.set(scope, event.version);
-    this.events.set(event.eventId, { digest, version: event.version, result });
+    this.events.set(cacheKey, { digest, version: event.version, result });
     return result;
   }
 

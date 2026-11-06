@@ -1,32 +1,51 @@
-# HK-AI-04 人脸服务层 Mock 骨架
+# HK-AI-04 人脸服务层 Mock 骨架（契约修订版）
 
-状态：**骨架**，未接入 `server.mjs`，未接入数据库集合；正式集成等待 AI-C 阶段 2 终审与指定基线。
+状态：**部分骨架**。未接 `server.mjs`、未建集合、未连接真实设备；等待 AI-C 阶段 2 终审与本次契约复审通过后再接线。
 
-## 目录
+## 冻结契约
 
-| 文件 | 内容 |
+**Provider 方法**（`health` 仅作独立健康检查，不计入业务方法）：
+
+```text
+enrollFace / updateFace / revokeFace / queryOperation / verifyEvent
+```
+
+**权限**（不使用 `device.face.manage`）：
+
+| 场景 | 权限 |
 |---|---|
-| `dto.mjs` | 凭证/任务输入校验、对外最小投影（不含图片字节与摘要） |
-| `state.mjs` | 凭证状态机、`businessAllowed` / `deviceEffective` / 告警投影 |
-| `mock-provider.mjs` | 七种 Mock 场景、失败分类（post_send 不可重试） |
-| `routes.mjs` | 路由描述表（method/path/permission/DTO），仅匹配、不注册 |
-| `index.mjs` | 入口；`live` 模式选择 Mock 直接失败 |
+| 人脸提交 | `device.face.submit` |
+| 审核队列 / 审核 | `device.face.review` |
+| 图片下载 / 私密字段 | `device.face.readPrivate` |
+| 人工授权 / 撤权 | `device.access.manage` |
+| 任务查询 | `device.audit.read` |
+| 重试 | `device.operation.retry` |
+| 人工对账 | `device.operation.reconcile` |
 
-## 契约假设（待 Codex 对齐）
+**三轴状态**（互不串写）：
 
-- `FaceAccessProvider`：`health()`、`upsertCredential()`、`deleteCredential()`、`queryCredential()`；
-- 权限名沿用 AI-C 的 `device.face.submit|review|readPrivate`；`device.face.manage` 为占位，待定名；
-- 集合 `access_devices` / `face_credentials` / `device_access_grants` / `device_operation_jobs` / `device_operation_logs` 尚未建表。
+- 凭证审核：`draft/submitted/approved/rejected/revoked`
+- 图片质量：`pending/verified/rejected`
+- 授权：`pending/effective/suspended/revoked/expired`
+- 任务：`queued/sending/awaiting_result/succeeded/retryable_failed/terminal_failed/cancelled`
 
-## 安全边界
+**授权投影**：
 
-- Mock 成功 `deviceEffective` 恒为 `false`，不得标记真实设备生效；
-- 发送后未知结果 `UNKNOWN_RESULT` 不可自动重试；
-- `live` 模式禁止 Mock，真实 Provider 未实现前必须失败关闭；
-- 对外响应不含人脸图片、不含 SHA-256。
+- `businessAllowed` = grant 为 `effective` 且实时资格快照允许；与凭证审核/同步状态无关；
+- `deviceEffective` = 上述 + 成功 job + 受信设备证据（`device_ack`, `trusted`）；Mock 永不产生生效。
+
+**幂等与错误**：
+
+- `opId + requestDigest`：同键同摘要重放、同键不同摘要冲突、不同键独立执行；
+- 对外分类仅 `RETRYABLE / TERMINAL / UNKNOWN_RESULT`；live 未配置为 `NOT_CONFIGURED`；
+- `post_send` 未知结果不自动重试，任务停在 `awaiting_result`。
+
+## 集合（已认可，未建表）
+
+`access_devices`、`face_credentials`、`device_access_grants`、`device_operation_jobs`、`device_operation_logs`、`device_claims`、`grant_slot_claims`、`operation_keys`；组织域 `orgId`，可变记录 `revision` 条件写。
 
 ## 下一步
 
-1. 按 LOCK-01A 契约补齐集合读写与任务队列（租约、幂等键、requestDigest）；
-2. 接 `server.mjs` 路由并补 HTTP 测试；
+1. 本次契约复审通过；
+2. AI-C 阶段 2 终审通过后，按指定基线接线集合与 HTTP；
 3. 真实 Provider 继续关闭。

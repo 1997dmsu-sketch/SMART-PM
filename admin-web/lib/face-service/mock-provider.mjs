@@ -1,8 +1,12 @@
-/**
- * Mock FaceAccessProvider（仅 demo/test）。
+﻿/**
+ * Mock FaceAccessProvider（仅 demo/test；契约修订版 f044a04）。
  *
- * 真实 Provider 不在本轮范围；此实现用于验证服务层状态机与任务编排。
- * 场景由构造参数显式选择，禁止在 live 模式下实例化（见 index.mjs 的守卫约定）。
+ * 冻结方法：enrollFace / updateFace / revokeFace / queryOperation / verifyEvent。
+ * health 仅作独立健康检查适配，不参与业务方法编号。
+ *
+ * 幂等语义：opId + requestDigest —— 同键同摘要重放同一结果；
+ * 同键不同摘要抛 IDEMPOTENCY_CONFLICT；不同键各自执行。
+ * post_send 未知结果不可自动重试，投影为 UNKNOWN_RESULT。
  */
 
 export const MOCK_SCENARIOS = Object.freeze([
@@ -16,86 +20,103 @@ export const MOCK_SCENARIOS = Object.freeze([
 ]);
 
 export class MockFaceAccessProvider {
-  constructor({ scenario = "success", providerKind = "mock" } = {}) {
-    if (!MOCK_SCENARIOS.includes(scenario)) {
-      throw new Error(`未知 Mock 场景：${scenario}`);
-    }
+  constructor({ scenario = "success" } = {}) {
+    if (!MOCK_SCENARIOS.includes(scenario)) throw new Error(`未知 Mock 场景：${scenario}`);
     this.scenario = scenario;
-    this.providerKind = providerKind;
-    this.calls = [];
+    this.ops = new Map();
     this.people = new Map();
+    this.events = new Map();
+    this.calls = [];
   }
 
   async health() {
-    return { ok: this.scenario !== "device_offline", providerKind: this.providerKind, scenario: this.scenario };
+    return { ok: this.scenario !== "device_offline", scenario: this.scenario };
   }
 
-  async upsertCredential({ credentialId, personId, faceFileId }) {
-    this.calls.push({ action: "upsert", credentialId, personId, faceFileId });
-    return this.#act("upsert", () => {
-      this.people.set(personId, { credentialId, faceFileId });
-      return { status: "succeeded", providerRef: `mock-${personId}` };
+  async enrollFace(input) {
+    return this.#run("enroll", input, () => {
+      this.people.set(input.personId, { faceFileId: input.faceFileId });
+      return { status: "succeeded", providerRef: `mock-${input.personId}` };
     });
   }
 
-  async deleteCredential({ credentialId, personId }) {
-    this.calls.push({ action: "delete", credentialId, personId });
-    return this.#act("delete", () => {
-      this.people.delete(personId);
+  async updateFace(input) {
+    return this.#run("update", input, () => {
+      this.people.set(input.personId, { faceFileId: input.faceFileId });
+      return { status: "succeeded", providerRef: `mock-${input.personId}` };
+    });
+  }
+
+  async revokeFace(input) {
+    return this.#run("revoke", input, () => {
+      this.people.delete(input.personId);
       return { status: "succeeded" };
     });
   }
 
-  async queryCredential({ personId }) {
-    const found = this.people.get(personId);
-    return found ? { status: "present", ...found } : { status: "absent" };
+  async queryOperation({ opId }) {
+    const op = this.ops.get(opId);
+    if (!op) return { opId, state: "unknown" };
+    return { opId, state: op.state, digest: op.digest };
   }
 
-  #act(action, run) {
-    switch (this.scenario) {
-      case "device_offline":
-        throw providerError("DEVICE_OFFLINE", "pre_send");
-      case "pre_send_fail":
-        throw providerError("PROVIDER_ERROR", "pre_send");
-      case "post_send_unknown":
-        throw providerError("UNKNOWN_RESULT", "post_send");
-      case "terminal_fail":
-        throw providerError("DEVICE_REJECTED", "post_send");
-      case "revoke_fail":
-        if (action === "delete") throw providerError("DEVICE_REJECTED", "post_send");
-        return run();
-      case "duplicate_callback":
-        // 同一请求重放返回同一结果，不产生第二次物理操作
-        return this.#once(action, run);
-      default:
-        return run();
+  /** 设备回调验签/去重：同一 eventId 重放返回同一结果。 */
+  async verifyEvent({ eventId, payload, signature = "mock-signature" }) {
+    if (this.scenario === "post_send_unknown") {
+      throw providerError("UNKNOWN_RESULT", "post_send", "回调内容不可判定");
     }
+    if (!signature) throw providerError("TERMINAL", "post_send", "回调验签失败");
+    if (this.events.has(eventId)) return this.events.get(eventId);
+    const result = { eventId, state: "awaiting_result", payload };
+    this.events.set(eventId, result);
+    return result;
   }
 
-  #once(action, run) {
-    const key = `${action}:${this.calls.length}`;
-    if (!this.cached) this.cached = new Map();
-    if (this.cached.has(action)) return this.cached.get(action);
-    const result = run();
-    this.cached.set(action, result);
+  #run(action, input, execute) {
+    const { opId, requestDigest } = input;
+    if (!opId || !requestDigest) throw providerError("TERMINAL", "pre_send", "缺少 opId/requestDigest");
+    const existing = this.ops.get(opId);
+    if (existing) {
+      if (existing.digest !== requestDigest) {
+        const error = providerError("TERMINAL", "pre_send", "同键不同请求摘要");
+        error.code = "IDEMPOTENCY_CONFLICT";
+        throw error;
+      }
+      return existing.result; // 同键同摘要：重放，不再执行
+    }
+
+    if (this.scenario === "device_offline") throw providerError("DEVICE_OFFLINE", "pre_send", "设备离线");
+    if (this.scenario === "pre_send_fail") throw providerError("PROVIDER_ERROR", "pre_send", "发送前失败");
+    if (this.scenario === "terminal_fail") throw providerError("DEVICE_REJECTED", "post_send", "设备拒绝");
+    if (this.scenario === "revoke_fail" && action === "revoke") {
+      throw providerError("DEVICE_REJECTED", "post_send", "撤权失败");
+    }
+    if (this.scenario === "post_send_unknown") {
+      this.ops.set(opId, { digest: requestDigest, state: "awaiting_result", result: null });
+      throw providerError("UNKNOWN_RESULT", "post_send", "发送后结果未知");
+    }
+
+    this.calls.push({ action, opId });
+    const result = execute();
+    this.ops.set(opId, { digest: requestDigest, state: "succeeded", result });
     return result;
   }
 }
 
-function providerError(code, phase) {
-  const error = new Error(`${code} (${phase})`);
+function providerError(code, phase, message) {
+  const error = new Error(message);
   error.code = code;
   error.phase = phase;
   return error;
 }
 
-/**
- * 失败分类：post_send 的未知/失败一律不可自动重试（避免重复新增/删除）；
- * pre_send 的设备离线可重试。
- */
+/** 对外统一分类：RETRYABLE / TERMINAL / UNKNOWN_RESULT（冻结）。 */
 export function classifyProviderError(error) {
-  if (!error || typeof error !== "object") return { retryable: false, unknownResult: true };
-  if (error.phase === "post_send") return { retryable: false, unknownResult: error.code === "UNKNOWN_RESULT" };
-  if (error.code === "DEVICE_OFFLINE") return { retryable: true, unknownResult: false };
-  return { retryable: false, unknownResult: false };
+  if (!error || typeof error !== "object") return "TERMINAL";
+  if (error.code === "UNKNOWN_RESULT") return "UNKNOWN_RESULT";
+  if (error.phase === "post_send") return "TERMINAL";
+  if (error.phase === "pre_send" && ["DEVICE_OFFLINE", "PROVIDER_ERROR"].includes(error.code)) {
+    return "RETRYABLE";
+  }
+  return "TERMINAL";
 }

@@ -1,51 +1,65 @@
 /**
- * 路由描述表（骨架）。
- *
- * 只声明 method/path/permission/DTO 校验，不注册到 server.mjs；
- * 正式接线等待 AI-C 阶段 2 终审与指定集成基线。
- * permission 中 manage 类为占位，需与 Codex 对齐后定名。
+ * 路由描述表（提案，不注册到 server.mjs；待契约与 AI-C 终审通过后接线）。
+ * 权限按 f044a04 裁定：不使用 device.face.manage。
  */
 
 export const FACE_ROUTES = Object.freeze([
   {
-    id: "face-credential-create",
+    id: "face-credential-submit",
     method: "POST",
     path: "/api/v2/face-credentials",
     permission: "device.face.submit",
-    dto: "faceCredentialInput",
     idempotent: true,
   },
   {
-    id: "face-credential-list",
+    id: "face-review-queue",
     method: "GET",
-    path: "/api/v2/face-credentials",
-    permission: "device.face.readPrivate",
+    path: "/api/v2/face-credentials/review-queue",
+    permission: "device.face.review",
   },
   {
     id: "face-credential-review",
     method: "POST",
     path: "/api/v2/face-credentials/:credentialId/review",
     permission: "device.face.review",
-    dto: "reviewInput",
     idempotent: true,
   },
   {
-    id: "face-credential-delete",
+    id: "face-credential-image",
+    method: "GET",
+    path: "/api/v2/face-credentials/:credentialId/image",
+    permission: "device.face.readPrivate",
+  },
+  {
+    id: "face-grant-revoke",
     method: "POST",
     path: "/api/v2/face-credentials/:credentialId/revoke",
-    permission: "device.face.manage",
+    permission: "device.access.manage",
     idempotent: true,
   },
   {
     id: "device-job-list",
     method: "GET",
     path: "/api/v2/device-jobs",
-    permission: "device.face.manage",
+    permission: "device.audit.read",
+  },
+  {
+    id: "device-job-retry",
+    method: "POST",
+    path: "/api/v2/device-jobs/:jobId/retry",
+    permission: "device.operation.retry",
+    idempotent: true,
+  },
+  {
+    id: "device-job-reconcile",
+    method: "POST",
+    path: "/api/v2/device-jobs/:jobId/reconcile",
+    permission: "device.operation.reconcile",
+    idempotent: true,
   },
 ]);
 
-const patternOf = (path) =>
-  new RegExp(`^${path.replace(/:[A-Za-z0-9_]+/g, "([^/]+)")}$`);
+const patternOf = (path) => new RegExp(`^${path.replace(/:[A-Za-z0-9_]+/g, "([^/]+)")}$`);
 
 export function matchFaceRoute(method, path) {
   for (const route of FACE_ROUTES) {
@@ -55,7 +69,7 @@ export function matchFaceRoute(method, path) {
     const keys = [...route.path.matchAll(/:([A-Za-z0-9_]+)/g)].map((m) => m[1]);
     return {
       route,
-      params: Object.fromEntries(keys.map((key, index) => [key, decodeURIComponent(match[index + 1])])),
+      params: Object.fromEntries(keys.map((key, i) => [key, decodeURIComponent(match[i + 1])])),
     };
   }
   return null;

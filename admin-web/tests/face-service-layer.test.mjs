@@ -106,7 +106,7 @@ test("submitter 可提交，但不能审核/授权；提交不建 grant/job", as
   assert.equal((await store.list("device_access_grants", orgId)).length, 0);
   assert.equal((await store.list("device_operation_jobs", orgId)).length, 0);
   await assert.rejects(() => s.review(out.credentialId, { decision: "approved" }, { idempotencyKey: "k2" }), (e) => e.status === 403);
-  await assert.rejects(() => s.createGrant({ credentialId: out.credentialId, occupancyId: "occ-1", identityApplicationId: "id-1" }, { idempotencyKey: "k3" }), (e) => e.status === 403);
+  await assert.rejects(() => s.createGrant({ credentialId: out.credentialId, occupancyId: "occ-1", cycleId: "cycle-1", identityApplicationId: "id-1" }, { idempotencyKey: "k3" }), (e) => e.status === 403);
 });
 
 test("reviewer 可审核但不建 grant；未 approved 授权被拒", async () => {
@@ -122,7 +122,7 @@ test("access manager 创建 grant/job/claims；模拟证据不产生 deviceEffec
   const credential = await approvedCredential();
   const manager = service("mem-manage");
   const out = await manager.createGrant(
-    { credentialId: credential._id, occupancyId: "occ-1", identityApplicationId: "id-1" },
+    { credentialId: credential._id, occupancyId: "occ-1", cycleId: "cycle-1", identityApplicationId: "id-1" },
     { idempotencyKey: "idem-key-grant-01" },
   );
   assert.equal(out.evidenceScope, "simulated");
@@ -132,7 +132,6 @@ test("access manager 创建 grant/job/claims；模拟证据不产生 deviceEffec
   assert.equal(job.evidenceScope, "simulated");
   assert.equal(job.provider, "mock");
   assert.equal(job.executionMode, "test");
-  assert.equal((await store.list("device_claims", orgId)).length, 1);
   assert.equal((await store.list("grant_slot_claims", orgId)).length, 1);
 
   const projected = projectAccess({
@@ -165,13 +164,13 @@ test("资格待审/拒绝：grant/job 零写入", async () => {
 
   eligible = { eligible: false, code: "BLACKLIST_REVIEW_REQUIRED", entryIds: ["e1"], decisionId: null };
   await assert.rejects(
-    () => manager.createGrant({ credentialId: pending.credentialId, occupancyId: "occ-1", identityApplicationId: "id-1" }, { idempotencyKey: "idem-key-grant-02" }),
+    () => manager.createGrant({ credentialId: pending.credentialId, occupancyId: "occ-1", cycleId: "cycle-1", identityApplicationId: "id-1" }, { idempotencyKey: "idem-key-grant-02" }),
     (e) => e.status === 409,
   );
 
   eligible = { eligible: false, code: "BLACKLIST_DENIED", entryIds: ["e1"], decisionId: null };
   await assert.rejects(
-    () => manager.createGrant({ credentialId: pending.credentialId, occupancyId: "occ-1", identityApplicationId: "id-1" }, { idempotencyKey: "idem-key-grant-03" }),
+    () => manager.createGrant({ credentialId: pending.credentialId, occupancyId: "occ-1", cycleId: "cycle-1", identityApplicationId: "id-1" }, { idempotencyKey: "idem-key-grant-03" }),
     (e) => e.status === 403,
   );
 
@@ -202,14 +201,14 @@ test("幂等：同键同输入重放；不同输入 CONFLICT", async () => {
   const manager = service("mem-manage");
   const credential = await approvedCredential();
   const replay = await manager.createGrant(
-    { credentialId: credential._id, occupancyId: "occ-1", identityApplicationId: "id-1" },
+    { credentialId: credential._id, occupancyId: "occ-1", cycleId: "cycle-1", identityApplicationId: "id-1" },
     { idempotencyKey: "idem-key-grant-01" },
   );
   assert.ok(replay.grantId);
 
   await assert.rejects(
     () => manager.createGrant(
-      { credentialId: credential._id, occupancyId: "occ-2", identityApplicationId: "id-1" },
+      { credentialId: credential._id, occupancyId: "occ-2", cycleId: "cycle-1", identityApplicationId: "id-1" },
       { idempotencyKey: "idem-key-grant-01" },
     ),
     (e) => e.code === "CONFLICT",

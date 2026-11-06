@@ -93,9 +93,12 @@ export function nextRevision(record) {
 /** K1 配置：Base64 32 字节密钥、正整数版本、独立部署域。缺失/非法一律失败关闭。 */
 export function deviceClaimConfig(env = process.env) {
   const encoded = env.DEVICE_CLAIM_HMAC_KEY_B64 || "";
-  let key = null;
-  try { key = Buffer.from(encoded, "base64"); } catch { key = null; }
-  if (!key || key.length !== 32) throw schemaError("DEVICE_CLAIM_HMAC_KEY_B64 必须是 Base64 编码的 32 字节密钥");
+  const canonical = /^[A-Za-z0-9+/]+={0,2}$/.test(encoded) && encoded.length % 4 === 0;
+  if (!canonical) throw schemaError("DEVICE_CLAIM_HMAC_KEY_B64 不是规范的 Base64");
+  const key = Buffer.from(encoded, "base64");
+  if (key.length !== 32 || key.toString("base64") !== encoded) {
+    throw schemaError("DEVICE_CLAIM_HMAC_KEY_B64 必须是规范的 Base64 编码的 32 字节密钥");
+  }
   const version = Number(env.DEVICE_CLAIM_KEY_VERSION);
   if (!Number.isInteger(version) || version < 1) throw schemaError("DEVICE_CLAIM_KEY_VERSION 必须是正整数");
   const realm = String(env.DEVICE_DIGEST_REALM || "").trim();
@@ -117,15 +120,23 @@ export function deviceDigest(serial, { key, version }) {
     .digest("hex");
 }
 
+const encodeSegment = (value) => Buffer.from(String(value), "utf8").toString("base64url");
+
 export function deviceClaimKey({ provider = "hikvision", digestRealm, serial, key, version }) {
   if (!digestRealm) throw schemaError("digestRealm 必填");
-  return `provider-device:${provider}:${digestRealm}:${deviceDigest(serial, { key, version })}`;
+  return `provider-device:${encodeSegment(provider)}:${encodeSegment(digestRealm)}:${deviceDigest(serial, { key, version })}`;
 }
 
-/** 记录 realm+provider 首次使用的密钥版本，防止换钥后同一设备被重复登记。 */
-export function deviceDigestDomainKey({ provider = "hikvision", digestRealm, version }) {
+/** 稳定 head（不含版本）：同一 realm+provider 始终读取同一条记录。 */
+export function deviceDigestDomainKey({ provider = "hikvision", digestRealm }) {
   if (!digestRealm) throw schemaError("digestRealm 必填");
-  return `device-digest-domain:${provider}:${digestRealm}:${version}`;
+  return `device-digest-domain:${encodeSegment(provider)}:${encodeSegment(digestRealm)}`;
+}
+
+/** 版本历史记录（可选）：保留每次启用的 keyVersion 供审计。 */
+export function deviceDigestDomainVersionKey({ provider = "hikvision", digestRealm, version }) {
+  if (!digestRealm) throw schemaError("digestRealm 必填");
+  return `device-digest-domain-version:${encodeSegment(provider)}:${encodeSegment(digestRealm)}:${version}`;
 }
 
 export function assertDigestDomain(existing, { version }) {
@@ -141,7 +152,7 @@ export function grantSlotKey({ orgId, personId, deviceId, cycleId }) {
   for (const [field, value] of Object.entries({ orgId, personId, deviceId, cycleId })) {
     assertId(value, field);
   }
-  return `grant-slot:${orgId}:${personId}:${deviceId}:${cycleId}`;
+  return `grant-slot:${encodeSegment(orgId)}:${encodeSegment(personId)}:${encodeSegment(deviceId)}:${encodeSegment(cycleId)}`;
 }
 
 /** 操作幂等键：与 Mock 终审一致的 org + 方法 + actor + idempotencyKey。 */

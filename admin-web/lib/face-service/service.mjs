@@ -202,8 +202,8 @@ export class FaceCredentialService {
   // 3. 创建授权：资格事务 + device/slot claim + grant/job。
   async createGrant({ credentialId, occupancyId, cycleId, identityApplicationId }, { idempotencyKey } = {}) {
     await this.#require("device.access.manage");
-    if (!credentialId || !occupancyId || !identityApplicationId) {
-      failCode("PARAM_ERROR", "credentialId/occupancyId/identityApplicationId 必填", 400);
+    if (!credentialId || !occupancyId || !cycleId || !identityApplicationId) {
+      failCode("PARAM_ERROR", "credentialId/occupancyId/cycleId/identityApplicationId 必填", 400);
     }
     const credential = await this.#find(COLLECTIONS.FACE_CREDENTIALS, credentialId);
     if (!credential) failCode("NOT_FOUND", "凭证不存在或不可见", 404);
@@ -212,11 +212,10 @@ export class FaceCredentialService {
     }
 
     const opKey = await this.#opKey("face.grant", idempotencyKey);
-    const requestDigest = digestOf({ credentialId, occupancyId, identityApplicationId });
+    const requestDigest = digestOf({ credentialId, occupancyId, cycleId, identityApplicationId });
     const grantId = `grant-${digestOf(opKey).slice(0, 24)}`;
     const jobId = `job-${digestOf(`${opKey}:enroll`).slice(0, 24)}`;
-    const claimId = `device-claim:${credential.deviceId}`;
-    const slotId = grantSlotKey({ orgId: this.orgId, personId: credential.personId, deviceId: credential.deviceId, cycleId: cycleId || occupancyId });
+    const slotId = grantSlotKey({ orgId: this.orgId, personId: credential.personId, deviceId: credential.deviceId, cycleId });
     let result = null;
 
     await this.blacklist.withEligibility(
@@ -230,7 +229,6 @@ export class FaceCredentialService {
         ref(COLLECTIONS.FACE_CREDENTIALS, credentialId),
         ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId),
         ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId),
-        ref(COLLECTIONS.DEVICE_CLAIMS, claimId),
         ref(COLLECTIONS.GRANT_SLOT_CLAIMS, slotId),
         ref(COLLECTIONS.OPERATION_KEYS, opKey),
       ],
@@ -250,8 +248,6 @@ export class FaceCredentialService {
         if (current.reviewState !== REVIEW_STATE.APPROVED) {
           failCode("INVALID_STATE", "凭证尚未审核通过", 409);
         }
-        const claim = state[`${COLLECTIONS.DEVICE_CLAIMS}/${claimId}`];
-        if (claim && claim.grantId !== grantId) failCode("DEVICE_CLAIMED", "设备已被其他授权占用", 409);
         const slot = state[`${COLLECTIONS.GRANT_SLOT_CLAIMS}/${slotId}`];
         if (slot && slot.grantId !== grantId) failCode("GRANT_SLOT_CONFLICT", "授权槽位冲突", 409);
 
@@ -263,6 +259,7 @@ export class FaceCredentialService {
           personId: current.personId,
           deviceId: current.deviceId,
           occupancyId,
+          cycleId,
           state: GRANT_STATE.EFFECTIVE,
           evidenceScope: "simulated",
           validFrom: current.validFrom,
@@ -292,14 +289,9 @@ export class FaceCredentialService {
             { collection: COLLECTIONS.DEVICE_ACCESS_GRANTS, id: grantId, data: grant },
             { collection: COLLECTIONS.DEVICE_OPERATION_JOBS, id: jobId, data: job },
             {
-              collection: COLLECTIONS.DEVICE_CLAIMS,
-              id: claimId,
-              data: { orgId: this.orgId, deviceId: current.deviceId, grantId, revision: 1, createdAt: now },
-            },
-            {
               collection: COLLECTIONS.GRANT_SLOT_CLAIMS,
               id: slotId,
-              data: { orgId: this.orgId, deviceId: current.deviceId, grantId, revision: 1, createdAt: now },
+              data: { orgId: this.orgId, deviceId: current.deviceId, grantId, cycleId, revision: 1, createdAt: now },
             },
             {
               collection: COLLECTIONS.OPERATION_KEYS,

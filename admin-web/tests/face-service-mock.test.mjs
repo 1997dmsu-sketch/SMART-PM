@@ -234,8 +234,10 @@ test("事件：固定域/版本/时间窗/签名校验，缺一拒绝", () => {
 test("事件：同 ID 同摘要重放，同 ID 异摘要 CONFLICT，不回显 payload", async () => {
   const p = new MockFaceAccessProvider();
   await p.enrollFace(enrollInput, context); // 生成 job-1，供事件匹配
-  const a = await p.verifyEvent(eventInput({ payload: "secret" }), context);
-  const b = await p.verifyEvent(eventInput({ payload: "secret" }), context);
+  const occurredAt = Date.now();
+  const event = eventInput({ payload: "secret", occurredAt });
+  const a = await p.verifyEvent(event, context);
+  const b = await p.verifyEvent(event, context);
   assert.deepEqual(a, b);
   assert.equal(JSON.stringify(a).includes("secret"), false);
   assert.deepEqual(Object.keys(a).sort(), ["action", "matchedJobId"]);

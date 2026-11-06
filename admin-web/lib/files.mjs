@@ -814,6 +814,24 @@ export class FileService {
     }
     return { fileId: reference.fileId, revision: file.revision };
   }
+  /**
+   * 内部绑定复核：只校验文件仍可作为已提交凭证的来源，不授予读取能力、不返回字节。
+   * 供持有 device.access.manage 的授权流程复用；要求 revision 与提交时一致。
+   */
+  assertBinding(state, binding) {
+    const deny = () => failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
+    const file = state["file_assets/" + binding?.fileId];
+    if (!file || !this.own(file) || file.purpose !== "face-biometric" || file.status !== "ready" ||
+        file.visibility !== "private" || !["image/jpeg", "image/png"].includes(file.mimeType) ||
+        (file.size ?? 0) > 200 * 1024) {
+      deny();
+    }
+    if (Number(file.revision) !== Number(binding.revision)) {
+      failCode("FILE_CHANGED", "文件已变化，请重新提交", 409);
+    }
+    return { fileId: binding.fileId, revision: file.revision };
+  }
+
   async list(query = {}) {
     const { cursor, limit } = pageParams(query);
     if (query.purpose !== undefined && !PURPOSES[query.purpose])

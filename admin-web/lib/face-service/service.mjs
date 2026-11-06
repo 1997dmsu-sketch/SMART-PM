@@ -120,6 +120,7 @@ export class FaceCredentialService {
           grantId: parsed.grantId,
           occupancyId: input.occupancyId,
           sourceFileId: parsed.sourceFileId,
+          sourceFileRevision: reference.revision,
           validFrom: parsed.validFrom,
           validUntil: parsed.validUntil,
           reviewState: REVIEW_STATE.SUBMITTED,

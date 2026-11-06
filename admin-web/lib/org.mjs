@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+﻿import { createHash } from "node:crypto";
 import { failCode } from "./model.mjs";
 import { guardId } from "./claims.mjs";
 const hash = (...parts) =>
@@ -97,6 +97,11 @@ export class OrgService {
       "device.face.submit",
       "device.face.review",
       "device.face.readPrivate",
+      // HK-AI-04：门禁授权、任务审计、重试与人工对账各自独立授权。
+      "device.access.manage",
+      "device.audit.read",
+      "device.operation.retry",
+      "device.operation.reconcile",
     ];
     if (
       !Array.isArray(permissions) ||

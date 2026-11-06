@@ -24,9 +24,9 @@
 | AI-B / HK-AI-02 | `f15160d` 代码侧复审通过 | `feat/hk-isapi-capability-probe` | `8136b90` | 三项返工已关闭；等待现场/项目负责人批准、隔离环境和一次性窗口，批准前禁止设置 `HIKVISION_PROBE_ALLOW_READ=true` |
 | AI-C / HK-AI-03 | DeepSeek Harness 已认领，阶段 2 进行中（`8592763`） | `feat/db-mvp-integration` | `b9ee061`（`feat/db-05-occupancies`） | 九项 HTTP 测试与两项资源回归未完成；复审通过前不进入阶段 3 |
 | AI-D0 / HK-AI-04A | 文档阶段通过 Codex 复审（`5148159`） | `docs/hk-ai-04-contract-evidence` | `8b47fb7` | 九项架构裁定见 `HK-AI-04A-REVIEW-2026-11-05.md`；不代表真实能力验证 |
-| AI-D / HK-AI-04 | 可由 DeepSeek Harness 启动独立 Mock 核心 | `feat/hk-face-service-mock` | 等待 AI-C 阶段 2 终审后确定集成提交 | 可先做状态机、Mock 与 fixture；正式集成不得复制资格/文件逻辑，真实 Provider 关闭 |
-| AI-E / HK-AI-05 | 待认领 | — | 等待 AI-D API 契约 | API 冻结后开始 |
-| AI-F / DEV-AI-01 | Workburry 已分配 | `feat/wecom-dev-board` | `docs/lock-01-fast-track@1358ef5` | 真实发送等待企业微信应用/群机器人配置；Mock 开发可立即开始 |
+| AI-D / HK-AI-04 | 今日由 DeepSeek Harness 启动独立 Mock 核心 | `feat/hk-face-service-mock` | AI-C 测试提交后开始；正式集成等待阶段2终审 | 今日先交路由/DTO、状态投影、Mock接口与失败关闭测试；真实 Provider 关闭 |
+| AI-E / HK-AI-05 | 今日由 Workburry 启动页面壳 | `feat/hk-face-admin` | 先用合成 fixture；等待 AI-D DTO 后绑定 | 今日交设备/申请/任务/审计页面壳，持续显示 Mock 标识 |
+| AI-F / DEV-AI-01 | Workburry 已分配，演示前降为 P1 | `feat/wecom-dev-board` | `docs/lock-01-fast-track@1358ef5` | 暂不占用 AI-E 关键路径；真实发送仍等待企业微信配置 |
 
 > AI-B 现场批准与执行包：`docs/tasks/HK-AI-02-LIVE-APPROVAL-PACK.md`。批准栏（现场负责人 + 项目负责人 + 执行人）签署前禁止设置 `HIKVISION_PROBE_ALLOW_READ=true`；一次批准只授权一次只读执行。
 

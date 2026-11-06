@@ -1,4 +1,4 @@
-// DB-07 T03 文件服务层（docs/database/DB-07-IMPLEMENTATION.md §2/§3/§5/§7）。
+﻿// DB-07 T03 文件服务层（docs/database/DB-07-IMPLEMENTATION.md §2/§3/§5/§7）。
 //
 // FileService 是 file_assets / file_links / file_access_log 的唯一写入口：
 // 鉴权（组织上下文、purpose/visibility 分级）全部在服务层完成，适配器只做
@@ -759,6 +759,39 @@ export class FileService {
   }
 
   // 列表：orgId 过滤先于分页（§3、store.mjs:130-135）。
+  /**
+   * 引用校验：只确认“可引用的私密人脸文件”，不返回图片、URL、摘要或存储位置。
+   * 权限使用 device.face.submit，不要求 readPrivate；实际读取仍走 authorizeDownload。
+   */
+  async prepareReference(fileId, { purpose = "face-biometric" } = {}) {
+    this.assertActorRole(true, "device.face.submit");
+    const file = (await this.store.list("file_assets", this.orgId)).find((row) => row._id === fileId);
+    if (!file || !this.own(file) || file.purpose !== purpose || file.status !== "ready" ||
+        file.visibility !== "private") {
+      failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
+    }
+    return {
+      fileId,
+      orgId: this.orgId,
+      purpose,
+      revision: file.revision,
+      mimeType: file.mimeType,
+      size: file.size,
+    };
+  }
+
+  /** 事务内复核引用：文件版本变化或不再可引用时失败关闭（409/404）。 */
+  assertReference(state, reference) {
+    const file = state[`file_assets/${reference?.fileId}`];
+    if (!file || !this.own(file) || file.purpose !== reference.purpose ||
+        file.status !== "ready" || file.visibility !== "private") {
+      failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
+    }
+    if (file.revision !== reference.revision) {
+      failCode("FILE_CHANGED", "文件已变化，请重新提交", 409);
+    }
+    return { fileId: reference.fileId, revision: file.revision };
+  }
   async list(query = {}) {
     const { cursor, limit } = pageParams(query);
     if (query.purpose !== undefined && !PURPOSES[query.purpose])

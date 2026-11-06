@@ -1,4 +1,4 @@
-import { test, before, after } from "node:test";
+﻿import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { LocalStore } from "../lib/store.mjs";
 import { MockFaceAccessProvider, projectAccess } from "../lib/face-service/index.mjs";
 import { FaceCredentialService } from "../lib/face-service/service.mjs";
+import { FileService } from "../lib/files.mjs";
 
 let store, dir;
 const orgId = "org-demo";
@@ -62,6 +63,10 @@ const service = (membershipId) =>
   new FaceCredentialService({
     store: trackedStore(), orgId,
     actor: { membershipId, actorType: "user", actorId: membershipId },
+    files: new FileService(store, orgId, {
+      auth: { membershipId },
+      actor: { actorType: "user", actorId: membershipId, role: "editor", permissions: ["device.face.submit"] },
+    }),
     blacklist, provider, now: () => 1_700_000_000_000,
   });
 

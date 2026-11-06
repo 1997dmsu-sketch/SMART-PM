@@ -1,4 +1,4 @@
-﻿/**
+/**
  * HK-AI-04 服务层（集合接线，无 HTTP）。
  *
  * 流程严格分离：
@@ -37,10 +37,11 @@ const ref = (collection, id) => ({ collection, id });
 const digestOf = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 export class FaceCredentialService {
-  constructor({ store, orgId, actor, blacklist, provider, now = () => Date.now() }) {
+  constructor({ store, orgId, actor, files, blacklist, provider, now = () => Date.now() }) {
     this.store = store;
     this.orgId = orgId;
     this.actor = actor;
+    this.files = files;
     this.blacklist = blacklist;
     this.provider = provider;
     this.now = now;
@@ -90,20 +91,8 @@ export class FaceCredentialService {
     const parsed = assertEnrollInput(input);
     if (!input.occupancyId) failCode("PARAM_ERROR", "occupancyId 必填", 400);
 
-    const file = await this.#find("file_assets", parsed.sourceFileId);
-    const policy = PURPOSES["face-biometric"];
-    if (
-      !file ||
-      file.orgId !== this.orgId ||
-      file.purpose !== "face-biometric" ||
-      file.status !== "ready" ||
-      file.visibility !== "private"
-    ) {
-      failCode("FILE_NOT_FOUND", "源文件不存在或不可见", 404);
-    }
-    if (!policy.accept.includes(file.mimeType) || (file.size ?? 0) > policy.maxSize) {
-      failCode("PARAM_ERROR", "源文件格式或大小不符合人脸用途", 400);
-    }
+    // 引用校验：token 携带 file/organization/membership refs，事务内再复核。
+    const reference = await this.files.prepareReference(parsed.sourceFileId);
 
     const opKey = await this.#opKey("face.submit", idempotencyKey);
     const requestDigest = digestOf({ ...parsed, occupancyId: input.occupancyId });

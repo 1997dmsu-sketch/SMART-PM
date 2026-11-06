@@ -7,6 +7,7 @@ import {
   deviceClaimConfig,
   deviceDigest,
   deviceDigestDomainKey,
+  deviceDigestDomainVersionKey,
   assertDigestDomain,
   normalizeDeviceSerial,
   grantSlotKey,
@@ -208,11 +209,39 @@ test("换钥语义：无 head 创建、同版本继续、异版本 DOMAIN_MISMAT
   assert.equal(created[0].data.kind, "head");
   assert.equal(created[1].data.kind, "version");
 
-  const headId = created[0].id;
-  const state = { [`device_digest_domains/${headId}`]: created[0].data };
+  const state = Object.fromEntries(
+    created.map((write) => [`device_digest_domains/${write.id}`, write.data]),
+  );
   assert.deepEqual(applyDigestDomain(state, config), []);
   assert.throws(
     () => applyDigestDomain(state, { ...config, version: 2 }),
     (e) => e.code === "DOMAIN_MISMATCH",
   );
+});
+
+test("不完整或伪造的 domain 记录一律失败关闭，且不自动补写", () => {
+  const config = { provider: "hikvision", digestRealm: "prod-a", version: 1, now: 100 };
+  const [headWrite, versionWrite] = applyDigestDomain({}, config);
+  const two = {
+    [`device_digest_domains/${headWrite.id}`]: headWrite.data,
+    [`device_digest_domains/${versionWrite.id}`]: versionWrite.data,
+  };
+
+  const onlyHead = { [`device_digest_domains/${headWrite.id}`]: headWrite.data };
+  const onlyVersion = { [`device_digest_domains/${versionWrite.id}`]: versionWrite.data };
+  for (const bad of [onlyHead, onlyVersion]) {
+    assert.throws(() => applyDigestDomain(bad, config), (e) => e.code === "DOMAIN_INCOMPLETE");
+  }
+
+  const wrongKind = {
+    ...two,
+    [`device_digest_domains/${headWrite.id}`]: { ...headWrite.data, kind: "version" },
+  };
+  assert.throws(() => applyDigestDomain(wrongKind, config), (e) => e.code === "DOMAIN_INCOMPLETE");
+
+  const wrongProvider = {
+    ...two,
+    [`device_digest_domains/${headWrite.id}`]: { ...headWrite.data, provider: "other" },
+  };
+  assert.throws(() => applyDigestDomain(wrongProvider, config), (e) => e.code === "DOMAIN_INCOMPLETE");
 });

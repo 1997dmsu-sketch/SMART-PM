@@ -33,6 +33,8 @@ const collections = [
   "file_assets",
   "file_links",
   "file_access_log",
+  // HK-AI-04：全局设备摘要域（跨组织共享）
+  "device_digest_domains",
 ];
 export function seed() {
   return {
@@ -123,6 +125,7 @@ export function seed() {
     file_assets: [],
     file_links: [],
     file_access_log: [],
+  device_digest_domains: [],
   };
 }
 export class LocalStore {
@@ -147,6 +150,7 @@ export class LocalStore {
     this.data.file_assets ||= [];
     this.data.file_links ||= [];
     this.data.file_access_log ||= [];
+    this.data.device_digest_domains ||= [];
     return this;
   }
   async persist(data) {

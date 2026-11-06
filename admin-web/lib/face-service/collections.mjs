@@ -201,9 +201,15 @@ export function validateDigestDomainRecord(record) {
  * 版本不同 DOMAIN_MISMATCH 且零写入。真正换钥只能走独立受控迁移。
  */
 export function applyDigestDomain(state, { provider = "hikvision", digestRealm, version, now = Date.now() }) {
+  const prefix = `${COLLECTIONS.DEVICE_DIGEST_DOMAINS}/`;
   const headId = deviceDigestDomainKey({ provider, digestRealm });
-  const head = state[`${COLLECTIONS.DEVICE_DIGEST_DOMAINS}/${headId}`];
-  if (!head) {
+  const versionId = deviceDigestDomainVersionKey({ provider, digestRealm, version });
+  const head = state[prefix + headId];
+  const versionRecord = state[prefix + versionId];
+  // 已有 head 但配置版本不同：直接 DOMAIN_MISMATCH（换钥须受控迁移）。
+  if (head && head.keyVersion !== version) assertDigestDomain(head, { version });
+
+  if (!head && !versionRecord) {
     return [
       {
         collection: COLLECTIONS.DEVICE_DIGEST_DOMAINS,
@@ -212,12 +218,34 @@ export function applyDigestDomain(state, { provider = "hikvision", digestRealm, 
       },
       {
         collection: COLLECTIONS.DEVICE_DIGEST_DOMAINS,
-        id: deviceDigestDomainVersionKey({ provider, digestRealm, version }),
+        id: versionId,
         data: { kind: "version", provider, digestRealm, keyVersion: version, enabledAt: now },
       },
     ];
   }
-  assertDigestDomain(head, { version });
+
+  const failIncomplete = () => {
+    const error = schemaError("摘要域记录不完整或身份不符，需受控修复");
+    error.code = "DOMAIN_INCOMPLETE";
+    throw error;
+  };
+  if (!head || !versionRecord) failIncomplete();
+
+  try {
+    validateDigestDomainRecord(head);
+    validateDigestDomainRecord(versionRecord);
+  } catch {
+    failIncomplete();
+  }
+  if (head.kind !== "head" || versionRecord.kind !== "version") failIncomplete();
+  if (head.provider !== provider || head.digestRealm !== digestRealm ||
+      versionRecord.provider !== provider || versionRecord.digestRealm !== digestRealm) {
+    failIncomplete();
+  }
+  if (head.keyVersion !== version || versionRecord.keyVersion !== version) {
+    assertDigestDomain(head, { version });
+    failIncomplete();
+  }
   return [];
 }
 

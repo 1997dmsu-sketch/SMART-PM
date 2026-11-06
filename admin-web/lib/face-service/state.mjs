@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 四轴状态机与访问投影（精确契约 cc569a8）。
  *
  * - businessAllowed：grant effective + 实时资格；
@@ -64,7 +64,9 @@ export function assertTransition(axis, from, to) {
 
 function evidenceVerified({ grant, job, evidence }) {
   if (!evidence || evidence.trusted !== true) return false;
-  if (evidence.source !== "device" && evidence.kind !== "device_ack") return false;
+  // 来源与类型必须同时成立，不能用 OR 让任一字段单独放行。
+  if (evidence.kind !== "device_ack") return false;
+  if (evidence.source !== "device") return false;
   if (evidence.evidenceScope !== EVIDENCE_SCOPE.DEVICE_VERIFIED) return false;
   if (!job || job.state !== JOB_STATE.SUCCEEDED) return false;
   return (

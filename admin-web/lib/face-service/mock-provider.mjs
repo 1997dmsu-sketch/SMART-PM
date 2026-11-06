@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Mock FaceAccessProvider（精确契约 cc569a8）。
  *
  * 双参数签名：enrollFace(input, context) / updateFace / revokeFace /
@@ -54,7 +54,7 @@ export class MockFaceAccessProvider {
   async enrollFace(input, context) {
     const ctx = assertFaceAccessContext(context);
     const parsed = assertEnrollInput(input);
-    return this.#run("create", parsed, ctx, () => {
+    return this.#run("enroll", parsed, ctx, () => {
       this.people.set(parsed.personId, { sourceFileId: parsed.sourceFileId });
       return { status: "succeeded" };
     });
@@ -69,7 +69,7 @@ export class MockFaceAccessProvider {
   async revokeFace(input, context) {
     const ctx = assertFaceAccessContext(context);
     const parsed = assertRevokeInput(input);
-    return this.#run("delete", parsed, ctx, () => {
+    return this.#run("revoke", parsed, ctx, () => {
       return { status: "succeeded" };
     });
   }
@@ -94,11 +94,17 @@ export class MockFaceAccessProvider {
       if (existing.digest !== digest) {
         throw providerError("CONFLICT", "post_send", "同事件 ID 不同摘要");
       }
+      // 严格递增：已受理更高版本后，低版本（即使内容不同）一律冲突。
+      if (event.version < existing.version) {
+        throw providerError("CONFLICT", "post_send", "事件版本必须严格递增");
+      }
       return existing.result; // 同 ID 同摘要重放
     }
 
     const job = this.jobs.get(event.jobId);
-    const result = job
+    // 事件必须命中同一组织、同一设备上的 job，否则 rejected。
+    const bound = Boolean(job && job.orgId === context.orgId && job.deviceId === event.deviceId);
+    const result = bound
       ? { matchedJobId: event.jobId, action: job.action }
       : { matchedJobId: event.jobId, rejected: true };
     this.events.set(event.eventId, { digest, version: event.version, result });
@@ -115,38 +121,48 @@ export class MockFaceAccessProvider {
     if (context.executionMode === "live") return this.#notConfigured();
 
     const digest = digestOf(input);
-    const existing = this.operations.get(context.idempotencyKey);
+    // 幂等作用域：组织 + 方法 + actor 类型 + actor ID + 幂等键；
+    // 不同组织/用户即使撞键也不得重放同一 job。
+    const scopeKey = [context.orgId, action, context.actorType, context.actorId, context.idempotencyKey].join("|");
+    const existing = this.operations.get(scopeKey);
     if (existing) {
       if (existing.digest !== digest) throw providerError("CONFLICT", "pre_send", "同键不同请求摘要");
       return existing.result;
     }
 
     const jobId = `job-${(this.seq += 1)}`;
-    this.calls.push({ action, jobId });
+    this.calls.push({ action, jobId, orgId: context.orgId });
+    const binding = {
+      jobId,
+      action,
+      orgId: context.orgId,
+      deviceId: input.deviceId ?? null,
+      grantId: input.grantId ?? null,
+      credentialId: input.credentialId ?? null,
+    };
 
     if (this.scenario === "device_offline") throw providerError("DEVICE_OFFLINE", "pre_send", "设备离线");
     if (this.scenario === "pre_send_fail") throw providerError("PROVIDER_ERROR", "pre_send", "发送前失败");
     if (this.scenario === "post_send_unknown") {
-      this.jobs.set(jobId, { jobId, action, state: "awaiting_result", attempts: 1, failureReason: "result_unknown" });
-      this.operations.set(context.idempotencyKey, { digest, jobId, result: null });
+      this.jobs.set(jobId, { ...binding, state: "awaiting_result", attempts: 1, failureReason: "result_unknown" });
+      this.operations.set(scopeKey, { digest, jobId, result: null });
       throw providerError("UNKNOWN_RESULT", "post_send", "发送后结果未知");
     }
-    if (this.scenario === "terminal_fail" || (this.scenario === "revoke_fail" && action === "delete")) {
-      this.jobs.set(jobId, { jobId, action, state: "terminal_failed", attempts: 1, failureReason: "device_rejected" });
-      this.operations.set(context.idempotencyKey, { digest, jobId, result: null });
+    if (this.scenario === "terminal_fail" || (this.scenario === "revoke_fail" && action === "revoke")) {
+      this.jobs.set(jobId, { ...binding, state: "terminal_failed", attempts: 1, failureReason: "device_rejected" });
+      this.operations.set(scopeKey, { digest, jobId, result: null });
       throw providerError("DEVICE_REJECTED", "post_send", "设备拒绝");
     }
 
     const result = { ...execute(), jobId };
     this.jobs.set(jobId, {
-      jobId,
-      action,
+      ...binding,
       state: "succeeded",
       attempts: 1,
       lastSuccessAt: Date.now(),
       failureReason: null,
     });
-    this.operations.set(context.idempotencyKey, { digest, jobId, result });
+    this.operations.set(scopeKey, { digest, jobId, result });
     return result;
   }
 }

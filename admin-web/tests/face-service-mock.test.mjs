@@ -29,6 +29,9 @@ const context = {
   executionMode: "test",
 };
 
+const contextOrgB = { ...context, orgId: "org-other" };
+const contextUserB = { ...context, actorId: "user-2" };
+
 const enrollInput = {
   personId: "person-001",
   deviceId: "device-1",
@@ -117,6 +120,9 @@ test("伪造 trusted 回执不生效：缺 source/action/evidenceScope 均拒绝
     { ...evidence, action: "delete" },
     { ...evidence, evidenceScope: "simulated" },
     { ...evidence, evidenceScope: "review" },
+    { ...evidence, kind: "wrong_kind" },
+    { ...evidence, source: "caller" },
+    { ...evidence, kind: "wrong_kind", source: "device" },
   ]) {
     assert.equal(
       projectAccess({ grant, eligibility: { allowed: true }, jobs: [job], deviceEvidence: wrong }).deviceEffective,
@@ -172,6 +178,31 @@ test("幂等：同键同摘要重放；不同摘要 CONFLICT", async () => {
   );
 });
 
+test("幂等作用域：不同组织/不同 actor 撞键也不重放", async () => {
+  const p = new MockFaceAccessProvider();
+  const a = await p.enrollFace(enrollInput, context);
+  const b = await p.enrollFace(enrollInput, contextOrgB);
+  const c = await p.enrollFace(enrollInput, contextUserB);
+  assert.notEqual(a.jobId, b.jobId);
+  assert.notEqual(a.jobId, c.jobId);
+  assert.equal(p.calls.length, 3);
+  // 同组织+同 actor+同键才重放
+  assert.deepEqual(await p.enrollFace(enrollInput, context), a);
+});
+
+test("job 保存组织/设备绑定，动作名为 enroll/update/revoke", async () => {
+  const p = new MockFaceAccessProvider();
+  const created = await p.enrollFace(enrollInput, context);
+  const job = p.jobs.get(created.jobId);
+  assert.equal(job.action, "enroll");
+  assert.equal(job.orgId, "org-demo");
+  assert.equal(job.deviceId, "device-1");
+  const upd = await p.updateFace({ credentialId: "c1", sourceFileId: "file-2" }, context);
+  assert.equal(p.jobs.get(upd.jobId).action, "update");
+  const rev = await p.revokeFace({ grantId: "grant-1", credentialId: "c1" }, context);
+  assert.equal(p.jobs.get(rev.jobId).action, "revoke");
+});
+
 test("post_send 未知：UNKNOWN_RESULT，job 停 awaiting_result", async () => {
   const p = new MockFaceAccessProvider({ scenario: "post_send_unknown" });
   await assert.rejects(() => p.enrollFace(enrollInput, context), (e) => classifyProviderError(e) === "UNKNOWN_RESULT");
@@ -211,6 +242,30 @@ test("事件：同 ID 同摘要重放，同 ID 异摘要 CONFLICT，不回显 pa
 
   await assert.rejects(
     () => p.verifyEvent(eventInput({ version: 2, signature: "mock-sig:mock.test:evt-1:2", occurredAt: Date.now() }), context),
+    (e) => e.code === "CONFLICT",
+  );
+});
+
+test("事件必须匹配同组织/同设备 job；低版本冲突", async () => {
+  const p = new MockFaceAccessProvider();
+  const created = await p.enrollFace(enrollInput, context);
+
+  // 设备不符 → rejected
+  const wrongDevice = await p.verifyEvent(
+    eventInput({ eventId: "evt-wrong", jobId: created.jobId, deviceId: "device-2", signature: "mock-sig:mock.test:evt-wrong:1" }),
+    context,
+  );
+  assert.deepEqual(wrongDevice, { matchedJobId: created.jobId, rejected: true });
+
+  // 正确设备 → matched
+  const matched = await p.verifyEvent(eventInput({ jobId: created.jobId, occurredAt: Date.now() }), context);
+  assert.equal(matched.action, "enroll");
+
+  // 先受理版本2，再来版本1 → CONFLICT
+  const v2 = eventInput({ eventId: "evt-2", jobId: created.jobId, version: 2, signature: "mock-sig:mock.test:evt-2:2" });
+  await p.verifyEvent(v2, context);
+  await assert.rejects(
+    () => p.verifyEvent({ ...v2, version: 1, signature: "mock-sig:mock.test:evt-2:1" }, context),
     (e) => e.code === "CONFLICT",
   );
 });

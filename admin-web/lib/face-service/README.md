@@ -1,4 +1,4 @@
-# HK-AI-04 人脸服务层 Mock 骨架（精确契约 cc569a8）
+﻿# HK-AI-04 人脸服务层 Mock 骨架（精确契约 cc569a8）
 
 状态：**部分骨架**。未接 `server.mjs`、未建集合、未连接真实设备；等待契约复审通过后再接线。
 
@@ -54,13 +54,13 @@ executionMode: demo|test|live
 
 - 固定测试域 `mock.test`、递增 `version`、`occurredAt` 5 分钟时间窗；
 - 签名格式 `mock-sig:<domain>:<eventId>:<version>`；
-- 同 ID 同摘要重放；同 ID 不同摘要 `CONFLICT`；
+- 事件必须匹配同组织、同设备上的 job；版本必须严格递增；同 ID 同摘要重放，不同摘要 `CONFLICT`；
 - 返回只含 `matchedJobId/action` 或 `rejected`，不回显 payload；
 - `executionMode=live` 一律 `NOT_CONFIGURED`。
 
 ## 幂等与错误
 
-- 同 `idempotencyKey` 同输入摘要重放；不同摘要 `CONFLICT`；
+- 幂等作用域 = 组织 + 方法 + actor 类型 + actor ID + 幂等键；同作用域同摘要重放，不同摘要 `CONFLICT`；
 - 对外分类：`RETRYABLE / TERMINAL / UNKNOWN_RESULT / NOT_CONFIGURED`；
 - `createFaceProvider({mode, provider})` 必须**同时显式** `mode=demo|test` 与 `provider="mock"`。
 

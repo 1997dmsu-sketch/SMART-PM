@@ -99,8 +99,13 @@ export class FaceCredentialService {
     const credentialId = `fc-${digestOf(opKey).slice(0, 24)}`;
 
     await this.store.transact(
-      [ref(COLLECTIONS.FACE_CREDENTIALS, credentialId), ref(COLLECTIONS.OPERATION_KEYS, opKey)],
+      [
+        ref(COLLECTIONS.FACE_CREDENTIALS, credentialId),
+        ref(COLLECTIONS.OPERATION_KEYS, opKey),
+        ...reference.refs,
+      ],
       (state) => {
+        this.files.assertReference(state, reference);
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
           if (existing.digest !== requestDigest) failCode("CONFLICT", "同键不同请求摘要", 409);

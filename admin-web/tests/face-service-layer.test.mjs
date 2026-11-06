@@ -1,4 +1,4 @@
-﻿import { test, before, after } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -84,7 +84,8 @@ before(async () => {
     ["mem-audit", ["device.audit.read"]],
     ["mem-admin", ["device.face.submit", "device.face.review", "device.access.manage", "device.audit.read"]],
   ];
-  await store.transact([ref("file_assets", "file-1"), ...memberships.map(([id]) => ref("org_memberships", id))], () => [
+  await store.transact([ref("organizations", orgId), ref("file_assets", "file-1"), ...memberships.map(([id]) => ref("org_memberships", id))], () => [
+    { collection: "organizations", id: orgId, data: { name: "人脸组织", status: "active", revision: 1 } },
     { collection: "file_assets", id: "file-1", data: { orgId, purpose: "face-biometric", status: "ready", visibility: "private", mimeType: "image/jpeg", size: 1024, objectKey: "private/f.jpg", revision: 1 } },
     ...memberships.map(([id, permissions]) => ({
       collection: "org_memberships", id,
@@ -224,4 +225,78 @@ test("跨组织任务查询同态 404", async () => {
     () => service("mem-audit").queryJob("job-other-org"),
     (e) => e.status === 404 || e.code === "NOT_FOUND",
   );
+});
+
+test("prepare 后撤销权限：submit 失败且凭证/operation key 零写入", async () => {
+  const membershipId = "mem-race";
+  await store.transact([ref("org_memberships", membershipId)], () => [{
+    collection: "org_memberships", id: membershipId,
+    data: { orgId, status: "active", role: "admin", principalType: "adminAccount", principalId: membershipId, permissions: ["device.face.submit"], revision: 1 },
+  }], audit);
+
+  const base = new FileService(store, orgId, {
+    auth: { membershipId },
+    actor: { actorType: "user", actorId: membershipId, role: "editor", permissions: ["device.face.submit"] },
+  });
+  const racing = {
+    prepareReference: async (fileId) => {
+      const token = await base.prepareReference(fileId);
+      const row = (await store.list("org_memberships", orgId)).find((m) => m._id === membershipId);
+      await store.transact([ref("org_memberships", membershipId)], () => [{
+        collection: "org_memberships", id: membershipId, data: { ...row, permissions: [] },
+      }], audit);
+      return token;
+    },
+    assertReference: base.assertReference.bind(base),
+  };
+  const svc = new FaceCredentialService({
+    store, orgId,
+    actor: { membershipId, actorType: "user", actorId: membershipId },
+    files: racing, blacklist, provider, now: () => 1_700_000_000_000,
+  });
+
+  const before = {
+    credentials: (await store.list("face_credentials", orgId)).length,
+    keys: (await store.list("operation_keys", orgId)).length,
+  };
+  await assert.rejects(
+    () => svc.submit({ ...input, personId: "person-race" }, { idempotencyKey: "idem-key-race-01" }),
+    (e) => e.status === 404,
+  );
+  assert.equal((await store.list("face_credentials", orgId)).length, before.credentials);
+  assert.equal((await store.list("operation_keys", orgId)).length, before.keys);
+});
+
+test("prepare 后文件 revision 变化：submit 失败且零写入", async () => {
+  const base = new FileService(store, orgId, {
+    auth: { membershipId: "mem-submit" },
+    actor: { actorType: "user", actorId: "mem-submit", role: "editor", permissions: ["device.face.submit"] },
+  });
+  const racing = {
+    prepareReference: async (fileId) => {
+      const token = await base.prepareReference(fileId);
+      const file = (await store.list("file_assets", orgId)).find((f) => f._id === fileId);
+      await store.transact([ref("file_assets", fileId)], () => [{
+        collection: "file_assets", id: fileId, data: { ...file, revision: file.revision + 1 },
+      }], audit);
+      return token;
+    },
+    assertReference: base.assertReference.bind(base),
+  };
+  const svc = new FaceCredentialService({
+    store, orgId,
+    actor: { membershipId: "mem-submit", actorType: "user", actorId: "mem-submit" },
+    files: racing, blacklist, provider, now: () => 1_700_000_000_000,
+  });
+
+  const before = {
+    credentials: (await store.list("face_credentials", orgId)).length,
+    keys: (await store.list("operation_keys", orgId)).length,
+  };
+  await assert.rejects(
+    () => svc.submit({ ...input, personId: "person-race-2" }, { idempotencyKey: "idem-key-race-02" }),
+    (e) => e.code === "FILE_CHANGED",
+  );
+  assert.equal((await store.list("face_credentials", orgId)).length, before.credentials);
+  assert.equal((await store.list("operation_keys", orgId)).length, before.keys);
 });

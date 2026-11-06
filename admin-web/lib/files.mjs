@@ -1,4 +1,4 @@
-﻿// DB-07 T03 文件服务层（docs/database/DB-07-IMPLEMENTATION.md §2/§3/§5/§7）。
+// DB-07 T03 文件服务层（docs/database/DB-07-IMPLEMENTATION.md §2/§3/§5/§7）。
 //
 // FileService 是 file_assets / file_links / file_access_log 的唯一写入口：
 // 鉴权（组织上下文、purpose/visibility 分级）全部在服务层完成，适配器只做
@@ -797,6 +797,8 @@ export class FileService {
   assertReference(state, reference) {
     const deny = () => failCode("FILE_NOT_FOUND", "文件不存在或不可见", 404);
     try {
+      const org = state[`organizations/${this.orgId}`];
+      if (!org || org.status !== "active") deny();
       this.authCheck(state, { permission: "device.face.submit" });
     } catch {
       deny();

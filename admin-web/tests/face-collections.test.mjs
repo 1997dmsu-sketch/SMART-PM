@@ -15,9 +15,10 @@ import {
   operationKey,
   validateRecord,
   validateDigestDomainRecord,
+  applyDigestDomain,
 } from "../lib/face-service/collections.mjs";
 
-test("集合名冻结为八张，且可识别", () => {
+test("集合名冻结为九张，且可识别", () => {
   assert.deepEqual(Object.values(COLLECTIONS).sort(), [
     "access_devices",
     "device_access_grants",
@@ -172,9 +173,46 @@ test("domain head 不含版本：换钥后仍读取同一条记录", () => {
 });
 
 test("device_digest_domains：head 与版本历史记录校验", () => {
-  assert.equal(validateDigestDomainRecord({ kind: "head", provider: "hikvision", digestRealm: "prod-a", keyVersion: 1 }).kind, "head");
-  assert.equal(validateDigestDomainRecord({ kind: "version", provider: "hikvision", digestRealm: "prod-a", keyVersion: 2 }).keyVersion, 2);
+  assert.equal(validateDigestDomainRecord({ kind: "head", provider: "hikvision", digestRealm: "prod-a", keyVersion: 1, revision: 1, createdAt: 1 }).kind, "head");
+  assert.equal(validateDigestDomainRecord({ kind: "version", provider: "hikvision", digestRealm: "prod-a", keyVersion: 2, enabledAt: 2 }).keyVersion, 2);
   assert.throws(() => validateDigestDomainRecord({ kind: "other", provider: "p", digestRealm: "r", keyVersion: 1 }), /kind/);
   assert.throws(() => validateDigestDomainRecord({ kind: "head", provider: "", digestRealm: "r", keyVersion: 1 }), /provider/);
   assert.throws(() => validateDigestDomainRecord({ kind: "head", provider: "p", digestRealm: "r", keyVersion: 0 }), /keyVersion/);
+});
+
+test("validateRecord 自动分发摘要域校验；head/version 字段强化", () => {
+  assert.throws(
+    () => validateRecord(COLLECTIONS.DEVICE_DIGEST_DOMAINS, { kind: "head", provider: "p", digestRealm: "r", keyVersion: 1 }),
+    /revision/,
+  );
+  assert.throws(
+    () => validateRecord(COLLECTIONS.DEVICE_DIGEST_DOMAINS, { kind: "version", provider: "p", digestRealm: "r", keyVersion: 1 }),
+    /enabledAt/,
+  );
+  assert.throws(
+    () => validateRecord(COLLECTIONS.DEVICE_DIGEST_DOMAINS, { kind: "head", provider: "  ", digestRealm: "r", keyVersion: 1, revision: 1, createdAt: 1 }),
+    /provider/,
+  );
+  assert.equal(
+    validateRecord(COLLECTIONS.DEVICE_DIGEST_DOMAINS, {
+      kind: "head", provider: "p", digestRealm: "r", keyVersion: 1, revision: 1, createdAt: 1,
+    }).kind,
+    "head",
+  );
+});
+
+test("换钥语义：无 head 创建、同版本继续、异版本 DOMAIN_MISMATCH 零写入", () => {
+  const config = { provider: "hikvision", digestRealm: "prod-a", version: 1, now: 100 };
+  const created = applyDigestDomain({}, config);
+  assert.equal(created.length, 2);
+  assert.equal(created[0].data.kind, "head");
+  assert.equal(created[1].data.kind, "version");
+
+  const headId = created[0].id;
+  const state = { [`device_digest_domains/${headId}`]: created[0].data };
+  assert.deepEqual(applyDigestDomain(state, config), []);
+  assert.throws(
+    () => applyDigestDomain(state, { ...config, version: 2 }),
+    (e) => e.code === "DOMAIN_MISMATCH",
+  );
 });

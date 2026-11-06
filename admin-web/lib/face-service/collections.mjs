@@ -66,6 +66,9 @@ export function validateRecord(collection, record, { partial = false } = {}) {
     throw schemaError(`未知集合：${collection}`);
   }
   if (!record || typeof record !== "object") throw schemaError("记录必须是对象");
+  if (collection === COLLECTIONS.DEVICE_DIGEST_DOMAINS) {
+    return validateDigestDomainRecord(record);
+  }
 
   if (ORG_SCOPED.has(collection) && !partial) {
     if (!record.orgId) throw schemaError(`${collection}.orgId 必填`);
@@ -178,12 +181,44 @@ function assertId(value, field) {
 export function validateDigestDomainRecord(record) {
   if (!record || typeof record !== "object") throw schemaError("摘要域记录必须是对象");
   if (!["head", "version"].includes(record.kind)) throw schemaError("kind 必须是 head/version");
-  if (typeof record.provider !== "string" || !record.provider) throw schemaError("provider 必填");
-  if (typeof record.digestRealm !== "string" || !record.digestRealm) throw schemaError("digestRealm 必填");
+  if (typeof record.provider !== "string" || !record.provider.trim()) throw schemaError("provider 必填");
+  if (typeof record.digestRealm !== "string" || !record.digestRealm.trim()) throw schemaError("digestRealm 必填");
   if (!Number.isInteger(record.keyVersion) || record.keyVersion < 1) {
     throw schemaError("keyVersion 必须是正整数");
   }
+  if (record.kind === "head") {
+    if (!Number.isInteger(record.revision) || record.revision < 1) throw schemaError("head.revision 必须是 ≥1 整数");
+    if (!Number.isInteger(record.createdAt)) throw schemaError("head.createdAt 必须是时间戳");
+  }
+  if (record.kind === "version" && !Number.isInteger(record.enabledAt)) {
+    throw schemaError("version.enabledAt 必须是时间戳");
+  }
   return record;
+}
+
+/**
+ * 换钥语义（冻结）：无 head 则创建 head＋版本记录；版本相同继续；
+ * 版本不同 DOMAIN_MISMATCH 且零写入。真正换钥只能走独立受控迁移。
+ */
+export function applyDigestDomain(state, { provider = "hikvision", digestRealm, version, now = Date.now() }) {
+  const headId = deviceDigestDomainKey({ provider, digestRealm });
+  const head = state[`${COLLECTIONS.DEVICE_DIGEST_DOMAINS}/${headId}`];
+  if (!head) {
+    return [
+      {
+        collection: COLLECTIONS.DEVICE_DIGEST_DOMAINS,
+        id: headId,
+        data: { kind: "head", provider, digestRealm, keyVersion: version, revision: 1, createdAt: now },
+      },
+      {
+        collection: COLLECTIONS.DEVICE_DIGEST_DOMAINS,
+        id: deviceDigestDomainVersionKey({ provider, digestRealm, version }),
+        data: { kind: "version", provider, digestRealm, keyVersion: version, enabledAt: now },
+      },
+    ];
+  }
+  assertDigestDomain(head, { version });
+  return [];
 }
 
 export function schemaError(message) {

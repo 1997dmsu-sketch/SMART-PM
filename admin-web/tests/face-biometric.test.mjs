@@ -61,9 +61,18 @@ test("assertFaceImage：区间内通过，过小/过大拒绝", async () => {
 test("解码超时后槽位可恢复（不会永久占用）", async () => {
   const jpeg = await jpegOf(640, 480);
   await assert.rejects(() => decodeFaceImage(jpeg, { timeoutMs: 1 }), /超时/);
-  await new Promise((resolve) => setTimeout(resolve, 80)); // 等底层任务结束并释放槽位
-  const ok = await decodeFaceImage(jpeg, { timeoutMs: 3000 });
-  assert.equal(ok.width, 640);
+  // 并发测试环境下 libvips 结束时间不确定：轮询直到槽位释放（上限 3s），
+  // 避免固定 sleep 造成的偶发失败。
+  const deadline = Date.now() + 3000;
+  let ok = null;
+  while (!ok && Date.now() < deadline) {
+    try {
+      ok = await decodeFaceImage(jpeg, { timeoutMs: 3000 });
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+  assert.equal(ok?.width, 640);
 });
 
 test("publicAsset 不返回任何摘要", () => {

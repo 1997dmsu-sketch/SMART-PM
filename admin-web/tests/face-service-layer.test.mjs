@@ -1,4 +1,4 @@
-﻿import { test, before, after } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,28 +10,20 @@ import { FaceCredentialService } from "../lib/face-service/service.mjs";
 
 let store, dir;
 const orgId = "org-demo";
-
 const ref = (collection, id) => ({ collection, id });
 const audit = { actor: "system", actorId: "system", action: "测试" };
 
-const actor = { membershipId: "mem-1", actorType: "user", actorId: "admin-1" };
-
 const input = {
-  personId: "person-001",
-  deviceId: "device-1",
-  grantId: "grant-1",
-  sourceFileId: "file-1",
-  validFrom: 1000,
-  validUntil: 2000,
-  occupancyId: "occ-1",
+  personId: "person-001", deviceId: "device-1", grantId: "grant-1",
+  sourceFileId: "file-1", validFrom: 1000, validUntil: 2000, occupancyId: "occ-1",
 };
 
-// 真实 transact + 固定 eligible 的资格桩；服务层不复制名单规则。
+let eligible = { eligible: true, entryIds: [], decisionId: null };
 const blacklist = {
   withEligibility: async (request, refs, build) => {
     let result;
     await store.transact(refs, async (state) => {
-      const built = await build(state, { eligible: true, entryIds: [], decisionId: null });
+      const built = await build(state, eligible);
       result = built.result;
       return built.writes;
     }, audit);
@@ -39,54 +31,60 @@ const blacklist = {
   },
 };
 
-const provider = new MockFaceAccessProvider();
+let providerCalls = [];
+let inTransaction = false;
+const provider = {
+  async enrollFace(inputArg, context) {
+    providerCalls.push({ action: "enroll", inTransaction });
+    return new MockFaceAccessProvider().enrollFace(inputArg, context);
+  },
+  async revokeFace(inputArg, context) {
+    providerCalls.push({ action: "revoke", inTransaction });
+    return new MockFaceAccessProvider().revokeFace(inputArg, context);
+  },
+};
 
-const service = () =>
-  new FaceCredentialService({
-    store,
-    orgId,
-    actor,
-    files: {},
-    blacklist,
-    provider,
-    now: () => 1_700_000_000_000,
+const trackedStore = () =>
+  new Proxy(store, {
+    get(target, prop) {
+      if (prop === "transact") {
+        return async (...args) => {
+          inTransaction = true;
+          try { return await target.transact(...args); } finally { inTransaction = false; }
+        };
+      }
+      const value = target[prop];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
   });
 
+const service = (membershipId) =>
+  new FaceCredentialService({
+    store: trackedStore(), orgId,
+    actor: { membershipId, actorType: "user", actorId: membershipId },
+    blacklist, provider, now: () => 1_700_000_000_000,
+  });
+
+const approvedCredential = async () =>
+  (await store.list("face_credentials", orgId)).find((c) => c.reviewState === "approved");
+
 before(async () => {
-  dir = await mkdtemp(join(tmpdir(), "smartpm-face-service-"));
+  dir = await mkdtemp(join(tmpdir(), "smartpm-face-svc-"));
   store = new LocalStore(dir);
   await store.init();
-
-  await store.transact([ref("org_memberships", "mem-1")], () => [
-    {
-      collection: "org_memberships",
-      id: "mem-1",
-      data: {
-        orgId,
-        status: "active",
-        role: "admin",
-        principalType: "adminAccount",
-        principalId: "acc-1",
-        permissions: ["device.face.submit", "device.face.review", "device.access.manage", "device.audit.read"],
-        revision: 1,
-      },
-    },
-  ], audit);
-
-  await store.transact([ref("file_assets", "file-1")], () => [
-    {
-      collection: "file_assets",
-      id: "file-1",
-      data: {
-        orgId,
-        purpose: "face-biometric",
-        status: "ready",
-        visibility: "private",
-        mimeType: "image/jpeg",
-        objectKey: "private/face-1.jpg",
-        revision: 1,
-      },
-    },
+  const memberships = [
+    ["mem-submit", ["device.face.submit"]],
+    ["mem-review", ["device.face.review"]],
+    ["mem-manage", ["device.access.manage"]],
+    ["mem-audit", ["device.audit.read"]],
+    ["mem-admin", ["device.face.submit", "device.face.review", "device.access.manage", "device.audit.read"]],
+  ];
+  await store.transact([ref("file_assets", "file-1"), ...memberships.map(([id]) => ref("org_memberships", id))], () => [
+    { collection: "file_assets", id: "file-1", data: { orgId, purpose: "face-biometric", status: "ready", visibility: "private", mimeType: "image/jpeg", size: 1024, objectKey: "private/f.jpg", revision: 1 } },
+    ...memberships.map(([id, permissions]) => ({
+      collection: "org_memberships", id,
+      data: { orgId, status: "active", role: "admin", principalType: "adminAccount", principalId: id, permissions, revision: 1 },
+    })),
   ], audit);
 });
 
@@ -94,84 +92,131 @@ after(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-test("提交：无 device.face.submit 权限 → 403 且零写入", async () => {
-  await store.transact([ref("org_memberships", "mem-2")], () => [
-    {
-      collection: "org_memberships",
-      id: "mem-2",
-      data: { orgId, status: "active", role: "viewer", principalType: "adminAccount", principalId: "acc-2", permissions: [], revision: 1 },
-    },
-  ], audit);
-  const noPerm = new FaceCredentialService({
-    store, orgId, actor: { membershipId: "mem-2", actorType: "user", actorId: "viewer-1" },
-    files: {}, blacklist, provider, now: () => 1,
-  });
-  await assert.rejects(
-    () => noPerm.submit(input, { idempotencyKey: "idem-key-00000001" }),
-    (e) => e.status === 403 || e.code === "FORBIDDEN",
-  );
-  const rows = await store.list("face_credentials", orgId);
-  assert.equal(rows.length, 0);
+test("submitter 可提交，但不能审核/授权；提交不建 grant/job", async () => {
+  const s = service("mem-submit");
+  const out = await s.submit(input, { idempotencyKey: "idem-key-submit-01" });
+  assert.equal(out.reviewState, "submitted");
+  assert.equal((await store.list("face_credentials", orgId)).length, 1);
+  assert.equal((await store.list("device_access_grants", orgId)).length, 0);
+  assert.equal((await store.list("device_operation_jobs", orgId)).length, 0);
+  await assert.rejects(() => s.review(out.credentialId, { decision: "approved" }, { idempotencyKey: "k2" }), (e) => e.status === 403);
+  await assert.rejects(() => s.createGrant({ credentialId: out.credentialId, occupancyId: "occ-1", identityApplicationId: "id-1" }, { idempotencyKey: "k3" }), (e) => e.status === 403);
 });
 
-test("提交：成功写入凭证与 operation_key；重放同结果，异摘要 CONFLICT", async () => {
-  const s = service();
-  const first = await s.submit(input, { idempotencyKey: "idem-key-00000001" });
-  assert.equal(first.reviewState, "submitted");
-  assert.equal((await store.list("face_credentials", orgId)).length, 1);
-  assert.equal((await store.list("operation_keys", orgId)).length, 1);
+test("reviewer 可审核但不建 grant；未 approved 授权被拒", async () => {
+  const [credential] = await store.list("face_credentials", orgId);
+  const reviewer = service("mem-review");
+  const reviewed = await reviewer.review(credential._id, { decision: "approved", expectedRevision: 1 }, { idempotencyKey: "idem-key-review-01" });
+  assert.equal(reviewed.reviewState, "approved");
+  assert.equal((await store.list("device_access_grants", orgId)).length, 0);
+  assert.equal((await store.list("device_operation_jobs", orgId)).length, 0);
+});
 
-  const replay = await s.submit(input, { idempotencyKey: "idem-key-00000001" });
-  assert.deepEqual(replay, first);
+test("access manager 创建 grant/job/claims；模拟证据不产生 deviceEffective", async () => {
+  const credential = await approvedCredential();
+  const manager = service("mem-manage");
+  const out = await manager.createGrant(
+    { credentialId: credential._id, occupancyId: "occ-1", identityApplicationId: "id-1" },
+    { idempotencyKey: "idem-key-grant-01" },
+  );
+  assert.equal(out.evidenceScope, "simulated");
+  const grant = (await store.list("device_access_grants", orgId))[0];
+  const job = (await store.list("device_operation_jobs", orgId)).find((j) => j._id === out.jobId);
+  assert.equal(grant.state, "effective");
+  assert.equal(job.evidenceScope, "simulated");
+  assert.equal(job.provider, "mock");
+  assert.equal(job.executionMode, "test");
+  assert.equal((await store.list("device_claims", orgId)).length, 1);
+  assert.equal((await store.list("grant_slot_claims", orgId)).length, 1);
+
+  const projected = projectAccess({
+    grant, eligibility: { allowed: true }, jobs: [job],
+    deviceEvidence: { kind: "mock_result", trusted: true, evidenceScope: "simulated" },
+  });
+  assert.equal(projected.deviceEffective, false);
+});
+
+test("Provider 调用发生在事务外", () => {
+  assert.ok(providerCalls.length >= 1);
+  assert.ok(providerCalls.every((call) => call.inTransaction === false));
+});
+
+test("资格待审/拒绝：grant/job 零写入", async () => {
+  const pending = await service("mem-submit").submit(
+    { ...input, personId: "person-002", deviceId: "device-2" },
+    { idempotencyKey: "idem-key-submit-02" },
+  );
+  await service("mem-review").review(pending.credentialId, { decision: "approved" }, { idempotencyKey: "idem-key-review-02" });
+
+  const manager = service("mem-manage");
+  const snapshot = async () => ({
+    grants: (await store.list("device_access_grants", orgId)).length,
+    jobs: (await store.list("device_operation_jobs", orgId)).length,
+    keys: (await store.list("operation_keys", orgId)).length,
+    claims: (await store.list("device_claims", orgId)).length,
+  });
+  const before = await snapshot();
+
+  eligible = { eligible: false, code: "BLACKLIST_REVIEW_REQUIRED", entryIds: ["e1"], decisionId: null };
+  await assert.rejects(
+    () => manager.createGrant({ credentialId: pending.credentialId, occupancyId: "occ-1", identityApplicationId: "id-1" }, { idempotencyKey: "idem-key-grant-02" }),
+    (e) => e.status === 409,
+  );
+
+  eligible = { eligible: false, code: "BLACKLIST_DENIED", entryIds: ["e1"], decisionId: null };
+  await assert.rejects(
+    () => manager.createGrant({ credentialId: pending.credentialId, occupancyId: "occ-1", identityApplicationId: "id-1" }, { idempotencyKey: "idem-key-grant-03" }),
+    (e) => e.status === 403,
+  );
+
+  assert.deepEqual(await snapshot(), before);
+  eligible = { eligible: true, entryIds: [], decisionId: null };
+});
+
+test("撤权不查资格；grant 立即 revoked；清理失败不回滚", async () => {
+  const grant = (await store.list("device_access_grants", orgId))[0];
+  const manager = service("mem-manage");
+  const saved = eligible;
+  eligible = { eligible: false, code: "BLACKLIST_DENIED", entryIds: [], decisionId: null };
+  provider.revokeFace = async (inputArg, context) => {
+    providerCalls.push({ action: "revoke", inTransaction });
+    return new MockFaceAccessProvider({ scenario: "revoke_fail" }).revokeFace(inputArg, context);
+  };
+  const out = await manager.revoke(grant._id, { idempotencyKey: "idem-key-revoke-01" });
+  eligible = saved;
+
+  const after = (await store.list("device_access_grants", orgId))[0];
+  const revokeJob = (await store.list("device_operation_jobs", orgId)).find((j) => j._id === out.jobId);
+  assert.equal(after.state, "revoked");
+  assert.equal(after.cleanupPending, true);
+  assert.equal(revokeJob.state, "terminal_failed");
+});
+
+test("幂等：同键同输入重放；不同输入 CONFLICT", async () => {
+  const manager = service("mem-manage");
+  const credential = await approvedCredential();
+  const replay = await manager.createGrant(
+    { credentialId: credential._id, occupancyId: "occ-1", identityApplicationId: "id-1" },
+    { idempotencyKey: "idem-key-grant-01" },
+  );
+  assert.ok(replay.grantId);
 
   await assert.rejects(
-    () => s.submit({ ...input, validUntil: 2001 }, { idempotencyKey: "idem-key-00000001" }),
+    () => manager.createGrant(
+      { credentialId: credential._id, occupancyId: "occ-2", identityApplicationId: "id-1" },
+      { idempotencyKey: "idem-key-grant-01" },
+    ),
     (e) => e.code === "CONFLICT",
   );
 });
 
-test("审核通过：创建 grant 与 job，Mock 只产生 simulated，不产生真实设备生效", async () => {
-  const s = service();
-  const [credential] = await store.list("face_credentials", orgId);
-  const result = await s.review(credential._id, { decision: "approved" }, { idempotencyKey: "idem-key-review-0001" });
-  assert.equal(result.reviewState, "approved");
-  assert.ok(result.grantId && result.jobId);
-
-  const grant = (await store.list("device_access_grants", orgId))[0];
-  const job = (await store.list("device_operation_jobs", orgId))[0];
-  assert.equal(grant.state, "effective");
-  assert.equal(grant.evidenceScope, "simulated");
-  assert.equal(job.state, "succeeded");
-  assert.equal(job.evidenceScope, "simulated");
-
-  const projected = projectAccess({
-    grant,
-    eligibility: { allowed: true },
-    jobs: [job],
-    deviceEvidence: { kind: "mock_result", trusted: true, evidenceScope: "simulated" },
-  });
-  assert.equal(projected.businessAllowed, true);
-  assert.equal(projected.deviceEffective, false);
-});
-
-test("审核队列与任务查询：各自权限，队列不含摘要/图片", async () => {
-  const s = service();
-  const queue = await s.reviewQueue();
-  assert.equal(queue.length, 0); // 已审核的不再出现
-  const job = (await store.list("device_operation_jobs", orgId))[0];
-  const dto = await s.queryJob(job._id);
-  assert.equal(dto.jobId, job._id);
-  assert.equal(dto.state, "succeeded");
-  assert.equal("opId" in dto, false);
-});
-
-test("撤销：grant 立即失效，job 为模拟撤权", async () => {
-  const s = service();
-  const grant = (await store.list("device_access_grants", orgId))[0];
-  const result = await s.revoke(grant._id, { idempotencyKey: "idem-key-revoke-0001" });
-  assert.equal(result.grantId, grant._id);
-  const after = (await store.list("device_access_grants", orgId))[0];
-  assert.equal(after.state, "revoked");
-  const jobs = await store.list("device_operation_jobs", orgId);
-  assert.ok(jobs.some((j) => j.action === "revoke" && j.state === "succeeded"));
+test("跨组织任务查询同态 404", async () => {
+  await store.transact([ref("device_operation_jobs", "job-other-org")], () => [{
+    collection: "device_operation_jobs", id: "job-other-org",
+    data: { orgId: "org-other", revision: 1, action: "enroll", state: "succeeded", evidenceScope: "simulated" },
+  }], audit);
+  await assert.rejects(
+    () => service("mem-audit").queryJob("job-other-org"),
+    (e) => e.status === 404 || e.code === "NOT_FOUND",
+  );
 });

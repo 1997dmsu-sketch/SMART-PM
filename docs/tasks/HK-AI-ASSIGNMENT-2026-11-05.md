@@ -14,7 +14,6 @@
 | AI-D0 契约证据准备 | `HK-AI-04A-CONTRACT-EVIDENCE-PREP.md` | Kimi 立即开始 | AI-A 文档与 LOCK-01A 契约 |
 | AI-D 门禁后端 | `HK-AI-04-FACE-SERVICE-MOCK.md` | Harness 夜间连续开发；早间统一复审 | AI-C 集成基线 |
 | AI-E 后台前端 | `HK-AI-05-ADMIN-FLOW.md` | API 契约冻结后开始 | AI-D 契约 |
-| AI-F 企业微信看板 | `DEV-AI-01-WECOM-BOARD.md` | Workburry 立即开始 | 无海康设备依赖 |
 
 ## 认领状态
 
@@ -26,7 +25,7 @@
 | AI-D0 / HK-AI-04A | 文档阶段通过 Codex 复审（`5148159`） | `docs/hk-ai-04-contract-evidence` | `8b47fb7` | 九项架构裁定见 `HK-AI-04A-REVIEW-2026-11-05.md`；不代表真实能力验证 |
 | AI-D / HK-AI-04 | H2-a `1116e9d` 实现方向通过，缺严格重放测试提交 | `feat/hk-face-service-integration` | `1116e9d` | 生产 helper 与头注释已对齐；仅补真实 op 记录的 null/空对象/数组/错误 ID/evidenceScope/异常时间戳测试，见 `HK-AI-04-H2A-PART2-REREVIEW-1116E9D-2026-11-07.md`；H2-b/H3/H4 继续关闭 |
 | AI-E / HK-AI-05 | 今日由 Workburry 启动页面壳 | `feat/hk-face-admin` | 先用合成 fixture；等待 AI-D DTO 后绑定 | 今日交设备/申请/任务/审计页面壳，持续显示 Mock 标识 |
-| AI-F / DEV-AI-01 | Workburry 已分配，演示前降为 P1 | `feat/wecom-dev-board` | `docs/lock-01-fast-track@1358ef5` | 暂不占用 AI-E 关键路径；真实发送仍等待企业微信配置 |
+| 并行任务包 | `HK-AI-PARALLEL-TASKS-2026-11-07.md` | 已分配 Harness / Kimi / Workburry | 企业微信看板任务已取消；五项任务按独立分支执行 |
 | HK-HUMAN-02 安装视频 | Kimi 负责脚本/分镜/字幕，真人负责断电接线与拍摄 | `docs/hk-install-video` | DS-K1T671BM + PDC-K7B-12V5A | 先交文档包；端子与锁铭牌经真人复核后再出最终成片 |
 
 > AI-B 现场批准与执行包：`docs/tasks/HK-AI-02-LIVE-APPROVAL-PACK.md`。批准栏（现场负责人 + 项目负责人 + 执行人）签署前禁止设置 `HIKVISION_PROBE_ALLOW_READ=true`；一次批准只授权一次只读执行。
@@ -43,7 +42,6 @@ AI-A 在收到原包前可以先完成证据矩阵结构、已有资料登记映
 | AI-D0 契约证据准备 | Kimi | Codex |
 | AI-D 门禁后端 | DeepSeek Harness | Codex |
 | AI-E 后台前端 | Workburry | Codex |
-| AI-F 企业微信开发看板 | Workburry | Codex |
 
 Codex 另行认领 ISAPI 路线、系统架构、安全边界、关键状态机和所有阶段复审，详见 `HK-AI-OWNERSHIP-AND-BUDGET.md`。
 

@@ -323,11 +323,11 @@ export function validateDigestDomainRecord(record) {
   if (!["head", "version"].includes(record.kind)) throw schemaError("kind 必须是 head/version");
   if (typeof record.provider !== "string" || !record.provider.trim()) throw schemaError("provider 必填");
   if (typeof record.digestRealm !== "string" || !record.digestRealm.trim()) throw schemaError("digestRealm 必填");
-  if (!Number.isInteger(record.keyVersion) || record.keyVersion < 1) {
+  if (!Number.isSafeInteger(record.keyVersion) || record.keyVersion < 1) {
     throw schemaError("keyVersion 必须是正整数");
   }
   if (record.kind === "head") {
-    if (!Number.isInteger(record.revision) || record.revision < 1) throw schemaError("head.revision 必须是 ≥1 整数");
+    if (!Number.isSafeInteger(record.revision) || record.revision < 1) throw schemaError("head.revision 必须是 ≥1 整数");
     if (!Number.isSafeInteger(record.createdAt) || record.createdAt < 0) throw schemaError("head.createdAt 必须是 ≥0 时间戳");
   }
   if (record.kind === "version" && (!Number.isSafeInteger(record.enabledAt) || record.enabledAt < 0)) {
@@ -474,8 +474,7 @@ export function validateOperationKeyDomainRecord(record) {
     throw schemaError("realm 必须是 3–64 位小写字母/数字/连字符");
   }
   if (!Number.isSafeInteger(record.keyVersion) || record.keyVersion < 1) throw schemaError("keyVersion 必须是正整数");
-  if (record.keyFingerprint !== undefined &&
-      (typeof record.keyFingerprint !== "string" || !/^[0-9a-f]{64}$/.test(record.keyFingerprint))) {
+  if (typeof record.keyFingerprint !== "string" || !/^[0-9a-f]{64}$/.test(record.keyFingerprint)) {
     throw schemaError("keyFingerprint 必须是 64 位十六进制");
   }
   if (record.kind === "head") {
@@ -491,6 +490,25 @@ export function validateOperationKeyDomainRecord(record) {
 export const OWNER_CLAIM_STATE = Object.freeze({ ACTIVE: "active", RELEASED: "released" });
 const FORBIDDEN_CLAIM_FIELDS = ["grantId", "orgId", "serialNumber"];
 const DEVICE_DIGEST_DOMAIN = "KEYED_DIGEST/device";
+const CLAIM_ALLOWED_FIELDS = new Set([
+  "_id", "ownerOrgId", "boundDeviceId", "provider", "digestRealm", "digestDomain",
+  "keyVersion", "state", "revision", "createdAt", "updatedAt",
+  "activatedAt", "activatedByAuditId",
+  "releasedAt", "releasedByAuditId", "releaseReason",
+]);
+const SLOT_ALLOWED_FIELDS = new Set([
+  "_id", "orgId", "personId", "deviceId", "cycleId", "activeClaimId",
+  "state", "revision", "createdAt", "updatedAt", "activatedAt",
+  "releasedAt", "releasedByJobId",
+]);
+
+function rejectUnknownFields(record, allowed, label) {
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) throw schemaError(`${label} 包含不允许字段 ${key}`);
+  }
+}
+
+
 
 function bounded(record, field) {
   assertBoundedId(record[field], field);
@@ -514,6 +532,7 @@ export function validateAccessDeviceRecord(record) {
 
 export function validateOwnerClaimRecord(record) {
   if (!record || typeof record !== "object") throw schemaError("owner claim 必须是对象");
+  rejectUnknownFields(record, CLAIM_ALLOWED_FIELDS, "owner claim");
   for (const field of FORBIDDEN_CLAIM_FIELDS) {
     if (field in record) throw schemaError(`owner claim 不得包含 ${field}`);
   }
@@ -539,7 +558,7 @@ export function validateOwnerClaimRecord(record) {
     }
     safeInt(record, "releasedAt");
     bounded(record, "releasedByAuditId");
-    if (typeof record.releaseReason !== "string" || !record.releaseReason.trim() || record.releaseReason.length > 160) {
+    if (typeof record.releaseReason !== "string" || !record.releaseReason.trim() || record.releaseReason.length > 160 || /[\u0000-\u001f\u007f]/.test(record.releaseReason)) {
       throw schemaError("released claim 缺少或超长 releaseReason");
     }
   }
@@ -548,6 +567,7 @@ export function validateOwnerClaimRecord(record) {
 
 export function validateGrantSlotRecord(record) {
   if (!record || typeof record !== "object") throw schemaError("slot 必须是对象");
+  rejectUnknownFields(record, SLOT_ALLOWED_FIELDS, "slot");
   for (const field of ["orgId", "personId", "deviceId", "cycleId"]) bounded(record, field);
   if ("grantId" in record) throw schemaError("slot 不得使用旧 grantId 字段");
   if (!Number.isSafeInteger(record.revision) || record.revision < 1) throw schemaError("slot revision 非法");

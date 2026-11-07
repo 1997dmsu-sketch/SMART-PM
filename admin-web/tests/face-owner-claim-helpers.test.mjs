@@ -104,3 +104,29 @@ test("digestDomain：复用官方 validator，损坏 INCOMPLETE，配置不符 C
   assert.equal(digestDomainMatchesDevice({ ...head, keyVersion: 2 }, { ...version, keyVersion: 2 }, config).code, "DEVICE_DIGEST_CONFIG_CHANGED");
   assert.equal(digestDomainMatchesDevice(head, version, { ...config, keyVersion: 2 }).code, "DEVICE_DIGEST_CONFIG_CHANGED");
 });
+
+test("敏感字段黑名单：claim/slot 不允许 MAC/IP/密钥/指纹/住户/人脸字段", () => {
+  for (const field of ["mac", "ip", "ipAddress", "key", "fingerprint", "residentName", "faceImage", "phone", "idCard"]) {
+    assert.throws(() => validateOwnerClaimRecord({ ...claim, [field]: "x" }), /不允许字段/, field);
+    assert.throws(() => validateGrantSlotRecord({ ...slot, [field]: "x" }), /不允许字段/, field);
+  }
+});
+
+test("releaseReason 拒绝控制字符", () => {
+  assert.throws(
+    () => validateOwnerClaimRecord({ ...releasedClaim, releaseReason: "device\u0000retired" }),
+    /releaseReason/,
+  );
+});
+
+test("K1 keyVersion/revision 只接受安全整数", () => {
+  const head = { kind: "head", provider: "hikvision", digestRealm: "test-realm", keyVersion: 1, revision: 1, createdAt: 1 };
+  const version = { kind: "version", provider: "hikvision", digestRealm: "test-realm", keyVersion: 1, enabledAt: 1 };
+  const config = { provider: "hikvision", digestRealm: "test-realm", keyVersion: 1 };
+  assert.equal(digestDomainMatchesDevice(head, version, config).ok, true);
+  assert.equal(digestDomainMatchesDevice({ ...head, keyVersion: "1" }, { ...version, keyVersion: "1" }, config).code, "DOMAIN_INCOMPLETE");
+  assert.equal(digestDomainMatchesDevice({ ...head, revision: "1" }, version, config).code, "DOMAIN_INCOMPLETE");
+  assert.equal(digestDomainMatchesDevice({ ...head, revision: Number.MAX_SAFE_INTEGER + 2 }, version, config).code, "DOMAIN_INCOMPLETE");
+  assert.equal(digestDomainMatchesDevice({ ...head, digestRealm: "other" }, { ...version, digestRealm: "other" }, config).code, "DEVICE_DIGEST_CONFIG_CHANGED");
+  assert.equal(digestDomainMatchesDevice({ ...head, keyVersion: 2 }, { ...version, keyVersion: 2 }, config).code, "DEVICE_DIGEST_CONFIG_CHANGED");
+});

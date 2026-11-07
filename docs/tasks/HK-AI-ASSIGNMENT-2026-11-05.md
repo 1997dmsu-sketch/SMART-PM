@@ -26,6 +26,7 @@
 | AI-D / HK-AI-04 | H2-a `f9a2b6b` 终审通过 | `feat/hk-face-service-integration` | `f9a2b6b` | 严格重放、domain guard 与内容级零变化测试全部通过；见 `HK-AI-04-H2A-FINAL-APPROVAL-F9A2B6B-2026-11-07.md`。先复审 H2-b 设计，再放行编码；H3/H4 继续关闭 |
 | AI-E / HK-AI-05 | 今日由 Workburry 启动页面壳 | `feat/hk-face-admin` | 先用合成 fixture；等待 AI-D DTO 后绑定 | 今日交设备/申请/任务/审计页面壳，持续显示 Mock 标识 |
 | 并行任务包 | `HK-AI-PARALLEL-TASKS-2026-11-07.md` | 已分配 Harness / Kimi / Workburry | 企业微信看板任务已取消；五项任务按独立分支执行 |
+| 并行任务复审 | `HK-AI-PARALLEL-REVIEW-2026-11-07.md` | 任务1通过；任务2需修订；任务3/4通过；任务5未交付 | H2-b 修订设计前禁止编码；真实探针仍需三方线下批准 |
 | HK-HUMAN-02 安装视频 | Kimi 负责脚本/分镜/字幕，真人负责断电接线与拍摄 | `docs/hk-install-video` | DS-K1T671BM + PDC-K7B-12V5A | 先交文档包；端子与锁铭牌经真人复核后再出最终成片 |
 
 > AI-B 现场批准与执行包：`docs/tasks/HK-AI-02-LIVE-APPROVAL-PACK.md`。批准栏（现场负责人 + 项目负责人 + 执行人）签署前禁止设置 `HIKVISION_PROBE_ALLOW_READ=true`；一次批准只授权一次只读执行。

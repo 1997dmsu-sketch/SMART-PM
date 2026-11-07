@@ -57,16 +57,19 @@ test("claim/slot 墓碑：释放后可重新占用，released 记录保留审计
   assert.equal(isReclaimable({ state: "corrupt", grantId: "g1" }, "g1"), false);
   assert.throws(() => releaseClaim({ state: "corrupt", revision: 1 }, { jobId: "j" }), /active/);
   assert.throws(() => releaseClaim({ state: "active", revision: 1 }, {}), /releasedByJobId/);
-  assert.throws(() => releaseClaim({ state: "active", revision: 0 }, { jobId: "j" }), /revision/);
-  assert.throws(() => releaseClaim({ state: "active", revision: "1" }, { jobId: "j" }), /revision/);
+  assert.throws(() => releaseClaim({ state: "active", grantId: "g1", revision: 0 }, { jobId: "j" }), /revision/);
+  assert.throws(() => releaseClaim({ state: "active", grantId: "g1", revision: "1" }, { jobId: "j" }), /revision/);
   assert.equal(isReclaimable({ state: "released", releasedAt: 1 }, "g"), false);
+  assert.equal(isReclaimable({ state: "released", releasedAt: -1, releasedByJobId: "j", revision: 2 }, "g"), false);
+  assert.equal(isReclaimable({ state: "active", revision: 1 }, "g"), false);
+  assert.equal(isReclaimable({ state: "active", grantId: "g" }, "g"), false);
   assert.equal(isReclaimable({ state: "released", releasedAt: 1, releasedByJobId: "j" }, "g"), false);
-  assert.equal(isReclaimable({ state: "released", releasedAt: 1, releasedByJobId: "j", revision: 2 }, "g"), true);
+  assert.equal(isReclaimable({ state: "released", grantId: "g1", releasedAt: 1, releasedByJobId: "j", revision: 2 }, "g"), true);
 });
 
 test("确定性 log ID 与租约结构", () => {
   assert.match(deterministicLogId("job-1", "queued"), /^log:/);
-  for (const bad of [0, -1, "1"]) {
+  for (const bad of [0, -1, "1", Number.MAX_SAFE_INTEGER + 2]) {
     assert.throws(() => deterministicLogId("job-1", "queued", bad), /occurrence/);
   }
   assert.notEqual(
@@ -84,6 +87,8 @@ test("确定性 log ID 与租约结构", () => {
   assert.throws(() => leasePatch({ owner: "w", expiresAt: 100, attempts: 0, revision: 1, now: 100 }), /leaseExpiresAt/);
   assert.throws(() => leasePatch({ owner: "   ", expiresAt: 2000, now: 100 }), /leaseOwner/);
   assert.throws(() => leasePatch({ owner: "w", expiresAt: 2000, now: "100" }), /now/);
+  assert.throws(() => leasePatch({ owner: "w", expiresAt: 2000, now: -1 }), /now/);
+  assert.throws(() => leasePatch({ owner: "w", expiresAt: Number.MAX_SAFE_INTEGER + 2, now: 100 }), /leaseExpiresAt/);
 });
 
 test("LocalStore 登记本期人脸集合", async () => {

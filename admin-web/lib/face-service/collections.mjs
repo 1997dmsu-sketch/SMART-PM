@@ -251,13 +251,32 @@ export function applyDigestDomain(state, { provider = "hikvision", digestRealm, 
 
 export const CLAIM_STATE = Object.freeze({ ACTIVE: "active", RELEASED: "released" });
 
+/** 有界字符串 ID：非空、≤128、无控制字符；不接受纯空白。 */
+export function assertBoundedId(value, field) {
+  if (typeof value !== "string" || value.trim() === "" || value.length > 128 || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw schemaError(field + " 必须是有界非空字符串");
+  }
+  return value;
+}
+
+/** 安全整数：Number.isSafeInteger 且 ≥ min。 */
+export function assertSafeInt(value, field, { min = 0 } = {}) {
+  if (!Number.isSafeInteger(value) || value < min) {
+    throw schemaError(field + " 必须是 ≥" + min + " 的安全整数");
+  }
+  return value;
+}
+
 /** 墓碑释放：只改状态与审计字段，不删除历史。 */
 export function releaseClaim(record, { jobId, now = Date.now() }) {
   if (!record) throw schemaError("claim/slot 记录不存在");
   if (record.state !== CLAIM_STATE.ACTIVE) throw schemaError("仅 active claim/slot 可释放");
-  if (typeof jobId !== "string" || !jobId.trim()) throw schemaError("releasedByJobId 必填");
-  if (!Number.isInteger(record.revision) || record.revision < 1) throw schemaError("claim revision 非法");
+  assertBoundedId(jobId, "releasedByJobId");
+  assertBoundedId(record.grantId, "grantId");
+  assertSafeInt(record.revision, "record.revision", { min: 1 });
+  assertSafeInt(now, "now");
   return {
+    grantId: record.grantId,
     state: CLAIM_STATE.RELEASED,
     releasedAt: now,
     releasedByJobId: jobId,
@@ -269,31 +288,36 @@ export function releaseClaim(record, { jobId, now = Date.now() }) {
 /** 可占用：不存在、已墓碑释放，或声明为 active 但属于本 grant。 */
 export function isReclaimable(record, ownerGrantId) {
   if (!record) return true;
-  if (record.state === CLAIM_STATE.RELEASED) {
-    // 墓碑必须带完整审计字段，否则视为损坏记录，失败关闭。
-    return Number.isInteger(record.releasedAt) &&
-      typeof record.releasedByJobId === "string" && record.releasedByJobId.trim() !== "" &&
-      Number.isInteger(record.revision) && record.revision >= 1;
+  try {
+    assertBoundedId(record.grantId, "grantId");
+    assertSafeInt(record.revision, "record.revision", { min: 1 });
+    if (record.state === CLAIM_STATE.RELEASED) {
+      assertSafeInt(record.releasedAt, "releasedAt");
+      assertBoundedId(record.releasedByJobId, "releasedByJobId");
+      return true;
+    }
+    if (record.state === CLAIM_STATE.ACTIVE) return record.grantId === ownerGrantId;
+    return false;
+  } catch {
+    return false; // 任何损坏/缺字段 -> 失败关闭
   }
-  if (record.state === CLAIM_STATE.ACTIVE) return record.grantId === ownerGrantId;
-  return false; // 未知状态失败关闭
 }
 
 /** 确定性 log ID：同一 job 的同一状态迁移只产生一条日志。 */
 export function deterministicLogId(jobId, state, occurrence = 1) {
   assertId(jobId, "jobId");
   assertId(state, "state");
-  if (!Number.isInteger(occurrence) || occurrence < 1) throw schemaError("occurrence 必须是 ≥1 整数");
+  assertSafeInt(occurrence, "occurrence", { min: 1 });
   return `log:${encodeSegment(jobId)}:${encodeSegment(state)}:${occurrence}`;
 }
 
 /** 租约结构：不保存凭据，仅 owner/过期时间/次数。 */
 export function leasePatch({ owner, expiresAt, attempts = 0, revision = 1, now = Date.now() }) {
-  if (typeof owner !== "string" || !owner.trim()) throw schemaError("leaseOwner 必须是非空字符串");
-  if (!Number.isInteger(now)) throw schemaError("now 必须是毫秒时间戳");
-  if (!Number.isInteger(expiresAt) || expiresAt <= now) throw schemaError("leaseExpiresAt 必须是未来毫秒时间戳");
-  if (!Number.isInteger(attempts) || attempts < 0) throw schemaError("attempts 必须是 ≥0 整数");
-  if (!Number.isInteger(revision) || revision < 1) throw schemaError("revision 必须是 ≥1 整数");
+  assertBoundedId(owner, "leaseOwner");
+  assertSafeInt(now, "now");
+  assertSafeInt(expiresAt, "leaseExpiresAt", { min: now + 1 });
+  assertSafeInt(attempts, "attempts", { min: 0 });
+  assertSafeInt(revision, "revision", { min: 1 });
   return {
     leaseOwner: owner,
     leaseExpiresAt: expiresAt,

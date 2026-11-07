@@ -90,3 +90,48 @@ H2 必须使用真实 `BlacklistService` 至少覆盖：
 ## 下一提交边界
 
 仅返工 H2 生产代码与服务层测试。不得进入租约/sending/派发，不得实现 revoke 闭环，不得注册 HTTP，不得修改 `server.mjs`，不得连接真实或 Mock Provider。
+
+## 返工拆分补充裁定
+
+允许按 H2-a～H2-d 拆分，但必须遵守以下顺序与语义。
+
+### H2-a：K2 与 operation key
+
+- K2 配置、域、版本与 K1 完全分离；
+- idempotency key 严格匹配 `[A-Za-z0-9._:-]{16,128}`；
+- 固定 ID 不包含原始 idempotency key，所有未约束分段必须编码或纳入 HMAC 消息；
+- 测试覆盖同键同域稳定、跨 org/route/actor 隔离、同键异摘要冲突所需字段、非法配置失败关闭。
+
+完成 H2-a 后仍不得开放 createGrant。
+
+### H2-b：设备 owner claim
+
+- grant 不计算、创建、抢占或释放设备 owner claim；
+- `access_devices.claimId` 必须引用已存在的全局 claim；
+- claim 保存 `ownerOrgId/provider/digestRealm/keyVersion/revision`，不得保存 grantId 或序列号明文；
+- createGrant 事务只验证 device、claimId、ownerOrgId、provider、realm/version 与 capability；
+- 同一设备允许不同人员建立不同 grant slot；跨组织 owner 冲突失败关闭。
+
+不要尝试“在事务内重新计算 claim key”：事务 refs 在进入事务前必须已知。设备登记阶段负责生成 claimId，授权阶段通过 device 上的 claimId 读取并复核既有 claim。
+
+### H2-c：真实资格与重放
+
+重放语义保持原裁定：**当前权限有效时，同键同摘要直接返回旧结果，不再调用 `withEligibility`。** 不接受“重放仍走资格但修改说明”。资格后来变化不应改写已经提交成功的幂等响应；权限撤销后则必须拒绝重放。
+
+实现可使用两段检查：
+
+1. 轻量前置检查当前组织/成员权限和 operation key；命中重放即返回；
+2. 未命中时准备完整资格快照并进入唯一业务写事务；事务内再次检查权限与 operation key，再执行真实 `withEligibility` 和全部业务校验。
+
+第二次 op 检查用于关闭前置检查与最终提交之间的并发窗口。所有 grant/job/log/slot/op 业务写仍必须在同一资格事务中完成。
+
+完整资格 refs 由预读快照形成，但事务内必须比较 person、identity、occupancy、cycle、room、building、community、device 与 file/credential 的 ID、归属、revision 和状态；变化时重试或失败关闭。
+
+### H2-d：回归与并发
+
+- 恢复 H1 的 8 项服务层回归，不得以 H2 测试替换；
+- 使用真实 `BlacklistService`，自制桩只可用于独立 helper 单测；
+- 补齐本复审列出的真实资格、domain、owner claim、slot、墓碑、双请求、各 revision 变化和跨域幂等测试；
+- 测试稳定性修复保持独立提交。
+
+每一阶段单独提交、单独报告定向/admin/root 测试；H2-d 完成前 H2 整体不通过，createGrant 不得接入 HTTP。

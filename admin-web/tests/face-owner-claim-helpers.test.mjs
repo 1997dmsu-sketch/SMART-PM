@@ -9,7 +9,6 @@ import {
   validateOwnerClaimRecord,
 } from "../lib/face-service/collections.mjs";
 
-const fingerprint = "a".repeat(64);
 const device = {
   claimId: "claim-1", ownerOrgId: "org-a", orgId: "org-a", provider: "hikvision",
   digestRealm: "test-realm", keyVersion: 1, revision: 2, status: "active",
@@ -91,11 +90,14 @@ test("ownerClaimMatchesDevice：任一绑定字段不一致即 false", () => {
 });
 
 test("digestDomain：复用官方 validator，损坏 INCOMPLETE，配置不符 CONFIG_CHANGED", () => {
-  const head = { kind: "head", provider: "hikvision", digestRealm: "test-realm", keyVersion: 1, keyFingerprint: fingerprint, revision: 1, createdAt: 1 };
-  const version = { kind: "version", provider: "hikvision", digestRealm: "test-realm", keyVersion: 1, keyFingerprint: fingerprint, enabledAt: 1 };
+  const head = { kind: "head", provider: "hikvision", digestRealm: "test-realm", keyVersion: 1, revision: 1, createdAt: 1 };
+  const version = { kind: "version", provider: "hikvision", digestRealm: "test-realm", keyVersion: 1, enabledAt: 1 };
   const config = { provider: "hikvision", digestRealm: "test-realm", keyVersion: 1 };
 
   assert.equal(digestDomainMatchesDevice(head, version, config).ok, true);
+  assert.equal(digestDomainMatchesDevice({ ...head, createdAt: -1 }, version, config).code, "DOMAIN_INCOMPLETE");
+  assert.equal(digestDomainMatchesDevice(head, { ...version, enabledAt: -1 }, config).code, "DOMAIN_INCOMPLETE");
+  assert.equal(digestDomainMatchesDevice({ ...head, digestRealm: "other" }, { ...version, digestRealm: "other" }, config).code, "DEVICE_DIGEST_CONFIG_CHANGED");
   assert.equal(digestDomainMatchesDevice(null, version, config).code, "DOMAIN_INCOMPLETE");
   assert.equal(digestDomainMatchesDevice({ ...head, createdAt: undefined }, version, config).code, "DOMAIN_INCOMPLETE");
   assert.equal(digestDomainMatchesDevice(head, { ...version, enabledAt: undefined }, config).code, "DOMAIN_INCOMPLETE");

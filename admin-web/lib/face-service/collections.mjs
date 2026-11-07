@@ -328,9 +328,9 @@ export function validateDigestDomainRecord(record) {
   }
   if (record.kind === "head") {
     if (!Number.isInteger(record.revision) || record.revision < 1) throw schemaError("head.revision 必须是 ≥1 整数");
-    if (!Number.isInteger(record.createdAt)) throw schemaError("head.createdAt 必须是时间戳");
+    if (!Number.isSafeInteger(record.createdAt) || record.createdAt < 0) throw schemaError("head.createdAt 必须是 ≥0 时间戳");
   }
-  if (record.kind === "version" && !Number.isInteger(record.enabledAt)) {
+  if (record.kind === "version" && (!Number.isSafeInteger(record.enabledAt) || record.enabledAt < 0)) {
     throw schemaError("version.enabledAt 必须是时间戳");
   }
   return record;
@@ -474,7 +474,8 @@ export function validateOperationKeyDomainRecord(record) {
     throw schemaError("realm 必须是 3–64 位小写字母/数字/连字符");
   }
   if (!Number.isSafeInteger(record.keyVersion) || record.keyVersion < 1) throw schemaError("keyVersion 必须是正整数");
-  if (typeof record.keyFingerprint !== "string" || !/^[0-9a-f]{64}$/.test(record.keyFingerprint)) {
+  if (record.keyFingerprint !== undefined &&
+      (typeof record.keyFingerprint !== "string" || !/^[0-9a-f]{64}$/.test(record.keyFingerprint))) {
     throw schemaError("keyFingerprint 必须是 64 位十六进制");
   }
   if (record.kind === "head") {
@@ -538,8 +539,8 @@ export function validateOwnerClaimRecord(record) {
     }
     safeInt(record, "releasedAt");
     bounded(record, "releasedByAuditId");
-    if (typeof record.releaseReason !== "string" || !record.releaseReason.trim()) {
-      throw schemaError("released claim 缺少 releaseReason");
+    if (typeof record.releaseReason !== "string" || !record.releaseReason.trim() || record.releaseReason.length > 160) {
+      throw schemaError("released claim 缺少或超长 releaseReason");
     }
   }
   return record;

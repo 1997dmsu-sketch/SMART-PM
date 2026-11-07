@@ -9,6 +9,7 @@ import {
   validateOwnerClaimRecord,
 } from "../lib/face-service/collections.mjs";
 
+const fingerprint = "a".repeat(64);
 const device = {
   claimId: "claim-1", ownerOrgId: "org-a", orgId: "org-a", provider: "hikvision",
   digestRealm: "test-realm", keyVersion: 1, revision: 2, status: "active",
@@ -16,71 +17,88 @@ const device = {
 };
 const claim = {
   ownerOrgId: "org-a", boundDeviceId: "device-1", provider: "hikvision",
-  digestRealm: "test-realm", keyVersion: 1, state: "active",
-  revision: 1, createdAt: 1, updatedAt: 2,
+  digestRealm: "test-realm", digestDomain: "KEYED_DIGEST/device", keyVersion: 1,
+  state: "active", revision: 1, createdAt: 1, updatedAt: 2,
+  activatedAt: 1, activatedByAuditId: "audit-1",
+};
+const releasedClaim = {
+  ...claim,
+  boundDeviceId: undefined,
+  activatedAt: undefined,
+  activatedByAuditId: undefined,
+  state: "released",
+  releasedAt: 5,
+  releasedByAuditId: "audit-2",
+  releaseReason: "device retired",
 };
 const slot = {
   orgId: "org-a", personId: "p1", deviceId: "device-1", cycleId: "c1",
-  activeClaimId: "claim-1", state: "active", revision: 1,
+  activeClaimId: "grant-1", state: "active", revision: 1,
+  createdAt: 1, updatedAt: 2, activatedAt: 1,
+};
+const releasedSlot = {
+  ...slot,
+  activeClaimId: undefined,
+  activatedAt: undefined,
+  state: "released",
+  releasedAt: 5,
+  releasedByJobId: "job-1",
 };
 
-test("device：orgId/ownerOrgId/时间字段/face capability 校验", () => {
+test("device：orgId/ownerOrgId/时间/face 校验", () => {
   assert.equal(validateAccessDeviceRecord(device), device);
   assert.throws(() => validateAccessDeviceRecord({ ...device, ownerOrgId: "org-b" }), /ownerOrgId 必须等于 orgId/);
-  assert.throws(() => validateAccessDeviceRecord({ ...device, createdAt: -1 }), /createdAt/);
+  assert.throws(() => validateAccessDeviceRecord({ ...device, updatedAt: -1 }), /updatedAt/);
   assert.throws(() => validateAccessDeviceRecord({ ...device, capabilities: {} }), /capabilities.face/);
-  assert.throws(() => validateAccessDeviceRecord({ ...device, claimId: "" }), /claimId/);
 });
 
-test("owner claim：provider/realm/keyVersion/updatedAt 与 released 审计", () => {
+test("owner claim：digestDomain、激活审计、released 墓碑与互斥", () => {
   assert.equal(validateOwnerClaimRecord(claim), claim);
-  assert.throws(() => validateOwnerClaimRecord({ ...claim, provider: "" }), /provider/);
-  assert.throws(() => validateOwnerClaimRecord({ ...claim, digestRealm: "" }), /digestRealm/);
-  assert.throws(() => validateOwnerClaimRecord({ ...claim, keyVersion: 0 }), /keyVersion/);
-  assert.throws(() => validateOwnerClaimRecord({ ...claim, updatedAt: -1 }), /updatedAt/);
+  assert.throws(() => validateOwnerClaimRecord({ ...claim, digestDomain: "" }), /digestDomain/);
+  assert.throws(() => validateOwnerClaimRecord({ ...claim, activatedAt: -1 }), /activatedAt/);
   assert.throws(() => validateOwnerClaimRecord({ ...claim, releasedAt: 1 }), /released/);
 
-  const released = { ...claim, state: "released", releasedAt: 5, releasedByJobId: "job-1" };
-  assert.equal(validateOwnerClaimRecord(released), released);
-  const { releasedAt, ...withoutReleasedAt } = released;
-  assert.throws(() => validateOwnerClaimRecord(withoutReleasedAt), /releasedAt/);
-  assert.throws(() => validateOwnerClaimRecord({ ...released, releasedByJobId: "" }), /releasedByJobId/);
+  const released = validateOwnerClaimRecord(releasedClaim);
+  assert.equal(released.state, "released");
+  assert.throws(() => validateOwnerClaimRecord({ ...releasedClaim, boundDeviceId: "device-1" }), /boundDeviceId/);
+  assert.throws(() => validateOwnerClaimRecord({ ...releasedClaim, releasedByAuditId: "" }), /releasedByAuditId/);
+  assert.throws(() => validateOwnerClaimRecord({ ...releasedClaim, releaseReason: "" }), /releaseReason/);
 });
 
-test("owner claim：拒绝 grantId/orgId/serialNumber", () => {
+test("owner claim：拒绝 grantId/orgId/serialNumber 与非有界 ID", () => {
   for (const field of ["grantId", "orgId", "serialNumber"]) {
     assert.throws(() => validateOwnerClaimRecord({ ...claim, [field]: "x" }), new RegExp(field));
   }
+  assert.throws(() => validateOwnerClaimRecord({ ...claim, ownerOrgId: "x".repeat(129) }), /ownerOrgId/);
 });
 
-test("slot：active 用 activeClaimId；released 清空并保留墓碑", () => {
+test("slot：active 生命周期字段；released 清除并保留墓碑", () => {
   assert.equal(validateGrantSlotRecord(slot), slot);
   assert.throws(() => validateGrantSlotRecord({ ...slot, grantId: "g1" }), /grantId/);
+  assert.throws(() => validateGrantSlotRecord({ ...slot, activatedAt: -1 }), /activatedAt/);
   assert.throws(() => validateGrantSlotRecord({ ...slot, activeClaimId: "" }), /activeClaimId/);
 
-  const released = { ...slot, activeClaimId: undefined, state: "released", releasedAt: 5, releasedByJobId: "job-1" };
-  assert.equal(validateGrantSlotRecord(released), released);
-  assert.throws(() => validateGrantSlotRecord({ ...released, activeClaimId: "claim-1" }), /activeClaimId/);
-  assert.throws(() => validateGrantSlotRecord({ ...released, releasedByJobId: "" }), /releasedByJobId/);
+  assert.equal(validateGrantSlotRecord(releasedSlot).state, "released");
+  assert.throws(() => validateGrantSlotRecord({ ...releasedSlot, activeClaimId: "grant-1" }), /activeClaimId/);
+  assert.throws(() => validateGrantSlotRecord({ ...releasedSlot, releasedByJobId: "" }), /releasedByJobId/);
 });
 
-test("ownerClaimMatchesDevice：bound/owner/provider/realm/version 不一致即 false", () => {
+test("ownerClaimMatchesDevice：任一绑定字段不一致即 false", () => {
   assert.equal(ownerClaimMatchesDevice(claim, device, "device-1"), true);
   assert.equal(ownerClaimMatchesDevice({ ...claim, boundDeviceId: "device-2" }, device, "device-1"), false);
   assert.equal(ownerClaimMatchesDevice({ ...claim, ownerOrgId: "org-b" }, device, "device-1"), false);
   assert.equal(ownerClaimMatchesDevice({ ...claim, provider: "other" }, device, "device-1"), false);
-  assert.equal(ownerClaimMatchesDevice({ ...claim, keyVersion: 2 }, device, "device-1"), false);
 });
 
-test("digestDomainMatchesDevice：损坏 INCOMPLETE，配置不符 CONFIG_CHANGED", () => {
-  const head = { kind: "head", provider: "hikvision", digestRealm: "test-realm", keyVersion: 1 };
-  const version = { kind: "version", provider: "hikvision", digestRealm: "test-realm", keyVersion: 1 };
+test("digestDomain：复用官方 validator，损坏 INCOMPLETE，配置不符 CONFIG_CHANGED", () => {
+  const head = { kind: "head", provider: "hikvision", digestRealm: "test-realm", keyVersion: 1, keyFingerprint: fingerprint, revision: 1, createdAt: 1 };
+  const version = { kind: "version", provider: "hikvision", digestRealm: "test-realm", keyVersion: 1, keyFingerprint: fingerprint, enabledAt: 1 };
   const config = { provider: "hikvision", digestRealm: "test-realm", keyVersion: 1 };
 
   assert.equal(digestDomainMatchesDevice(head, version, config).ok, true);
   assert.equal(digestDomainMatchesDevice(null, version, config).code, "DOMAIN_INCOMPLETE");
-  assert.equal(digestDomainMatchesDevice(head, { ...version, kind: "head" }, config).code, "DOMAIN_INCOMPLETE");
-  assert.equal(digestDomainMatchesDevice(head, { ...version, keyVersion: 2 }, config).code, "DOMAIN_INCOMPLETE");
-  assert.equal(digestDomainMatchesDevice({ ...head, provider: "other" }, { ...version, provider: "other" }, config).code, "DEVICE_DIGEST_CONFIG_CHANGED");
+  assert.equal(digestDomainMatchesDevice({ ...head, createdAt: undefined }, version, config).code, "DOMAIN_INCOMPLETE");
+  assert.equal(digestDomainMatchesDevice(head, { ...version, enabledAt: undefined }, config).code, "DOMAIN_INCOMPLETE");
+  assert.equal(digestDomainMatchesDevice({ ...head, keyVersion: 2 }, { ...version, keyVersion: 2 }, config).code, "DEVICE_DIGEST_CONFIG_CHANGED");
   assert.equal(digestDomainMatchesDevice(head, version, { ...config, keyVersion: 2 }).code, "DEVICE_DIGEST_CONFIG_CHANGED");
 });

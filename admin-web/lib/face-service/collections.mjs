@@ -489,17 +489,22 @@ export function validateOperationKeyDomainRecord(record) {
 
 export const OWNER_CLAIM_STATE = Object.freeze({ ACTIVE: "active", RELEASED: "released" });
 const FORBIDDEN_CLAIM_FIELDS = ["grantId", "orgId", "serialNumber"];
+const DEVICE_DIGEST_DOMAIN = "KEYED_DIGEST/device";
+
+function bounded(record, field) {
+  assertBoundedId(record[field], field);
+}
+function safeInt(record, field, min = 0) {
+  assertSafeInt(record[field], field, { min });
+}
 
 export function validateAccessDeviceRecord(record) {
   if (!record || typeof record !== "object") throw schemaError("设备记录必须是对象");
-  for (const field of ["claimId", "ownerOrgId", "orgId", "provider", "digestRealm"]) {
-    if (typeof record[field] !== "string" || !record[field].trim()) throw schemaError(`设备缺少 ${field}`);
-  }
+  for (const field of ["claimId", "ownerOrgId", "orgId", "provider", "digestRealm"]) bounded(record, field);
   if (!Number.isSafeInteger(record.keyVersion) || record.keyVersion < 1) throw schemaError("设备 keyVersion 非法");
   if (!Number.isSafeInteger(record.revision) || record.revision < 1) throw schemaError("设备 revision 非法");
-  for (const field of ["createdAt", "updatedAt"]) {
-    if (!Number.isSafeInteger(record[field]) || record[field] < 0) throw schemaError(`设备 ${field} 非法`);
-  }
+  safeInt(record, "createdAt");
+  safeInt(record, "updatedAt");
   if (!["active", "disabled"].includes(record.status)) throw schemaError("设备状态非法");
   if (typeof record.capabilities?.face !== "boolean") throw schemaError("设备缺少 capabilities.face");
   if (record.ownerOrgId !== record.orgId) throw schemaError("设备 ownerOrgId 必须等于 orgId");
@@ -511,23 +516,30 @@ export function validateOwnerClaimRecord(record) {
   for (const field of FORBIDDEN_CLAIM_FIELDS) {
     if (field in record) throw schemaError(`owner claim 不得包含 ${field}`);
   }
-  for (const field of ["ownerOrgId", "boundDeviceId", "provider", "digestRealm"]) {
-    if (typeof record[field] !== "string" || !record[field].trim()) throw schemaError(`claim 缺少 ${field}`);
-  }
+  for (const field of ["ownerOrgId", "provider", "digestRealm"]) bounded(record, field);
+  if (record.digestDomain !== DEVICE_DIGEST_DOMAIN) throw schemaError("claim digestDomain 非法");
   if (!Number.isSafeInteger(record.keyVersion) || record.keyVersion < 1) throw schemaError("claim keyVersion 非法");
   if (!Number.isSafeInteger(record.revision) || record.revision < 1) throw schemaError("claim revision 非法");
-  for (const field of ["createdAt", "updatedAt"]) {
-    if (!Number.isSafeInteger(record[field]) || record[field] < 0) throw schemaError(`claim ${field} 非法`);
-  }
+  safeInt(record, "createdAt");
+  safeInt(record, "updatedAt");
   if (!Object.values(OWNER_CLAIM_STATE).includes(record.state)) throw schemaError("claim 状态非法");
+
   if (record.state === OWNER_CLAIM_STATE.ACTIVE) {
-    if (record.releasedAt !== undefined || record.releasedByJobId !== undefined) {
-      throw schemaError("active claim 不得包含 released 字段");
+    bounded(record, "boundDeviceId");
+    safeInt(record, "activatedAt");
+    bounded(record, "activatedByAuditId");
+    for (const field of ["releasedAt", "releasedByAuditId", "releaseReason"]) {
+      if (record[field] !== undefined) throw schemaError("active claim 不得包含 released 字段");
     }
   } else {
-    if (!Number.isSafeInteger(record.releasedAt) || record.releasedAt < 0) throw schemaError("released claim 缺少 releasedAt");
-    if (typeof record.releasedByJobId !== "string" || !record.releasedByJobId.trim()) {
-      throw schemaError("released claim 缺少 releasedByJobId");
+    if (record.boundDeviceId !== undefined) throw schemaError("released claim 必须清除 boundDeviceId");
+    if (record.activatedAt !== undefined || record.activatedByAuditId !== undefined) {
+      throw schemaError("released claim 不得保留 activated 字段");
+    }
+    safeInt(record, "releasedAt");
+    bounded(record, "releasedByAuditId");
+    if (typeof record.releaseReason !== "string" || !record.releaseReason.trim()) {
+      throw schemaError("released claim 缺少 releaseReason");
     }
   }
   return record;
@@ -535,22 +547,22 @@ export function validateOwnerClaimRecord(record) {
 
 export function validateGrantSlotRecord(record) {
   if (!record || typeof record !== "object") throw schemaError("slot 必须是对象");
-  for (const field of ["orgId", "personId", "deviceId", "cycleId"]) {
-    if (typeof record[field] !== "string" || !record[field].trim()) throw schemaError(`slot 缺少 ${field}`);
-  }
+  for (const field of ["orgId", "personId", "deviceId", "cycleId"]) bounded(record, field);
   if ("grantId" in record) throw schemaError("slot 不得使用旧 grantId 字段");
   if (!Number.isSafeInteger(record.revision) || record.revision < 1) throw schemaError("slot revision 非法");
+  safeInt(record, "createdAt");
+  safeInt(record, "updatedAt");
   if (!["active", "released"].includes(record.state)) throw schemaError("slot 状态非法");
   if (record.state === "active") {
-    if (typeof record.activeClaimId !== "string" || !record.activeClaimId.trim()) {
-      throw schemaError("active slot 缺少 activeClaimId");
+    bounded(record, "activeClaimId");
+    safeInt(record, "activatedAt");
+    for (const field of ["releasedAt", "releasedByJobId"]) {
+      if (record[field] !== undefined) throw schemaError("active slot 不得包含 released 字段");
     }
   } else {
-    if (record.activeClaimId !== undefined) throw schemaError("released slot 不得保留 activeClaimId");
-    if (!Number.isSafeInteger(record.releasedAt) || record.releasedAt < 0) throw schemaError("released slot 缺少 releasedAt");
-    if (typeof record.releasedByJobId !== "string" || !record.releasedByJobId.trim()) {
-      throw schemaError("released slot 缺少 releasedByJobId");
-    }
+    if (record.activeClaimId !== undefined) throw schemaError("released slot 必须清除 activeClaimId");
+    safeInt(record, "releasedAt");
+    bounded(record, "releasedByJobId");
   }
   return record;
 }
@@ -566,18 +578,22 @@ export function ownerClaimMatchesDevice(claim, device, deviceId) {
   );
 }
 
-/** 记录损坏 -> DOMAIN_INCOMPLETE；记录完整但配置不符 -> DEVICE_DIGEST_CONFIG_CHANGED。 */
+/** 先复用 validateDigestDomainRecord；损坏 -> DOMAIN_INCOMPLETE；配置不符 -> DEVICE_DIGEST_CONFIG_CHANGED。 */
 export function digestDomainMatchesDevice(head, versionRecord, { provider, digestRealm, keyVersion }) {
-  const damaged =
-    !head || !versionRecord ||
-    head.kind !== "head" || versionRecord.kind !== "version" ||
-    typeof head.provider !== "string" || typeof versionRecord.provider !== "string" ||
-    typeof head.digestRealm !== "string" || typeof versionRecord.digestRealm !== "string" ||
-    !Number.isSafeInteger(head.keyVersion) || !Number.isSafeInteger(versionRecord.keyVersion) ||
-    head.keyVersion !== versionRecord.keyVersion ||
+  try {
+    validateDigestDomainRecord(head);
+    validateDigestDomainRecord(versionRecord);
+  } catch {
+    return { ok: false, code: "DOMAIN_INCOMPLETE" };
+  }
+  if (head.kind !== "head" || versionRecord.kind !== "version") return { ok: false, code: "DOMAIN_INCOMPLETE" };
+  if (
     head.provider !== versionRecord.provider ||
-    head.digestRealm !== versionRecord.digestRealm;
-  if (damaged) return { ok: false, code: "DOMAIN_INCOMPLETE" };
+    head.digestRealm !== versionRecord.digestRealm ||
+    head.keyVersion !== versionRecord.keyVersion
+  ) {
+    return { ok: false, code: "DOMAIN_INCOMPLETE" };
+  }
   if (head.provider !== provider || head.digestRealm !== digestRealm || head.keyVersion !== keyVersion) {
     return { ok: false, code: "DEVICE_DIGEST_CONFIG_CHANGED" };
   }

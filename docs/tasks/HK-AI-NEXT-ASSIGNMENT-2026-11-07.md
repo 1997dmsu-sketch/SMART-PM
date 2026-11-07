@@ -85,16 +85,16 @@
 - 截图不得包含真实人脸、姓名、手机号、地址、设备标识或凭据；
 - 若页面壳无法运行，记录启动命令、错误和阻断，不自行扩大修复范围。
 
-## D. 待解锁：DeepSeek Harness H2-b 编码
+## D. DeepSeek Harness：H2-b 第 2 笔 createGrant 接线
 
-状态：**禁止开始。**
+状态：**已解锁；schema/helper 基线为 `14f37c6`。**
 
-只有 Kimi 的任务 A 经 Codex 复审通过后，才另发编码卡。预计编码范围仅包括：
+只允许继续：
 
 - device owner claim 只读模型；
 - 事务内 device/claim/domain 快照复核；
 - 同组织多住户不同 slot；
-- released slot 的严格复用条件；
+- 任何既有 active/released slot 均冲突，禁止复用；
 - 对应测试。
 
 H2-c/H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。

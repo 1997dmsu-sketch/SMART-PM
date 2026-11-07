@@ -1,14 +1,9 @@
 ﻿/**
- * HK-AI-04 服务层（集合接线，无 HTTP）。
+ * HK-AI-04 服务层（H1 阶段）。
  *
- * 流程严格分离：
- *   submit   → 仅创建/更新 credential（不建 grant/job，不调 Provider）
- *   review   → 仅改 credential 审核状态（不建 grant/job）
- *   grant    → withEligibility 通过后创建 grant + job + claims
- *   revoke   → grant 立即 revoked，再建异步清理 job；不查资格
- *   queryJob → 组织内最小 DTO，跨组织 404
- *
- * Provider 只在 transact 之外调用；Mock 证据恒为 simulated，永不 device_verified。
+ * 已实现：submit（最小 credential）、review（审核状态机）、reviewQueue、queryJob。
+ * 阶段关闭：createGrant / revoke 返回 STAGE_CLOSED，不写 grant/job/claim/slot/log。
+ * 未实现：H2 原子授权、H3 租约与派发、H4 撤权闭环；不调用任何 Provider。
  */
 import { createHash } from "node:crypto";
 

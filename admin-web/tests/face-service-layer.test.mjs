@@ -238,4 +238,7 @@ test("stale expectedRevision 审核：409 且 credential/op key 零变化", asyn
     (e) => e.code === "REVISION_CONFLICT" && e.status === 409,
   );
   assert.deepEqual(await counts(), before);
+  const credential = (await store.list("face_credentials", orgId)).find((row) => row._id === out.credentialId);
+  assert.equal(credential.reviewState, "submitted");
+  assert.equal(credential.revision, 1);
 });

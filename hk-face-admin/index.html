@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>概览 · 人脸门禁管理后台</title>
+  <title>概览 · 人脸门禁管理后台（Mock 演示）</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body data-page="index">
@@ -25,78 +25,93 @@
         <a class="nav-link" href="tasks.html" data-nav="tasks"><span class="nav-ico"></span>任务中心</a>
         <a class="nav-link" href="audits.html" data-nav="audits"><span class="nav-ico"></span>审计日志</a>
       </nav>
-      <div class="sidebar-foot">页面壳演示 · v0.1<br />未接入真实接口与设备</div>
+      <div class="sidebar-foot">合成数据演示 · v0.2<br />未连接真实门禁</div>
     </aside>
 
     <div class="main">
       <header class="topbar">
-        <div class="crumb">人脸门禁管理后台 / <strong>概览</strong></div>
+        <div class="crumb"><a href="index.html">概览</a></div>
         <div class="topbar-right">
-          <span class="env-tag">SHELL · 未联调</span>
+          <span class="env-tag">MOCK · 未联调</span>
           <span>演示环境</span>
         </div>
       </header>
 
       <main class="content">
-        <div class="notice">页面壳演示：本站点仅提供后台页面结构与交互占位，未接入任何真实接口、真实数据、登录权限或真实硬件设备；所有按钮点击仅弹出占位提示。</div>
+        <div class="mock-banner" role="note" aria-label="Mock 演示状态边界">
+          <span class="mock-flag">MOCK · 演示</span>
+          <span class="mock-lead">Mock 演示，未连接真实门禁</span>
+          <div class="mock-status">
+            <span><code>executionMode=test</code></span>
+            <span><code>provider=mock</code></span>
+            <span><code>evidenceScope=simulated</code></span>
+            <span class="no">真实设备生效：否</span>
+          </div>
+        </div>
+
+        <div class="notice">Mock 演示，未连接真实门禁：本站点全部记录均为明显虚构的合成数据；所有操作仅改变本地演示状态，不读取或写入任何真实设备、Provider、接口或文件；统计值不代表任何真实指标。</div>
 
         <section class="hero">
-          <h1>HK 人脸门禁 · 管理后台页面壳</h1>
-          <p>本轮交付「设备 / 申请 / 任务 / 审计」四个业务页面的结构骨架，用于确认信息架构、字段与交互范围。零第三方依赖、零外链，可直接用浏览器离线打开。</p>
+          <h1>HK 人脸门禁 · 合成数据演示 UI</h1>
+          <p>本轮把「设备 / 申请 / 任务 / 审计」四个业务页面从空页面壳改造为合成数据演示 UI：统一的 Mock 状态边界、六类可复核页面状态、按权限分流的视图，以及未知结果人工对账表达。零第三方依赖、零外链，可直接离线打开。</p>
         </section>
 
         <div class="stat-grid">
-          <div class="stat-card"><div class="stat-label">设备</div><div class="stat-value">—</div><div class="stat-hint">台账 / 在线状态 / 固件</div></div>
-          <div class="stat-card"><div class="stat-label">申请</div><div class="stat-value">—</div><div class="stat-hint">通行权限审批</div></div>
-          <div class="stat-card"><div class="stat-label">任务</div><div class="stat-value">—</div><div class="stat-hint">下发 / 同步异步任务</div></div>
-          <div class="stat-card"><div class="stat-label">审计</div><div class="stat-value">—</div><div class="stat-hint">通行与操作留痕</div></div>
+          <div class="stat-card"><div class="stat-label">设备（合成）</div><div class="stat-value">3</div><div class="stat-hint">合成演示记录，非真实指标</div></div>
+          <div class="stat-card"><div class="stat-label">申请（合成）</div><div class="stat-value">2</div><div class="stat-hint">合成演示记录，非真实指标</div></div>
+          <div class="stat-card"><div class="stat-label">任务（合成）</div><div class="stat-value">3</div><div class="stat-hint">含 1 条未知结果待对账</div></div>
+          <div class="stat-card"><div class="stat-label">审计（合成）</div><div class="stat-value">6</div><div class="stat-hint">合成演示事件，非真实指标</div></div>
         </div>
 
         <section class="panel">
-          <div class="panel-head"><h2>业务模块</h2><span class="muted">4 个页面壳</span></div>
+          <div class="panel-head"><h2>业务模块</h2><span class="muted">4 个业务页 · 六类合成状态</span></div>
           <div class="module-grid">
             <a class="module-card" href="devices.html">
               <span class="idx">01 / DEVICES</span>
               <h3>设备管理</h3>
-              <p>设备台账、安装点位、在线状态与固件版本的列表与筛选骨架。</p>
+              <p>合成设备记录：脱敏编号、型号、固件、capability / 灰度、Provider 边界、在线与心跳。</p>
               <span class="go">进入页面 →</span>
             </a>
             <a class="module-card" href="applications.html">
               <span class="idx">02 / APPLICATIONS</span>
               <h3>申请管理</h3>
-              <p>业主 / 住户通行与人脸采集授权申请的审批列表骨架。</p>
+              <p>合成申请详情、理由必填的本地审批演示、审核与私密读取权限分离、逐次授权占位。</p>
               <span class="go">进入页面 →</span>
             </a>
             <a class="module-card" href="tasks.html">
               <span class="idx">03 / TASKS</span>
               <h3>任务中心</h3>
-              <p>设备下发、人脸库同步等异步任务的状态与进度骨架。</p>
+              <p>合成任务、awaiting_result / UNKNOWN_RESULT 对账、受控重试门控，自动重试禁用。</p>
               <span class="go">进入页面 →</span>
             </a>
             <a class="module-card" href="audits.html">
               <span class="idx">04 / AUDITS</span>
               <h3>审计日志</h3>
-              <p>通行记录、管理操作与安全事件的留痕查询骨架。</p>
+              <p>合成批准 / 拒绝 / 查看原图申请 / 重试 / 撤销 / 人工对账事件，带理由与结果。</p>
               <span class="go">进入页面 →</span>
             </a>
           </div>
         </section>
 
         <section class="panel">
-          <div class="panel-head"><h2>本轮范围与边界</h2><span class="muted">feat/hk-face-admin</span></div>
+          <div class="panel-head"><h2>本轮范围与边界</h2><span class="muted">feat/hk-face-admin · HK-AI-05A</span></div>
           <ul class="checklist">
-            <li>已交付：4 个业务页面壳 + 概览导航页 + 共享样式与交互脚本，全部可离线打开。</li>
-            <li>仅复用既有小程序设计稿的颜色 / 字号 / 圆角等 token，不套用业主端小程序画板布局。</li>
-            <li>未接入：真实 API、真实数据、真实人脸设备硬件联调、登录与权限体系。</li>
-            <li>未包含：API 文档整理、定时任务、企业微信同步、公网发布。</li>
-            <li>表格均为空状态占位，仅保留列结构；统计值统一显示「—」，不代表任何真实指标。</li>
+            <li>五页首屏均持续显示统一 Mock 横幅（executionMode=test / provider=mock / evidenceScope=simulated / 真实设备生效：否），打印态保留。</li>
+            <li>四业务页提供六类合成状态（loading / empty / forbidden / error / retrying / ready），仅切换合成 UI 状态，刷新恢复默认，不读取浏览器本地存储，不发网络请求。</li>
+            <li>合成记录一律使用 DEMO 前缀代号，不含任何真实人员信息或真实硬件标识；私密内容仅以「需逐次授权查看」占位表达，不加载任何图片、外链或字节。</li>
+            <li>未知结果（UNKNOWN_RESULT）只允许查询 / 人工对账，不提供重复下发，系统自动重试禁用；受控重试仅在 retryable 状态且具备 device.operation.retry 时可操作。</li>
+            <li>审核权限（device.face.review）不自动获得私密读取权限（device.face.readPrivate）；缺失权限时显示 forbidden 状态。</li>
+            <li>未接入真实 API、真实数据、真实门禁设备、Provider、登录权限体系；未实现真实文件读取或下载；未合并 main。</li>
           </ul>
         </section>
       </main>
     </div>
   </div>
 
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden>
+    <span class="toast-msg" id="toast-msg"></span>
+    <button type="button" class="toast-close" id="toast-close" aria-label="关闭提示">关闭</button>
+  </div>
   <script src="app.js"></script>
 </body>
 </html>

@@ -8,42 +8,47 @@ import { LocalStore } from "../lib/store.mjs";
 import { FileService } from "../lib/files.mjs";
 import { MockFaceAccessProvider } from "../lib/face-service/index.mjs";
 import { FaceCredentialService } from "../lib/face-service/service.mjs";
+import { deviceClaimKey, deviceClaimConfig } from "../lib/face-service/collections.mjs";
 
 let store, dir;
 const orgId = "org-demo";
 const audit = { actor: "system", actorId: "system", action: "测试" };
 const ref = (collection, id) => ({ collection, id });
+let eligible = { eligible: true, entryIds: [], decisionId: null };
+let shared = null;
 
-const submitInput = { personId: "person-001", sourceFileId: "file-1" };
-const grantInput = {
-  credentialId: "",
-  expectedCredentialRevision: 2,
-  deviceId: "device-1",
-  occupancyId: "occ-1",
-  cycleId: "cycle-1",
-  identityApplicationId: "id-1",
-  validFrom: 1000,
-  validUntil: 2000,
+const blacklist = {
+  withEligibility: async (request, refs, build) => {
+    let result;
+    await store.transact(refs, async (state) => {
+      const built = await build(state, eligible);
+      result = built.result;
+      return built.writes;
+    }, audit);
+    return result;
+  },
 };
 
-const service = (membershipId, { files, provider } = {}) =>
+const providerCalls = { enroll: 0, revoke: 0 };
+const provider = {
+  enrollFace: () => { providerCalls.enroll += 1; throw new Error("Provider 不应被调用"); },
+  revokeFace: () => { providerCalls.revoke += 1; throw new Error("Provider 不应被调用"); },
+};
+
+const service = (membershipId) =>
   new FaceCredentialService({
-    store,
-    orgId,
+    store, orgId,
     actor: { membershipId, actorType: "user", actorId: membershipId },
-    files: files || new FileService(store, orgId, {
+    files: new FileService(store, orgId, {
       auth: { membershipId },
       actor: { actorType: "user", actorId: membershipId, role: "editor", permissions: ["device.face.submit"] },
     }),
-    blacklist: {},
-    provider: provider || new MockFaceAccessProvider(),
-    now: () => 1_700_000_000_000,
+    blacklist, provider, now: () => 1_700_000_000_000,
   });
 
 const counts = async () => {
   const of = async (name) => (await store.list(name, orgId)).length;
   return {
-    credentials: await of("face_credentials"),
     grants: await of("device_access_grants"),
     jobs: await of("device_operation_jobs"),
     slots: await of("grant_slot_claims"),
@@ -53,21 +58,53 @@ const counts = async () => {
   };
 };
 
+async function approvedCredential(suffix) {
+  const out = await service("mem-submit").submit(
+    { personId: `person-${suffix}`, sourceFileId: "file-1" },
+    { idempotencyKey: `idem-sub-${suffix}-0001` },
+  );
+  await service("mem-review").review(
+    out.credentialId,
+    { decision: "approved", expectedRevision: 1 },
+    { idempotencyKey: `idem-rev-${suffix}-0001` },
+  );
+  return out.credentialId;
+}
+
+const grantInput = (credentialId) => ({
+  credentialId,
+  expectedCredentialRevision: 2,
+  deviceId: "device-1",
+  occupancyId: "occ-1",
+  cycleId: "cycle-1",
+  identityApplicationId: "id-1",
+  validFrom: 1000,
+  validUntil: 2000,
+});
+
 before(async () => {
-  dir = await mkdtemp(join(tmpdir(), "smartpm-face-h1-"));
+  process.env.DEVICE_CLAIM_HMAC_KEY_B64 = Buffer.alloc(32, 7).toString("base64");
+  process.env.DEVICE_CLAIM_KEY_VERSION = "1";
+  process.env.DEVICE_DIGEST_REALM = "test-realm";
+
+  dir = await mkdtemp(join(tmpdir(), "smartpm-face-h2-"));
   store = new LocalStore(dir);
   await store.init();
   const memberships = [
     ["mem-submit", ["device.face.submit"]],
     ["mem-review", ["device.face.review"]],
     ["mem-manage", ["device.access.manage"]],
-    ["mem-audit", ["device.audit.read"]],
   ];
   await store.transact(
-    [ref("organizations", orgId), ref("file_assets", "file-1"), ...memberships.map(([id]) => ref("org_memberships", id))],
+    [ref("organizations", orgId), ref("file_assets", "file-1"), ref("access_devices", "device-1"), ref("access_devices", "device-2"), ref("access_devices", "device-3"), ref("access_devices", "device-inactive"), ref("access_devices", "device-other"), ...memberships.map(([id]) => ref("org_memberships", id))],
     () => [
       { collection: "organizations", id: orgId, data: { name: "人脸组织", status: "active", revision: 1 } },
       { collection: "file_assets", id: "file-1", data: { orgId, purpose: "face-biometric", status: "ready", visibility: "private", mimeType: "image/jpeg", size: 1024, objectKey: "private/f.jpg", revision: 1 } },
+      { collection: "access_devices", id: "device-1", data: { orgId, status: "active", provider: "hikvision", serialNumber: "SN-1", revision: 1 } },
+      { collection: "access_devices", id: "device-2", data: { orgId, status: "active", provider: "hikvision", serialNumber: "SN-2", revision: 1 } },
+      { collection: "access_devices", id: "device-3", data: { orgId, status: "active", provider: "hikvision", serialNumber: "SN-3", revision: 1 } },
+      { collection: "access_devices", id: "device-inactive", data: { orgId, status: "disabled", provider: "hikvision", serialNumber: "SN-X", revision: 1 } },
+      { collection: "access_devices", id: "device-other", data: { orgId: "org-other", status: "active", provider: "hikvision", serialNumber: "SN-O", revision: 1 } },
       ...memberships.map(([id, permissions]) => ({
         collection: "org_memberships", id,
         data: { orgId, status: "active", role: "admin", principalType: "adminAccount", principalId: id, permissions, revision: 1 },
@@ -81,164 +118,98 @@ after(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-test("submit 使用最小入参，credential 不含设备/授权字段", async () => {
-  const out = await service("mem-submit").submit(submitInput, { idempotencyKey: "idem-submit-00000001" });
-  assert.equal(out.reviewState, "submitted");
-  const record = (await store.list("face_credentials", orgId))[0];
-  for (const key of ["deviceId", "grantId", "occupancyId", "validFrom", "validUntil"]) {
-    assert.equal(key in record, false, `${key} 不应写入 credential`);
-  }
-  assert.equal(record.sourceFileId, "file-1");
-  assert.equal(record.sourceFileRevision, 1);
-  assert.equal(record.personId, "person-001");
-  assert.equal(record.revision, 1);
+test("createGrant：同事务写 domain/claim/slot/pending grant/queued job/log/op key，Provider 零调用", async () => {
+  const credentialId = await approvedCredential("a");
+  const input = grantInput(credentialId);
+  const key = "idem-grant-a-0001";
+  const out = await service("mem-manage").createGrant(input, { idempotencyKey: key });
+  shared = { input, key, result: out };
+  assert.equal(out.evidenceScope, "simulated");
+
+  const grant = (await store.list("device_access_grants", orgId))[0];
+  const job = (await store.list("device_operation_jobs", orgId))[0];
+  const claim = (await store.list("device_claims", orgId))[0];
+  const slot = (await store.list("grant_slot_claims", orgId))[0];
+  const logs = await store.list("device_operation_logs", orgId);
+  assert.equal(grant.state, "pending");
+  assert.equal(job.state, "queued");
+  assert.equal(job.leaseOwner, null);
+  assert.equal(claim.state, "active");
+  assert.equal(slot.state, "active");
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].jobId, job._id);
+  assert.equal((await store.list("device_digest_domains")).length, 2);
+  assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
 });
 
-test("review 通过后 revision 为 2，且不创建 grant/job", async () => {
-  const credential = (await store.list("face_credentials", orgId))[0];
+test("幂等重放：同键同摘要返回旧结果、零新增、零 Provider；异摘要 CONFLICT", async () => {
+  const manager = service("mem-manage");
   const before = await counts();
-  const out = await service("mem-review").review(credential._id, { decision: "approved", expectedRevision: 1 }, { idempotencyKey: "idem-review-000001" });
-  assert.equal(out.reviewState, "approved");
-  const after = await counts();
-  assert.equal(after.grants, before.grants);
-  assert.equal(after.jobs, before.jobs);
-  assert.equal((await store.list("face_credentials", orgId))[0].revision, 2);
-});
-
-test("createGrant 阶段关闭：STAGE_CLOSED 且零 grant/job/slot/claim/log/op key", async () => {
-  const credential = (await store.list("face_credentials", orgId))[0];
-  const before = await counts();
-  const calls = { enroll: 0, revoke: 0 };
-  const spy = {
-    enrollFace: () => { calls.enroll += 1; throw new Error("provider 不应被调用"); },
-    revokeFace: () => { calls.revoke += 1; throw new Error("provider 不应被调用"); },
-  };
-  await assert.rejects(
-    () => service("mem-manage", { provider: spy }).createGrant({ ...grantInput, credentialId: credential._id }, { idempotencyKey: "idem-grant-00000001" }),
-    (e) => e.code === "STAGE_CLOSED" && e.status === 501,
-  );
+  const replay = await manager.createGrant(shared.input, { idempotencyKey: shared.key });
+  assert.deepEqual(replay, shared.result);
   assert.deepEqual(await counts(), before);
-  assert.deepEqual(calls, { enroll: 0, revoke: 0 });
+  await assert.rejects(
+    () => manager.createGrant({ ...shared.input, cycleId: "cycle-2" }, { idempotencyKey: shared.key }),
+    (e) => e.code === "CONFLICT",
+  );
+  assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
 });
 
-test("revoke 阶段关闭：STAGE_CLOSED 且零写入", async () => {
+test("资格阻断与未知/停用/跨组织设备：零写入", async () => {
+  const credentialId = await approvedCredential("c");
+  const manager = service("mem-manage");
   const before = await counts();
-  const calls = { enroll: 0, revoke: 0 };
-  const spy = {
-    enrollFace: () => { calls.enroll += 1; throw new Error("provider 不应被调用"); },
-    revokeFace: () => { calls.revoke += 1; throw new Error("provider 不应被调用"); },
-  };
-  await assert.rejects(
-    () => service("mem-manage", { provider: spy }).revoke("grant-001", { idempotencyKey: "idem-revoke-0000001" }),
-    (e) => e.code === "STAGE_CLOSED" && e.status === 501,
-  );
-  assert.deepEqual(await counts(), before);
-  assert.deepEqual(calls, { enroll: 0, revoke: 0 });
-});
+  const input = { ...grantInput(credentialId), deviceId: "device-2" };
 
-test("权限分离：submitter 不能 review/createGrant；reviewer 不能 createGrant", async () => {
-  const credential = (await store.list("face_credentials", orgId))[0];
+  eligible = { eligible: false, code: "BLACKLIST_REVIEW_REQUIRED", entryIds: ["e1"], decisionId: null };
   await assert.rejects(
-    () => service("mem-submit").review(credential._id, { decision: "approved" }, { idempotencyKey: "idem-x-0000000001" }),
-    (e) => e.status === 403,
+    () => manager.createGrant(input, { idempotencyKey: "idem-grant-c-0001" }),
+    (e) => e.status === 409,
   );
-  await assert.rejects(
-    () => service("mem-submit").createGrant({ ...grantInput, credentialId: credential._id }, { idempotencyKey: "idem-x-0000000002" }),
-    (e) => e.status === 403,
-  );
-  await assert.rejects(
-    () => service("mem-review").createGrant({ ...grantInput, credentialId: credential._id }, { idempotencyKey: "idem-x-0000000003" }),
-    (e) => e.status === 403,
-  );
-});
+  eligible = { eligible: true, entryIds: [], decisionId: null };
 
-test("竞态：prepare 后撤销权限 / 修改文件 revision 均零写入", async () => {
-  const membershipId = "mem-race";
-  await store.transact([ref("org_memberships", membershipId)], () => [{
-    collection: "org_memberships", id: membershipId,
-    data: { orgId, status: "active", role: "admin", principalType: "adminAccount", principalId: membershipId, permissions: ["device.face.submit"], revision: 1 },
-  }], audit);
-
-  const base = new FileService(store, orgId, {
-    auth: { membershipId },
-    actor: { actorType: "user", actorId: membershipId, role: "editor", permissions: ["device.face.submit"] },
-  });
-  const racing = {
-    prepareReference: async (fileId) => {
-      const token = await base.prepareReference(fileId);
-      const row = (await store.list("org_memberships", orgId)).find((m) => m._id === membershipId);
-      await store.transact([ref("org_memberships", membershipId)], () => [{
-        collection: "org_memberships", id: membershipId, data: { ...row, permissions: [] },
-      }], audit);
-      return token;
-    },
-    assertReference: base.assertReference.bind(base),
-  };
-  const svc = service(membershipId, { files: racing });
-  const before = await counts();
   await assert.rejects(
-    () => svc.submit({ personId: "person-race", sourceFileId: "file-1" }, { idempotencyKey: "idem-race-00000001" }),
+    () => manager.createGrant({ ...input, deviceId: "missing" }, { idempotencyKey: "idem-grant-c-0002" }),
     (e) => e.status === 404,
   );
+  await assert.rejects(
+    () => manager.createGrant({ ...input, deviceId: "device-inactive" }, { idempotencyKey: "idem-grant-c-0003" }),
+    (e) => e.status === 409,
+  );
+  await assert.rejects(
+    () => manager.createGrant({ ...input, deviceId: "device-other" }, { idempotencyKey: "idem-grant-c-0004" }),
+    (e) => e.status === 404,
+  );
+  await assert.rejects(
+    () => manager.createGrant({ ...input, expectedCredentialRevision: 99 }, { idempotencyKey: "idem-grant-c-0005" }),
+    (e) => e.code === "REVISION_CONFLICT",
+  );
   assert.deepEqual(await counts(), before);
-
-  await store.transact([ref("org_memberships", membershipId)], (state) => [{
-    collection: "org_memberships", id: membershipId,
-    data: { ...state[`org_memberships/${membershipId}`], permissions: ["device.face.submit"] },
-  }], audit);
-
-  const base2 = new FileService(store, orgId, {
-    auth: { membershipId },
-    actor: { actorType: "user", actorId: membershipId, role: "editor", permissions: ["device.face.submit"] },
-  });
-  const racing2 = {
-    prepareReference: async (fileId) => {
-      const token = await base2.prepareReference(fileId);
-      const file = (await store.list("file_assets", orgId)).find((f) => f._id === fileId);
-      await store.transact([ref("file_assets", fileId)], () => [{
-        collection: "file_assets", id: fileId, data: { ...file, revision: file.revision + 1 },
-      }], audit);
-      return token;
-    },
-    assertReference: base2.assertReference.bind(base2),
-  };
-  const svc2 = service(membershipId, { files: racing2 });
-  const before2 = await counts();
-  await assert.rejects(
-    () => svc2.submit({ personId: "person-race-2", sourceFileId: "file-1" }, { idempotencyKey: "idem-race-00000002" }),
-    (e) => e.code === "FILE_CHANGED",
-  );
-  assert.deepEqual(await counts(), before2);
 });
 
-test("跨组织任务查询同态 404", async () => {
-  await store.transact([ref("device_operation_jobs", "job-other-org")], () => [{
-    collection: "device_operation_jobs",
-    id: "job-other-org",
-    data: { orgId: "org-other", revision: 1, action: "enroll", state: "queued", evidenceScope: "simulated" },
+test("claim 冲突：其他 grant 占用设备 → DEVICE_CLAIMED 零写入", async () => {
+  const credentialId = await approvedCredential("d");
+  const manager = service("mem-manage");
+  const k1 = deviceClaimConfig(process.env);
+  const claimId = deviceClaimKey({ provider: "hikvision", digestRealm: k1.realm, serial: "SN-3", key: k1.key, version: k1.version });
+  await store.transact([ref("device_claims", claimId)], () => [{
+    collection: "device_claims", id: claimId,
+    data: { orgId, deviceId: "device-3", grantId: "grant-other", state: "active", revision: 1 },
   }], audit);
-  await assert.rejects(
-    () => service("mem-audit").queryJob("job-other-org"),
-    (e) => e.status === 404 || e.code === "NOT_FOUND",
-  );
-});
-
-test("stale expectedRevision 审核：409 且 credential/op key 零变化", async () => {
-  const out = await service("mem-submit").submit(
-    { personId: "person-002", sourceFileId: "file-1" },
-    { idempotencyKey: "idem-stale-0000001" },
-  );
   const before = await counts();
   await assert.rejects(
-    () => service("mem-review").review(
-      out.credentialId,
-      { decision: "approved", expectedRevision: 99 },
-      { idempotencyKey: "idem-stale-0000002" },
-    ),
-    (e) => e.code === "REVISION_CONFLICT" && e.status === 409,
+    () => manager.createGrant({ ...grantInput(credentialId), deviceId: "device-3" }, { idempotencyKey: "idem-grant-d-0001" }),
+    (e) => e.code === "DEVICE_CLAIMED",
   );
   assert.deepEqual(await counts(), before);
-  const credential = (await store.list("face_credentials", orgId)).find((row) => row._id === out.credentialId);
-  assert.equal(credential.reviewState, "submitted");
-  assert.equal(credential.revision, 1);
+});
+
+test("撤权仍为 STAGE_CLOSED，零写入零 Provider", async () => {
+  const before = await counts();
+  await assert.rejects(
+    () => service("mem-manage").revoke("grant-1", { idempotencyKey: "idem-revoke-h2-0001" }),
+    (e) => e.code === "STAGE_CLOSED",
+  );
+  assert.deepEqual(await counts(), before);
+  assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
 });

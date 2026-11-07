@@ -196,7 +196,7 @@ export function operationKeyConfig(env = process.env) {
   if (!Number.isSafeInteger(version) || version < 1) {
     throw operationConfigError("OPERATION_KEY_VERSION 必须是正整数");
   }
-  const realm = String(env.OPERATION_KEY_REALM || "").trim();
+  const realm = String(env.OPERATION_KEY_REALM ?? "");
   if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(realm)) {
     throw operationConfigError("OPERATION_KEY_REALM 必须是 3–64 位小写字母/数字/连字符");
   }
@@ -243,6 +243,14 @@ export function operationKey({ orgId, method, actorType, actorId, idempotencyKey
  * 单边缺失/损坏 -> DOMAIN_INCOMPLETE；完整但配置不同 -> DOMAIN_MISMATCH。
  */
 export function applyOperationKeyDomain(state, { realm, version, fingerprint, now = Date.now() }) {
+  if (typeof realm !== "string" || !/^[a-z0-9][a-z0-9-]{2,63}$/.test(realm)) {
+    throw schemaError("realm 必须是 3–64 位小写字母/数字/连字符");
+  }
+  if (!Number.isSafeInteger(version) || version < 1) throw schemaError("version 必须是正整数");
+  if (typeof fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(fingerprint)) {
+    throw schemaError("fingerprint 必须是 64 位十六进制");
+  }
+  if (!Number.isSafeInteger(now)) throw schemaError("now 必须是毫秒时间戳");
   const { headId, versionIdPrefix } = operationKeyDomainIds(realm);
   const versionId = `${versionIdPrefix}${version}`;
   const prefix = `${COLLECTIONS.OPERATION_KEY_DOMAINS}/`;
@@ -250,17 +258,13 @@ export function applyOperationKeyDomain(state, { realm, version, fingerprint, no
   const versionRecord = state[prefix + versionId];
 
   if (!head && !versionRecord) {
+    const headData = { kind: "head", realm, keyVersion: version, keyFingerprint: fingerprint, revision: 1, createdAt: now };
+    const versionData = { kind: "version", realm, keyVersion: version, keyFingerprint: fingerprint, enabledAt: now };
+    validateOperationKeyDomainRecord(headData);
+    validateOperationKeyDomainRecord(versionData);
     return [
-      {
-        collection: COLLECTIONS.OPERATION_KEY_DOMAINS,
-        id: headId,
-        data: { kind: "head", realm, keyVersion: version, keyFingerprint: fingerprint, revision: 1, createdAt: now },
-      },
-      {
-        collection: COLLECTIONS.OPERATION_KEY_DOMAINS,
-        id: versionId,
-        data: { kind: "version", realm, keyVersion: version, keyFingerprint: fingerprint, enabledAt: now },
-      },
+      { collection: COLLECTIONS.OPERATION_KEY_DOMAINS, id: headId, data: headData },
+      { collection: COLLECTIONS.OPERATION_KEY_DOMAINS, id: versionId, data: versionData },
     ];
   }
 
@@ -296,6 +300,7 @@ export function applyOperationKeyDomain(state, { realm, version, fingerprint, no
   // 身份/版本自相矛盾 = 存储损坏
   if (head.realm !== realm || versionRecord.realm !== realm) incomplete();
   if (head.keyVersion !== versionRecord.keyVersion) incomplete();
+  if (head.keyFingerprint !== versionRecord.keyFingerprint) incomplete();
 
   // 完整记录与配置不同 = 配置不匹配
   if (head.keyVersion !== version || versionRecord.keyVersion !== version) mismatch();

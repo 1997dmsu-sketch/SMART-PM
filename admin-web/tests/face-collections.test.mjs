@@ -153,6 +153,10 @@ test("K2 operation key：HMAC 摘要、幂等键格式与配置校验", () => {
     (e) => e.code === "NOT_CONFIGURED",
   );
   assert.throws(
+    () => operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: Buffer.alloc(32, 9).toString("base64"), OPERATION_KEY_VERSION: "1", OPERATION_KEY_REALM: " test-realm " }),
+    (e) => e.code === "NOT_CONFIGURED",
+  );
+  assert.throws(
     () => operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: key.toString("base64"), OPERATION_KEY_VERSION: "0", OPERATION_KEY_REALM: "r" }),
     /正整数/,
   );
@@ -256,6 +260,14 @@ test("operation key domain：fingerprint、同版本换钥与损坏记录", () =
   const fingerprint = operationKeyFingerprint(config);
   const writes = applyOperationKeyDomain({}, { realm: config.realm, version: config.version, fingerprint, now: 100 });
   assert.equal(writes.length, 2);
+  assert.throws(
+    () => applyOperationKeyDomain({}, { realm: "Bad", version: 1, fingerprint, now: 100 }),
+    /realm/,
+  );
+  assert.throws(
+    () => applyOperationKeyDomain({}, { realm: config.realm, version: 1, fingerprint: "short", now: 100 }),
+    /fingerprint/,
+  );
   const state = Object.fromEntries(writes.map((w) => [`operation_key_domains/${w.id}`, w.data]));
   assert.deepEqual(applyOperationKeyDomain(state, { realm: config.realm, version: config.version, fingerprint, now: 200 }), []);
 
@@ -279,6 +291,16 @@ test("operation key domain：fingerprint、同版本换钥与损坏记录", () =
   };
   assert.throws(
     () => applyOperationKeyDomain(contradictory, { realm: config.realm, version: config.version, fingerprint, now: 200 }),
+    (e) => e.code === "DOMAIN_INCOMPLETE",
+  );
+
+  // head/version fingerprint 矛盾 -> DOMAIN_INCOMPLETE
+  const fpContradiction = {
+    ...state,
+    [`operation_key_domains/${writes[1].id}`]: { ...writes[1].data, keyFingerprint: otherFingerprint },
+  };
+  assert.throws(
+    () => applyOperationKeyDomain(fpContradiction, { realm: config.realm, version: config.version, fingerprint, now: 200 }),
     (e) => e.code === "DOMAIN_INCOMPLETE",
   );
 

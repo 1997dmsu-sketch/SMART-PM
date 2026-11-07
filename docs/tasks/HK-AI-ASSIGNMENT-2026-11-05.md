@@ -24,7 +24,7 @@
 | AI-B / HK-AI-02 | `f15160d` 代码侧复审通过 | `feat/hk-isapi-capability-probe` | `8136b90` | 三项返工已关闭；等待现场/项目负责人批准、隔离环境和一次性窗口，批准前禁止设置 `HIKVISION_PROBE_ALLOW_READ=true` |
 | AI-C / HK-AI-03 | 阶段2通过（`c7516e6`） | `feat/db-mvp-integration` | `b9ee061`（`feat/db-05-occupancies`） | 221/221 admin、51/51根测试及smoke通过；阶段3继续关闭，等待单独安排 |
 | AI-D0 / HK-AI-04A | 文档阶段通过 Codex 复审（`5148159`） | `docs/hk-ai-04-contract-evidence` | `8b47fb7` | 九项架构裁定见 `HK-AI-04A-REVIEW-2026-11-05.md`；不代表真实能力验证 |
-| AI-D / HK-AI-04 | H1 返工 `9491bf9` 二次复审仍未通过 | `feat/hk-face-service-integration` | `d42dd4b`（含 binding 与稳定 Mock 测试） | 按 `HK-AI-04-H1-REREVIEW-9491BF9-2026-11-07.md` 补齐 helper 严格校验；下一提交不得混入方法切换或 H2 |
+| AI-D / HK-AI-04 | H1 二次返工 `3b97109` 三次复审仍未通过 | `feat/hk-face-service-integration` | `d42dd4b`（含 binding 与稳定 Mock 测试） | 按 `HK-AI-04-H1-REREVIEW-3B97109-2026-11-07.md` 统一使用 bounded ID / safe integer 校验；不得混入方法切换或 H2 |
 | AI-E / HK-AI-05 | 今日由 Workburry 启动页面壳 | `feat/hk-face-admin` | 先用合成 fixture；等待 AI-D DTO 后绑定 | 今日交设备/申请/任务/审计页面壳，持续显示 Mock 标识 |
 | AI-F / DEV-AI-01 | Workburry 已分配，演示前降为 P1 | `feat/wecom-dev-board` | `docs/lock-01-fast-track@1358ef5` | 暂不占用 AI-E 关键路径；真实发送仍等待企业微信配置 |
 | HK-HUMAN-02 安装视频 | Kimi 负责脚本/分镜/字幕，真人负责断电接线与拍摄 | `docs/hk-install-video` | DS-K1T671BM + PDC-K7B-12V5A | 先交文档包；端子与锁铭牌经真人复核后再出最终成片 |

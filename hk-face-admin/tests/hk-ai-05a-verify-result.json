@@ -1,0 +1,1096 @@
+{
+  "meta": {
+    "node": "v22.22.2",
+    "chrome": "156.0.8078.81 (headless=new)",
+    "baseline": "708c3ab",
+    "repo": "C:\\Users\\Administrator\\WorkBuddy\\2026-10-23-16-18-12\\.tmp-hk-push",
+    "generatedAt": "2026-11-07T08:23:07.510Z",
+    "note": "CDP WebSocket 为本地回环 DevTools 协议，不属于页面运行时网络请求"
+  },
+  "assertions": [
+    {
+      "name": "C1.1 24 组合：每态 state-root innerHTML 与相邻态不同（且结构不同，非只换文字）",
+      "ok": true,
+      "detail": "24 格中 20 格参与相邻比较，全部 DOM + 结构双重差异"
+    },
+    {
+      "name": "C1.2 24 组合：同一时刻 ≤1 个状态容器、无 hidden/aria-hidden 残留、无 URL 变化",
+      "ok": true,
+      "detail": "24/24 通过"
+    },
+    {
+      "name": "C1.3 24 组合：localStorage.length===0 && sessionStorage.length===0",
+      "ok": true,
+      "detail": "24/24 实测 0/0"
+    },
+    {
+      "name": "C1.4 24 组合：每态 data-ui-state / select.value 与目标态一致",
+      "ok": true,
+      "detail": "24/24 通过"
+    },
+    {
+      "name": "C1.5 四业务页切到 error 后 reload 强制恢复默认 ready",
+      "ok": true,
+      "detail": "4/4 回 ready"
+    },
+    {
+      "name": "C2 CDP Network：整轮 requestWillBeSent 非 file:// 计数 = 0",
+      "ok": true,
+      "detail": "总事件=96（file:// 协议本身=96），非 file://=0"
+    },
+    {
+      "name": "C2b 整轮 console error = 0（exceptionThrown / console.error / log.error）",
+      "ok": true,
+      "detail": "0 条"
+    },
+    {
+      "name": "C3.1 真实点击 [data-toast] 触发 toast",
+      "ok": true,
+      "detail": "hidden=false"
+    },
+    {
+      "name": "C3.2 Input.dispatchKeyEvent(keyDown Escape) 真的关闭 toast",
+      "ok": true,
+      "detail": "hidden=true"
+    },
+    {
+      "name": "C3.3 真实鼠标点击 #toast-close 同样关闭 toast",
+      "ok": true,
+      "detail": "hidden=true"
+    },
+    {
+      "name": "C3.4 Enter 合成按键（带 text:'\\r'）可激活聚焦按钮",
+      "ok": true,
+      "detail": "toast 弹出"
+    },
+    {
+      "name": "C4.1 Tab 序列可聚焦元素均 matches(':focus-visible') 且有可见 outline",
+      "ok": true,
+      "detail": "12 个 Tab 步，12 个 focus-visible + 可见 outline"
+    },
+    {
+      "name": "C4.2 900×768 下能 Tab 到 .table-wrap（显式 tabindex=\"0\"）",
+      "ok": true,
+      "detail": "第 12 步命中，tabindex=0"
+    },
+    {
+      "name": "C4.3 .table-wrap 有被裁列（scrollWidth > clientWidth）",
+      "ok": true,
+      "detail": "scrollWidth=1003 clientWidth=592"
+    },
+    {
+      "name": "C4.4 方向键 / End（keyDown）可滚入被裁列",
+      "ok": true,
+      "detail": "scrollLeft 0 -> 12"
+    },
+    {
+      "name": "C5 打印态 .mock-banner computed display/visibility 非隐藏，且含逐字文案 + 四项",
+      "ok": true,
+      "detail": "display=flex visibility=visible 逐字=true 四项=4/4"
+    },
+    {
+      "name": "C6 Mock 横幅文本 + --text-2 类次级文字对比度均 ≥4.5:1（computed style + WCAG 公式实算）",
+      "ok": true,
+      "detail": "26 个元素，最小 6.11:1，最大 16.48:1"
+    },
+    {
+      "name": "C7.1 awaiting_result / UNKNOWN_RESULT 行内不存在可执行重试 / 再次新增按钮，只有查询 / 人工对账",
+      "ok": true,
+      "detail": "unknown行=1 actions=[[\"query\",\"reconcile\"]]"
+    },
+    {
+      "name": "C7.2 受控重试按钮只出现在 retryable 行",
+      "ok": true,
+      "detail": "retryable行=1 全站 retry 按钮=1"
+    },
+    {
+      "name": "C7.3 取消 device.operation.retry 勾选后受控重试按钮 disabled 且有缺权限说明",
+      "ok": true,
+      "detail": "checked=false disabled=true hint=\"缺少 device.operation.retry：受控重试按钮已禁用，不可操作。\" title=\"缺少 device.operation.retry 权限，不可操作\""
+    },
+    {
+      "name": "C7.4 点击受控重试后 URL / 浏览器存储 / 非 file 网络计数均不变",
+      "ok": true,
+      "detail": "url不变=true ls=0 ss=0 net=0->0"
+    },
+    {
+      "name": "B/C 20 张截图全部生成",
+      "ok": true,
+      "detail": "20/20"
+    },
+    {
+      "name": "B/C 20 张 PNG 签名 + IHDR 宽高与文件名一致",
+      "ok": true,
+      "detail": "20/20 IHDR OK"
+    },
+    {
+      "name": "B/C 20 张 innerText 脱敏 10 类值正则 0 命中",
+      "ok": true,
+      "detail": "0 命中"
+    },
+    {
+      "name": "B/C 20 张均含 Mock 横幅逐字文案 + 四项（含打印态）",
+      "ok": true,
+      "detail": "20/20 命中"
+    },
+    {
+      "name": "B/C 既有 21 个证据文件 SHA-256 出图前后完全一致，且均与 708c3ab 基线一致",
+      "ok": true,
+      "detail": "前后差异=0 基线差异=0"
+    }
+  ],
+  "screenshots": [
+    {
+      "file": "index-1366x768.png",
+      "page": "index",
+      "state": "ready",
+      "w": 1366,
+      "h": 768,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1366,
+        "height": 768,
+        "bytes": 86251,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "devices-1366x768.png",
+      "page": "devices",
+      "state": "ready",
+      "w": 1366,
+      "h": 768,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1366,
+        "height": 768,
+        "bytes": 88525,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "applications-1366x768.png",
+      "page": "applications",
+      "state": "ready",
+      "w": 1366,
+      "h": 768,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1366,
+        "height": 768,
+        "bytes": 82081,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "tasks-1366x768.png",
+      "page": "tasks",
+      "state": "ready",
+      "w": 1366,
+      "h": 768,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1366,
+        "height": 768,
+        "bytes": 88659,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "audits-1366x768.png",
+      "page": "audits",
+      "state": "ready",
+      "w": 1366,
+      "h": 768,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1366,
+        "height": 768,
+        "bytes": 82439,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "devices-1440x900.png",
+      "page": "devices",
+      "state": "ready",
+      "w": 1440,
+      "h": 900,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1440,
+        "height": 900,
+        "bytes": 107406,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "applications-1440x900.png",
+      "page": "applications",
+      "state": "ready",
+      "w": 1440,
+      "h": 900,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1440,
+        "height": 900,
+        "bytes": 101276,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "tasks-1440x900.png",
+      "page": "tasks",
+      "state": "ready",
+      "w": 1440,
+      "h": 900,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1440,
+        "height": 900,
+        "bytes": 108516,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "audits-1440x900.png",
+      "page": "audits",
+      "state": "ready",
+      "w": 1440,
+      "h": 900,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1440,
+        "height": 900,
+        "bytes": 102974,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "devices-1920x1080.png",
+      "page": "devices",
+      "state": "ready",
+      "w": 1920,
+      "h": 1080,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 128516,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "applications-1920x1080.png",
+      "page": "applications",
+      "state": "ready",
+      "w": 1920,
+      "h": 1080,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 122548,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "tasks-1920x1080.png",
+      "page": "tasks",
+      "state": "ready",
+      "w": 1920,
+      "h": 1080,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 139942,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "audits-1920x1080.png",
+      "page": "audits",
+      "state": "ready",
+      "w": 1920,
+      "h": 1080,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1920,
+        "height": 1080,
+        "bytes": 134556,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "tasks-state-unknown-result-1366x768.png",
+      "page": "tasks",
+      "state": "ready",
+      "w": 1366,
+      "h": 768,
+      "print": false,
+      "scroll": true,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1366,
+        "height": 768,
+        "bytes": 88052,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "applications-state-forbidden-readprivate-1366x768.png",
+      "page": "applications",
+      "state": "ready",
+      "w": 1366,
+      "h": 768,
+      "print": false,
+      "scroll": true,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1366,
+        "height": 768,
+        "bytes": 83163,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "devices-state-loading-1366x768.png",
+      "page": "devices",
+      "state": "loading",
+      "w": 1366,
+      "h": 768,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1366,
+        "height": 768,
+        "bytes": 79775,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "applications-state-forbidden-1366x768.png",
+      "page": "applications",
+      "state": "forbidden",
+      "w": 1366,
+      "h": 768,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1366,
+        "height": 768,
+        "bytes": 75305,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "tasks-state-error-1366x768.png",
+      "page": "tasks",
+      "state": "error",
+      "w": 1366,
+      "h": 768,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1366,
+        "height": 768,
+        "bytes": 80249,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "audits-state-retrying-1366x768.png",
+      "page": "audits",
+      "state": "retrying",
+      "w": 1366,
+      "h": 768,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1366,
+        "height": 768,
+        "bytes": 70913,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "devices-print-mock-banner.png",
+      "page": "devices",
+      "state": "ready",
+      "w": 1366,
+      "h": 768,
+      "print": true,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1366,
+        "height": 768,
+        "bytes": 74511,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    }
+  ],
+  "stateMatrix": [
+    {
+      "page": "devices",
+      "state": "ready",
+      "domDiffFromPrev": null,
+      "structDiffFromPrev": null,
+      "stateAttr": "ready",
+      "selValue": "ready",
+      "views": 0,
+      "hidden": 0,
+      "children": 2,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "devices",
+      "state": "loading",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "loading",
+      "selValue": "loading",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "devices",
+      "state": "empty",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "empty",
+      "selValue": "empty",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "devices",
+      "state": "forbidden",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "forbidden",
+      "selValue": "forbidden",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "devices",
+      "state": "error",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "error",
+      "selValue": "error",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "devices",
+      "state": "retrying",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "retrying",
+      "selValue": "retrying",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "applications",
+      "state": "ready",
+      "domDiffFromPrev": null,
+      "structDiffFromPrev": null,
+      "stateAttr": "ready",
+      "selValue": "ready",
+      "views": 0,
+      "hidden": 0,
+      "children": 2,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "applications",
+      "state": "loading",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "loading",
+      "selValue": "loading",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "applications",
+      "state": "empty",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "empty",
+      "selValue": "empty",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "applications",
+      "state": "forbidden",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "forbidden",
+      "selValue": "forbidden",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "applications",
+      "state": "error",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "error",
+      "selValue": "error",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "applications",
+      "state": "retrying",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "retrying",
+      "selValue": "retrying",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "tasks",
+      "state": "ready",
+      "domDiffFromPrev": null,
+      "structDiffFromPrev": null,
+      "stateAttr": "ready",
+      "selValue": "ready",
+      "views": 0,
+      "hidden": 0,
+      "children": 2,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "tasks",
+      "state": "loading",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "loading",
+      "selValue": "loading",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "tasks",
+      "state": "empty",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "empty",
+      "selValue": "empty",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "tasks",
+      "state": "forbidden",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "forbidden",
+      "selValue": "forbidden",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "tasks",
+      "state": "error",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "error",
+      "selValue": "error",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "tasks",
+      "state": "retrying",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "retrying",
+      "selValue": "retrying",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "audits",
+      "state": "ready",
+      "domDiffFromPrev": null,
+      "structDiffFromPrev": null,
+      "stateAttr": "ready",
+      "selValue": "ready",
+      "views": 0,
+      "hidden": 0,
+      "children": 2,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "audits",
+      "state": "loading",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "loading",
+      "selValue": "loading",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "audits",
+      "state": "empty",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "empty",
+      "selValue": "empty",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "audits",
+      "state": "forbidden",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "forbidden",
+      "selValue": "forbidden",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "audits",
+      "state": "error",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "error",
+      "selValue": "error",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    },
+    {
+      "page": "audits",
+      "state": "retrying",
+      "domDiffFromPrev": true,
+      "structDiffFromPrev": true,
+      "stateAttr": "retrying",
+      "selValue": "retrying",
+      "views": 1,
+      "hidden": 0,
+      "children": 1,
+      "ls": 0,
+      "ss": 0,
+      "urlStable": true
+    }
+  ],
+  "contrast": [
+    {
+      "sel": ".crumb",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": ".mock-flag",
+      "fg": "rgb(163, 21, 43)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 7.78
+    },
+    {
+      "sel": ".mock-lead",
+      "fg": "rgb(255, 255, 255)",
+      "bg": "rgb(58,17,25)",
+      "ratio": 16.48
+    },
+    {
+      "sel": ".mock-status",
+      "fg": "rgb(255, 233, 236)",
+      "bg": "rgb(58,17,25)",
+      "ratio": 14.22
+    },
+    {
+      "sel": "CODE",
+      "fg": "rgb(255, 255, 255)",
+      "bg": "rgb(86,50,57)",
+      "ratio": 10.98
+    },
+    {
+      "sel": "CODE",
+      "fg": "rgb(255, 255, 255)",
+      "bg": "rgb(86,50,57)",
+      "ratio": 10.98
+    },
+    {
+      "sel": "CODE",
+      "fg": "rgb(255, 255, 255)",
+      "bg": "rgb(86,50,57)",
+      "ratio": 10.98
+    },
+    {
+      "sel": ".no",
+      "fg": "rgb(255, 208, 215)",
+      "bg": "rgb(58,17,25)",
+      "ratio": 11.97
+    },
+    {
+      "sel": ".sub",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(245,245,247)",
+      "ratio": 6.11
+    },
+    {
+      "sel": ".stat-label",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": ".stat-hint",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": ".stat-label",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": ".stat-hint",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": ".stat-label",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": ".stat-hint",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": ".stat-label",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": ".stat-hint",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": ".muted",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": ".muted",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(245,245,247)",
+      "ratio": 6.11
+    },
+    {
+      "sel": ".state-note",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,246,247)",
+      "ratio": 6.27
+    },
+    {
+      "sel": ".state-note",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,246,247)",
+      "ratio": 6.27
+    },
+    {
+      "sel": "P",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": "P",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": "P",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": "P",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    },
+    {
+      "sel": "P",
+      "fg": "rgb(92, 92, 96)",
+      "bg": "rgb(255,255,255)",
+      "ratio": 6.66
+    }
+  ],
+  "runtime": {
+    "tabSequence": {
+      "total": 12,
+      "focusVisibleCount": 12,
+      "reachedWrap": true,
+      "wrap": {
+        "tag": "DIV",
+        "cls": "table-wrap",
+        "id": "",
+        "fv": true,
+        "outline": "solid",
+        "ow": "3px",
+        "oc": "rgb(11, 87, 208)",
+        "tabindex": "0"
+      }
+    },
+    "tableScroll": {
+      "before": {
+        "sl": 0,
+        "sw": 1003,
+        "cw": 592,
+        "active": true
+      },
+      "after": {
+        "sl": 12
+      }
+    },
+    "print": {
+      "display": "flex",
+      "visibility": "visible",
+      "opacity": "1",
+      "hasLead": true,
+      "four": [
+        {
+          "s": "executionMode=test",
+          "hit": true
+        },
+        {
+          "s": "provider=mock",
+          "hit": true
+        },
+        {
+          "s": "evidenceScope=simulated",
+          "hit": true
+        },
+        {
+          "s": "真实设备生效：否",
+          "hit": true
+        }
+      ]
+    },
+    "unknownResult": {
+      "unknownCount": 1,
+      "unknownActions": [
+        [
+          "query",
+          "reconcile"
+        ]
+      ],
+      "unknownHasRetry": false,
+      "unknownHasNew": false,
+      "unknownHasQuery": true,
+      "unknownHasReconcile": true,
+      "retryableCount": 1,
+      "retryableHasRetry": true,
+      "totalRetryBtns": 1
+    },
+    "buttonSideEffect": {
+      "urlBefore": "file:///C:/Users/Administrator/WorkBuddy/2026-10-23-16-18-12/.tmp-hk-push/hk-face-admin/tasks.html",
+      "afterClick": {
+        "url": "file:///C:/Users/Administrator/WorkBuddy/2026-10-23-16-18-12/.tmp-hk-push/hk-face-admin/tasks.html",
+        "ls": 0,
+        "ss": 0
+      },
+      "netBefore": 0,
+      "netAfter": 0
+    },
+    "cssom": {
+      "ok": false,
+      "err": "SecurityError"
+    }
+  },
+  "evidenceIntegrity": {
+    "beforeCount": 21,
+    "afterCount": 21,
+    "beforeAfterChanged": [],
+    "baselineMismatch": [],
+    "allConsistent": true
+  },
+  "consoleErrors": [],
+  "network": {
+    "total": 114,
+    "file": 114,
+    "nonFile": 0,
+    "samples": []
+  }
+}

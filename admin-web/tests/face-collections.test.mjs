@@ -17,6 +17,7 @@ import {
   operationKeyConfig,
   operationKeyFingerprint,
   applyOperationKeyDomain,
+  validateOperationKeyDomainRecord,
   validateRecord,
   validateDigestDomainRecord,
   applyDigestDomain,
@@ -267,6 +268,18 @@ test("operation key domain：fingerprint、同版本换钥与损坏记录", () =
   assert.throws(
     () => applyOperationKeyDomain({}, { realm: config.realm, version: 1, fingerprint: "short", now: 100 }),
     /fingerprint/,
+  );
+  assert.throws(
+    () => applyOperationKeyDomain({}, { realm: config.realm, version: 1, fingerprint, now: -1 }),
+    /now/,
+  );
+  assert.throws(
+    () => validateOperationKeyDomainRecord({ kind: "head", realm: config.realm, keyVersion: 1, keyFingerprint: fingerprint, revision: 1, createdAt: -1 }),
+    /createdAt/,
+  );
+  assert.throws(
+    () => validateOperationKeyDomainRecord({ kind: "version", realm: config.realm, keyVersion: 1, keyFingerprint: fingerprint, enabledAt: -1 }),
+    /enabledAt/,
   );
   const state = Object.fromEntries(writes.map((w) => [`operation_key_domains/${w.id}`, w.data]));
   assert.deepEqual(applyOperationKeyDomain(state, { realm: config.realm, version: config.version, fingerprint, now: 200 }), []);

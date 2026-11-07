@@ -250,7 +250,7 @@ export function applyOperationKeyDomain(state, { realm, version, fingerprint, no
   if (typeof fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(fingerprint)) {
     throw schemaError("fingerprint 必须是 64 位十六进制");
   }
-  if (!Number.isSafeInteger(now)) throw schemaError("now 必须是毫秒时间戳");
+  if (!Number.isSafeInteger(now) || now < 0) throw schemaError("now 必须是 ≥0 的毫秒时间戳");
   const { headId, versionIdPrefix } = operationKeyDomainIds(realm);
   const versionId = `${versionIdPrefix}${version}`;
   const prefix = `${COLLECTIONS.OPERATION_KEY_DOMAINS}/`;
@@ -479,9 +479,9 @@ export function validateOperationKeyDomainRecord(record) {
   }
   if (record.kind === "head") {
     if (!Number.isSafeInteger(record.revision) || record.revision < 1) throw schemaError("head.revision 必须是 ≥1 整数");
-    if (!Number.isSafeInteger(record.createdAt)) throw schemaError("head.createdAt 必须是时间戳");
+    if (!Number.isSafeInteger(record.createdAt) || record.createdAt < 0) throw schemaError("head.createdAt 必须是 ≥0 时间戳");
   }
-  if (record.kind === "version" && !Number.isSafeInteger(record.enabledAt)) {
+  if (record.kind === "version" && (!Number.isSafeInteger(record.enabledAt) || record.enabledAt < 0)) {
     throw schemaError("version.enabledAt 必须是时间戳");
   }
   return record;

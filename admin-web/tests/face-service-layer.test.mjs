@@ -222,3 +222,20 @@ test("跨组织任务查询同态 404", async () => {
     (e) => e.status === 404 || e.code === "NOT_FOUND",
   );
 });
+
+test("stale expectedRevision 审核：409 且 credential/op key 零变化", async () => {
+  const out = await service("mem-submit").submit(
+    { personId: "person-002", sourceFileId: "file-1" },
+    { idempotencyKey: "idem-stale-0000001" },
+  );
+  const before = await counts();
+  await assert.rejects(
+    () => service("mem-review").review(
+      out.credentialId,
+      { decision: "approved", expectedRevision: 99 },
+      { idempotencyKey: "idem-stale-0000002" },
+    ),
+    (e) => e.code === "REVISION_CONFLICT" && e.status === 409,
+  );
+  assert.deepEqual(await counts(), before);
+});

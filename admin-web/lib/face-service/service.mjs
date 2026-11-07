@@ -13,11 +13,8 @@
 import { createHash } from "node:crypto";
 
 import { failCode } from "../model.mjs";
-import { PURPOSES } from "../files.mjs";
 import {
   COLLECTIONS,
-  deviceClaimKey,
-  grantSlotKey,
   nextRevision,
   operationKey,
   validateRecord,

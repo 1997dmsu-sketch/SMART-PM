@@ -56,10 +56,19 @@ test("claim/slot 墓碑：释放后可重新占用，released 记录保留审计
   assert.equal(isReclaimable(released, "g3"), true);
   assert.equal(isReclaimable({ state: "corrupt", grantId: "g1" }, "g1"), false);
   assert.throws(() => releaseClaim({ state: "corrupt", revision: 1 }, { jobId: "j" }), /active/);
+  assert.throws(() => releaseClaim({ state: "active", revision: 1 }, {}), /releasedByJobId/);
+  assert.throws(() => releaseClaim({ state: "active", revision: 0 }, { jobId: "j" }), /revision/);
+  assert.throws(() => releaseClaim({ state: "active", revision: "1" }, { jobId: "j" }), /revision/);
+  assert.equal(isReclaimable({ state: "released", releasedAt: 1 }, "g"), false);
+  assert.equal(isReclaimable({ state: "released", releasedAt: 1, releasedByJobId: "j" }, "g"), false);
+  assert.equal(isReclaimable({ state: "released", releasedAt: 1, releasedByJobId: "j", revision: 2 }, "g"), true);
 });
 
 test("确定性 log ID 与租约结构", () => {
   assert.match(deterministicLogId("job-1", "queued"), /^log:/);
+  for (const bad of [0, -1, "1"]) {
+    assert.throws(() => deterministicLogId("job-1", "queued", bad), /occurrence/);
+  }
   assert.notEqual(
     deterministicLogId("a:b", "c"),
     deterministicLogId("a", "b:c"),
@@ -73,6 +82,8 @@ test("确定性 log ID 与租约结构", () => {
   assert.throws(() => leasePatch({ owner: "w", expiresAt: 2000, attempts: "0", revision: 1, now: 100 }), /attempts/);
   assert.throws(() => leasePatch({ owner: "w", expiresAt: 2000, attempts: 0, revision: "1", now: 100 }), /revision/);
   assert.throws(() => leasePatch({ owner: "w", expiresAt: 100, attempts: 0, revision: 1, now: 100 }), /leaseExpiresAt/);
+  assert.throws(() => leasePatch({ owner: "   ", expiresAt: 2000, now: 100 }), /leaseOwner/);
+  assert.throws(() => leasePatch({ owner: "w", expiresAt: 2000, now: "100" }), /now/);
 });
 
 test("LocalStore 登记本期人脸集合", async () => {

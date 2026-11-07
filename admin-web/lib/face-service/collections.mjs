@@ -255,6 +255,8 @@ export const CLAIM_STATE = Object.freeze({ ACTIVE: "active", RELEASED: "released
 export function releaseClaim(record, { jobId, now = Date.now() }) {
   if (!record) throw schemaError("claim/slot 记录不存在");
   if (record.state !== CLAIM_STATE.ACTIVE) throw schemaError("仅 active claim/slot 可释放");
+  if (typeof jobId !== "string" || !jobId.trim()) throw schemaError("releasedByJobId 必填");
+  if (!Number.isInteger(record.revision) || record.revision < 1) throw schemaError("claim revision 非法");
   return {
     state: CLAIM_STATE.RELEASED,
     releasedAt: now,
@@ -267,7 +269,12 @@ export function releaseClaim(record, { jobId, now = Date.now() }) {
 /** 可占用：不存在、已墓碑释放，或声明为 active 但属于本 grant。 */
 export function isReclaimable(record, ownerGrantId) {
   if (!record) return true;
-  if (record.state === CLAIM_STATE.RELEASED) return true;
+  if (record.state === CLAIM_STATE.RELEASED) {
+    // 墓碑必须带完整审计字段，否则视为损坏记录，失败关闭。
+    return Number.isInteger(record.releasedAt) &&
+      typeof record.releasedByJobId === "string" && record.releasedByJobId.trim() !== "" &&
+      Number.isInteger(record.revision) && record.revision >= 1;
+  }
   if (record.state === CLAIM_STATE.ACTIVE) return record.grantId === ownerGrantId;
   return false; // 未知状态失败关闭
 }
@@ -276,12 +283,14 @@ export function isReclaimable(record, ownerGrantId) {
 export function deterministicLogId(jobId, state, occurrence = 1) {
   assertId(jobId, "jobId");
   assertId(state, "state");
+  if (!Number.isInteger(occurrence) || occurrence < 1) throw schemaError("occurrence 必须是 ≥1 整数");
   return `log:${encodeSegment(jobId)}:${encodeSegment(state)}:${occurrence}`;
 }
 
 /** 租约结构：不保存凭据，仅 owner/过期时间/次数。 */
 export function leasePatch({ owner, expiresAt, attempts = 0, revision = 1, now = Date.now() }) {
-  if (!owner) throw schemaError("leaseOwner 必填");
+  if (typeof owner !== "string" || !owner.trim()) throw schemaError("leaseOwner 必须是非空字符串");
+  if (!Number.isInteger(now)) throw schemaError("now 必须是毫秒时间戳");
   if (!Number.isInteger(expiresAt) || expiresAt <= now) throw schemaError("leaseExpiresAt 必须是未来毫秒时间戳");
   if (!Number.isInteger(attempts) || attempts < 0) throw schemaError("attempts 必须是 ≥0 整数");
   if (!Number.isInteger(revision) || revision < 1) throw schemaError("revision 必须是 ≥1 整数");

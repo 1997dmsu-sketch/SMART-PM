@@ -67,6 +67,9 @@ export function validateRecord(collection, record, { partial = false } = {}) {
     throw schemaError(`未知集合：${collection}`);
   }
   if (!record || typeof record !== "object") throw schemaError("记录必须是对象");
+  if (collection === COLLECTIONS.OPERATION_KEY_DOMAINS) {
+    return validateOperationKeyDomainRecord(record);
+  }
   if (collection === COLLECTIONS.DEVICE_DIGEST_DOMAINS) {
     return validateDigestDomainRecord(record);
   }
@@ -194,7 +197,9 @@ export function operationKeyConfig(env = process.env) {
     throw operationConfigError("OPERATION_KEY_VERSION 必须是正整数");
   }
   const realm = String(env.OPERATION_KEY_REALM || "").trim();
-  if (!realm) throw operationConfigError("OPERATION_KEY_REALM 必填");
+  if (!/^[a-z0-9][a-z0-9-]{2,63}$/.test(realm)) {
+    throw operationConfigError("OPERATION_KEY_REALM 必须是 3–64 位小写字母/数字/连字符");
+  }
   return { key, version, realm };
 }
 
@@ -238,8 +243,8 @@ export function operationKey({ orgId, method, actorType, actorId, idempotencyKey
  * 单边缺失/损坏 -> DOMAIN_INCOMPLETE；完整但配置不同 -> DOMAIN_MISMATCH。
  */
 export function applyOperationKeyDomain(state, { realm, version, fingerprint, now = Date.now() }) {
-  const { headId } = operationKeyDomainIds(realm);
-  const versionId = `${operationKeyDomainIds(realm).versionIdPrefix}${version}`;
+  const { headId, versionIdPrefix } = operationKeyDomainIds(realm);
+  const versionId = `${versionIdPrefix}${version}`;
   const prefix = `${COLLECTIONS.OPERATION_KEY_DOMAINS}/`;
   const head = state[prefix + headId];
   const versionRecord = state[prefix + versionId];
@@ -264,23 +269,37 @@ export function applyOperationKeyDomain(state, { realm, version, fingerprint, no
     error.code = "DOMAIN_INCOMPLETE";
     throw error;
   };
-  if (!head || !versionRecord) incomplete();
-
-  const valid = (record, kind) =>
-    record && record.kind === kind && typeof record.realm === "string" &&
-    Number.isSafeInteger(record.keyVersion) && typeof record.keyFingerprint === "string" &&
-    /^[0-9a-f]{64}$/.test(record.keyFingerprint);
-  if (!valid(head, "head") || !valid(versionRecord, "version")) incomplete();
-
-  const mismatch =
-    head.realm !== realm || versionRecord.realm !== realm ||
-    head.keyVersion !== version || versionRecord.keyVersion !== version ||
-    head.keyFingerprint !== fingerprint || versionRecord.keyFingerprint !== fingerprint;
-  if (mismatch) {
+  const mismatch = () => {
     const error = schemaError("operation key domain 与当前配置不一致");
     error.code = "DOMAIN_MISMATCH";
     throw error;
+  };
+  const validate = (record, kind) => {
+    validateOperationKeyDomainRecord(record);
+    if (record.kind !== kind) incomplete();
+  };
+
+  // 稳定 head 已存在但配置版本不同：直接判定配置不匹配。
+  if (head && !versionRecord) {
+    try { validate(head, "head"); } catch { incomplete(); }
+    if (head.keyVersion !== version) mismatch();
+    incomplete(); // 同版本却缺版本历史 = 损坏
   }
+  if (!head) incomplete(); // 只有版本记录 = 损坏
+
+  try {
+    validate(head, "head");
+    validate(versionRecord, "version");
+  } catch {
+    incomplete();
+  }
+  // 身份/版本自相矛盾 = 存储损坏
+  if (head.realm !== realm || versionRecord.realm !== realm) incomplete();
+  if (head.keyVersion !== versionRecord.keyVersion) incomplete();
+
+  // 完整记录与配置不同 = 配置不匹配
+  if (head.keyVersion !== version || versionRecord.keyVersion !== version) mismatch();
+  if (head.keyFingerprint !== fingerprint || versionRecord.keyFingerprint !== fingerprint) mismatch();
   return [];
 }
 
@@ -441,6 +460,26 @@ export function leasePatch({ owner, expiresAt, attempts = 0, revision = 1, now =
     revision: revision + 1,
     updatedAt: now,
   };
+}
+
+export function validateOperationKeyDomainRecord(record) {
+  if (!record || typeof record !== "object") throw schemaError("操作域记录必须是对象");
+  if (!["head", "version"].includes(record.kind)) throw schemaError("kind 必须是 head/version");
+  if (typeof record.realm !== "string" || !/^[a-z0-9][a-z0-9-]{2,63}$/.test(record.realm)) {
+    throw schemaError("realm 必须是 3–64 位小写字母/数字/连字符");
+  }
+  if (!Number.isSafeInteger(record.keyVersion) || record.keyVersion < 1) throw schemaError("keyVersion 必须是正整数");
+  if (typeof record.keyFingerprint !== "string" || !/^[0-9a-f]{64}$/.test(record.keyFingerprint)) {
+    throw schemaError("keyFingerprint 必须是 64 位十六进制");
+  }
+  if (record.kind === "head") {
+    if (!Number.isSafeInteger(record.revision) || record.revision < 1) throw schemaError("head.revision 必须是 ≥1 整数");
+    if (!Number.isSafeInteger(record.createdAt)) throw schemaError("head.createdAt 必须是时间戳");
+  }
+  if (record.kind === "version" && !Number.isSafeInteger(record.enabledAt)) {
+    throw schemaError("version.enabledAt 必须是时间戳");
+  }
+  return record;
 }
 
 export function schemaError(message) {

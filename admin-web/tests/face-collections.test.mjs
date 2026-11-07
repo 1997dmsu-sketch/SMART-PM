@@ -149,6 +149,10 @@ test("K2 operation key：HMAC 摘要、幂等键格式与配置校验", () => {
   );
   assert.throws(() => operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: "", OPERATION_KEY_VERSION: "1", OPERATION_KEY_REALM: "r" }), /Base64/);
   assert.throws(
+    () => operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: Buffer.alloc(32, 9).toString("base64"), OPERATION_KEY_VERSION: "1", OPERATION_KEY_REALM: "R" }),
+    (e) => e.code === "NOT_CONFIGURED",
+  );
+  assert.throws(
     () => operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: key.toString("base64"), OPERATION_KEY_VERSION: "0", OPERATION_KEY_REALM: "r" }),
     /正整数/,
   );
@@ -260,6 +264,22 @@ test("operation key domain：fingerprint、同版本换钥与损坏记录", () =
   assert.throws(
     () => applyOperationKeyDomain(state, { realm: config.realm, version: config.version, fingerprint: otherFingerprint, now: 200 }),
     (e) => e.code === "DOMAIN_MISMATCH",
+  );
+
+  // 完整 v1 + 配置 v2 -> DOMAIN_MISMATCH
+  assert.throws(
+    () => applyOperationKeyDomain(state, { realm: config.realm, version: 2, fingerprint, now: 200 }),
+    (e) => e.code === "DOMAIN_MISMATCH",
+  );
+
+  // head/version 版本矛盾 -> DOMAIN_INCOMPLETE
+  const contradictory = {
+    ...state,
+    [`operation_key_domains/${writes[1].id}`]: { ...writes[1].data, keyVersion: 9 },
+  };
+  assert.throws(
+    () => applyOperationKeyDomain(contradictory, { realm: config.realm, version: config.version, fingerprint, now: 200 }),
+    (e) => e.code === "DOMAIN_INCOMPLETE",
   );
 
   // 只存在 head -> DOMAIN_INCOMPLETE

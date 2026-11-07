@@ -26,7 +26,7 @@ const grantInput = {
   validUntil: 2000,
 };
 
-const service = (membershipId, { files } = {}) =>
+const service = (membershipId, { files, provider } = {}) =>
   new FaceCredentialService({
     store,
     orgId,
@@ -36,7 +36,7 @@ const service = (membershipId, { files } = {}) =>
       actor: { actorType: "user", actorId: membershipId, role: "editor", permissions: ["device.face.submit"] },
     }),
     blacklist: {},
-    provider: new MockFaceAccessProvider(),
+    provider: provider || new MockFaceAccessProvider(),
     now: () => 1_700_000_000_000,
   });
 
@@ -61,6 +61,7 @@ before(async () => {
     ["mem-submit", ["device.face.submit"]],
     ["mem-review", ["device.face.review"]],
     ["mem-manage", ["device.access.manage"]],
+    ["mem-audit", ["device.audit.read"]],
   ];
   await store.transact(
     [ref("organizations", orgId), ref("file_assets", "file-1"), ...memberships.map(([id]) => ref("org_memberships", id))],
@@ -96,7 +97,7 @@ test("submit 使用最小入参，credential 不含设备/授权字段", async (
 test("review 通过后 revision 为 2，且不创建 grant/job", async () => {
   const credential = (await store.list("face_credentials", orgId))[0];
   const before = await counts();
-  const out = await service("mem-review").review(credential._id, { decision: "approved" }, { idempotencyKey: "idem-review-000001" });
+  const out = await service("mem-review").review(credential._id, { decision: "approved", expectedRevision: 1 }, { idempotencyKey: "idem-review-000001" });
   assert.equal(out.reviewState, "approved");
   const after = await counts();
   assert.equal(after.grants, before.grants);
@@ -107,20 +108,32 @@ test("review 通过后 revision 为 2，且不创建 grant/job", async () => {
 test("createGrant 阶段关闭：STAGE_CLOSED 且零 grant/job/slot/claim/log/op key", async () => {
   const credential = (await store.list("face_credentials", orgId))[0];
   const before = await counts();
+  const calls = { enroll: 0, revoke: 0 };
+  const spy = {
+    enrollFace: () => { calls.enroll += 1; throw new Error("provider 不应被调用"); },
+    revokeFace: () => { calls.revoke += 1; throw new Error("provider 不应被调用"); },
+  };
   await assert.rejects(
-    () => service("mem-manage").createGrant({ ...grantInput, credentialId: credential._id }, { idempotencyKey: "idem-grant-00000001" }),
+    () => service("mem-manage", { provider: spy }).createGrant({ ...grantInput, credentialId: credential._id }, { idempotencyKey: "idem-grant-00000001" }),
     (e) => e.code === "STAGE_CLOSED" && e.status === 501,
   );
   assert.deepEqual(await counts(), before);
+  assert.deepEqual(calls, { enroll: 0, revoke: 0 });
 });
 
 test("revoke 阶段关闭：STAGE_CLOSED 且零写入", async () => {
   const before = await counts();
+  const calls = { enroll: 0, revoke: 0 };
+  const spy = {
+    enrollFace: () => { calls.enroll += 1; throw new Error("provider 不应被调用"); },
+    revokeFace: () => { calls.revoke += 1; throw new Error("provider 不应被调用"); },
+  };
   await assert.rejects(
-    () => service("mem-manage").revoke("grant-001", { idempotencyKey: "idem-revoke-0000001" }),
+    () => service("mem-manage", { provider: spy }).revoke("grant-001", { idempotencyKey: "idem-revoke-0000001" }),
     (e) => e.code === "STAGE_CLOSED" && e.status === 501,
   );
   assert.deepEqual(await counts(), before);
+  assert.deepEqual(calls, { enroll: 0, revoke: 0 });
 });
 
 test("权限分离：submitter 不能 review/createGrant；reviewer 不能 createGrant", async () => {
@@ -196,4 +209,16 @@ test("竞态：prepare 后撤销权限 / 修改文件 revision 均零写入", as
     (e) => e.code === "FILE_CHANGED",
   );
   assert.deepEqual(await counts(), before2);
+});
+
+test("跨组织任务查询同态 404", async () => {
+  await store.transact([ref("device_operation_jobs", "job-other-org")], () => [{
+    collection: "device_operation_jobs",
+    id: "job-other-org",
+    data: { orgId: "org-other", revision: 1, action: "enroll", state: "queued", evidenceScope: "simulated" },
+  }], audit);
+  await assert.rejects(
+    () => service("mem-audit").queryJob("job-other-org"),
+    (e) => e.status === 404 || e.code === "NOT_FOUND",
+  );
 });

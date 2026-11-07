@@ -23,16 +23,13 @@ import {
   validateRecord,
 } from "./collections.mjs";
 import {
-  GRANT_STATE,
   IMAGE_STATE,
-  JOB_STATE,
   REVIEW_STATE,
   assertCreateGrantInput,
   assertSubmitInput,
   publicJobResult,
   publicReviewItem,
 } from "./dto.mjs";
-import { classifyProviderError } from "./mock-provider.mjs";
 
 const ref = (collection, id) => ({ collection, id });
 const digestOf = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -200,75 +197,6 @@ export class FaceCredentialService {
     failCode("STAGE_CLOSED", "授权创建尚未开放（H2）", 501);
   }
 
-  // 4. 撤销：不查资格；grant 立即失效；异步清理失败不回滚。
-  async revoke(grantId, { idempotencyKey } = {}) {
-    await this.#require("device.access.manage");
-    const grant = await this.#find(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId);
-    if (!grant) failCode("NOT_FOUND", "授权不存在或不可见", 404);
-
-    const opKey = await this.#opKey("face.revoke", idempotencyKey);
-    const requestDigest = digestOf({ grantId });
-    const jobId = `job-${digestOf(`${opKey}:revoke`).slice(0, 24)}`;
-    let result = null;
-
-    await this.store.transact(
-      [
-        ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId),
-        ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId),
-        ref(COLLECTIONS.OPERATION_KEYS, opKey),
-      ],
-      (state) => {
-        const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
-        if (existing) {
-          if (existing.digest !== requestDigest) failCode("CONFLICT", "同键不同请求摘要", 409);
-          result = existing.result;
-          return [];
-        }
-        const current = state[`${COLLECTIONS.DEVICE_ACCESS_GRANTS}/${grantId}`];
-        if (!current || current.orgId !== this.orgId) failCode("NOT_FOUND", "授权不存在或不可见", 404);
-        const now = this.now();
-        const job = {
-          orgId: this.orgId,
-          revision: 1,
-          credentialId: current.credentialId,
-          grantId,
-          deviceId: current.deviceId,
-          action: "revoke",
-          state: JOB_STATE.QUEUED,
-          executionMode: "test",
-          provider: "mock",
-          evidenceScope: "simulated",
-          attempts: 0,
-          createdAt: now,
-        };
-        validateRecord(COLLECTIONS.DEVICE_OPERATION_JOBS, job);
-        result = { grantId, jobId };
-        return [
-          {
-            collection: COLLECTIONS.DEVICE_ACCESS_GRANTS,
-            id: grantId,
-            data: {
-              state: GRANT_STATE.REVOKED,
-              cleanupPending: true,
-              revision: nextRevision(current),
-              updatedAt: now,
-            },
-          },
-          { collection: COLLECTIONS.DEVICE_OPERATION_JOBS, id: jobId, data: job },
-          {
-            collection: COLLECTIONS.OPERATION_KEYS,
-            id: opKey,
-            data: { orgId: this.orgId, digest: requestDigest, result, createdAt: now },
-          },
-        ];
-      },
-      this.#audit("撤销门禁授权"),
-    );
-
-    if (result?.jobId) await this.#runJob(result.jobId, "revoke");
-    return result;
-  }
-
   // 4. 撤销：H1 阶段关闭（H4 撤权闭环未开放）。
   async revoke(grantId, { idempotencyKey } = {}) {
     await this.#require("device.access.manage");
@@ -284,83 +212,5 @@ export class FaceCredentialService {
     return publicJobResult(job);
   }
 
-  async #runJob(jobId, action) {
-    const job = await this.#find(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId);
-    if (!job) return;
-    const credential = await this.#find(COLLECTIONS.FACE_CREDENTIALS, job.credentialId);
-    if (!credential) return;
-    const context = {
-      actorId: this.actor.actorId,
-      actorType: this.actor.actorType || "user",
-      orgId: this.orgId,
-      permissions: new Set(),
-      idempotencyKey: `job-${jobId}`.slice(0, 64).padEnd(16, "0"),
-      executionMode: "test",
-    };
-    try {
-      if (action === "enroll") {
-        await this.provider.enrollFace(
-          {
-            personId: credential.personId,
-            deviceId: job.deviceId,
-            grantId: job.grantId,
-            sourceFileId: credential.sourceFileId,
-            validFrom: credential.validFrom,
-            validUntil: credential.validUntil,
-          },
-          context,
-        );
-      } else {
-        await this.provider.revokeFace(
-          { grantId: job.grantId, credentialId: job.credentialId },
-          context,
-        );
-      }
-      await this.#closeJob(jobId, JOB_STATE.SUCCEEDED, null);
-    } catch (error) {
-      const kind = classifyProviderError(error);
-      const state = kind === "UNKNOWN_RESULT" ? JOB_STATE.AWAITING_RESULT : JOB_STATE.TERMINAL_FAILED;
-      await this.#closeJob(jobId, state, String(error?.code || kind).slice(0, 120));
-      if (action === "revoke") {
-        // 清理失败不回滚：grant 保持 revoked，仅标记 cleanupPending。
-        await this.store.transact(
-          [ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, job.grantId)],
-          (current) => {
-            const grant = current[`${COLLECTIONS.DEVICE_ACCESS_GRANTS}/${job.grantId}`];
-            if (!grant) return [];
-            return [{
-              collection: COLLECTIONS.DEVICE_ACCESS_GRANTS,
-              id: job.grantId,
-              data: { cleanupPending: true, revision: nextRevision(grant), updatedAt: this.now() },
-            }];
-          },
-          this.#audit("记录撤权清理待处理"),
-        );
-      }
-    }
-  }
 
-  async #closeJob(jobId, state, failureReason) {
-    await this.store.transact(
-      [ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId)],
-      (current) => {
-        const job = current[`${COLLECTIONS.DEVICE_OPERATION_JOBS}/${jobId}`];
-        if (!job) return [];
-        return [{
-          collection: COLLECTIONS.DEVICE_OPERATION_JOBS,
-          id: jobId,
-          data: {
-            state,
-            evidenceScope: "simulated",
-            attempts: (job.attempts || 0) + 1,
-            lastSuccessAt: state === JOB_STATE.SUCCEEDED ? this.now() : job.lastSuccessAt ?? null,
-            failureReason,
-            revision: nextRevision(job),
-            updatedAt: this.now(),
-          },
-        }];
-      },
-      this.#audit("执行人脸任务"),
-    );
-  }
 }

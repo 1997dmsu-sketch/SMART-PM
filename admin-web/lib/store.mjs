@@ -41,6 +41,7 @@ const collections = [
   "device_operation_logs",
   "device_claims",
   "grant_slot_claims",
+  "access_devices",
 ];
 export function seed() {
   return {
@@ -138,6 +139,7 @@ export function seed() {
   device_operation_logs: [],
   device_claims: [],
   grant_slot_claims: [],
+  access_devices: [],
   };
 }
 export class LocalStore {
@@ -169,6 +171,7 @@ export class LocalStore {
     this.data.device_operation_logs ||= [];
     this.data.device_claims ||= [];
     this.data.grant_slot_claims ||= [];
+    this.data.access_devices ||= [];
     return this;
   }
   async persist(data) {

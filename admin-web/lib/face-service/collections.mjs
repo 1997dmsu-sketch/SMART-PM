@@ -254,6 +254,7 @@ export const CLAIM_STATE = Object.freeze({ ACTIVE: "active", RELEASED: "released
 /** 墓碑释放：只改状态与审计字段，不删除历史。 */
 export function releaseClaim(record, { jobId, now = Date.now() }) {
   if (!record) throw schemaError("claim/slot 记录不存在");
+  if (record.state !== CLAIM_STATE.ACTIVE) throw schemaError("仅 active claim/slot 可释放");
   return {
     state: CLAIM_STATE.RELEASED,
     releasedAt: now,
@@ -267,25 +268,28 @@ export function releaseClaim(record, { jobId, now = Date.now() }) {
 export function isReclaimable(record, ownerGrantId) {
   if (!record) return true;
   if (record.state === CLAIM_STATE.RELEASED) return true;
-  return record.grantId === ownerGrantId;
+  if (record.state === CLAIM_STATE.ACTIVE) return record.grantId === ownerGrantId;
+  return false; // 未知状态失败关闭
 }
 
 /** 确定性 log ID：同一 job 的同一状态迁移只产生一条日志。 */
 export function deterministicLogId(jobId, state, occurrence = 1) {
   assertId(jobId, "jobId");
   assertId(state, "state");
-  const seq = Number.isInteger(occurrence) && occurrence > 0 ? occurrence : 1;
-  return `log:${jobId}:${state}:${seq}`;
+  return `log:${encodeSegment(jobId)}:${encodeSegment(state)}:${occurrence}`;
 }
 
 /** 租约结构：不保存凭据，仅 owner/过期时间/次数。 */
-export function leasePatch({ owner, expiresAt, attempts, revision, now = Date.now() }) {
+export function leasePatch({ owner, expiresAt, attempts = 0, revision = 1, now = Date.now() }) {
   if (!owner) throw schemaError("leaseOwner 必填");
+  if (!Number.isInteger(expiresAt) || expiresAt <= now) throw schemaError("leaseExpiresAt 必须是未来毫秒时间戳");
+  if (!Number.isInteger(attempts) || attempts < 0) throw schemaError("attempts 必须是 ≥0 整数");
+  if (!Number.isInteger(revision) || revision < 1) throw schemaError("revision 必须是 ≥1 整数");
   return {
     leaseOwner: owner,
     leaseExpiresAt: expiresAt,
-    attempts: (attempts ?? 0) + 1,
-    revision: (Number.isInteger(revision) ? revision : 0) + 1,
+    attempts: attempts + 1,
+    revision: revision + 1,
     updatedAt: now,
   };
 }

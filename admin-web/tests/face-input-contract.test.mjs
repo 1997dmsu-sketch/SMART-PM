@@ -54,16 +54,25 @@ test("claim/slot 墓碑：释放后可重新占用，released 记录保留审计
   assert.equal(released.releasedByJobId, "job-1");
   assert.equal(released.revision, 2);
   assert.equal(isReclaimable(released, "g3"), true);
+  assert.equal(isReclaimable({ state: "corrupt", grantId: "g1" }, "g1"), false);
+  assert.throws(() => releaseClaim({ state: "corrupt", revision: 1 }, { jobId: "j" }), /active/);
 });
 
 test("确定性 log ID 与租约结构", () => {
-  assert.equal(deterministicLogId("job-1", "queued"), "log:job-1:queued:1");
+  assert.match(deterministicLogId("job-1", "queued"), /^log:/);
+  assert.notEqual(
+    deterministicLogId("a:b", "c"),
+    deterministicLogId("a", "b:c"),
+  );
   assert.equal(deterministicLogId("job-1", "queued"), deterministicLogId("job-1", "queued"));
   assert.notEqual(deterministicLogId("job-1", "sending"), deterministicLogId("job-1", "queued"));
 
   const lease = leasePatch({ owner: "worker-1", expiresAt: 2000, attempts: 0, revision: 1, now: 100 });
   assert.deepEqual(Object.keys(lease).sort(), ["attempts", "leaseExpiresAt", "leaseOwner", "revision", "updatedAt"]);
   assert.equal(lease.attempts, 1);
+  assert.throws(() => leasePatch({ owner: "w", expiresAt: 2000, attempts: "0", revision: 1, now: 100 }), /attempts/);
+  assert.throws(() => leasePatch({ owner: "w", expiresAt: 2000, attempts: 0, revision: "1", now: 100 }), /revision/);
+  assert.throws(() => leasePatch({ owner: "w", expiresAt: 100, attempts: 0, revision: 1, now: 100 }), /leaseExpiresAt/);
 });
 
 test("LocalStore 登记本期人脸集合", async () => {
@@ -72,7 +81,8 @@ test("LocalStore 登记本期人脸集合", async () => {
     const store = await new LocalStore(dir).init();
     for (const name of [
       "face_credentials", "device_access_grants", "device_operation_jobs",
-      "device_operation_logs", "device_claims", "grant_slot_claims", "device_digest_domains",
+      "device_operation_logs", "device_claims", "grant_slot_claims",
+      "device_digest_domains", "access_devices",
     ]) {
       assert.ok(Array.isArray(store.data[name]), `${name} 应已初始化`);
       assert.deepEqual(await store.list(name), []);

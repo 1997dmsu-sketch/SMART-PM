@@ -4,9 +4,9 @@
 
 ## A. Kimi：修订 H2-b 设备 claim 设计
 
-**优先级：P0**  
-**分支：** `docs/hk-h2b-device-claim-design`  
-**当前提交：** `037083d`  
+**优先级：P0**
+**分支：** `docs/hk-h2b-device-claim-design`
+**当前提交：** `037083d`
 **交付：** 修订 `docs/tasks/HK-AI-04-H2B-DEVICE-CLAIM-DESIGN.md`
 
 ### 必改项
@@ -37,9 +37,9 @@
 
 ## B. DeepSeek Harness：整合时序稳定性修复
 
-**优先级：P0**  
-**建议分支：** `integration/hk-face-h2a-stable`  
-**基线：** `feat/hk-face-service-integration @ f9a2b6b`  
+**优先级：P0**
+**建议分支：** `integration/hk-face-h2a-stable`
+**基线：** `feat/hk-face-service-integration @ f9a2b6b`
 **引入提交：** `test/face-decode-stability @ ad5ccc8`
 
 ### 工作
@@ -64,8 +64,8 @@
 
 ## C. Workburry：补交门禁管理页面静态审计
 
-**优先级：P1**  
-**分支：** `feat/hk-face-admin`；若远端分支不存在，先从原页面壳提交恢复并推送，不改服务层。  
+**优先级：P1**
+**分支：** `feat/hk-face-admin`；若远端分支不存在，先从原页面壳提交恢复并推送，不改服务层。
 **交付：** `docs/tasks/HK-AI-05-STATIC-UI-AUDIT.md` 与四页脱敏截图。
 
 ### 检查范围
@@ -98,3 +98,11 @@
 - 对应测试。
 
 H2-c/H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
+
+## E. Workburry：HK-AI-05A 门禁管理页面演示门禁修复
+
+**优先级：P0**
+**分支：** `feat/hk-face-admin`，基线 `708c3ab`，只允许追加提交。
+**任务卡：** `docs/tasks/HK-AI-05A-ADMIN-UI-REMEDIATION.md`
+
+修复持续 Mock 边界、六类页面状态、权限提示、UNKNOWN_RESULT 人工对账与审计禁显位；只使用合成 fixture，不接 API、不修改后端、不连接设备。完成后更新独立截图目录并交 Codex 复审，通过前不得制作演示包或合并 main。

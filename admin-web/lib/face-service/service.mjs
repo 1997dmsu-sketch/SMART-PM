@@ -19,8 +19,12 @@ import {
   grantSlotKey,
   isReclaimable,
   nextRevision,
+  applyOperationKeyDomain,
   operationKey,
   operationKeyConfig,
+  operationKeyDomainIds,
+  operationKeyFingerprint,
+  assertIdempotencyKey,
   validateRecord,
 } from "./collections.mjs";
 import {
@@ -36,7 +40,8 @@ import {
 
 const ref = (collection, id) => ({ collection, id });
 const classificationRevision = (record) => (Number.isInteger(record?.revision) ? record.revision + 1 : 1);
-const digestOf = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const stable = (value) => (Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable(value[k])])) : value);
+const digestOf = (value) => createHash("sha256").update(JSON.stringify(stable(value))).digest("hex");
 
 export class FaceCredentialService {
   constructor({ store, orgId, actor, files, blacklist, provider, now = () => Date.now() }) {
@@ -70,23 +75,29 @@ export class FaceCredentialService {
     return { actor: this.actor.actorId, actorId: this.actor.actorId, action, orgId: this.orgId };
   }
 
-  async #opKey(route, idempotencyKey) {
-    if (typeof idempotencyKey !== "string" || !idempotencyKey) {
-      failCode("PARAM_ERROR", "缺少 Idempotency-Key", 400);
-    }
-    const config = operationKeyConfig(process.env);
-    return operationKey({
-      orgId: this.orgId,
-      method: route,
-      actorType: this.actor.actorType || "user",
-      actorId: this.actor.actorId,
-      idempotencyKey,
-      config,
-    });
-  }
-
   async #find(collection, id) {
     return (await this.store.list(collection, this.orgId)).find((row) => row._id === id) || null;
+  }
+
+  async #opContext(route, idempotencyKey) {
+    try { assertIdempotencyKey(idempotencyKey); } catch (error) { failCode("PARAM_ERROR", error.message, 400); }
+    const config = operationKeyConfig(process.env);
+    const opKey = operationKey({
+      orgId: this.orgId, method: route, actorType: this.actor.actorType || "user",
+      actorId: this.actor.actorId, idempotencyKey, config,
+    });
+    const { headId, versionIdPrefix } = operationKeyDomainIds(config.realm);
+    return { opKey, config, headId, versionId: `${versionIdPrefix}${config.version}`, fingerprint: operationKeyFingerprint(config) };
+  }
+
+  #opDomainRefs(op) {
+    return [ref(COLLECTIONS.OPERATION_KEY_DOMAINS, op.headId), ref(COLLECTIONS.OPERATION_KEY_DOMAINS, op.versionId)];
+  }
+
+  #opDomainWrites(state, op, now) {
+    return applyOperationKeyDomain(state, {
+      realm: op.config.realm, version: op.config.version, fingerprint: op.fingerprint, now,
+    });
   }
 
   // 1. 提交：只建 credential（人员 + 人脸来源 + 审核/图片状态）。
@@ -95,7 +106,8 @@ export class FaceCredentialService {
     const parsed = assertSubmitInput(input);
     const reference = await this.files.prepareReference(parsed.sourceFileId);
 
-    const opKey = await this.#opKey("face.submit", idempotencyKey);
+    const op = await this.#opContext("face.submit", idempotencyKey);
+    const { opKey } = op;
     const requestDigest = digestOf(parsed);
     const credentialId = `fc-${digestOf(opKey).slice(0, 24)}`;
 
@@ -103,13 +115,18 @@ export class FaceCredentialService {
       [
         ref(COLLECTIONS.FACE_CREDENTIALS, credentialId),
         ref(COLLECTIONS.OPERATION_KEYS, opKey),
+        ...this.#opDomainRefs(op),
         ...reference.refs,
       ],
       (state) => {
         this.files.assertReference(state, reference);
+        const domainWrites = this.#opDomainWrites(state, op, this.now());
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
-          if (existing.digest !== requestDigest) failCode("CONFLICT", "同键不同请求摘要", 409);
+          if (existing.realm !== op.config.realm || existing.keyVersion !== op.config.version ||
+            existing.requestDigest !== requestDigest) {
+          failCode("CONFLICT", "同键不同请求摘要或域不一致", 409);
+        }
           return [];
         }
         const now = this.now();
@@ -128,11 +145,12 @@ export class FaceCredentialService {
         validateRecord(COLLECTIONS.FACE_CREDENTIALS, record);
         const result = { credentialId, reviewState: record.reviewState };
         return [
+          ...domainWrites,
           { collection: COLLECTIONS.FACE_CREDENTIALS, id: credentialId, data: record },
           {
             collection: COLLECTIONS.OPERATION_KEYS,
             id: opKey,
-            data: { orgId: this.orgId, digest: requestDigest, result, createdAt: now },
+            data: { orgId: this.orgId, realm: op.config.realm, keyVersion: op.config.version, requestDigest, result, createdAt: now },
           },
         ];
       },
@@ -149,16 +167,21 @@ export class FaceCredentialService {
     const credential = await this.#find(COLLECTIONS.FACE_CREDENTIALS, credentialId);
     if (!credential) failCode("NOT_FOUND", "凭证不存在或不可见", 404);
 
-    const opKey = await this.#opKey("face.review", idempotencyKey);
+    const op = await this.#opContext("face.review", idempotencyKey);
+    const { opKey } = op;
     const requestDigest = digestOf({ credentialId, decision, expectedRevision: expectedRevision ?? null });
     let result = null;
 
     await this.store.transact(
-      [ref(COLLECTIONS.FACE_CREDENTIALS, credentialId), ref(COLLECTIONS.OPERATION_KEYS, opKey)],
+      [ref(COLLECTIONS.FACE_CREDENTIALS, credentialId), ref(COLLECTIONS.OPERATION_KEYS, opKey), ...this.#opDomainRefs(op)],
       (state) => {
+        const domainWrites = this.#opDomainWrites(state, op, this.now());
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
-          if (existing.digest !== requestDigest) failCode("CONFLICT", "同键不同请求摘要", 409);
+          if (existing.realm !== op.config.realm || existing.keyVersion !== op.config.version ||
+            existing.requestDigest !== requestDigest) {
+          failCode("CONFLICT", "同键不同请求摘要或域不一致", 409);
+        }
           result = existing.result;
           return [];
         }
@@ -173,6 +196,7 @@ export class FaceCredentialService {
         const nextReview = decision === "approved" ? REVIEW_STATE.APPROVED : REVIEW_STATE.REJECTED;
         result = { credentialId, reviewState: nextReview };
         return [
+          ...domainWrites,
           {
             collection: COLLECTIONS.FACE_CREDENTIALS,
             id: credentialId,
@@ -181,7 +205,7 @@ export class FaceCredentialService {
           {
             collection: COLLECTIONS.OPERATION_KEYS,
             id: opKey,
-            data: { orgId: this.orgId, digest: requestDigest, result, createdAt: this.now() },
+            data: { orgId: this.orgId, realm: op.config.realm, keyVersion: op.config.version, requestDigest, result, createdAt: this.now() },
           },
         ];
       },
@@ -200,7 +224,8 @@ export class FaceCredentialService {
   async createGrant(input, { idempotencyKey } = {}) {
     await this.#require("device.access.manage");
     const parsed = assertCreateGrantInput(input);
-    const opKey = await this.#opKey("face.grant", idempotencyKey);
+    const op = await this.#opContext("face.grant", idempotencyKey);
+    const { opKey } = op;
     const requestDigest = digestOf(parsed);
 
     const credential = await this.#find(COLLECTIONS.FACE_CREDENTIALS, parsed.credentialId);
@@ -241,6 +266,7 @@ export class FaceCredentialService {
         ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId),
         ref(COLLECTIONS.DEVICE_OPERATION_LOGS, logId),
         ref(COLLECTIONS.OPERATION_KEYS, opKey),
+        ...this.#opDomainRefs(op),
       ],
       (state, eligibility) => {
         // 1) 事务内复核成员与权限（先于重放，撤销后不得重放）。
@@ -251,9 +277,13 @@ export class FaceCredentialService {
           failCode("FORBIDDEN", "当前成员无权创建门禁授权", 403);
         }
         // 2) operation key：同键同摘要直接返回旧结果。
+        const domainWrites = this.#opDomainWrites(state, op, this.now());
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
-          if (existing.digest !== requestDigest) failCode("CONFLICT", "同键不同请求摘要", 409);
+          if (existing.realm !== op.config.realm || existing.keyVersion !== op.config.version ||
+            existing.requestDigest !== requestDigest) {
+          failCode("CONFLICT", "同键不同请求摘要或域不一致", 409);
+        }
           result = existing.result;
           return { writes: [], result };
         }
@@ -274,7 +304,7 @@ export class FaceCredentialService {
         if (!currentDevice || currentDevice.orgId !== this.orgId) failCode("NOT_FOUND", "设备不存在或不可见", 404);
         if (currentDevice.status !== "active") failCode("INVALID_STATE", "设备已停用", 409);
 
-        const domainWrites = applyDigestDomain(state, {
+        const deviceDomainWrites = applyDigestDomain(state, {
           provider,
           digestRealm: k1.realm,
           version: k1.version,
@@ -309,6 +339,7 @@ export class FaceCredentialService {
         return {
           writes: [
             ...domainWrites,
+            ...deviceDomainWrites,
             { collection: COLLECTIONS.DEVICE_ACCESS_GRANTS, id: grantId, data: grantRecord },
             { collection: COLLECTIONS.DEVICE_OPERATION_JOBS, id: jobId, data: job },
             {
@@ -337,7 +368,7 @@ export class FaceCredentialService {
             },
             {
               collection: COLLECTIONS.OPERATION_KEYS, id: opKey,
-              data: { orgId: this.orgId, digest: requestDigest, result, createdAt: now },
+              data: { orgId: this.orgId, realm: op.config.realm, keyVersion: op.config.version, requestDigest, result, createdAt: now },
             },
           ],
           result,

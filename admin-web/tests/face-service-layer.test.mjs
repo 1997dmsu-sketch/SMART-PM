@@ -216,3 +216,30 @@ test("撤权仍为 STAGE_CLOSED，零写入零 Provider", async () => {
   assert.deepEqual(await counts(), before);
   assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
 });
+
+test("operation_keys 元数据与三条路径共用同一 domain", async () => {
+  const keys = await store.list("operation_keys", orgId);
+  assert.ok(keys.length >= 3);
+  for (const record of keys) {
+    assert.equal(record.realm, "test-realm");
+    assert.equal(record.keyVersion, 1);
+    assert.match(record.requestDigest, /^[0-9a-f]{64}$/);
+    assert.equal(JSON.stringify(record).includes("idem-"), false);
+  }
+  assert.equal((await store.list("operation_key_domains")).length, 2);
+});
+
+test("K2 配置缺失：503 NOT_CONFIGURED 且零写入", async () => {
+  const saved = process.env.OPERATION_KEY_HMAC_KEY_B64;
+  delete process.env.OPERATION_KEY_HMAC_KEY_B64;
+  const before = await counts();
+  await assert.rejects(
+    () => service("mem-submit").submit(
+      { personId: "person-k2", sourceFileId: "file-1" },
+      { idempotencyKey: "idem-k2-missing-0001" },
+    ),
+    (e) => e.code === "NOT_CONFIGURED" && e.status === 503,
+  );
+  process.env.OPERATION_KEY_HMAC_KEY_B64 = saved;
+  assert.deepEqual(await counts(), before);
+});

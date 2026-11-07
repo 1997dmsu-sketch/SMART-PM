@@ -23,7 +23,7 @@
 | AI-B / HK-AI-02 | `f15160d` 代码侧复审通过 | `feat/hk-isapi-capability-probe` | `8136b90` | 三项返工已关闭；等待现场/项目负责人批准、隔离环境和一次性窗口，批准前禁止设置 `HIKVISION_PROBE_ALLOW_READ=true` |
 | AI-C / HK-AI-03 | 阶段2通过（`c7516e6`） | `feat/db-mvp-integration` | `b9ee061`（`feat/db-05-occupancies`） | 221/221 admin、51/51根测试及smoke通过；阶段3继续关闭，等待单独安排 |
 | AI-D0 / HK-AI-04A | 文档阶段通过 Codex 复审（`5148159`） | `docs/hk-ai-04-contract-evidence` | `8b47fb7` | 九项架构裁定见 `HK-AI-04A-REVIEW-2026-11-05.md`；不代表真实能力验证 |
-| AI-D / HK-AI-04 | H2-a `3bc6144` 剩纯测试隔离修复 | `feat/hk-face-service-integration` | `3bc6144` | 每个损坏场景先恢复 result/createdAt 基线，并用完整集合快照证明业务内容零变化；见 `HK-AI-04-H2A-FINAL-TEST-REVIEW-3BC6144-2026-11-07.md`；H2-b/H3/H4 继续关闭 |
+| AI-D / HK-AI-04 | H2-a `f9a2b6b` 终审通过 | `feat/hk-face-service-integration` | `f9a2b6b` | 严格重放、domain guard 与内容级零变化测试全部通过；见 `HK-AI-04-H2A-FINAL-APPROVAL-F9A2B6B-2026-11-07.md`。先复审 H2-b 设计，再放行编码；H3/H4 继续关闭 |
 | AI-E / HK-AI-05 | 今日由 Workburry 启动页面壳 | `feat/hk-face-admin` | 先用合成 fixture；等待 AI-D DTO 后绑定 | 今日交设备/申请/任务/审计页面壳，持续显示 Mock 标识 |
 | 并行任务包 | `HK-AI-PARALLEL-TASKS-2026-11-07.md` | 已分配 Harness / Kimi / Workburry | 企业微信看板任务已取消；五项任务按独立分支执行 |
 | HK-HUMAN-02 安装视频 | Kimi 负责脚本/分镜/字幕，真人负责断电接线与拍摄 | `docs/hk-install-video` | DS-K1T671BM + PDC-K7B-12V5A | 先交文档包；端子与锁铭牌经真人复核后再出最终成片 |

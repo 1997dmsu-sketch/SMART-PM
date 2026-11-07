@@ -13,35 +13,44 @@
 
 ## B. 设备与环境
 
-- [ ] 铭牌完整型号与批准的 `EXPECTED_MODEL` 完全一致
+- [ ] 目标完整型号 `DS-K1T671BM` 与铭牌、批准单及 `EXPECTED_MODEL` 原文完全一致；近似型号不通过
 - [ ] 固件、硬件版本和设备时间/NTP已记录在离线工单
 - [ ] 执行机和设备位于隔离网络，无生产云凭据及公网出口
 - [ ] 目标主机、唯一批准端口与资产登记一致；端口为非空纯数字
 - [ ] 使用本次专用最小权限只读账号
 - [ ] 叶证书 SHA-256 指纹已由两人独立线下核验
-- [ ] 原始输出目录（`mktemp` 专用）、删除负责人和复核人已确定
+- [ ] 原始输出为 `mktemp` 专用 `0700` 目录、`0600` 文件；删除负责人和复核人已确定
 
 ## C. Dry-run
 
 - [ ] 从仓库根目录按批准包 §3 启动
 - [ ] dry-run 前已显式清除 `HIKVISION_PROBE_ALLOW_READ` 和 `HIKVISION_PROBE_CA_PEM`
-- [ ] 超时固定为10000ms，响应上限固定为262144字节
-- [ ] 输出恰好为6个固定 GET，方法、顺序、路径和查询串完全一致
-- [ ] dry-run 没有 DNS/TCP/TLS/HTTP 请求
-- [ ] dry-run 退出码为 `0`；非 0 时未进入真实执行
+- [ ] 超时固定为 10000 ms，响应上限固定为 262144 字节
+- [ ] 输出恰好为 6 个固定 GET，方法、顺序、路径和查询串与下方完全一致：
+
+```text
+1  GET /ISAPI/System/deviceInfo
+2  GET /ISAPI/AccessControl/capabilities
+3  GET /ISAPI/AccessControl/UserInfo/capabilities?format=json
+4  GET /ISAPI/Intelligent/FDLib/capabilities?format=json
+5  GET /ISAPI/Intelligent/FDLib?format=json
+6  GET /ISAPI/Intelligent/FDLib/Count?format=json
+```
+
+- [ ] dry-run 没有 DNS/TCP/TLS/HTTP 请求，退出码为 `0`；非 0 时未进入真实执行
 - [ ] 主机、端口、账号、密码、指纹未进入命令历史、日志或截图
 - [ ] 输入 `EXECUTE-ONCE` 前由现场负责人再次核对窗口和停止条件
 
 ## D. 唯一一次真实执行
 
-- [ ] 仅执行一次 `node cli.mjs`
+- [ ] dry-run 后的真实读取仅执行一次 `node cli.mjs`，未重跑
 - [ ] 未修改端点、超时、大小限制、认证或证书策略
 - [ ] 未出现 POST/PUT/PATCH/DELETE
 - [ ] 记录退出码：______（`0` 成功；`1` 端点失败；`2` 启动/配置/权限错误）
 - [ ] 退出码非 0 时未重跑，按停止条件处理
 - [ ] 若触发停止条件，已立即停止且没有重跑
 
-停止条件：型号空/不符；指纹缺失/不匹配；第二次401；非 Digest/畸形挑战；重定向；超时；响应超限；类型异常；`RESPONSE_ERROR`；窗口超时；任何写操作迹象。
+停止条件：型号空/不符（首个响应后停止）；指纹缺失/不匹配；第二次 401；非 Digest/畸形挑战；重定向；超时；响应超限；类型异常；`NETWORK/TLS/RESPONSE_ERROR`；窗口超时；任何写操作迹象。
 
 ## E. 脱敏回填与清理
 

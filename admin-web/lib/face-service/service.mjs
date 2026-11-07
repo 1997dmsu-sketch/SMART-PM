@@ -9,14 +9,15 @@ import { createHash } from "node:crypto";
 import { failCode } from "../model.mjs";
 import {
   COLLECTIONS,
-  applyDigestDomain,
   deterministicLogId,
-  deviceClaimConfig,
   deviceClaimKey,
   deviceDigestDomainKey,
   deviceDigestDomainVersionKey,
+  digestDomainMatchesDevice,
+  ownerClaimMatchesDevice,
+  validateAccessDeviceRecord,
+  validateOwnerClaimRecord,
   grantSlotKey,
-  isReclaimable,
   nextRevision,
   applyOperationKeyDomain,
   operationKey,
@@ -237,7 +238,7 @@ export class FaceCredentialService {
     return rows.filter((row) => row.reviewState === REVIEW_STATE.SUBMITTED).map(publicReviewItem);
   }
 
-  // 3. 创建授权（H2：权限 → op key → 资格 → domain/claim/slot/grant/job/log/op key）。
+  // 3. 创建授权（H2-b：device/domain/claim 只读复核 + slot 新占用）。
   async createGrant(input, { idempotencyKey } = {}) {
     await this.#require("device.access.manage");
     const parsed = assertCreateGrantInput(input);
@@ -249,14 +250,25 @@ export class FaceCredentialService {
     if (!credential) failCode("NOT_FOUND", "凭证不存在或不可见", 404);
     const device = await this.#find("access_devices", parsed.deviceId);
     if (!device || device.orgId !== this.orgId) failCode("NOT_FOUND", "设备不存在或不可见", 404);
-    if (device.status !== "active") failCode("INVALID_STATE", "设备已停用", 409);
+    try {
+      validateAccessDeviceRecord(device);
+    } catch {
+      failCode("DEVICE_CLAIM_INVALID", "设备缺少有效的 owner claim 绑定", 409);
+    }
+    if (device.status !== "active" || device.capabilities?.face !== true) {
+      failCode("INVALID_STATE", "设备不可用或未启用人脸能力", 409);
+    }
+    if (device.ownerOrgId !== this.orgId) failCode("DEVICE_CLAIM_CONFLICT", "设备归属冲突", 409);
 
-    const k1 = deviceClaimConfig(process.env);
-    const provider = device.provider || "hikvision";
-    const claimId = deviceClaimKey({ provider, digestRealm: k1.realm, serial: device.serialNumber, key: k1.key, version: k1.version });
-    const slotId = grantSlotKey({ orgId: this.orgId, personId: credential.personId, deviceId: parsed.deviceId, cycleId: parsed.cycleId });
-    const headId = deviceDigestDomainKey({ provider, digestRealm: k1.realm });
-    const versionId = deviceDigestDomainVersionKey({ provider, digestRealm: k1.realm, version: k1.version });
+    const claimId = device.claimId;
+    const k1HeadId = deviceDigestDomainKey({ provider: device.provider, digestRealm: device.digestRealm });
+    const k1VersionId = deviceDigestDomainVersionKey({
+      provider: device.provider, digestRealm: device.digestRealm, version: device.keyVersion,
+    });
+    const slotId = grantSlotKey({
+      orgId: this.orgId, personId: credential.personId,
+      deviceId: parsed.deviceId, cycleId: parsed.cycleId,
+    });
     const grantId = `grant-${digestOf(opKey).slice(0, 24)}`;
     const jobId = `job-${digestOf(opKey + ":enroll").slice(0, 24)}`;
     const logId = deterministicLogId(jobId, "queued");
@@ -276,9 +288,9 @@ export class FaceCredentialService {
         ref("organizations", this.orgId),
         ref("org_memberships", this.actor.membershipId),
         ref("access_devices", parsed.deviceId),
-        ref(COLLECTIONS.DEVICE_DIGEST_DOMAINS, headId),
-        ref(COLLECTIONS.DEVICE_DIGEST_DOMAINS, versionId),
         ref(COLLECTIONS.DEVICE_CLAIMS, claimId),
+        ref(COLLECTIONS.DEVICE_DIGEST_DOMAINS, k1HeadId),
+        ref(COLLECTIONS.DEVICE_DIGEST_DOMAINS, k1VersionId),
         ref(COLLECTIONS.GRANT_SLOT_CLAIMS, slotId),
         ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId),
         ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId),
@@ -287,28 +299,23 @@ export class FaceCredentialService {
         ...this.#opDomainRefs(op),
       ],
       (state, eligibility) => {
-        // 1) 事务内复核成员与权限（先于重放，撤销后不得重放）。
         const org = state[`organizations/${this.orgId}`];
         const membership = state[`org_memberships/${this.actor.membershipId}`];
         if (!org || org.status !== "active" || !membership || membership.status !== "active" ||
             !(membership.permissions || []).includes("device.access.manage")) {
           failCode("FORBIDDEN", "当前成员无权创建门禁授权", 403);
         }
-        // 2) operation key：同键同摘要直接返回旧结果。
         const domainWrites = this.#opDomainWrites(state, op, this.now());
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
-          if (!this.#replayValid(existing, op, requestDigest, expected)) {
-          failCode("CONFLICT", "同键不同请求摘要或域不一致", 409);
-        }
-          result = existing.result;
+          result = this.#replayValid(existing, op, requestDigest, expected);
           return { writes: [], result };
         }
-        // 3) withEligibility 已提供同一事务内的资格结论。
         if (!eligibility?.eligible) {
           const code = eligibility?.code || "BLACKLIST_DENIED";
           failCode(code, "资格不满足，无法创建门禁授权", code === "BLACKLIST_DENIED" ? 403 : 409);
         }
+
         const current = state[`${COLLECTIONS.FACE_CREDENTIALS}/${parsed.credentialId}`];
         if (!current || current.orgId !== this.orgId) failCode("NOT_FOUND", "凭证不存在或不可见", 404);
         if (current.reviewState !== REVIEW_STATE.APPROVED) failCode("INVALID_STATE", "凭证尚未审核通过", 409);
@@ -317,27 +324,55 @@ export class FaceCredentialService {
         }
         this.files.assertBinding(state, { fileId: current.sourceFileId, revision: current.sourceFileRevision });
 
-        const currentDevice = state[`access_devices/${parsed.deviceId}`];
-        if (!currentDevice || currentDevice.orgId !== this.orgId) failCode("NOT_FOUND", "设备不存在或不可见", 404);
-        if (currentDevice.status !== "active") failCode("INVALID_STATE", "设备已停用", 409);
+        const dev = state[`access_devices/${parsed.deviceId}`];
+        if (!dev || dev.orgId !== this.orgId) failCode("NOT_FOUND", "设备不存在或不可见", 404);
+        try {
+          validateAccessDeviceRecord(dev);
+        } catch {
+          failCode("DEVICE_CLAIM_INVALID", "设备缺少有效的 owner claim 绑定", 409);
+        }
+        const sameSnapshot =
+          dev.revision === device.revision && dev.claimId === device.claimId &&
+          dev.ownerOrgId === device.ownerOrgId && dev.provider === device.provider &&
+          dev.digestRealm === device.digestRealm && dev.keyVersion === device.keyVersion &&
+          dev.status === device.status && dev.capabilities?.face === device.capabilities?.face;
+        if (!sameSnapshot) failCode("DEVICE_CLAIM_INVALID", "设备快照已变化，请刷新后重试", 409);
+        if (dev.ownerOrgId !== this.orgId || dev.orgId !== this.orgId) {
+          failCode("DEVICE_CLAIM_CONFLICT", "设备归属冲突", 409);
+        }
+        if (dev.status !== "active" || dev.capabilities?.face !== true) {
+          failCode("INVALID_STATE", "设备不可用或未启用人脸能力", 409);
+        }
 
-        const deviceDomainWrites = applyDigestDomain(state, {
-          provider,
-          digestRealm: k1.realm,
-          version: k1.version,
-          now: this.now(),
+        const head = state[`${COLLECTIONS.DEVICE_DIGEST_DOMAINS}/${k1HeadId}`];
+        const versionRecord = state[`${COLLECTIONS.DEVICE_DIGEST_DOMAINS}/${k1VersionId}`];
+        const domainMatch = digestDomainMatchesDevice(head, versionRecord, {
+          provider: dev.provider, digestRealm: dev.digestRealm, keyVersion: dev.keyVersion,
         });
+        if (!domainMatch.ok) failCode(domainMatch.code, "K1 domain 缺失、损坏或与设备配置不一致", 503);
 
         const claim = state[`${COLLECTIONS.DEVICE_CLAIMS}/${claimId}`];
-        if (!isReclaimable(claim, grantId)) failCode("DEVICE_CLAIMED", "设备已被其他授权占用", 409);
+        if (!claim) failCode("DEVICE_CLAIM_INVALID", "设备缺少 owner claim", 409);
+        try {
+          validateOwnerClaimRecord(claim);
+        } catch {
+          failCode("DEVICE_CLAIM_INVALID", "owner claim 记录损坏", 409);
+        }
+        if (claim.state !== "active") failCode("DEVICE_CLAIM_INVALID", "owner claim 非 active", 409);
+        if (claim.ownerOrgId !== this.orgId) failCode("DEVICE_CLAIM_CONFLICT", "设备归属冲突", 409);
+        if (!ownerClaimMatchesDevice(claim, dev, parsed.deviceId)) {
+          failCode("DEVICE_CLAIM_INVALID", "设备与 owner claim 引用不一致", 409);
+        }
+
         const slot = state[`${COLLECTIONS.GRANT_SLOT_CLAIMS}/${slotId}`];
-        if (!isReclaimable(slot, grantId)) failCode("GRANT_SLOT_CONFLICT", "授权槽位冲突", 409);
+        if (slot) failCode("GRANT_SLOT_CONFLICT", "授权槽位冲突", 409);
 
         const now = this.now();
         const grantRecord = {
           orgId: this.orgId, revision: 1, credentialId: parsed.credentialId,
           personId: current.personId, deviceId: parsed.deviceId,
           occupancyId: parsed.occupancyId, cycleId: parsed.cycleId,
+          claimId, slotId,
           state: GRANT_STATE.PENDING, evidenceScope: "simulated",
           validFrom: parsed.validFrom, validUntil: parsed.validUntil,
           createdAt: now, updatedAt: now,
@@ -356,24 +391,14 @@ export class FaceCredentialService {
         return {
           writes: [
             ...domainWrites,
-            ...deviceDomainWrites,
             { collection: COLLECTIONS.DEVICE_ACCESS_GRANTS, id: grantId, data: grantRecord },
             { collection: COLLECTIONS.DEVICE_OPERATION_JOBS, id: jobId, data: job },
             {
-              collection: COLLECTIONS.DEVICE_CLAIMS, id: claimId,
-              data: {
-                orgId: this.orgId, deviceId: parsed.deviceId, grantId,
-                state: "active", revision: classificationRevision(claim),
-                createdAt: claim?.createdAt ?? now, updatedAt: now,
-              },
-            },
-            {
               collection: COLLECTIONS.GRANT_SLOT_CLAIMS, id: slotId,
               data: {
-                orgId: this.orgId, grantId, personId: current.personId,
-                deviceId: parsed.deviceId, cycleId: parsed.cycleId,
-                state: "active", revision: classificationRevision(slot),
-                createdAt: slot?.createdAt ?? now, updatedAt: now,
+                orgId: this.orgId, personId: current.personId, deviceId: parsed.deviceId,
+                cycleId: parsed.cycleId, activeClaimId: grantId, state: "active",
+                revision: 1, createdAt: now, updatedAt: now, activatedAt: now,
               },
             },
             {
@@ -385,7 +410,10 @@ export class FaceCredentialService {
             },
             {
               collection: COLLECTIONS.OPERATION_KEYS, id: opKey,
-              data: { orgId: this.orgId, realm: op.config.realm, keyVersion: op.config.version, requestDigest, result, createdAt: now },
+              data: {
+                orgId: this.orgId, realm: op.config.realm, keyVersion: op.config.version,
+                requestDigest, result, createdAt: now,
+              },
             },
           ],
           result,

@@ -1,4 +1,5 @@
-﻿import { test, before, after } from "node:test";
+﻿import { makeAccessDeviceFixture, makeDigestDomainFixture, makeOwnerClaimFixture } from "./helpers/face-fixtures.mjs";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -118,6 +119,23 @@ before(async () => {
     ],
     audit,
   );
+
+  const ids = ["device-1", "device-2", "device-3", "device-4", "device-5", "device-replay", "device-inactive", "device-other"];
+  const deviceWrites = ids.map((id) => makeAccessDeviceFixture({
+    id,
+    orgId: id === "device-other" ? "org-other" : orgId,
+    status: id === "device-inactive" ? "disabled" : "active",
+  }));
+  const claimWrites = ids.map((id) => makeOwnerClaimFixture({
+    deviceId: id,
+    orgId: id === "device-other" ? "org-other" : orgId,
+  }));
+  await store.transact(
+    [...ids.flatMap((id) => [ref("access_devices", id), ref("device_claims", `claim-${id}`)]),
+      ...makeDigestDomainFixture().map((w) => ref(w.collection, w.id))],
+    () => [...deviceWrites, ...claimWrites, ...makeDigestDomainFixture()],
+    audit,
+  );
 });
 
 after(async () => {
@@ -134,7 +152,7 @@ test("createGrant：同事务写 domain/claim/slot/pending grant/queued job/log/
 
   const grant = (await store.list("device_access_grants", orgId))[0];
   const job = (await store.list("device_operation_jobs", orgId))[0];
-  const claim = (await store.list("device_claims", orgId))[0];
+  const claim = (await store.list("device_claims")).find((c) => c._id === "claim-device-1");
   const slot = (await store.list("grant_slot_claims", orgId))[0];
   const logs = await store.list("device_operation_logs", orgId);
   assert.equal(grant.state, "pending");
@@ -193,21 +211,26 @@ test("资格阻断与未知/停用/跨组织设备：零写入", async () => {
   assert.deepEqual(await counts(), before);
 });
 
-test("claim 冲突：其他 grant 占用设备 → DEVICE_CLAIMED 零写入", async () => {
+test("owner claim 归属冲突：DEVICE_CLAIM_CONFLICT 且零写入", async () => {
   const credentialId = await approvedCredential("d");
-  const manager = service("mem-manage");
-  const k1 = deviceClaimConfig(process.env);
-  const claimId = deviceClaimKey({ provider: "hikvision", digestRealm: k1.realm, serial: "SN-3", key: k1.key, version: k1.version });
+  const claimId = "claim-device-3";
+  const original = structuredClone((await store.list("device_claims")).find((c) => c._id === claimId));
   await store.transact([ref("device_claims", claimId)], () => [{
     collection: "device_claims", id: claimId,
-    data: { orgId, deviceId: "device-3", grantId: "grant-other", state: "active", revision: 1 },
+    data: { ...original, ownerOrgId: "org-other" },
   }], audit);
   const before = await counts();
   await assert.rejects(
-    () => manager.createGrant({ ...grantInput(credentialId), deviceId: "device-3" }, { idempotencyKey: "idem-grant-d-0001" }),
-    (e) => e.code === "DEVICE_CLAIMED",
+    () => service("mem-manage").createGrant(
+      { ...grantInput(credentialId), deviceId: "device-3" },
+      { idempotencyKey: "idem-grant-d-0000001" },
+    ),
+    (e) => e.code === "DEVICE_CLAIM_CONFLICT",
   );
   assert.deepEqual(await counts(), before);
+  await store.transact([ref("device_claims", claimId)], () => [{
+    collection: "device_claims", id: claimId, data: { ...original },
+  }], audit);
 });
 
 test("撤权仍为 STAGE_CLOSED，零写入零 Provider", async () => {

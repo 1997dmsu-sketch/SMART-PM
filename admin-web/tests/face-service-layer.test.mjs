@@ -247,24 +247,50 @@ test("K2 配置缺失：503 NOT_CONFIGURED 且零写入", async () => {
   assert.deepEqual(await counts(), before);
 });
 
-test("损坏 operation key（缺 result/createdAt）→ CONFLICT 且业务零变化", async () => {
+test("重放结果损坏（null/{}/[]/错 ID/异常时间）→ CONFLICT、Provider 零调用、业务零变化", async () => {
+  process.env.OPERATION_KEY_HMAC_KEY_B64 = Buffer.alloc(32, 9).toString("base64");
+  process.env.OPERATION_KEY_VERSION = "1";
+  process.env.OPERATION_KEY_REALM = "test-realm";
+
   const credentialId = await approvedCredential("e");
+  const actor = service("mem-manage");
+  const input = { ...grantInput(credentialId), deviceId: "device-replay" };
+  const idempotencyKey = "idem-corrupt-result-0001";
+  const created = await actor.createGrant(input, { idempotencyKey });
+
   const config = operationKeyConfig(process.env);
-  const idem = "idem-grant-e-0000001";
-  const opKey = operationKey({
+  const expectedOpKey = operationKey({
     orgId, method: "face.grant", actorType: "user", actorId: "mem-manage",
-    idempotencyKey: idem, config,
+    idempotencyKey, config,
   });
-  await store.transact([ref("operation_keys", opKey)], () => [{
-    collection: "operation_keys", id: opKey,
-    data: { orgId, realm: config.realm, keyVersion: config.version, requestDigest: "x", createdAt: 1 },
-  }], audit);
-  const before = await counts();
-  await assert.rejects(
-    () => service("mem-manage").createGrant(grantInput(credentialId), { idempotencyKey: idem }),
-    (e) => e.code === "CONFLICT",
-  );
-  assert.deepEqual(await counts(), before);
+  const row = (await store.list("operation_keys", orgId)).find((r) => r._id === expectedOpKey);
+  assert.ok(row, "expected op key 必须存在");
+  const baseline = await counts();
+  const callsBefore = { ...providerCalls };
+
+  const corruptions = [
+    { result: null },
+    { result: {} },
+    { result: [] },
+    { result: { ...row.result, grantId: "grant-wrong" } },
+    { result: { ...row.result, jobId: "job-wrong" } },
+    { result: { ...row.result, evidenceScope: "device_verified" } },
+    { createdAt: -1 },
+    { createdAt: Number.MAX_SAFE_INTEGER + 2 },
+  ];
+  for (const corruption of corruptions) {
+    await store.transact([ref("operation_keys", expectedOpKey)], () => [{
+      collection: "operation_keys", id: expectedOpKey, data: { ...corruption },
+    }], audit);
+    const after = (await store.list("operation_keys", orgId)).find((r) => r._id === expectedOpKey);
+    assert.ok(after, "损坏写入后记录必须仍存在");
+    await assert.rejects(
+      () => actor.createGrant(input, { idempotencyKey }),
+      (e) => e.code === "CONFLICT" && e.status === 409,
+    );
+    assert.deepEqual(await counts(), baseline);
+    assert.deepEqual(providerCalls, callsBefore);
+  }
 });
 
 test("domain 损坏 → DOMAIN_INCOMPLETE 且业务零变化", async () => {

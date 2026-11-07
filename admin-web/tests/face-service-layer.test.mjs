@@ -86,6 +86,7 @@ before(async () => {
   process.env.DEVICE_CLAIM_HMAC_KEY_B64 = Buffer.alloc(32, 7).toString("base64");
   process.env.OPERATION_KEY_HMAC_KEY_B64 = Buffer.alloc(32, 9).toString("base64");
   process.env.OPERATION_KEY_VERSION = "1";
+  process.env.OPERATION_KEY_REALM = "test-realm";
   process.env.DEVICE_CLAIM_KEY_VERSION = "1";
   process.env.DEVICE_DIGEST_REALM = "test-realm";
 

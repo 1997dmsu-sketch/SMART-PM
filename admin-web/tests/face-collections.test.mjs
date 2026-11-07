@@ -15,12 +15,14 @@ import {
   nextRevision,
   operationKey,
   operationKeyConfig,
+  operationKeyFingerprint,
+  applyOperationKeyDomain,
   validateRecord,
   validateDigestDomainRecord,
   applyDigestDomain,
 } from "../lib/face-service/collections.mjs";
 
-test("集合名冻结为九张，且可识别", () => {
+test("集合名冻结为十张，且可识别", () => {
   assert.deepEqual(Object.values(COLLECTIONS).sort(), [
     "access_devices",
     "device_access_grants",
@@ -30,6 +32,7 @@ test("集合名冻结为九张，且可识别", () => {
     "device_operation_logs",
     "face_credentials",
     "grant_slot_claims",
+    "operation_key_domains",
     "operation_keys",
   ]);
   assert.equal(isKnownCollection("face_credentials"), true);
@@ -98,7 +101,7 @@ test("K1 配置校验：Base64 32 字节、正整数版本、非空 realm", () =
 
 test("设备 claim：HMAC-SHA256、序列号规范化、版本参与摘要", () => {
   const key = Buffer.alloc(32, 7);
-  const config = { key, version: 1 };
+  const config = { key, version: 1, realm: "test-realm" };
   assert.equal(normalizeDeviceSerial("  ab-12 "), "AB-12");
   assert.equal(deviceDigest("AB-12", config), deviceDigest(" ab-12 ", config));
   assert.notEqual(deviceDigest("AB-12", config), deviceDigest("AB-12", { key, version: 2 }));
@@ -134,7 +137,7 @@ test("K1 与 K2 分离：设备摘要不等于 operation key", () => {
 
 test("K2 operation key：HMAC 摘要、幂等键格式与配置校验", () => {
   const key = Buffer.alloc(32, 9);
-  const config = { key, version: 1 };
+  const config = { key, version: 1, realm: "test-realm" };
   const a = operationKey({ orgId: "org-demo", method: "enroll", actorType: "user", actorId: "admin-1", idempotencyKey: "idem-key-0000000001", config });
   assert.match(a, /^op:/);
   assert.equal(a.includes("idem-key-0000000001"), false);
@@ -144,12 +147,12 @@ test("K2 operation key：HMAC 摘要、幂等键格式与配置校验", () => {
     () => operationKey({ orgId: "o", method: "enroll", actorType: "user", actorId: "a", idempotencyKey: "short", config }),
     /Idempotency-Key/,
   );
-  assert.throws(() => operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: "", OPERATION_KEY_VERSION: "1" }), /Base64/);
+  assert.throws(() => operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: "", OPERATION_KEY_VERSION: "1", OPERATION_KEY_REALM: "r" }), /Base64/);
   assert.throws(
-    () => operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: key.toString("base64"), OPERATION_KEY_VERSION: "0" }),
+    () => operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: key.toString("base64"), OPERATION_KEY_VERSION: "0", OPERATION_KEY_REALM: "r" }),
     /正整数/,
   );
-  assert.deepEqual(operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: key.toString("base64"), OPERATION_KEY_VERSION: "1" }), config);
+  assert.deepEqual(operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: key.toString("base64"), OPERATION_KEY_VERSION: "1", OPERATION_KEY_REALM: "test-realm" }), config);
 });
 
 test("固定键无分隔符碰撞：冒号不会串键", () => {
@@ -241,4 +244,35 @@ test("不完整或伪造的 domain 记录一律失败关闭，且不自动补写
     [`device_digest_domains/${headWrite.id}`]: { ...headWrite.data, provider: "other" },
   };
   assert.throws(() => applyDigestDomain(wrongProvider, config), (e) => e.code === "DOMAIN_INCOMPLETE");
+});
+
+test("operation key domain：fingerprint、同版本换钥与损坏记录", () => {
+  const key = Buffer.alloc(32, 9);
+  const config = { key, version: 1, realm: "test-realm" };
+  const fingerprint = operationKeyFingerprint(config);
+  const writes = applyOperationKeyDomain({}, { realm: config.realm, version: config.version, fingerprint, now: 100 });
+  assert.equal(writes.length, 2);
+  const state = Object.fromEntries(writes.map((w) => [`operation_key_domains/${w.id}`, w.data]));
+  assert.deepEqual(applyOperationKeyDomain(state, { realm: config.realm, version: config.version, fingerprint, now: 200 }), []);
+
+  // 同版本换钥 -> fingerprint 不一致
+  const otherFingerprint = operationKeyFingerprint({ ...config, key: Buffer.alloc(32, 8) });
+  assert.throws(
+    () => applyOperationKeyDomain(state, { realm: config.realm, version: config.version, fingerprint: otherFingerprint, now: 200 }),
+    (e) => e.code === "DOMAIN_MISMATCH",
+  );
+
+  // 只存在 head -> DOMAIN_INCOMPLETE
+  const headOnly = { [`operation_key_domains/${writes[0].id}`]: writes[0].data };
+  assert.throws(
+    () => applyOperationKeyDomain(headOnly, { realm: config.realm, version: config.version, fingerprint, now: 200 }),
+    (e) => e.code === "DOMAIN_INCOMPLETE",
+  );
+
+  // 伪造 kind -> DOMAIN_INCOMPLETE
+  const broken = { ...state, [`operation_key_domains/${writes[0].id}`]: { ...writes[0].data, kind: "version" } };
+  assert.throws(
+    () => applyOperationKeyDomain(broken, { realm: config.realm, version: config.version, fingerprint, now: 200 }),
+    (e) => e.code === "DOMAIN_INCOMPLETE",
+  );
 });

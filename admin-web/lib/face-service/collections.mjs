@@ -27,6 +27,7 @@ export const COLLECTIONS = Object.freeze({
   OPERATION_KEYS: "operation_keys",
   // 全局部署域记录：跨组织共享，不能按 orgId 隔离，否则换钥保护可被绕过。
   DEVICE_DIGEST_DOMAINS: "device_digest_domains",
+  OPERATION_KEY_DOMAINS: "operation_key_domains",
 });
 
 const ORG_SCOPED = new Set([
@@ -165,37 +166,122 @@ const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{16,128}$/;
 
 export function assertIdempotencyKey(value) {
   if (typeof value !== "string" || !IDEMPOTENCY_KEY.test(value)) {
-    throw schemaError("Idempotency-Key 必须是 16–128 位 [A-Za-z0-9._:-]");
+    const error = schemaError("Idempotency-Key 必须是 16–128 位 [A-Za-z0-9._:-]");
+    error.status = 400;
+    throw error;
   }
   return value;
 }
 
-/** K2 配置：与 K1 完全独立。 */
+function operationConfigError(message) {
+  const error = new Error(message);
+  error.code = "NOT_CONFIGURED";
+  error.status = 503;
+  return error;
+}
+
+/** K2 配置：与 K1 完全独立；缺失/非法 -> 503 NOT_CONFIGURED。 */
 export function operationKeyConfig(env = process.env) {
   const encoded = env.OPERATION_KEY_HMAC_KEY_B64 || "";
   const canonical = /^[A-Za-z0-9+/]+={0,2}$/.test(encoded) && encoded.length % 4 === 0;
-  if (!canonical) throw schemaError("OPERATION_KEY_HMAC_KEY_B64 不是规范的 Base64");
+  if (!canonical) throw operationConfigError("OPERATION_KEY_HMAC_KEY_B64 不是规范的 Base64");
   const key = Buffer.from(encoded, "base64");
   if (key.length !== 32 || key.toString("base64") !== encoded) {
-    throw schemaError("OPERATION_KEY_HMAC_KEY_B64 必须是规范的 Base64 编码的 32 字节密钥");
+    throw operationConfigError("OPERATION_KEY_HMAC_KEY_B64 必须是规范的 Base64 编码的 32 字节密钥");
   }
   const version = Number(env.OPERATION_KEY_VERSION);
-  if (!Number.isSafeInteger(version) || version < 1) throw schemaError("OPERATION_KEY_VERSION 必须是正整数");
-  return { key, version };
+  if (!Number.isSafeInteger(version) || version < 1) {
+    throw operationConfigError("OPERATION_KEY_VERSION 必须是正整数");
+  }
+  const realm = String(env.OPERATION_KEY_REALM || "").trim();
+  if (!realm) throw operationConfigError("OPERATION_KEY_REALM 必填");
+  return { key, version, realm };
 }
 
-export function operationKeyDigest(idempotencyKey, { key, version }) {
+/** 不可逆指纹：同版本换钥可被发现。 */
+export function operationKeyFingerprint({ key, version, realm }) {
+  return createHmac("sha256", key)
+    .update(JSON.stringify(["KEYED_DIGEST/op-key-fingerprint", "v1", realm, version]))
+    .digest("hex");
+}
+
+export function operationKeyDigest(idempotencyKey, { key, version, realm }) {
   assertIdempotencyKey(idempotencyKey);
-  return createHmac("sha256", key).update(`${version}:${idempotencyKey}`).digest("hex");
+  return createHmac("sha256", key)
+    .update(JSON.stringify(["KEYED_DIGEST/op", "v1", realm, version, idempotencyKey]))
+    .digest("hex");
+}
+
+export function operationKeyDomainIds(realm) {
+  assertId(valueOfRealm(realm), "realm");
+  return {
+    headId: `op-domain:${encodeSegment(realm)}`,
+    versionIdPrefix: `op-domain-version:${encodeSegment(realm)}:`,
+  };
+}
+
+function valueOfRealm(realm) {
+  return String(realm ?? "");
 }
 
 export function operationKey({ orgId, method, actorType, actorId, idempotencyKey, config }) {
-  if (!config?.key) throw schemaError("缺少 K2 配置");
+  if (!config?.key) throw operationConfigError("缺少 K2 配置");
   for (const [field, value] of Object.entries({ orgId, method, actorType, actorId })) {
     assertId(value, field);
   }
   const digest = operationKeyDigest(idempotencyKey, config);
-  return `op:${encodeSegment(orgId)}:${encodeSegment(method)}:${encodeSegment(actorType)}:${encodeSegment(actorId)}:v${config.version}:${digest}`;
+  return `op:${encodeSegment(config.realm)}:${encodeSegment(orgId)}:${encodeSegment(method)}:${encodeSegment(actorType)}:${encodeSegment(actorId)}:v${config.version}:${digest}`;
+}
+
+/**
+ * operation_key_domains：head 与版本记录同时存在且 realm/version/fingerprint 全匹配才继续。
+ * 单边缺失/损坏 -> DOMAIN_INCOMPLETE；完整但配置不同 -> DOMAIN_MISMATCH。
+ */
+export function applyOperationKeyDomain(state, { realm, version, fingerprint, now = Date.now() }) {
+  const { headId } = operationKeyDomainIds(realm);
+  const versionId = `${operationKeyDomainIds(realm).versionIdPrefix}${version}`;
+  const prefix = `${COLLECTIONS.OPERATION_KEY_DOMAINS}/`;
+  const head = state[prefix + headId];
+  const versionRecord = state[prefix + versionId];
+
+  if (!head && !versionRecord) {
+    return [
+      {
+        collection: COLLECTIONS.OPERATION_KEY_DOMAINS,
+        id: headId,
+        data: { kind: "head", realm, keyVersion: version, keyFingerprint: fingerprint, revision: 1, createdAt: now },
+      },
+      {
+        collection: COLLECTIONS.OPERATION_KEY_DOMAINS,
+        id: versionId,
+        data: { kind: "version", realm, keyVersion: version, keyFingerprint: fingerprint, enabledAt: now },
+      },
+    ];
+  }
+
+  const incomplete = () => {
+    const error = schemaError("operation key domain 记录不完整或损坏，需受控修复");
+    error.code = "DOMAIN_INCOMPLETE";
+    throw error;
+  };
+  if (!head || !versionRecord) incomplete();
+
+  const valid = (record, kind) =>
+    record && record.kind === kind && typeof record.realm === "string" &&
+    Number.isSafeInteger(record.keyVersion) && typeof record.keyFingerprint === "string" &&
+    /^[0-9a-f]{64}$/.test(record.keyFingerprint);
+  if (!valid(head, "head") || !valid(versionRecord, "version")) incomplete();
+
+  const mismatch =
+    head.realm !== realm || versionRecord.realm !== realm ||
+    head.keyVersion !== version || versionRecord.keyVersion !== version ||
+    head.keyFingerprint !== fingerprint || versionRecord.keyFingerprint !== fingerprint;
+  if (mismatch) {
+    const error = schemaError("operation key domain 与当前配置不一致");
+    error.code = "DOMAIN_MISMATCH";
+    throw error;
+  }
+  return [];
 }
 
 function assertId(value, field) {

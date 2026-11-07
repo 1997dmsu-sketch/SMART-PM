@@ -27,7 +27,8 @@ import {
   IMAGE_STATE,
   JOB_STATE,
   REVIEW_STATE,
-  assertEnrollInput,
+  assertCreateGrantInput,
+  assertSubmitInput,
   publicJobResult,
   publicReviewItem,
 } from "./dto.mjs";
@@ -85,17 +86,14 @@ export class FaceCredentialService {
     return (await this.store.list(collection, this.orgId)).find((row) => row._id === id) || null;
   }
 
-  // 1. 提交：只建 credential。
+  // 1. 提交：只建 credential（人员 + 人脸来源 + 审核/图片状态）。
   async submit(input, { idempotencyKey } = {}) {
     await this.#require("device.face.submit");
-    const parsed = assertEnrollInput(input);
-    if (!input.occupancyId) failCode("PARAM_ERROR", "occupancyId 必填", 400);
-
-    // 引用校验：token 携带 file/organization/membership refs，事务内再复核。
+    const parsed = assertSubmitInput(input);
     const reference = await this.files.prepareReference(parsed.sourceFileId);
 
     const opKey = await this.#opKey("face.submit", idempotencyKey);
-    const requestDigest = digestOf({ ...parsed, occupancyId: input.occupancyId });
+    const requestDigest = digestOf(parsed);
     const credentialId = `fc-${digestOf(opKey).slice(0, 24)}`;
 
     await this.store.transact(
@@ -116,13 +114,8 @@ export class FaceCredentialService {
           orgId: this.orgId,
           revision: 1,
           personId: parsed.personId,
-          deviceId: parsed.deviceId,
-          grantId: parsed.grantId,
-          occupancyId: input.occupancyId,
           sourceFileId: parsed.sourceFileId,
           sourceFileRevision: reference.revision,
-          validFrom: parsed.validFrom,
-          validUntil: parsed.validUntil,
           reviewState: REVIEW_STATE.SUBMITTED,
           imageState: IMAGE_STATE.VERIFIED,
           evidenceScope: "simulated",
@@ -200,114 +193,11 @@ export class FaceCredentialService {
     return rows.filter((row) => row.reviewState === REVIEW_STATE.SUBMITTED).map(publicReviewItem);
   }
 
-  // 3. 创建授权：资格事务 + device/slot claim + grant/job。
-  async createGrant({ credentialId, occupancyId, cycleId, identityApplicationId }, { idempotencyKey } = {}) {
+  // 3. 创建授权：H1 仅冻结输入，阶段关闭（H2 原子事务未开放）。
+  async createGrant(input, { idempotencyKey } = {}) {
     await this.#require("device.access.manage");
-    if (!credentialId || !occupancyId || !cycleId || !identityApplicationId) {
-      failCode("PARAM_ERROR", "credentialId/occupancyId/cycleId/identityApplicationId 必填", 400);
-    }
-    const credential = await this.#find(COLLECTIONS.FACE_CREDENTIALS, credentialId);
-    if (!credential) failCode("NOT_FOUND", "凭证不存在或不可见", 404);
-    if (credential.reviewState !== REVIEW_STATE.APPROVED) {
-      failCode("INVALID_STATE", "凭证尚未审核通过", 409);
-    }
-
-    const opKey = await this.#opKey("face.grant", idempotencyKey);
-    const requestDigest = digestOf({ credentialId, occupancyId, cycleId, identityApplicationId });
-    const grantId = `grant-${digestOf(opKey).slice(0, 24)}`;
-    const jobId = `job-${digestOf(`${opKey}:enroll`).slice(0, 24)}`;
-    const slotId = grantSlotKey({ orgId: this.orgId, personId: credential.personId, deviceId: credential.deviceId, cycleId });
-    let result = null;
-
-    await this.blacklist.withEligibility(
-      {
-        personId: credential.personId,
-        occupancyId,
-        identityApplicationId,
-        restriction: "occupancy.activate",
-      },
-      [
-        ref(COLLECTIONS.FACE_CREDENTIALS, credentialId),
-        ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId),
-        ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId),
-        ref(COLLECTIONS.GRANT_SLOT_CLAIMS, slotId),
-        ref(COLLECTIONS.OPERATION_KEYS, opKey),
-      ],
-      (state, eligibility) => {
-        if (!eligibility?.eligible) {
-          const code = eligibility?.code || "BLACKLIST_DENIED";
-          failCode(code, "资格不满足，无法创建门禁授权", code === "BLACKLIST_DENIED" ? 403 : 409);
-        }
-        const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
-        if (existing) {
-          if (existing.digest !== requestDigest) failCode("CONFLICT", "同键不同请求摘要", 409);
-          result = existing.result;
-          return { writes: [], result };
-        }
-        const current = state[`${COLLECTIONS.FACE_CREDENTIALS}/${credentialId}`];
-        if (!current || current.orgId !== this.orgId) failCode("NOT_FOUND", "凭证不存在或不可见", 404);
-        if (current.reviewState !== REVIEW_STATE.APPROVED) {
-          failCode("INVALID_STATE", "凭证尚未审核通过", 409);
-        }
-        const slot = state[`${COLLECTIONS.GRANT_SLOT_CLAIMS}/${slotId}`];
-        if (slot && slot.grantId !== grantId) failCode("GRANT_SLOT_CONFLICT", "授权槽位冲突", 409);
-
-        const now = this.now();
-        const grant = {
-          orgId: this.orgId,
-          revision: 1,
-          credentialId,
-          personId: current.personId,
-          deviceId: current.deviceId,
-          occupancyId,
-          cycleId,
-          state: GRANT_STATE.EFFECTIVE,
-          evidenceScope: "simulated",
-          validFrom: current.validFrom,
-          validUntil: current.validUntil,
-          createdAt: now,
-          updatedAt: now,
-        };
-        const job = {
-          orgId: this.orgId,
-          revision: 1,
-          credentialId,
-          grantId,
-          deviceId: current.deviceId,
-          action: "enroll",
-          state: JOB_STATE.QUEUED,
-          executionMode: "test",
-          provider: "mock",
-          evidenceScope: "simulated",
-          attempts: 0,
-          createdAt: now,
-        };
-        validateRecord(COLLECTIONS.DEVICE_ACCESS_GRANTS, grant);
-        validateRecord(COLLECTIONS.DEVICE_OPERATION_JOBS, job);
-        result = { grantId, jobId, evidenceScope: "simulated" };
-        return {
-          writes: [
-            { collection: COLLECTIONS.DEVICE_ACCESS_GRANTS, id: grantId, data: grant },
-            { collection: COLLECTIONS.DEVICE_OPERATION_JOBS, id: jobId, data: job },
-            {
-              collection: COLLECTIONS.GRANT_SLOT_CLAIMS,
-              id: slotId,
-              data: { orgId: this.orgId, deviceId: current.deviceId, grantId, cycleId, revision: 1, createdAt: now },
-            },
-            {
-              collection: COLLECTIONS.OPERATION_KEYS,
-              id: opKey,
-              data: { orgId: this.orgId, digest: requestDigest, result, createdAt: now },
-            },
-          ],
-          result,
-        };
-      },
-      this.#audit("创建门禁授权"),
-    );
-
-    if (result?.jobId) await this.#runJob(result.jobId, "enroll");
-    return result;
+    assertCreateGrantInput(input);
+    failCode("STAGE_CLOSED", "授权创建尚未开放（H2）", 501);
   }
 
   // 4. 撤销：不查资格；grant 立即失效；异步清理失败不回滚。
@@ -377,6 +267,13 @@ export class FaceCredentialService {
 
     if (result?.jobId) await this.#runJob(result.jobId, "revoke");
     return result;
+  }
+
+  // 4. 撤销：H1 阶段关闭（H4 撤权闭环未开放）。
+  async revoke(grantId, { idempotencyKey } = {}) {
+    await this.#require("device.access.manage");
+    if (typeof grantId !== "string" || !grantId.trim()) failCode("PARAM_ERROR", "grantId 必填", 400);
+    failCode("STAGE_CLOSED", "撤权尚未开放（H4）", 501);
   }
 
   // 5. 查询任务：org 内最小 DTO。

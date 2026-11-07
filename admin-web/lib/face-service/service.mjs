@@ -1,9 +1,8 @@
 ﻿/**
- * HK-AI-04 服务层（H1 阶段）。
+ * HK-AI-04 服务层（H2-a）。
  *
- * 已实现：submit（最小 credential）、review（审核状态机）、reviewQueue、queryJob。
- * 阶段关闭：createGrant / revoke 返回 STAGE_CLOSED，不写 grant/job/claim/slot/log。
- * 未实现：H2 原子授权、H3 租约与派发、H4 撤权闭环；不调用任何 Provider。
+ * 已实现：submit、review、reviewQueue、queryJob、createGrant（原子授权事务）。
+ * 未实现：H2-b 设备 claim 模型、H3 租约派发、H4 撤权闭环；不调用 Provider。
  */
 import { createHash } from "node:crypto";
 
@@ -94,16 +93,19 @@ export class FaceCredentialService {
     return [ref(COLLECTIONS.OPERATION_KEY_DOMAINS, op.headId), ref(COLLECTIONS.OPERATION_KEY_DOMAINS, op.versionId)];
   }
 
-  #replayValid(existing, op, requestDigest) {
-    return Boolean(
-      existing &&
-        existing.orgId === this.orgId &&
-        existing.realm === op.config.realm &&
-        existing.keyVersion === op.config.version &&
-        Number.isSafeInteger(existing.createdAt) && existing.createdAt >= 0 &&
-        existing.result && typeof existing.result === "object" &&
-        existing.requestDigest === requestDigest,
-    );
+  #replayValid(existing, op, requestDigest, expected) {
+    const plainResult =
+      existing?.result && typeof existing.result === "object" && !Array.isArray(existing.result);
+    const valid =
+      existing?.orgId === this.orgId &&
+      existing?.realm === op.config.realm &&
+      existing?.keyVersion === op.config.version &&
+      Number.isSafeInteger(existing?.createdAt) && existing.createdAt >= 0 &&
+      existing?.requestDigest === requestDigest &&
+      plainResult &&
+      JSON.stringify(stable(existing.result)) === JSON.stringify(stable(expected));
+    if (!valid) failCode("CONFLICT", "幂等记录损坏或请求不一致", 409);
+    return existing.result;
   }
 
   #opDomainWrites(state, op, now) {
@@ -122,6 +124,7 @@ export class FaceCredentialService {
     const { opKey } = op;
     const requestDigest = digestOf(parsed);
     const credentialId = `fc-${digestOf(opKey).slice(0, 24)}`;
+    const expected = { credentialId, reviewState: REVIEW_STATE.SUBMITTED };
 
     await this.store.transact(
       [
@@ -135,7 +138,7 @@ export class FaceCredentialService {
         const domainWrites = this.#opDomainWrites(state, op, this.now());
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
-          if (!this.#replayValid(existing, op, requestDigest)) {
+          if (!this.#replayValid(existing, op, requestDigest, expected)) {
           failCode("CONFLICT", "同键不同请求摘要或域不一致", 409);
         }
           return [];
@@ -181,6 +184,10 @@ export class FaceCredentialService {
     const op = await this.#opContext("face.review", idempotencyKey);
     const { opKey } = op;
     const requestDigest = digestOf({ credentialId, decision, expectedRevision: expectedRevision ?? null });
+    const expected = {
+      credentialId,
+      reviewState: decision === "approved" ? REVIEW_STATE.APPROVED : REVIEW_STATE.REJECTED,
+    };
     let result = null;
 
     await this.store.transact(
@@ -189,7 +196,7 @@ export class FaceCredentialService {
         const domainWrites = this.#opDomainWrites(state, op, this.now());
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
-          if (!this.#replayValid(existing, op, requestDigest)) {
+          if (!this.#replayValid(existing, op, requestDigest, expected)) {
           failCode("CONFLICT", "同键不同请求摘要或域不一致", 409);
         }
           result = existing.result;
@@ -253,6 +260,7 @@ export class FaceCredentialService {
     const grantId = `grant-${digestOf(opKey).slice(0, 24)}`;
     const jobId = `job-${digestOf(opKey + ":enroll").slice(0, 24)}`;
     const logId = deterministicLogId(jobId, "queued");
+    const expected = { grantId, jobId, evidenceScope: "simulated" };
     let result = null;
 
     await this.blacklist.withEligibility(
@@ -290,7 +298,7 @@ export class FaceCredentialService {
         const domainWrites = this.#opDomainWrites(state, op, this.now());
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
-          if (!this.#replayValid(existing, op, requestDigest)) {
+          if (!this.#replayValid(existing, op, requestDigest, expected)) {
           failCode("CONFLICT", "同键不同请求摘要或域不一致", 409);
         }
           result = existing.result;

@@ -99,7 +99,7 @@ before(async () => {
     ["mem-manage", ["device.access.manage"]],
   ];
   await store.transact(
-    [ref("organizations", orgId), ref("file_assets", "file-1"), ref("access_devices", "device-1"), ref("access_devices", "device-2"), ref("access_devices", "device-3"), ref("access_devices", "device-inactive"), ref("access_devices", "device-other"), ...memberships.map(([id]) => ref("org_memberships", id))],
+    [ref("organizations", orgId), ref("file_assets", "file-1"), ref("access_devices", "device-1"), ref("access_devices", "device-2"), ref("access_devices", "device-3"), ref("access_devices", "device-inactive"), ref("access_devices", "device-other"), ref("access_devices", "device-4"), ref("access_devices", "device-5"), ref("access_devices", "device-replay"), ...memberships.map(([id]) => ref("org_memberships", id))],
     () => [
       { collection: "organizations", id: orgId, data: { name: "人脸组织", status: "active", revision: 1 } },
       { collection: "file_assets", id: "file-1", data: { orgId, purpose: "face-biometric", status: "ready", visibility: "private", mimeType: "image/jpeg", size: 1024, objectKey: "private/f.jpg", revision: 1 } },
@@ -108,6 +108,9 @@ before(async () => {
       { collection: "access_devices", id: "device-3", data: { orgId, status: "active", provider: "hikvision", serialNumber: "SN-3", revision: 1 } },
       { collection: "access_devices", id: "device-inactive", data: { orgId, status: "disabled", provider: "hikvision", serialNumber: "SN-X", revision: 1 } },
       { collection: "access_devices", id: "device-other", data: { orgId: "org-other", status: "active", provider: "hikvision", serialNumber: "SN-O", revision: 1 } },
+      { collection: "access_devices", id: "device-4", data: { orgId, status: "active", provider: "hikvision", serialNumber: "SN-4", revision: 1 } },
+      { collection: "access_devices", id: "device-5", data: { orgId, status: "active", provider: "hikvision", serialNumber: "SN-5", revision: 1 } },
+      { collection: "access_devices", id: "device-replay", data: { orgId, status: "active", provider: "hikvision", serialNumber: "SN-R", revision: 1 } },
       ...memberships.map(([id, permissions]) => ({
         collection: "org_memberships", id,
         data: { orgId, status: "active", role: "admin", principalType: "adminAccount", principalId: id, permissions, revision: 1 },
@@ -273,7 +276,7 @@ test("domain 损坏 → DOMAIN_INCOMPLETE 且业务零变化", async () => {
   }], audit);
   const before = await counts();
   await assert.rejects(
-    () => service("mem-manage").createGrant(grantInput(credentialId), { idempotencyKey: "idem-grant-f-0000001" }),
+    () => service("mem-manage").createGrant({ ...grantInput(credentialId), deviceId: "device-5" }, { idempotencyKey: "idem-grant-f-0000001" }),
     (e) => e.code === "DOMAIN_INCOMPLETE",
   );
   assert.deepEqual(await counts(), before);
@@ -292,7 +295,7 @@ test("换钥后授权失败关闭且业务集合零变化", async () => {
   process.env.OPERATION_KEY_HMAC_KEY_B64 = Buffer.alloc(32, 11).toString("base64");
   const before = await counts();
   await assert.rejects(
-    () => service("mem-manage").createGrant(grantInput(credentialId), { idempotencyKey: "idem-grant-g-0000001" }),
+    () => service("mem-manage").createGrant({ ...grantInput(credentialId), deviceId: "device-4" }, { idempotencyKey: "idem-grant-g-0000001" }),
     (e) => e.code === "DOMAIN_MISMATCH",
   );
   process.env.OPERATION_KEY_HMAC_KEY_B64 = savedKey;

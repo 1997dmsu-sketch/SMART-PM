@@ -161,11 +161,41 @@ export function grantSlotKey({ orgId, personId, deviceId, cycleId }) {
 }
 
 /** 操作幂等键：与 Mock 终审一致的 org + 方法 + actor + idempotencyKey。 */
-export function operationKey({ orgId, method, actorType, actorId, idempotencyKey }) {
-  for (const [field, value] of Object.entries({ orgId, method, actorType, actorId, idempotencyKey })) {
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{16,128}$/;
+
+export function assertIdempotencyKey(value) {
+  if (typeof value !== "string" || !IDEMPOTENCY_KEY.test(value)) {
+    throw schemaError("Idempotency-Key 必须是 16–128 位 [A-Za-z0-9._:-]");
+  }
+  return value;
+}
+
+/** K2 配置：与 K1 完全独立。 */
+export function operationKeyConfig(env = process.env) {
+  const encoded = env.OPERATION_KEY_HMAC_KEY_B64 || "";
+  const canonical = /^[A-Za-z0-9+/]+={0,2}$/.test(encoded) && encoded.length % 4 === 0;
+  if (!canonical) throw schemaError("OPERATION_KEY_HMAC_KEY_B64 不是规范的 Base64");
+  const key = Buffer.from(encoded, "base64");
+  if (key.length !== 32 || key.toString("base64") !== encoded) {
+    throw schemaError("OPERATION_KEY_HMAC_KEY_B64 必须是规范的 Base64 编码的 32 字节密钥");
+  }
+  const version = Number(env.OPERATION_KEY_VERSION);
+  if (!Number.isSafeInteger(version) || version < 1) throw schemaError("OPERATION_KEY_VERSION 必须是正整数");
+  return { key, version };
+}
+
+export function operationKeyDigest(idempotencyKey, { key, version }) {
+  assertIdempotencyKey(idempotencyKey);
+  return createHmac("sha256", key).update(`${version}:${idempotencyKey}`).digest("hex");
+}
+
+export function operationKey({ orgId, method, actorType, actorId, idempotencyKey, config }) {
+  if (!config?.key) throw schemaError("缺少 K2 配置");
+  for (const [field, value] of Object.entries({ orgId, method, actorType, actorId })) {
     assertId(value, field);
   }
-  return `op:${orgId}:${method}:${actorType}:${actorId}:${idempotencyKey}`;
+  const digest = operationKeyDigest(idempotencyKey, config);
+  return `op:${encodeSegment(orgId)}:${encodeSegment(method)}:${encodeSegment(actorType)}:${encodeSegment(actorId)}:v${config.version}:${digest}`;
 }
 
 function assertId(value, field) {

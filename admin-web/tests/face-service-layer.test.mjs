@@ -1,4 +1,4 @@
-import { test, before, after } from "node:test";
+﻿import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -61,12 +61,12 @@ const counts = async () => {
 async function approvedCredential(suffix) {
   const out = await service("mem-submit").submit(
     { personId: `person-${suffix}`, sourceFileId: "file-1" },
-    { idempotencyKey: `idem-sub-${suffix}-0001` },
+    { idempotencyKey: `idem-sub-${suffix}-00000001` },
   );
   await service("mem-review").review(
     out.credentialId,
     { decision: "approved", expectedRevision: 1 },
-    { idempotencyKey: `idem-rev-${suffix}-0001` },
+    { idempotencyKey: `idem-rev-${suffix}-00000001` },
   );
   return out.credentialId;
 }
@@ -84,6 +84,8 @@ const grantInput = (credentialId) => ({
 
 before(async () => {
   process.env.DEVICE_CLAIM_HMAC_KEY_B64 = Buffer.alloc(32, 7).toString("base64");
+  process.env.OPERATION_KEY_HMAC_KEY_B64 = Buffer.alloc(32, 9).toString("base64");
+  process.env.OPERATION_KEY_VERSION = "1";
   process.env.DEVICE_CLAIM_KEY_VERSION = "1";
   process.env.DEVICE_DIGEST_REALM = "test-realm";
 

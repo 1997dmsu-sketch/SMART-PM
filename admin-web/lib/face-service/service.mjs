@@ -20,6 +20,7 @@ import {
   isReclaimable,
   nextRevision,
   operationKey,
+  operationKeyConfig,
   validateRecord,
 } from "./collections.mjs";
 import {
@@ -73,12 +74,14 @@ export class FaceCredentialService {
     if (typeof idempotencyKey !== "string" || !idempotencyKey) {
       failCode("PARAM_ERROR", "缺少 Idempotency-Key", 400);
     }
+    const config = operationKeyConfig(process.env);
     return operationKey({
       orgId: this.orgId,
       method: route,
       actorType: this.actor.actorType || "user",
       actorId: this.actor.actorId,
       idempotencyKey,
+      config,
     });
   }
 

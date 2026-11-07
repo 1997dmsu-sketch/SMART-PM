@@ -14,6 +14,7 @@ import {
   isKnownCollection,
   nextRevision,
   operationKey,
+  operationKeyConfig,
   validateRecord,
   validateDigestDomainRecord,
   applyDigestDomain,
@@ -125,34 +126,30 @@ test("grant slot 固定键：org+person+device+cycle，缺一不可", () => {
 test("K1 与 K2 分离：设备摘要不等于 operation key", () => {
   const key = Buffer.alloc(32, 7);
   const digest = deviceDigest("AB-12", { key, version: 1 });
-  const op = operationKey({ orgId: "o", method: "enroll", actorType: "user", actorId: "a", idempotencyKey: "k" });
+  const op = operationKey({ orgId: "o", method: "enroll", actorType: "user", actorId: "a", idempotencyKey: "idem-key-0000000001", config: { key: Buffer.alloc(32, 9), version: 1 } });
   assert.notEqual(digest, op);
   assert.equal(op.startsWith("op:"), true);
+  assert.equal(op.startsWith("provider-device:"), false);
 });
 
-test("操作幂等键包含组织/方法/actor/幂等键", () => {
-  const key = operationKey({
-    orgId: "org-demo",
-    method: "enroll",
-    actorType: "user",
-    actorId: "admin-1",
-    idempotencyKey: "idem-key-0000000001",
-  });
-  assert.equal(key, "op:org-demo:enroll:user:admin-1:idem-key-0000000001");
-  assert.notEqual(
-    key,
-    operationKey({
-      orgId: "org-other",
-      method: "enroll",
-      actorType: "user",
-      actorId: "admin-1",
-      idempotencyKey: "idem-key-0000000001",
-    }),
-  );
+test("K2 operation key：HMAC 摘要、幂等键格式与配置校验", () => {
+  const key = Buffer.alloc(32, 9);
+  const config = { key, version: 1 };
+  const a = operationKey({ orgId: "org-demo", method: "enroll", actorType: "user", actorId: "admin-1", idempotencyKey: "idem-key-0000000001", config });
+  assert.match(a, /^op:/);
+  assert.equal(a.includes("idem-key-0000000001"), false);
+  const b = operationKey({ orgId: "org-other", method: "enroll", actorType: "user", actorId: "admin-1", idempotencyKey: "idem-key-0000000001", config });
+  assert.notEqual(a, b);
   assert.throws(
-    () => operationKey({ orgId: "o", method: "enroll", actorType: "user", actorId: "", idempotencyKey: "k" }),
-    /actorId/,
+    () => operationKey({ orgId: "o", method: "enroll", actorType: "user", actorId: "a", idempotencyKey: "short", config }),
+    /Idempotency-Key/,
   );
+  assert.throws(() => operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: "", OPERATION_KEY_VERSION: "1" }), /Base64/);
+  assert.throws(
+    () => operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: key.toString("base64"), OPERATION_KEY_VERSION: "0" }),
+    /正整数/,
+  );
+  assert.deepEqual(operationKeyConfig({ OPERATION_KEY_HMAC_KEY_B64: key.toString("base64"), OPERATION_KEY_VERSION: "1" }), config);
 });
 
 test("固定键无分隔符碰撞：冒号不会串键", () => {

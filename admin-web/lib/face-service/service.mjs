@@ -94,6 +94,18 @@ export class FaceCredentialService {
     return [ref(COLLECTIONS.OPERATION_KEY_DOMAINS, op.headId), ref(COLLECTIONS.OPERATION_KEY_DOMAINS, op.versionId)];
   }
 
+  #replayValid(existing, op, requestDigest) {
+    return Boolean(
+      existing &&
+        existing.orgId === this.orgId &&
+        existing.realm === op.config.realm &&
+        existing.keyVersion === op.config.version &&
+        Number.isSafeInteger(existing.createdAt) && existing.createdAt >= 0 &&
+        existing.result && typeof existing.result === "object" &&
+        existing.requestDigest === requestDigest,
+    );
+  }
+
   #opDomainWrites(state, op, now) {
     return applyOperationKeyDomain(state, {
       realm: op.config.realm, version: op.config.version, fingerprint: op.fingerprint, now,
@@ -123,8 +135,7 @@ export class FaceCredentialService {
         const domainWrites = this.#opDomainWrites(state, op, this.now());
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
-          if (existing.realm !== op.config.realm || existing.keyVersion !== op.config.version ||
-            existing.requestDigest !== requestDigest) {
+          if (!this.#replayValid(existing, op, requestDigest)) {
           failCode("CONFLICT", "同键不同请求摘要或域不一致", 409);
         }
           return [];
@@ -178,8 +189,7 @@ export class FaceCredentialService {
         const domainWrites = this.#opDomainWrites(state, op, this.now());
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
-          if (existing.realm !== op.config.realm || existing.keyVersion !== op.config.version ||
-            existing.requestDigest !== requestDigest) {
+          if (!this.#replayValid(existing, op, requestDigest)) {
           failCode("CONFLICT", "同键不同请求摘要或域不一致", 409);
         }
           result = existing.result;
@@ -280,8 +290,7 @@ export class FaceCredentialService {
         const domainWrites = this.#opDomainWrites(state, op, this.now());
         const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
         if (existing) {
-          if (existing.realm !== op.config.realm || existing.keyVersion !== op.config.version ||
-            existing.requestDigest !== requestDigest) {
+          if (!this.#replayValid(existing, op, requestDigest)) {
           failCode("CONFLICT", "同键不同请求摘要或域不一致", 409);
         }
           result = existing.result;

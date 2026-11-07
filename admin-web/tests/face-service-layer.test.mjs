@@ -8,7 +8,7 @@ import { LocalStore } from "../lib/store.mjs";
 import { FileService } from "../lib/files.mjs";
 import { MockFaceAccessProvider } from "../lib/face-service/index.mjs";
 import { FaceCredentialService } from "../lib/face-service/service.mjs";
-import { deviceClaimKey, deviceClaimConfig } from "../lib/face-service/collections.mjs";
+import { deviceClaimKey, deviceClaimConfig, operationKey, operationKeyConfig } from "../lib/face-service/collections.mjs";
 
 let store, dir;
 const orgId = "org-demo";
@@ -241,5 +241,60 @@ test("K2 配置缺失：503 NOT_CONFIGURED 且零写入", async () => {
     (e) => e.code === "NOT_CONFIGURED" && e.status === 503,
   );
   process.env.OPERATION_KEY_HMAC_KEY_B64 = saved;
+  assert.deepEqual(await counts(), before);
+});
+
+test("损坏 operation key（缺 result/createdAt）→ CONFLICT 且业务零变化", async () => {
+  const credentialId = await approvedCredential("e");
+  const config = operationKeyConfig(process.env);
+  const idem = "idem-grant-e-0000001";
+  const opKey = operationKey({
+    orgId, method: "face.grant", actorType: "user", actorId: "mem-manage",
+    idempotencyKey: idem, config,
+  });
+  await store.transact([ref("operation_keys", opKey)], () => [{
+    collection: "operation_keys", id: opKey,
+    data: { orgId, realm: config.realm, keyVersion: config.version, requestDigest: "x", createdAt: 1 },
+  }], audit);
+  const before = await counts();
+  await assert.rejects(
+    () => service("mem-manage").createGrant(grantInput(credentialId), { idempotencyKey: idem }),
+    (e) => e.code === "CONFLICT",
+  );
+  assert.deepEqual(await counts(), before);
+});
+
+test("domain 损坏 → DOMAIN_INCOMPLETE 且业务零变化", async () => {
+  const credentialId = await approvedCredential("f");
+  const [head] = (await store.list("operation_key_domains")).filter((d) => d.kind === "head");
+  await store.transact([ref("operation_key_domains", head._id)], (state) => [{
+    collection: "operation_key_domains", id: head._id,
+    data: { ...state["operation_key_domains/" + head._id], kind: "version" },
+  }], audit);
+  const before = await counts();
+  await assert.rejects(
+    () => service("mem-manage").createGrant(grantInput(credentialId), { idempotencyKey: "idem-grant-f-0000001" }),
+    (e) => e.code === "DOMAIN_INCOMPLETE",
+  );
+  assert.deepEqual(await counts(), before);
+});
+
+test("换钥后授权失败关闭且业务集合零变化", async () => {
+  const headRec = (await store.list("operation_key_domains")).find((d) => d._id.startsWith("op-domain:") && !d._id.startsWith("op-domain-version"));
+  if (headRec && headRec.kind !== "head") {
+    await store.transact([ref("operation_key_domains", headRec._id)], (state) => [{
+      collection: "operation_key_domains", id: headRec._id,
+      data: { ...state["operation_key_domains/" + headRec._id], kind: "head" },
+    }], audit);
+  }
+  const credentialId = await approvedCredential("g");
+  const savedKey = process.env.OPERATION_KEY_HMAC_KEY_B64;
+  process.env.OPERATION_KEY_HMAC_KEY_B64 = Buffer.alloc(32, 11).toString("base64");
+  const before = await counts();
+  await assert.rejects(
+    () => service("mem-manage").createGrant(grantInput(credentialId), { idempotencyKey: "idem-grant-g-0000001" }),
+    (e) => e.code === "DOMAIN_MISMATCH",
+  );
+  process.env.OPERATION_KEY_HMAC_KEY_B64 = savedKey;
   assert.deepEqual(await counts(), before);
 });

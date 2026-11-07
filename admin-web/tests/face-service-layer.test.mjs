@@ -247,7 +247,7 @@ test("K2 配置缺失：503 NOT_CONFIGURED 且零写入", async () => {
   assert.deepEqual(await counts(), before);
 });
 
-test("重放结果损坏（null/{}/[]/错 ID/异常时间）→ CONFLICT、Provider 零调用、业务零变化", async () => {
+test("重放结果损坏（null/{}/[]/错 ID/异常时间）→ CONFLICT、Provider 零调用、业务无变化", async () => {
   process.env.OPERATION_KEY_HMAC_KEY_B64 = Buffer.alloc(32, 9).toString("base64");
   process.env.OPERATION_KEY_VERSION = "1";
   process.env.OPERATION_KEY_REALM = "test-realm";
@@ -265,30 +265,43 @@ test("重放结果损坏（null/{}/[]/错 ID/异常时间）→ CONFLICT、Provi
   });
   const row = (await store.list("operation_keys", orgId)).find((r) => r._id === expectedOpKey);
   assert.ok(row, "expected op key 必须存在");
-  const baseline = await counts();
+  const original = structuredClone(row);
+
+  const snapshot = async () => structuredClone({
+    grants: await store.list("device_access_grants", orgId),
+    jobs: await store.list("device_operation_jobs", orgId),
+    slots: await store.list("grant_slot_claims", orgId),
+    claims: await store.list("device_claims", orgId),
+    logs: await store.list("device_operation_logs", orgId),
+  });
+  const baseline = await snapshot();
   const callsBefore = { ...providerCalls };
 
   const corruptions = [
     { result: null },
     { result: {} },
     { result: [] },
-    { result: { ...row.result, grantId: "grant-wrong" } },
-    { result: { ...row.result, jobId: "job-wrong" } },
-    { result: { ...row.result, evidenceScope: "device_verified" } },
+    { result: { ...original.result, grantId: "grant-wrong" } },
+    { result: { ...original.result, jobId: "job-wrong" } },
+    { result: { ...original.result, evidenceScope: "device_verified" } },
+    { createdAt: null },
     { createdAt: -1 },
     { createdAt: Number.MAX_SAFE_INTEGER + 2 },
   ];
   for (const corruption of corruptions) {
+    // 每轮先恢复原始记录，再单独应用一项损坏
+    await store.transact([ref("operation_keys", expectedOpKey)], () => [{
+      collection: "operation_keys", id: expectedOpKey, data: { ...original },
+    }], audit);
     await store.transact([ref("operation_keys", expectedOpKey)], () => [{
       collection: "operation_keys", id: expectedOpKey, data: { ...corruption },
     }], audit);
-    const after = (await store.list("operation_keys", orgId)).find((r) => r._id === expectedOpKey);
-    assert.ok(after, "损坏写入后记录必须仍存在");
+
     await assert.rejects(
       () => actor.createGrant(input, { idempotencyKey }),
       (e) => e.code === "CONFLICT" && e.status === 409,
     );
-    assert.deepEqual(await counts(), baseline);
+    assert.deepEqual(await snapshot(), baseline);
     assert.deepEqual(providerCalls, callsBefore);
   }
 });

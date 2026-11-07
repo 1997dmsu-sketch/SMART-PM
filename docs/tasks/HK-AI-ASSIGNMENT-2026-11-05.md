@@ -24,7 +24,7 @@
 | AI-B / HK-AI-02 | `f15160d` 代码侧复审通过 | `feat/hk-isapi-capability-probe` | `8136b90` | 三项返工已关闭；等待现场/项目负责人批准、隔离环境和一次性窗口，批准前禁止设置 `HIKVISION_PROBE_ALLOW_READ=true` |
 | AI-C / HK-AI-03 | 阶段2通过（`c7516e6`） | `feat/db-mvp-integration` | `b9ee061`（`feat/db-05-occupancies`） | 221/221 admin、51/51根测试及smoke通过；阶段3继续关闭，等待单独安排 |
 | AI-D0 / HK-AI-04A | 文档阶段通过 Codex 复审（`5148159`） | `docs/hk-ai-04-contract-evidence` | `8b47fb7` | 九项架构裁定见 `HK-AI-04A-REVIEW-2026-11-05.md`；不代表真实能力验证 |
-| AI-D / HK-AI-04 | H2-a 第二部分 `3d1f03e` 复审未通过 | `feat/hk-face-service-integration` | `3d1f03e` | 修复损坏 operation key 被当作重放、补业务路径级 domain/换钥/损坏记录零写入测试并更新头注释；见 `HK-AI-04-H2A-PART2-REVIEW-3D1F03E-2026-11-07.md`，H2-b/H3/H4 继续关闭 |
+| AI-D / HK-AI-04 | H2-a 第二部分 `7e9132a` 复审仍有两项定点返工 | `feat/hk-face-service-integration` | `7e9132a` | result 必须按路由校验结构与确定性 ID；重写损坏 op 测试使摘要一致并覆盖空对象/数组/时间戳，同时更新头注释；见 `HK-AI-04-H2A-PART2-REREVIEW-7E9132A-2026-11-07.md`，H2-b/H3/H4 继续关闭 |
 | AI-E / HK-AI-05 | 今日由 Workburry 启动页面壳 | `feat/hk-face-admin` | 先用合成 fixture；等待 AI-D DTO 后绑定 | 今日交设备/申请/任务/审计页面壳，持续显示 Mock 标识 |
 | AI-F / DEV-AI-01 | Workburry 已分配，演示前降为 P1 | `feat/wecom-dev-board` | `docs/lock-01-fast-track@1358ef5` | 暂不占用 AI-E 关键路径；真实发送仍等待企业微信配置 |
 | HK-HUMAN-02 安装视频 | Kimi 负责脚本/分镜/字幕，真人负责断电接线与拍摄 | `docs/hk-install-video` | DS-K1T671BM + PDC-K7B-12V5A | 先交文档包；端子与锁铭牌经真人复核后再出最终成片 |

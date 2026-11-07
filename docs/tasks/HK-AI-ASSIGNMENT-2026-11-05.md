@@ -31,6 +31,7 @@
 | H2-a 稳定集成 | `HK-AI-H2A-STABLE-INTEGRATION-APPROVAL-9852C7F-2026-11-07.md` | `9852c7f` 通过，任务 B 关闭 | 基于 `f9a2b6b`，目标测试 20/20、Admin 291/291、根测试 51/51 |
 | H2-b 设计复审 | `HK-AI-04-H2B-DESIGN-REVIEW-3AFD9B8-2026-11-07.md` | `3afd9b8` 暂不通过，不发编码卡 | 移除现模型无法支持的 K1 fingerprint；released slot 禁止复用直至有固定 job-set guard；去除 H2-c 字段 |
 | H2-b 设计终审 | `HK-AI-04-H2B-DESIGN-APPROVAL-C60EB4F-2026-11-07.md` | `c60eb4f` 通过 | 已发 `HK-AI-04-H2B-OWNER-CLAIM-CODING.md`，只放行 owner claim 只读模型与 slot 冲突语义 |
+| H2-b 第1笔复审 | `HK-AI-04-H2B-REVIEW-E62CD70-2026-11-07.md` | `e62cd70` 暂不通过 | 移除 K1 fingerprint；补齐 owner claim/device/slot 状态 schema 与反例；第2笔接线继续关闭 |
 | HK-HUMAN-02 安装视频 | Kimi 负责脚本/分镜/字幕，真人负责断电接线与拍摄 | `docs/hk-install-video` | DS-K1T671BM + PDC-K7B-12V5A | 先交文档包；端子与锁铭牌经真人复核后再出最终成片 |
 
 > AI-B 现场批准与执行包：`docs/tasks/HK-AI-02-LIVE-APPROVAL-PACK.md`。批准栏（现场负责人 + 项目负责人 + 执行人）签署前禁止设置 `HIKVISION_PROBE_ALLOW_READ=true`；一次批准只授权一次只读执行。

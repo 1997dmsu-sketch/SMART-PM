@@ -87,16 +87,16 @@
 
 ## D. DeepSeek Harness：H2-b 第 2 笔 createGrant 接线
 
-状态：**接线已提交但 H2-b 尚未关闭；`1f6940d` 场景证据复审暂不通过。**
+状态：**已关闭；`2bc10e3` 终审通过。**
 
-下一提交只允许补测试：
+已验收：
 
-- K1 domain 缺 head、缺 version、内部矛盾、realm/version 配置变化；
-- device 八个快照字段的逐字段竞态；
-- active/released slot 冲突的内容级零变化；
-- 并发竞争与同设备多住户成功路径的完整记录断言。
+- K1 domain 缺失、损坏、内部矛盾和配置变化失败关闭；
+- device 全部冻结快照字段在事务内复核；
+- owner claim 只读，active/released slot 均禁止复用；
+- 并发竞争仅一个成功，业务副作用及敏感字段边界已验证。
 
-H2-c/H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
+不得继续在本卡扩大范围。H2-c/H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭，需另发任务卡。
 
 ## E. Workburry：HK-AI-05A 门禁管理页面演示门禁修复
 

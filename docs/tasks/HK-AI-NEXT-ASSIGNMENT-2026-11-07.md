@@ -98,6 +98,16 @@
 
 不得继续在本卡扩大范围。H2-c/H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭，需另发任务卡。
 
+## F. Kimi：H2-c 资格快照契约设计
+
+**优先级：P0**
+**状态：已发卡，仅允许文档设计；编码关闭。**
+**任务卡：** `docs/tasks/HK-AI-04-H2C-ELIGIBILITY-DESIGN-TASK.md`
+
+基于真实 `BlacklistService.withEligibility()` 与现有实名、入住、周期、房间模型，冻结 H2-c 完整资格快照、事务 refs、错误映射和不少于 D01–D40 的竞态测试矩阵。只允许 Markdown；设计经 Codex 复审通过后，才可另发 DeepSeek Harness 编码卡。
+
+H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
+
 ## E. Workburry：HK-AI-05A 门禁管理页面演示门禁修复
 
 **优先级：P0**

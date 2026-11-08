@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 /**
- * HK-AI-05A 独立 QA · CDP 运行时验证 + 20 张脱敏截图
+ * HK-AI-05A 独立 QA · CDP 运行时验证 + 21 张脱敏截图
  *
- * 用法：node hk-face-admin/tests/hk-ai-05a-cdp-verify.mjs
+ * 用法：
+ *   node hk-face-admin/tests/hk-ai-05a-cdp-verify.mjs
+ *   CHROME_BIN=/path/to/chromium node hk-face-admin/tests/hk-ai-05a-cdp-verify.mjs
  * 依赖：零第三方依赖。Node 22 内置全局 WebSocket（本地回环 CDP，不属于页面网络请求）。
  * 输出：
- *   - docs/tasks/screenshots/hk-ai-05a/*.png  （20 张，独立子目录）
+ *   - docs/tasks/screenshots/hk-ai-05a/*.png  （21 张，独立子目录）
  *   - hk-face-admin/tests/hk-ai-05a-verify-result.json （结构化实测证据）
- *   - 退出码 0 = 全部断言通过；1 = 存在失败（只报告，不改页面代码）
+ *   - 退出码 0 = 全部断言通过；1 = 存在失败或浏览器解析失败（只报告，不改页面代码）
  *
+ * Chrome 探测（复审 P1-2）：优先 CHROME_BIN，其次按 process.platform 探测常见路径，
+ * 再以 which / where 兜底；找不到则输出候选清单并退出 1，不产生任何截图。
  * 离线：Chrome 以 --headless=new + 严格离线参数启动，file:// 打开，独立 --user-data-dir。
  * 判定：.tmp-hk-05a-acceptance.md §3 / §4 / §5 / §6 / §7 / §8。
  */
@@ -25,7 +29,73 @@ const REPO = path.resolve(ROOT, "..");                    // .tmp-hk-push
 const OUT = path.join(REPO, "docs", "tasks", "screenshots", "hk-ai-05a");
 const SHOT_ROOT = path.join(REPO, "docs", "tasks", "screenshots");
 const BASELINE = "708c3ab";
-const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
+
+/** 按平台列出常见 Chrome / Chromium 候选路径（零第三方依赖） */
+function platformChromeCandidates() {
+  const p = process.platform;
+  const out = [];
+  if (p === "win32") {
+    const pf = process.env["ProgramFiles"] || "C:/Program Files";
+    const pf86 = process.env["ProgramFiles(x86)"] || "C:/Program Files (x86)";
+    const la = process.env.LOCALAPPDATA || "";
+    out.push(
+      "C:/Program Files/Google/Chrome/Application/chrome.exe",
+      path.join(pf, "Google/Chrome/Application/chrome.exe"),
+      path.join(pf86, "Google/Chrome/Application/chrome.exe"),
+      la ? path.join(la, "Google/Chrome/Application/chrome.exe") : "",
+    );
+  } else if (p === "darwin") {
+    out.push(
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      path.join(os.homedir(), "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    );
+  } else {
+    out.push(
+      "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable",
+      "/usr/bin/chromium", "/usr/bin/chromium-browser", "/snap/bin/chromium",
+    );
+  }
+  return out.filter(Boolean);
+}
+
+/** 解析失败：打印候选清单 + CHROME_BIN 提示，退出 1，不产生任何截图 */
+function failChrome(env, candidates, reason) {
+  console.error("ERROR: " + reason + "。");
+  if (env) console.error("  CHROME_BIN = " + env);
+  console.error("已探测的候选路径清单：");
+  for (const c of candidates) console.error("  - " + c + (fs.existsSync(c) ? "  [存在]" : "  [不存在]"));
+  console.error("解决办法：设置环境变量后重试，例如：");
+  console.error("  CHROME_BIN=/path/to/chromium node hk-face-admin/tests/hk-ai-05a-cdp-verify.mjs");
+  console.error("浏览器解析阶段即退出，未产生任何截图。");
+  process.exit(1);
+}
+
+/** 便携 Chrome 探测：CHROME_BIN 优先 → 平台路径 → which/where 兜底 */
+function resolveChrome() {
+  const env = process.env.CHROME_BIN;
+  const candidates = platformChromeCandidates();
+  if (env && env.trim()) {
+    if (!fs.existsSync(env)) failChrome(env, candidates, "CHROME_BIN 指向的文件不存在");
+    info(`Chrome 来源：CHROME_BIN = ${env}`);
+    return env;
+  }
+  for (const c of candidates) {
+    if (fs.existsSync(c)) { info(`Chrome 来源：平台探测 = ${c}`); return c; }
+  }
+  const names = process.platform === "win32"
+    ? ["chrome.exe", "chrome"]
+    : ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"];
+  const whichCmd = process.platform === "win32" ? "where" : "which";
+  for (const n of names) {
+    try {
+      const r = execFileSync(whichCmd, [n],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim().split(/\r?\n/)[0];
+      if (r && fs.existsSync(r)) { info(`Chrome 来源：${whichCmd} ${n} = ${r}`); return r; }
+    } catch (e) { /* 未安装，继续下一个候选 */ }
+  }
+  failChrome("", candidates, "未探测到任何 Chrome/Chromium 可执行文件");
+}
 
 const PAGES = ["index", "devices", "applications", "tasks", "audits"];
 const BUSINESS = ["devices", "applications", "tasks", "audits"];
@@ -129,7 +199,7 @@ class CDP {
   on(fn) { this.collectors.push(fn); }
 }
 
-async function launchChrome() {
+async function launchChrome(chromePath) {
   const userDir = fs.mkdtempSync(path.join(os.tmpdir(), "hk05a-chrome-"));
   const args = [
     "--headless=new", "--disable-gpu", "--no-sandbox", "--no-first-run",
@@ -142,7 +212,12 @@ async function launchChrome() {
     "--remote-debugging-port=0", `--user-data-dir=${userDir}`,
     "--window-size=1366,768", "about:blank",
   ];
-  const proc = spawn(CHROME, args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+  const proc = spawn(chromePath, args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+  proc.on("error", (err) => {
+    console.error("ERROR: 无法启动 Chrome（所选路径：" + chromePath + "）：" + err.message);
+    console.error("请检查 CHROME_BIN 或安装 Chrome/Chromium 后重试；未产生任何截图。");
+    process.exit(1);
+  });
   let stderr = "";
   proc.stderr.on("data", (d) => { stderr += d.toString(); });
   const portFile = path.join(userDir, "DevToolsActivePort");
@@ -310,6 +385,7 @@ const SHOTS = [
   { file: "tasks-state-unknown-result-1366x768.png", page: "tasks", w: 1366, h: 768, scrollJs: UNKNOWN_SCROLL },
   { file: "applications-state-forbidden-readprivate-1366x768.png", page: "applications", w: 1366, h: 768, scrollJs: PRIVATE_SCROLL },
   { file: "devices-state-loading-1366x768.png", page: "devices", w: 1366, h: 768, state: "loading" },
+  { file: "devices-state-forbidden-1366x768.png", page: "devices", w: 1366, h: 768, state: "forbidden" },
   { file: "applications-state-forbidden-1366x768.png", page: "applications", w: 1366, h: 768, state: "forbidden" },
   { file: "tasks-state-error-1366x768.png", page: "tasks", w: 1366, h: 768, state: "error" },
   { file: "audits-state-retrying-1366x768.png", page: "audits", w: 1366, h: 768, state: "retrying" },
@@ -321,11 +397,14 @@ const SHOTS = [
  * ------------------------------------------------------------------ */
 let chrome = null;
 try {
+  // P1-2：先解析浏览器；失败时 failChrome() 直接 process.exit(1)，不写任何文件、不出图。
+  const chromePath = resolveChrome();
+
   const before = snap21();
   report.evidenceIntegrity.beforeCount = Object.keys(before).length;
   info(`出图前：既有证据文件 ${Object.keys(before).length} 个，SHA-256 已记录`);
 
-  chrome = await launchChrome();
+  chrome = await launchChrome(chromePath);
   const { cdp, ws, proc } = chrome;
   const col = attachCollectors(cdp);
 
@@ -338,8 +417,8 @@ try {
   await cdp.send("Log.enable", {}, sid);
   info(`CDP 已连接 127.0.0.1:${chrome.port}（flatten session=${sid}）`);
 
-  /* ---------- B. 20 张截图 ---------- */
-  console.log("\n--- B. 生成 20 张脱敏截图 ---");
+  /* ---------- B. 21 张截图 ---------- */
+  console.log("\n--- B. 生成 21 张脱敏截图 ---");
   for (const spec of SHOTS) await shot(cdp, sid, spec);
 
   /* ---------- C1. 六态 × 四业务页 = 24 组合 ---------- */
@@ -622,14 +701,14 @@ try {
     beforeAfterChanged: changed, baselineMismatch: baseMismatch,
     allConsistent: changed.length === 0 && baseMismatch.length === 0,
   };
-  assert("B/C 20 张截图全部生成", report.screenshots.length === 20, `${report.screenshots.length}/20`);
-  assert("B/C 20 张 PNG 签名 + IHDR 宽高与文件名一致",
-    report.screenshots.every((s) => s.ihdr.ok), "20/20 IHDR OK");
-  assert("B/C 20 张 innerText 脱敏 10 类值正则 0 命中",
+  assert("B/C 21 张截图全部生成", report.screenshots.length === 21, `${report.screenshots.length}/21`);
+  assert("B/C 21 张 PNG 签名 + IHDR 宽高与文件名一致",
+    report.screenshots.every((s) => s.ihdr.ok), "21/21 IHDR OK");
+  assert("B/C 21 张 innerText 脱敏 10 类值正则 0 命中",
     report.screenshots.every((s) => s.innerTextLeaks.length === 0),
     report.screenshots.flatMap((s) => s.innerTextLeaks.map((l) => s.file + ":" + l)).join(" | ") || "0 命中");
-  assert("B/C 20 张均含 Mock 横幅逐字文案 + 四项（含打印态）",
-    report.screenshots.every((s) => s.bannerTextAndFour), "20/20 命中");
+  assert("B/C 21 张均含 Mock 横幅逐字文案 + 四项（含打印态）",
+    report.screenshots.every((s) => s.bannerTextAndFour), "21/21 命中");
   assert("B/C 既有 21 个证据文件 SHA-256 出图前后完全一致，且均与 708c3ab 基线一致",
     report.evidenceIntegrity.allConsistent,
     `前后差异=${changed.length} 基线差异=${baseMismatch.length}`);

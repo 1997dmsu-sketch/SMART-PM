@@ -118,7 +118,7 @@
     ]
   };
   var PERM_NOTE = {
-    devices: "device.face.read",
+    devices: "device.manage",
     applications: "device.face.review",
     tasks: "device.operation.retry",
     audits: "device.audit.read"
@@ -146,7 +146,7 @@
       + '<p class="state-note"><a class="back-link" href="index.html">返回概览</a></p></section>';
   }
   function renderForbidden(p) {
-    var perm = PERM_NOTE[p] || "device.face.read";
+    var perm = PERM_NOTE[p] || "device.manage";
     return '<section class="state-view state-forbidden">'
       + '<span class="lock">无权限 · FORBIDDEN</span>'
       + '<p class="state-title">缺少权限：<code>' + esc(perm) + '</code></p>'

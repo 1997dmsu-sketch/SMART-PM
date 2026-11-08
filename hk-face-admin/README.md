@@ -48,7 +48,7 @@ Mock 证据与真实设备证据，补齐关键页面状态、权限分流与未
 
 - 每个状态有肉眼可辨的面板差异：骨架屏、虚线空框、无权限锁屏、脱敏错误分类、
   受控重试进度、就绪态数据表；
-- `forbidden` 态分别对应缺少 `device.face.read` / `device.face.review` /
+- `forbidden` 态分别对应缺少 `device.manage` / `device.face.review` /
   `device.operation.retry` / `device.audit.read`；
 - 默认态为 `ready`；**刷新强制恢复默认**，不读取浏览器本地存储，不发任何网络请求；
 - 状态切换只重渲染本地容器，不改动其它页面或持久数据。
@@ -110,3 +110,18 @@ Mock 证据与真实设备证据，补齐关键页面状态、权限分流与未
 - 待做：交 Codex 复审；复审通过前**不宣称「演示页面已通过」**，不制作演示包，不合并 `main`。
 - 静态检查脚本与脱敏截图由后续 QA 提交单独交付，不覆盖 `docs/tasks/` 下已通过复审的
   静态审计原始证据。
+
+## 十一、验证脚本复现（CHROME_BIN）
+
+独立 QA 的 CDP 验证脚本按 `process.platform` 探测 Chrome / Chromium；自动探测失败或需指定
+浏览器时，可显式设置 `CHROME_BIN`（优先级最高）：
+
+```bash
+node hk-face-admin/tests/hk-ai-05a-static-check.mjs
+node hk-face-admin/tests/hk-ai-05a-cdp-verify.mjs
+CHROME_BIN=/path/to/chromium node hk-face-admin/tests/hk-ai-05a-cdp-verify.mjs
+```
+
+`CHROME_BIN` 非空即使用并校验文件存在；找不到浏览器时脚本输出候选路径清单与
+`CHROME_BIN` 提示后退出 1，不产生任何截图。脚本零第三方依赖、全程 `file://` 离线，
+不改变页面的零网络约束。

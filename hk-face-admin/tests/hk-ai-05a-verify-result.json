@@ -4,7 +4,7 @@
     "chrome": "156.0.8078.81 (headless=new)",
     "baseline": "708c3ab",
     "repo": "C:\\Users\\Administrator\\WorkBuddy\\2026-10-23-16-18-12\\.tmp-hk-push",
-    "generatedAt": "2026-11-07T08:23:07.510Z",
+    "generatedAt": "2026-11-08T07:49:45.033Z",
     "note": "CDP WebSocket 为本地回环 DevTools 协议，不属于页面运行时网络请求"
   },
   "assertions": [
@@ -36,7 +36,7 @@
     {
       "name": "C2 CDP Network：整轮 requestWillBeSent 非 file:// 计数 = 0",
       "ok": true,
-      "detail": "总事件=96（file:// 协议本身=96），非 file://=0"
+      "detail": "总事件=99（file:// 协议本身=99），非 file://=0"
     },
     {
       "name": "C2b 整轮 console error = 0（exceptionThrown / console.error / log.error）",
@@ -81,7 +81,7 @@
     {
       "name": "C4.4 方向键 / End（keyDown）可滚入被裁列",
       "ok": true,
-      "detail": "scrollLeft 0 -> 12"
+      "detail": "scrollLeft 0 -> 19"
     },
     {
       "name": "C5 打印态 .mock-banner computed display/visibility 非隐藏，且含逐字文案 + 四项",
@@ -114,24 +114,24 @@
       "detail": "url不变=true ls=0 ss=0 net=0->0"
     },
     {
-      "name": "B/C 20 张截图全部生成",
+      "name": "B/C 21 张截图全部生成",
       "ok": true,
-      "detail": "20/20"
+      "detail": "21/21"
     },
     {
-      "name": "B/C 20 张 PNG 签名 + IHDR 宽高与文件名一致",
+      "name": "B/C 21 张 PNG 签名 + IHDR 宽高与文件名一致",
       "ok": true,
-      "detail": "20/20 IHDR OK"
+      "detail": "21/21 IHDR OK"
     },
     {
-      "name": "B/C 20 张 innerText 脱敏 10 类值正则 0 命中",
+      "name": "B/C 21 张 innerText 脱敏 10 类值正则 0 命中",
       "ok": true,
       "detail": "0 命中"
     },
     {
-      "name": "B/C 20 张均含 Mock 横幅逐字文案 + 四项（含打印态）",
+      "name": "B/C 21 张均含 Mock 横幅逐字文案 + 四项（含打印态）",
       "ok": true,
-      "detail": "20/20 命中"
+      "detail": "21/21 命中"
     },
     {
       "name": "B/C 既有 21 个证据文件 SHA-256 出图前后完全一致，且均与 708c3ab 基线一致",
@@ -423,6 +423,24 @@
         "width": 1366,
         "height": 768,
         "bytes": 79775,
+        "ok": true
+      },
+      "innerTextLeaks": [],
+      "bannerTextAndFour": true
+    },
+    {
+      "file": "devices-state-forbidden-1366x768.png",
+      "page": "devices",
+      "state": "forbidden",
+      "w": 1366,
+      "h": 768,
+      "print": false,
+      "scroll": false,
+      "ihdr": {
+        "sigOk": true,
+        "width": 1366,
+        "height": 768,
+        "bytes": 78040,
         "ok": true
       },
       "innerTextLeaks": [],
@@ -1021,7 +1039,7 @@
         "active": true
       },
       "after": {
-        "sl": 12
+        "sl": 19
       }
     },
     "print": {
@@ -1088,8 +1106,8 @@
   },
   "consoleErrors": [],
   "network": {
-    "total": 114,
-    "file": 114,
+    "total": 117,
+    "file": 117,
     "nonFile": 0,
     "samples": []
   }

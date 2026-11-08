@@ -442,6 +442,31 @@ check("§6 详情 / 状态卡有可点击「返回」控件 + app.js 注入 .is-
     changed.length ? changed.join(" | ") : "0 变更（新增截图只进 hk-ai-05a/ 子目录，符合规格）");
 }
 
+/* ------------------------------------------------------------------ *
+ * P1-1 复审定点修复：HK-AI-05 冻结权限白名单（共 5 个）
+ * 扫描 8 个页面交付文件里所有 device\.[A-Za-z.]+ 字面，断言全部落在白名单内，
+ * 并明确禁止 device.face.read\b（readPrivate 中的 read 后接 P 不是词边界，不误伤）。
+ * ------------------------------------------------------------------ */
+{
+  const FROZEN_PERMS = new Set([
+    "device.manage", "device.face.review", "device.face.readPrivate",
+    "device.operation.retry", "device.audit.read",
+  ]);
+  const permRe = /device\.[A-Za-z.]+/g;
+  const found = new Set();
+  for (const f of PAGE_FILES) {
+    let m;
+    permRe.lastIndex = 0;
+    while ((m = permRe.exec(src[f]))) found.add(m[0]);
+  }
+  const outside = [...found].filter((p) => !FROZEN_PERMS.has(p));
+  const banned = /device\.face\.read\b/.test(all);
+  check("P1-1 冻结权限白名单：页面源码 device.* 字面全部落在 5 个冻结权限内，且无 device.face.read",
+    outside.length === 0 && !banned,
+    `命中 ${[...found].sort().join(", ")}；越界 ${outside.length}` +
+    `${outside.length ? " (" + outside.join(",") + ")" : ""}；device.face.read\\b 命中 ${banned}`);
+}
+
 console.log("");
 console.log(`=== 汇总：${pass} PASS / ${fail} FAIL ===`);
 if (fail) {

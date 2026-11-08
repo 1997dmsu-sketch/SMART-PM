@@ -92,3 +92,60 @@ tasks.html:83   系统自动重试禁用，未知结果仅查询 / 人工对账�
 - HK-AI-05 静态审计任务已在 `7655c28` 关闭；本次为另开的 HK-AI-05A 修复，**不推翻、不改写**其已验收结论（累计 24 条 / 开放 23 条口径不变）。
 
 **请求 Codex 复审。通过前不宣称「演示页面已通过」，不制作演示包；合并 `main` 仍需单独决定。**
+
+## 7. 复审后追加：两项定点修复与复跑留证（2026-11-08）
+
+> 正式复审 `4725608`（`HK-AI-05A-UI-REVIEW-61FD240-2026-11-08.md`，49 行）结论
+> **「暂不通过；两项定点修复后复审」**，核心 UI 方向已认可，「下一提交只修上述两项及受影响证据，
+> 继续在 `feat/hk-face-admin` 追加提交」。本节由独立 QA 追加，**单个追加提交、不 push、不 amend、
+> 不改写 `708c3ab` / `33ce350` / `07e7616` / `61fd240` 历史**。
+
+### 7.1 P1-1：未冻结权限点 `device.face.read` → `device.manage`
+
+冻结权限白名单仍为复审锁定的 5 个：`device.manage`、`device.face.review`、`device.face.readPrivate`、
+`device.operation.retry`、`device.audit.read`；`device.face.readPrivate` **未改动**。
+
+- `hk-face-admin/app.js:121` `devices: "device.face.read"` → `"device.manage"`；
+- `hk-face-admin/app.js:149` `renderForbidden` 默认 `PERM_NOTE[p] || "device.face.read"` → `|| "device.manage"`；
+- `hk-face-admin/README.md:51` forbidden 态权限点同步；
+- 静态脚本新增「冻结权限白名单」1 条断言（扫描 `device\.[A-Za-z.]+`，`device\.face\.read\b` 禁止、
+  `readPrivate` 不误伤），断言数 **30 → 31**；
+- 新增定向证据 `devices-state-forbidden-1366x768.png`（`device.manage` 缺失权限文案 + Mock 横幅，
+  IHDR `1366×768` / `78040B` / 签名 OK / 脱敏 0 命中）。
+
+### 7.2 P1-2：CDP 脚本便携 Chrome 探测
+
+移除硬编码 Windows 路径，改为 `CHROME_BIN` 优先（非空即用并校验存在）→ `process.platform` 探测
+win32 / darwin / linux 常见路径 → `which`/`where` 兜底；找不到则打印候选清单 + `CHROME_BIN` 提示 +
+「未产生任何截图」并 `process.exit(1)`；`spawn` 新增 `proc.on("error", ...)`。
+头部注释、`hk-face-admin/README.md` §11、`HK-AI-05A-UI-CHECK.md` §12 同步补充
+`CHROME_BIN=/path/to/chromium node hk-face-admin/tests/hk-ai-05a-cdp-verify.mjs`。
+**页面零网络约束与既有 26 项验收断言未改**（仅 `SHOTS`/「N 张截图」断言 20→21 属受影响证据）。
+
+### 7.3 复跑实测
+
+| 项目 | 结果 |
+|---|---|
+| 静态脚本 | **31 PASS / 0 FAIL**，退出码 0（含 21 文件 SHA-256 基线 21/21 一致 + P1-1 白名单断言） |
+| CDP 默认路径（平台探测） | **26 PASS / 0 FAIL**，`nonFile=0`、`consoleErrors=0`，退出码 0 |
+| `CHROME_BIN` 成功分支 | 来源行 `CHROME_BIN = ...`，**26 PASS / 0 FAIL**，`nonFile=0`、`consoleErrors=0`，退出码 0 |
+| `CHROME_BIN` 失败分支 | 退出码 **1**，明确错误 + 候选清单 + 提示；**无新截图、21 张截图 SHA-256 未变、`verify-result.json` 未改写** |
+| 结构化证据 | `assertions=26 allOk=true`；`network={"total":117,"file":117,"nonFile":0}`；`consoleErrors=[]`；`screenshots=21`；`evidenceIntegrity.allConsistent=true` |
+| 21 张截图 IHDR | 独立 Node 复核 `checked=21 bad=0` |
+| 既有 21 个原始证据 | 独立交叉复核 `checked=21 mismatch=0`，与 `708c3ab` 逐字节一致 |
+
+重跑截图字节变化（如实列出，未静默覆盖）：`compared=20 changed=1`，仅
+`audits-state-retrying-1366x768.png` 因 `retrying` 动画态截图帧不同产生字节变化
+（`before=5e9681d3d128deb689be` → `after=3a431498c428e5c83100`），**非页面代码 / 权限点改动引起**；
+其余 19 张 SHA-256 不变，新增第 21 张为 forbidden 定向证据。
+
+### 7.4 裁定与边界
+
+- **D1 / D2 裁定不变**：§4 的 D1（自动重试否定式禁用声明，按行为口径不判 FAIL）、
+  D2（`applications` ready 为详情网格、3 张表带 `tabindex="0"`）本轮未改动、未重判；D3–D6 同样不变。
+- 核心 UI 方向（Mock 边界、六态、UNKNOWN_RESULT、禁显、权限分离）复审已认可，本轮不重做验证。
+- 未扩大到复审排除项（正式 DTO、跨浏览器 / 屏幕阅读器认证、1024/1280 补测等）；
+  未接 API、未改后端、未调 Provider、未连设备、未合并 main、未制作演示包、未改写历史、未 push。
+- **网络请求 0（非 `file://` = 0）、真实设备 / Provider 调用 0**；全程 `file://` 离线、只用合成 fixture。
+
+**仍待 Codex 复审。通过前不宣称「演示页面已通过」，不制作演示包；合并 `main` 仍需单独决定。**

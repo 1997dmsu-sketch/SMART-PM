@@ -9,7 +9,7 @@ import { LocalStore } from "../lib/store.mjs";
 import { FileService } from "../lib/files.mjs";
 import { MockFaceAccessProvider } from "../lib/face-service/index.mjs";
 import { FaceCredentialService } from "../lib/face-service/service.mjs";
-import { deviceClaimKey, deviceClaimConfig, operationKey, operationKeyConfig } from "../lib/face-service/collections.mjs";
+import { deviceClaimKey, deviceClaimConfig, deviceDigestDomainKey, deviceDigestDomainVersionKey, operationKey, operationKeyConfig } from "../lib/face-service/collections.mjs";
 
 let store, dir;
 const orgId = "org-demo";
@@ -444,4 +444,157 @@ test("成功写入不含序列号/MAC/IP/原始幂等键", async () => {
     assert.equal(dump.includes(token), false, token);
   }
   assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
+});
+
+const coreSnapshot = async () => structuredClone({
+  grants: await store.list("device_access_grants", orgId),
+  jobs: await store.list("device_operation_jobs", orgId),
+  slots: await store.list("grant_slot_claims", orgId),
+  logs: await store.list("device_operation_logs", orgId),
+  keys: await store.list("operation_keys", orgId),
+});
+
+const businessSnapshot = async () => structuredClone({
+  grants: await store.list("device_access_grants", orgId),
+  jobs: await store.list("device_operation_jobs", orgId),
+  slots: await store.list("grant_slot_claims", orgId),
+  claims: await store.list("device_claims"),
+  logs: await store.list("device_operation_logs", orgId),
+  keys: await store.list("operation_keys", orgId),
+  domains: await store.list("device_digest_domains"),
+});
+
+const withPreMutation = async (mutate, fn) => {
+  const original = blacklist.withEligibility;
+  blacklist.withEligibility = async (request, refs, build) => {
+    await mutate();
+    return original(request, refs, build);
+  };
+  try {
+    return await fn();
+  } finally {
+    blacklist.withEligibility = original;
+  }
+};
+
+test("personId 预读后变化 → REVISION_CONFLICT 且零写入", async () => {
+  const credentialId = await approvedCredential("m");
+  const manager = service("mem-manage");
+  const original = structuredClone((await store.list("face_credentials", orgId)).find((c) => c._id === credentialId));
+  const before = await businessSnapshot();
+  await withPreMutation(async () => {
+    await store.transact([ref("face_credentials", credentialId)], () => [{
+      collection: "face_credentials", id: credentialId,
+      data: { ...original, personId: "person-other" },
+    }], audit);
+  }, async () => {
+    await assert.rejects(
+      () => manager.createGrant({ ...grantInput(credentialId), deviceId: "device-3", cycleId: "cycle-m1" }, { idempotencyKey: "idem-grant-m-0000001" }),
+      (e) => e.code === "REVISION_CONFLICT",
+    );
+  });
+  await store.transact([ref("face_credentials", credentialId)], () => [{ collection: "face_credentials", id: credentialId, data: original }], audit);
+  assert.deepEqual(await businessSnapshot(), before);
+});
+
+test("device revision/claimId 事务前变化 → DEVICE_CLAIM_INVALID 且零写入", async () => {
+  const credentialId = await approvedCredential("n1");
+  const manager = service("mem-manage");
+  const original = structuredClone((await store.list("access_devices")).find((d) => d._id === "device-3"));
+  for (const patch of [{ revision: 2 }, { claimId: "claim-missing" }]) {
+    const before = await businessSnapshot();
+    await withPreMutation(async () => {
+      await store.transact([ref("access_devices", "device-3")], () => [{
+        collection: "access_devices", id: "device-3", data: { ...original, ...patch },
+      }], audit);
+    }, async () => {
+      await assert.rejects(
+        () => manager.createGrant({ ...grantInput(credentialId), deviceId: "device-3", cycleId: "cycle-n1" }, { idempotencyKey: "idem-grant-n-0000001" }),
+        (e) => e.code === "DEVICE_CLAIM_INVALID",
+      );
+    });
+    await store.transact([ref("access_devices", "device-3")], () => [{ collection: "access_devices", id: "device-3", data: original }], audit);
+    assert.deepEqual(await businessSnapshot(), before);
+  }
+});
+
+test("K1 domain 损坏 → DOMAIN_INCOMPLETE；配置不一致 → DEVICE_DIGEST_CONFIG_CHANGED", async () => {
+  const credentialId = await approvedCredential("n2");
+  const manager = service("mem-manage");
+  const headId = deviceDigestDomainKey({ provider: "hikvision", digestRealm: "test-realm" });
+  const versionId = deviceDigestDomainVersionKey({ provider: "hikvision", digestRealm: "test-realm", version: 1 });
+  const head = structuredClone((await store.list("device_digest_domains")).find((d) => d._id === headId));
+  const version = structuredClone((await store.list("device_digest_domains")).find((d) => d._id === versionId));
+
+  const cases = [
+    { head: { ...head, kind: "version" }, version, code: "DOMAIN_INCOMPLETE" },
+    { head: { ...head, provider: "other" }, version: { ...version, provider: "other" }, code: "DEVICE_DIGEST_CONFIG_CHANGED" },
+  ];
+  for (const scenario of cases) {
+    const before = await coreSnapshot();
+    await store.transact([ref("device_digest_domains", headId), ref("device_digest_domains", versionId)], () => [
+      { collection: "device_digest_domains", id: headId, data: scenario.head },
+      { collection: "device_digest_domains", id: versionId, data: scenario.version },
+    ], audit);
+    await assert.rejects(
+      () => manager.createGrant({ ...grantInput(credentialId), deviceId: "device-4", cycleId: "cycle-n2" }, { idempotencyKey: "idem-grant-o-0000001" }),
+      (e) => e.code === scenario.code,
+    );
+    await store.transact([ref("device_digest_domains", headId), ref("device_digest_domains", versionId)], () => [
+      { collection: "device_digest_domains", id: headId, data: head },
+      { collection: "device_digest_domains", id: versionId, data: version },
+    ], audit);
+    assert.deepEqual(await coreSnapshot(), before);
+  }
+});
+
+test("claim 缺失、结构损坏、绑定不一致 → DEVICE_CLAIM_INVALID 且零写入", async () => {
+  const credentialId = await approvedCredential("n3");
+  const manager = service("mem-manage");
+  const deviceId = "device-5";
+  const device = structuredClone((await store.list("access_devices")).find((d) => d._id === deviceId));
+  const claimId = device.claimId;
+  const claim = structuredClone((await store.list("device_claims")).find((c) => c._id === claimId));
+  const cases = [
+    { device: { ...device, claimId: "claim-missing" }, claim, code: "DEVICE_CLAIM_INVALID" },
+    { device, claim: { ...claim, provider: "" }, code: "DEVICE_CLAIM_INVALID" },
+    { device, claim: { ...claim, boundDeviceId: "device-x" }, code: "DEVICE_CLAIM_INVALID" },
+  ];
+  for (const scenario of cases) {
+    const before = await coreSnapshot();
+    await store.transact([ref("access_devices", deviceId), ref("device_claims", claimId)], () => [
+      { collection: "access_devices", id: deviceId, data: scenario.device },
+      { collection: "device_claims", id: claimId, data: scenario.claim },
+    ], audit);
+    await assert.rejects(
+      () => manager.createGrant({ ...grantInput(credentialId), deviceId, cycleId: "cycle-n3" }, { idempotencyKey: "idem-grant-p-0000001" }),
+      (e) => e.code === "DEVICE_CLAIM_INVALID",
+    );
+    await store.transact([ref("access_devices", deviceId), ref("device_claims", claimId)], () => [
+      { collection: "access_devices", id: deviceId, data: device },
+      { collection: "device_claims", id: claimId, data: claim },
+    ], audit);
+    assert.deepEqual(await coreSnapshot(), before);
+  }
+});
+
+test("并发竞争同一 slot：仅一个成功，另一个 GRANT_SLOT_CONFLICT", async () => {
+  const credentialId = await approvedCredential("n4");
+  const input = { ...grantInput(credentialId), deviceId: "device-3", cycleId: "cycle-race" };
+  const manager = service("mem-manage");
+  const before = await businessSnapshot();
+  const results = await Promise.allSettled([
+    manager.createGrant(input, { idempotencyKey: "idem-race-a-0000001" }),
+    manager.createGrant(input, { idempotencyKey: "idem-race-b-0000001" }),
+  ]);
+  const ok = results.filter((r) => r.status === "fulfilled");
+  const failed = results.filter((r) => r.status === "rejected");
+  assert.equal(ok.length, 1);
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].reason.code, "GRANT_SLOT_CONFLICT");
+  const after = await businessSnapshot();
+  assert.equal(after.grants.length, before.grants.length + 1);
+  assert.equal(after.slots.length, before.slots.length + 1);
+  assert.equal(after.claims.length, before.claims.length);
+  assert.deepEqual(after.domains, before.domains);
 });

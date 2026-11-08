@@ -363,3 +363,85 @@ test("换钥后授权失败关闭且业务集合零变化", async () => {
   process.env.OPERATION_KEY_HMAC_KEY_B64 = savedKey;
   assert.deepEqual(await counts(), before);
 });
+
+test("同设备不同住户不同 slot 均成功，owner claim 内容不变", async () => {
+  const p1 = await approvedCredential("h");
+  const p2 = await approvedCredential("i");
+  const claimsBefore = structuredClone(await store.list("device_claims"));
+  const first = await service("mem-manage").createGrant(
+    { ...grantInput(p1), deviceId: "device-3", cycleId: "cycle-h1" },
+    { idempotencyKey: "idem-grant-h-0000001" },
+  );
+  const second = await service("mem-manage").createGrant(
+    { ...grantInput(p2), deviceId: "device-3", cycleId: "cycle-h2" },
+    { idempotencyKey: "idem-grant-i-0000001" },
+  );
+  assert.ok(first.grantId && second.grantId);
+  assert.deepEqual(await store.list("device_claims"), claimsBefore);
+});
+
+test("同 person/device/cycle 第二次请求 → GRANT_SLOT_CONFLICT 零写入", async () => {
+  const credentialId = await approvedCredential("j");
+  const input = { ...grantInput(credentialId), deviceId: "device-2", cycleId: "cycle-j1" };
+  await service("mem-manage").createGrant(input, { idempotencyKey: "idem-grant-j-0000001" });
+  const before = await counts();
+  await assert.rejects(
+    () => service("mem-manage").createGrant(input, { idempotencyKey: "idem-grant-j-0000002" }),
+    (e) => e.code === "GRANT_SLOT_CONFLICT",
+  );
+  assert.deepEqual(await counts(), before);
+});
+
+test("released slot 也不得复用", async () => {
+  const credentialId = await approvedCredential("k");
+  const input = { ...grantInput(credentialId), deviceId: "device-2", cycleId: "cycle-k1" };
+  const created = await service("mem-manage").createGrant(input, { idempotencyKey: "idem-grant-k-0000001" });
+  const grant = (await store.list("device_access_grants", orgId)).find((g) => g._id === created.grantId);
+  const slot = (await store.list("grant_slot_claims", orgId)).find((r) => r.activeClaimId === created.grantId);
+  await store.transact([ref("grant_slot_claims", slot._id)], () => [{
+    collection: "grant_slot_claims", id: slot._id,
+    data: { ...slot, activeClaimId: undefined, state: "released", releasedAt: 5, releasedByJobId: created.jobId },
+  }], audit);
+  const before = await counts();
+  await assert.rejects(
+    () => service("mem-manage").createGrant(input, { idempotencyKey: "idem-grant-k-0000002" }),
+    (e) => e.code === "GRANT_SLOT_CONFLICT",
+  );
+  assert.deepEqual(await counts(), before);
+});
+
+test("owner claim released / 绑定不一致 → DEVICE_CLAIM_INVALID", async () => {
+  const credentialId = await approvedCredential("l");
+  const claimId = "claim-device-4";
+  const original = structuredClone((await store.list("device_claims")).find((c) => c._id === claimId));
+  const released = {
+    ...original, state: "released",
+    boundDeviceId: undefined, activatedAt: undefined, activatedByAuditId: undefined,
+    releasedAt: 5, releasedByAuditId: "audit-2", releaseReason: "retired",
+  };
+  await store.transact([ref("device_claims", claimId)], () => [{ collection: "device_claims", id: claimId, data: released }], audit);
+  const before = await counts();
+  await assert.rejects(
+    () => service("mem-manage").createGrant(
+      { ...grantInput(credentialId), deviceId: "device-4", cycleId: "cycle-l1" },
+      { idempotencyKey: "idem-grant-l-0000001" },
+    ),
+    (e) => e.code === "DEVICE_CLAIM_INVALID",
+  );
+  assert.deepEqual(await counts(), before);
+  await store.transact([ref("device_claims", claimId)], () => [{ collection: "device_claims", id: claimId, data: original }], audit);
+});
+
+test("成功写入不含序列号/MAC/IP/原始幂等键", async () => {
+  const dump = JSON.stringify({
+    grants: await store.list("device_access_grants", orgId),
+    jobs: await store.list("device_operation_jobs", orgId),
+    slots: await store.list("grant_slot_claims", orgId),
+    logs: await store.list("device_operation_logs", orgId),
+    keys: await store.list("operation_keys", orgId),
+  });
+  for (const token of ["serialNumber", "SN-", "MAC", "\"ip\"", "idem-grant", "idem-sub", "idem-rev"]) {
+    assert.equal(dump.includes(token), false, token);
+  }
+  assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
+});

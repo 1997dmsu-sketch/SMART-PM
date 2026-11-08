@@ -322,6 +322,9 @@ export class FaceCredentialService {
         if (current.revision !== parsed.expectedCredentialRevision) {
           failCode("REVISION_CONFLICT", "凭证已被修改，请刷新后重试", 409);
         }
+        if (current.personId !== credential.personId) {
+          failCode("REVISION_CONFLICT", "凭证人员已变化，请刷新后重试", 409);
+        }
         this.files.assertBinding(state, { fileId: current.sourceFileId, revision: current.sourceFileRevision });
 
         const dev = state[`access_devices/${parsed.deviceId}`];

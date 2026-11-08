@@ -87,15 +87,14 @@
 
 ## D. DeepSeek Harness：H2-b 第 2 笔 createGrant 接线
 
-状态：**已解锁；schema/helper 基线为 `14f37c6`。**
+状态：**接线已提交但 H2-b 尚未关闭；`1f6940d` 场景证据复审暂不通过。**
 
-只允许继续：
+下一提交只允许补测试：
 
-- device owner claim 只读模型；
-- 事务内 device/claim/domain 快照复核；
-- 同组织多住户不同 slot；
-- 任何既有 active/released slot 均冲突，禁止复用；
-- 对应测试。
+- K1 domain 缺 head、缺 version、内部矛盾、realm/version 配置变化；
+- device 八个快照字段的逐字段竞态；
+- active/released slot 冲突的内容级零变化；
+- 并发竞争与同设备多住户成功路径的完整记录断言。
 
 H2-c/H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
 

@@ -1,6 +1,6 @@
 # REL-AI-01 微信小程序体验版上线协助任务卡
 
-**负责人：Workburry（发布 AI）**
+**负责人：Cloud Code（DeepSeek，发布 AI）**
 
 **优先级：P0**
 
@@ -135,7 +135,7 @@
 
 ```text
 任务：REL-AI-01 微信小程序体验版上线协助
-负责人：Workburry
+负责人：Cloud Code（DeepSeek）
 发布基线：6e18d04 / v0.1.0-beta.18-production-test.1
 本地测试与打包：
 ZIP/SHA-256：

@@ -108,7 +108,7 @@
 
 H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
 
-## H. Workburry：微信小程序 beta.18 体验版上线协助
+## H. Cloud Code（DeepSeek）：微信小程序 beta.18 体验版上线协助
 
 **优先级：P0**
 
@@ -117,6 +117,18 @@ H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
 **任务卡：** `docs/tasks/REL-AI-01-MINIPROGRAM-EXPERIENCE-DEPLOY-2026-11-09.md`
 
 使用唯一冻结标签 `v0.1.0-beta.18-production-test.1` 完成本地预检、live 包摘要、微信开发者工具编译、体验版上传、脱敏冒烟测试和回退记录。不得包含 H2-c、人脸后台、Provider 或设备写能力，不得迁移数据库或提交正式审核。
+
+原 Workburry 分配已取消，不再执行本任务。
+
+## I. DeepSeek Harness：H2-c C1/C2 定点返工
+
+**优先级：P0**
+
+**状态：`3461726` 暂不通过；C3 关闭。**
+
+**复审记录：** `docs/tasks/HK-AI-04-H2C-C1-C2-REVIEW-3461726-2026-11-09.md`
+
+只修 sponsor 快照绕过、member/primary/sponsor/lifecycle/catalog 强制基线、hook refs 元素校验，以及每次 attempt 刷新 refs 与 90/91 合并边界测试。不得修改 `createGrant()` 或进入 C3。
 
 ## G. DeepSeek Harness：H2-c 完整资格快照编码
 

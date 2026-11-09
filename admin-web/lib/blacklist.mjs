@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { failCode } from "./model.mjs";
+import { HttpError, failCode } from "./model.mjs";
 import { opWrite, page, pageParams } from "./property-v2.mjs";
 import { eligibilityGuardId } from "./claims.mjs";
 export { eligibilityGuardId } from "./claims.mjs";
@@ -9,6 +9,9 @@ export { eligibilityGuardId } from "./claims.mjs";
 // DB-05 must activate through withEligibility so list changes and activation
 // write the same fixed subject guards. No public name/phone lookup is exposed.
 const ref = (collection, id) => ({ collection, id });
+const uniqueRefs = (refs) => [
+  ...new Map(refs.map((r) => [`${r.collection}/${r.id}`, r])).values(),
+];
 const base = () => ({ schemaVersion: 2, revision: 1, createdAt: Date.now() });
 const hash = (...parts) =>
   createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 32);
@@ -582,14 +585,35 @@ export class BlacklistService {
   // DB-05 integration boundary. build(state, eligibility) returns
   // {writes,result}; this wrapper appends the same subject guard writes and
   // retries the WHOLE pre-read + transaction when a list change is detected.
-  async withEligibility(request, refs, build, audit, { deferBlocked = false } = {}) {
+  //
+  // H2-c Q06: the optional prepareAttempt(token) hook runs after every
+  // prepareEligibility() so callers (createGrant) can plan qualification refs
+  // from a fresh pre-read each attempt. Its beforeEvaluate(state, token) runs
+  // inside the same transaction, before evaluateEligibility(), and may only
+  // fail with BLACKLIST_RETRY to join the existing three-attempt loop. The
+  // hook never computes or forges eligibility and never changes candidates,
+  // guards, decisions, retry count or deferBlocked semantics.
+  async withEligibility(request, refs, build, audit,
+    { deferBlocked = false, prepareAttempt = null } = {}) {
+    if (prepareAttempt !== null && typeof prepareAttempt !== "function")
+      failCode("ADAPTER_UNAVAILABLE", "资格准备钩子不可用", 503);
     for (let attempt = 0; attempt < 3; attempt++) {
       const token = await this.prepareEligibility(request);
+      const prepared = prepareAttempt ? await prepareAttempt(token) : null;
+      if (prepareAttempt && (!prepared || !Array.isArray(prepared.refs) ||
+          typeof prepared.beforeEvaluate !== "function"))
+        failCode("ADAPTER_UNAVAILABLE", "资格准备钩子未返回有效契约", 503);
+      const attemptRefs = uniqueRefs([...refs, ...(prepared?.refs ?? []), ...token.refs]);
+      if (attemptRefs.length > 90)
+        // 与 CloudStore 同一上限：超限失败关闭，不拆事务、不省略 refs。
+        throw new HttpError(400, "一次操作涉及记录过多，请缩小选择范围");
       let result;
       try {
-        await this.store.transact([...refs, ...token.refs], async (state) => {
+        await this.store.transact(attemptRefs, async (state) => {
+          // 资格快照竞态在 beforeEvaluate 内以 BLACKLIST_RETRY 抛出，进入同一重试。
+          const context = prepared ? await prepared.beforeEvaluate(state, token) : null;
           const eligibility = this.evaluateEligibility(state, token, { deferBlocked });
-          const built = await build(state, eligibility);
+          const built = await build(state, eligibility, context);
           if (!built || !Array.isArray(built.writes))
             throw Error("Eligibility transaction build must return {writes,result}");
           result = built.result;

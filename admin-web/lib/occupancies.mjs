@@ -1,7 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { failCode } from "./model.mjs";
-import { claimId, guardId } from "./claims.mjs";
+import { guardId } from "./claims.mjs";
 import { opWrite, page, pageParams } from "./property-v2.mjs";
+// H2-c：时间与固定 ID 原语由共享只读资格 helper 提供，入住激活控制流保持不变。
+import { activeAt, minEnd, occupancyClaimId, primarySlotId } from "./face-service/eligibility.mjs";
+export { occupancyClaimId, primarySlotId };
 
 // DB-05: org-scoped occupancy cycles and relations (DATA-MODEL §2/§3.2,
 // API-CONTRACT §5). Pending records never grant access. Every activation goes
@@ -27,12 +30,6 @@ const range = (startsAt, endsAt) => {
     failCode("PARAM_ERROR", "入住有效期无效");
   return { startsAt, endsAt };
 };
-const activeAt = (record, now) =>
-  record.startsAt <= now && (record.endsAt === null || now < record.endsAt);
-const minEnd = (...values) => {
-  const present = values.filter((v) => v !== null && v !== undefined);
-  return present.length ? Math.min(...present) : null;
-};
 const bump = (record) => ({
   epoch: (record?.epoch ?? 0) + 1,
   ...(record ? { revision: (record.revision ?? 0) + 1 } : base()),
@@ -40,10 +37,6 @@ const bump = (record) => ({
 const uniqueRefs = (refs) => [
   ...new Map(refs.map((r) => [`${r.collection}/${r.id}`, r])).values(),
 ];
-export const primarySlotId = (orgId, roomId) =>
-  `room-primary-slot-${hash(orgId, roomId)}`;
-export const occupancyClaimId = (orgId, roomId, cycleId, personId) =>
-  claimId("occupancy-person", `${orgId}|${roomId}|${cycleId}`, personId);
 
 function lifecycleWrite(state, orgId) {
   const id = guardId(orgId);

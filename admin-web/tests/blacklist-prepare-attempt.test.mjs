@@ -88,7 +88,7 @@ function instrument(service, store) {
 let sequence = 0;
 async function probe(service, {
   personId = "person-1", identityApplicationId = "id-1", prepareAttempt = undefined,
-  deferBlocked = undefined, beforeBuild = null, counts = null,
+  deferBlocked = undefined, beforeBuild = null, counts = null, extraRefs = [],
 } = {}) {
   const claimId = `hook-claim-${sequence++}`;
   const options = {};
@@ -96,7 +96,7 @@ async function probe(service, {
   if (deferBlocked !== undefined) options.deferBlocked = deferBlocked;
   return service.withEligibility(
     { personId, occupancyId: `occupancy-${personId}`, identityApplicationId },
-    [ref("unique_claims", claimId)],
+    [ref("unique_claims", claimId), ...extraRefs],
     (state, eligibility, context) => {
       if (counts) counts.build += 1;
       beforeBuild?.(state, eligibility, context);
@@ -237,6 +237,15 @@ test("C2 invalid hook contracts fail closed before the transaction", async (t) =
     await assert.rejects(probe(service, { prepareAttempt, counts }),
       (error) => error.code === "ADAPTER_UNAVAILABLE" && error.status === 503);
   }
+  for (const refs of [
+    [null], [{}], [{ collection: "", id: "x" }], [{ collection: "x", id: "" }],
+    ["x"], [42], [{ collection: "x" }], [{ id: "x" }],
+  ]) {
+    await assert.rejects(probe(service, {
+      counts,
+      prepareAttempt: async () => ({ refs, beforeEvaluate: () => null }),
+    }), (error) => error.code === "ADAPTER_UNAVAILABLE" && error.status === 503);
+  }
   assert.equal(counts.transact, 0);
   assert.equal((await store.list("unique_claims", ORG)).length, 0);
 });
@@ -254,6 +263,83 @@ test("C2 non-retry hook errors propagate once without rewriting state", async (t
   assert.deepEqual(counts, { prepare: 1, evaluate: 0, transact: 1, build: 0 });
   assert.equal((await store.list("unique_claims", ORG)).length, 0);
   assert.equal((await store.list("eligibility_guards", ORG)).length, 0);
+});
+
+test("C2 a retry re-plans refs instead of reusing the stale attempt snapshot", async (t) => {
+  const { store, service } = await setup(t);
+  await store.transact([ref("rooms", "room-a"), ref("rooms", "room-b")], () => [
+    { collection: "rooms", id: "room-a", data: { orgId: ORG, name: "A", revision: 1 } },
+    { collection: "rooms", id: "room-b", data: { orgId: ORG, name: "B", revision: 1 } },
+  ], audit);
+  const counts = instrument(service, store);
+  const seen = [];
+  let attempt = 0;
+  const result = await probe(service, {
+    counts,
+    prepareAttempt: async () => {
+      attempt += 1;
+      const current = attempt;
+      const roomId = current === 1 ? "room-a" : "room-b";
+      return {
+        refs: [ref("rooms", roomId)],
+        beforeEvaluate: (state) => {
+          seen.push({ attempt: current, a: Boolean(state["rooms/room-a"]), b: Boolean(state["rooms/room-b"]) });
+          if (current === 1) throw retry();
+          return null;
+        },
+      };
+    },
+  });
+  assert.deepEqual(seen, [
+    { attempt: 1, a: true, b: false },
+    { attempt: 2, a: false, b: true },
+  ]);
+  assert.equal(result.eligibility.eligible, true);
+  assert.deepEqual(counts, { prepare: 2, evaluate: 1, transact: 2, build: 1 });
+});
+
+test("C2 merged base+prepared+token refs enter at 90 and fail closed at 91", async (t) => {
+  const uniqueCount = (refs) => new Set(refs.map((item) => `${item.collection}/${item.id}`)).size;
+  const filler = (count) => Array.from({ length: count }, (_, index) => ref("access_devices", `device-${index}`));
+
+  const at90 = await setup(t);
+  const token = await at90.service.prepareEligibility({
+    personId: "person-1", occupancyId: "occupancy-person-1", identityApplicationId: "id-1",
+  });
+  const hookRefs = [ref("rooms", "room-a")];
+  const placeholderClaim = ref("unique_claims", "placeholder");
+  const needed = 90 - uniqueCount([placeholderClaim, ...hookRefs, ...token.refs]);
+  const counts90 = instrument(at90.service, at90.store);
+  const result = await probe(at90.service, {
+    counts: counts90,
+    extraRefs: filler(needed),
+    prepareAttempt: async () => ({ refs: hookRefs, beforeEvaluate: () => null }),
+  });
+  assert.equal(result.eligibility.eligible, true);
+  assert.deepEqual(counts90, { prepare: 1, evaluate: 1, transact: 1, build: 1 });
+  assert.equal((await at90.store.list("unique_claims", ORG)).length, 1);
+
+  const at91 = await setup(t);
+  const counts91 = instrument(at91.service, at91.store);
+  await assert.rejects(probe(at91.service, {
+    counts: counts91,
+    extraRefs: filler(needed + 1),
+    prepareAttempt: async () => ({ refs: hookRefs, beforeEvaluate: () => null }),
+  }), (error) => error.status === 400 && error.code === null);
+  assert.deepEqual(counts91, { prepare: 1, evaluate: 0, transact: 0, build: 0 });
+  assert.equal((await at91.store.list("unique_claims", ORG)).length, 0);
+
+  const deduped = await setup(t);
+  const countsDeduped = instrument(deduped.service, deduped.store);
+  const duplicateHookRefs = [ref("persons", "person-1"), ref("rooms", "room-a")];
+  const dedupedNeeded = 90 - uniqueCount([placeholderClaim, ...duplicateHookRefs, ...token.refs]);
+  const dedupedResult = await probe(deduped.service, {
+    counts: countsDeduped,
+    extraRefs: filler(dedupedNeeded),
+    prepareAttempt: async () => ({ refs: duplicateHookRefs, beforeEvaluate: () => null }),
+  });
+  assert.equal(dedupedResult.eligibility.eligible, true, "重复 ref 只计一次，不得把 90 推成 91");
+  assert.equal(countsDeduped.transact, 1);
 });
 
 test("C2 a no-op hook keeps guard and decision side effects identical to no hook", async (t) => {

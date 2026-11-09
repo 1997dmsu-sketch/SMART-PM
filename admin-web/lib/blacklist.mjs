@@ -589,10 +589,12 @@ export class BlacklistService {
   // H2-c Q06: the optional prepareAttempt(token) hook runs after every
   // prepareEligibility() so callers (createGrant) can plan qualification refs
   // from a fresh pre-read each attempt. Its beforeEvaluate(state, token) runs
-  // inside the same transaction, before evaluateEligibility(), and may only
-  // fail with BLACKLIST_RETRY to join the existing three-attempt loop. The
-  // hook never computes or forges eligibility and never changes candidates,
-  // guards, decisions, retry count or deferBlocked semantics.
+  // inside the same transaction, before evaluateEligibility(), and may fail
+  // with BLACKLIST_RETRY to join the existing three-attempt loop. Other
+  // qualification errors (e.g. REVISION_CONFLICT/IDENTITY_NOT_APPROVED) are
+  // formal failures and propagate without retry. The hook never computes or
+  // forges eligibility and never changes candidates, guards, decisions, retry
+  // count or deferBlocked semantics.
   async withEligibility(request, refs, build, audit,
     { deferBlocked = false, prepareAttempt = null } = {}) {
     if (prepareAttempt !== null && typeof prepareAttempt !== "function")
@@ -603,7 +605,12 @@ export class BlacklistService {
       if (prepareAttempt && (!prepared || !Array.isArray(prepared.refs) ||
           typeof prepared.beforeEvaluate !== "function"))
         failCode("ADAPTER_UNAVAILABLE", "资格准备钩子未返回有效契约", 503);
-      const attemptRefs = uniqueRefs([...refs, ...(prepared?.refs ?? []), ...token.refs]);
+      const hookRefs = prepared?.refs ?? [];
+      if (hookRefs.some((item) => !item || typeof item !== "object" ||
+          Array.isArray(item) || typeof item.collection !== "string" ||
+          !item.collection.trim() || typeof item.id !== "string" || !item.id.trim()))
+        failCode("ADAPTER_UNAVAILABLE", "资格准备钩子返回的 refs 无效", 503);
+      const attemptRefs = uniqueRefs([...refs, ...hookRefs, ...token.refs]);
       if (attemptRefs.length > 90)
         // 与 CloudStore 同一上限：超限失败关闭，不拆事务、不省略 refs。
         throw new HttpError(400, "一次操作涉及记录过多，请缩小选择范围");

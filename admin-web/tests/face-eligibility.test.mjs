@@ -12,6 +12,7 @@ import {
   validateEligibility,
 } from "../lib/face-service/eligibility.mjs";
 import { primarySlotId as occupancyPrimarySlotId } from "../lib/occupancies.mjs";
+import { guardId } from "../lib/claims.mjs";
 
 const ORG = "org-h2c";
 const NOW = 1_000_000;
@@ -62,7 +63,11 @@ function fixture({ role = "primary", sponsorOccupancyId = null } = {}) {
     cycleId: "cycle-1", role: "primary", state: "active",
     startsAt: 900_000, endsAt: 1_800_000, revision: 1, sponsorOccupancyId: null,
   };
-  const expected = { occupancy, cycle, room, catalog, person, identityApplication };
+  const expected = {
+    occupancy, cycle, room, catalog, person, identityApplication, lifecycleGuard: null,
+  };
+  if (role === "member") expected.primary = { _id: primaryId, revision: 1 };
+  if (sponsorOccupancyId) expected.sponsor = { _id: sponsorOccupancyId, revision: 1 };
   const request = {
     mode: "grant", orgId: ORG, personId: "person-1", occupancyId: "occ-1",
     cycleId: "cycle-1", identityApplicationId: "id-1",
@@ -143,7 +148,7 @@ test("C1 member requires an active matching primary and room slot", () => {
   assert.equal(check(futurePrimary).code, "SPONSOR_INACTIVE");
 
   const changedPrimary = fixture({ role: "member" });
-  changedPrimary.expected.primary = { revision: 0 };
+  changedPrimary.expected.primary = { _id: "occ-primary", revision: 2 };
   assert.equal(check(changedPrimary).code, "REVISION_CONFLICT");
 });
 
@@ -152,7 +157,7 @@ test("C1 non-null sponsor must stay active and equal the cycle primary", () => {
   assert.equal(check(valid).eligible, true);
 
   const changedSponsor = fixture({ role: "member", sponsorOccupancyId: "occ-primary" });
-  changedSponsor.expected.sponsor = { revision: 0 };
+  changedSponsor.expected.sponsor = { _id: "occ-primary", revision: 2 };
   assert.equal(check(changedSponsor).code, "REVISION_CONFLICT");
 
   const other = fixture({ role: "member", sponsorOccupancyId: "occ-sponsor" });
@@ -224,10 +229,8 @@ test("C1 catalog hierarchy is checked at every level and never skipped", () => {
     "REVISION_CONFLICT");
   assert.equal(withState((f) => { f.state[key("rooms", "room-1")].floorId = "floor-x"; }).code,
     "REVISION_CONFLICT");
-  assert.equal(withState((f) => {
-    f.state[key("rooms", "room-1")].communityId = null;
-    f.expected.room.communityId = null;
-  }).code, "NOT_FOUND");
+  assert.equal(withState((f) => { f.state[key("rooms", "room-1")].communityId = null; }).code,
+    "REVISION_CONFLICT");
 });
 
 test("C1 corrupt or missing snapshots fail closed without throwing", () => {
@@ -376,6 +379,90 @@ test("C1 occupancy, cycle and claim relations fail closed with the frozen codes"
   assert.equal(withOccupancy((f) => {
     f.state[key("room_primary_slots", primarySlotId(ORG, "room-1"))].currentOccupancyId = "occ-x";
   }).code, "INVALID_STATE");
+});
+
+test("C1 clearing or rewriting sponsor after pre-read cannot bypass sponsor checks", () => {
+  const cleared = fixture({ role: "member", sponsorOccupancyId: "occ-primary" });
+  cleared.state[key("occupancies", "occ-1")].sponsorOccupancyId = null;
+  const before = structuredClone(cleared.state);
+  assert.equal(check(cleared).code, "REVISION_CONFLICT");
+  assert.deepEqual(cleared.state, before, "sponsor 复核必须只读");
+
+  const rewritten = fixture({ role: "member", sponsorOccupancyId: "occ-primary" });
+  rewritten.state[key("occupancies", "occ-1")].sponsorOccupancyId = "occ-other";
+  const rewrittenBefore = structuredClone(rewritten.state);
+  assert.equal(check(rewritten).code, "REVISION_CONFLICT");
+  assert.deepEqual(rewritten.state, rewrittenBefore);
+
+  const sponsorRevision = fixture({ role: "member", sponsorOccupancyId: "occ-primary" });
+  sponsorRevision.state[key("occupancies", "occ-primary")].revision = 2;
+  const revisionBefore = structuredClone(sponsorRevision.state);
+  assert.equal(check(sponsorRevision).code, "REVISION_CONFLICT");
+  assert.deepEqual(sponsorRevision.state, revisionBefore);
+});
+
+test("C1 pre-read baselines are mandatory and validated at planning time", () => {
+  const planParam = (f) => assert.throws(
+    () => planEligibilityRefs(f.request),
+    (error) => error.code === "PARAM_ERROR",
+  );
+
+  const noPrimary = fixture({ role: "member" });
+  delete noPrimary.expected.primary;
+  planParam(noPrimary);
+
+  const noSponsor = fixture({ role: "member", sponsorOccupancyId: "occ-primary" });
+  delete noSponsor.expected.sponsor;
+  planParam(noSponsor);
+
+  const noGuard = fixture();
+  delete noGuard.expected.lifecycleGuard;
+  planParam(noGuard);
+
+  for (const mutate of [
+    (f) => { f.expected.person._id = "person-x"; },
+    (f) => { f.expected.identityApplication._id = "id-x"; },
+    (f) => { f.expected.occupancy.personId = "person-x"; },
+    (f) => { f.expected.cycle._id = "cycle-x"; },
+    (f) => { f.expected.room.revision = "5"; },
+    (f) => { f.expected.catalog.floor.revision = -1; },
+    (f) => { f.expected.person.revision = 2 ** 53; },
+    (f) => { f.expected.catalog.building.kind = "floor"; },
+    (f) => { f.expected.catalog.floor.parentId = "building-x"; },
+    (f) => { f.expected.room.communityId = null; },
+    (f) => { f.expected.lifecycleGuard = { epoch: 1 }; },
+    (f) => { f.expected.lifecycleGuard = { epoch: "1", revision: 1 }; },
+  ]) {
+    const f = fixture();
+    mutate(f);
+    planParam(f);
+  }
+});
+
+test("C1 lifecycle guard baseline distinguishes null from an existing record", () => {
+  const appeared = fixture();
+  put(appeared.state, "lifecycle_guards", {
+    _id: guardId(ORG), orgId: ORG, epoch: 1, revision: 1,
+  });
+  assert.equal(check(appeared).code, "REVISION_CONFLICT", "基线 null 但事务内出现记录");
+
+  const changed = fixture();
+  changed.request.expected.lifecycleGuard = { _id: guardId(ORG), epoch: 1, revision: 1 };
+  put(changed.state, "lifecycle_guards", {
+    _id: guardId(ORG), orgId: ORG, epoch: 2, revision: 2,
+  });
+  assert.equal(check(changed).code, "REVISION_CONFLICT");
+
+  const vanished = fixture();
+  vanished.request.expected.lifecycleGuard = { _id: guardId(ORG), epoch: 1, revision: 1 };
+  assert.equal(check(vanished).code, "REVISION_CONFLICT");
+
+  const stable = fixture();
+  stable.request.expected.lifecycleGuard = { _id: guardId(ORG), epoch: 3, revision: 3 };
+  put(stable.state, "lifecycle_guards", {
+    _id: guardId(ORG), orgId: ORG, epoch: 3, revision: 3,
+  });
+  assert.equal(check(stable).eligible, true);
 });
 
 test("C1 shared slot and claim ids are the same primitives used by OccupancyService", () => {

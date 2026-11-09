@@ -30,6 +30,8 @@ const hash = (...parts) =>
   createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 32);
 const read = (state, collection, id) =>
   (state && typeof state === "object" && id ? state[`${collection}/${id}`] ?? null : null);
+const positiveRevision = (value) => Number.isSafeInteger(value) && value >= 1;
+const nonNegativeEpoch = (value) => Number.isSafeInteger(value) && value >= 0;
 
 // 以下 ID 与时间原语由 OccupancyService 与 face-service 共用，避免两套简化逻辑。
 export const primarySlotId = (orgId, roomId) =>
@@ -47,13 +49,17 @@ export const uniqueRefs = (refs) => [
 ];
 
 /**
- * 预读请求：
+ * 预读请求（调用方必须先完成自洽预读；任何漏字段都按 PARAM_ERROR 失败关闭）：
  *   mode: "grant"
  *   orgId / personId / occupancyId / cycleId / identityApplicationId
  *   validFrom / validUntil
- *   expected: { occupancy, cycle, room, catalog: { floor, building, community },
- *               person, identityApplication, lifecycleGuard?,
- *               primary?, sponsor? }   // 事务前预读记录（primary/sponsor 仅 member 需要）
+ *   expected: {
+ *     occupancy, cycle, room, person, identityApplication,   // ID 与请求一致
+ *     catalog: { floor, building, community },               // kind/父子/revision 必须有效
+ *     lifecycleGuard: 记录对象 | null,                        // 显式基线，不可缺键
+ *     primary?,                                              // member 必填
+ *     sponsor?,                                              // sponsorOccupancyId 非空时必填
+ *   }
  *   baseRefs?: []  // 调用方的权限/设备/operation/名单 refs，一起受上限约束
  */
 function assertGrantRequest(request) {
@@ -70,19 +76,58 @@ function assertGrantRequest(request) {
       !expected.cycle || !expected.room || !expected.person ||
       !expected.identityApplication || typeof expected.catalog !== "object")
     failCode("PARAM_ERROR", "资格预读快照不完整");
-  if (expected.occupancy._id !== request.occupancyId ||
-      expected.cycle._id !== expected.occupancy.cycleId ||
-      expected.room._id !== expected.occupancy.roomId)
-    failCode("PARAM_ERROR", "资格预读快照自相矛盾");
-  for (const [label, value] of [
-    ["person.revision", expected.person.revision],
-    ["occupancy.revision", expected.occupancy.revision],
-    ["cycle.revision", expected.cycle.revision],
-    ["cycle.epoch", expected.cycle.epoch],
-    ["identityApplication.revision", expected.identityApplication.revision],
+  const { occupancy, cycle, room, person, identityApplication } = expected;
+  // 预读记录必须与请求 ID 自洽：调用方不得把另一条记录当作基线。
+  if (person._id !== request.personId ||
+      identityApplication._id !== request.identityApplicationId ||
+      occupancy._id !== request.occupancyId ||
+      occupancy.personId !== request.personId ||
+      cycle._id !== request.cycleId ||
+      cycle._id !== occupancy.cycleId ||
+      room._id !== occupancy.roomId)
+    failCode("PARAM_ERROR", "资格预读快照与请求不一致");
+  if (!positiveRevision(person.revision) || !positiveRevision(occupancy.revision) ||
+      !positiveRevision(cycle.revision) || !nonNegativeEpoch(cycle.epoch) ||
+      !positiveRevision(identityApplication.revision) || !positiveRevision(room.revision))
+    failCode("PARAM_ERROR", "资格预读快照缺少有效 revision");
+  // room 与三级目录的 ID、kind、父子关系、revision 全量强制，不得因漏传跳过。
+  if (typeof room.floorId !== "string" || !room.floorId ||
+      typeof room.buildingId !== "string" || !room.buildingId ||
+      typeof room.communityId !== "string" || !room.communityId)
+    failCode("PARAM_ERROR", "资格预读快照缺少物业层级");
+  if (!expected.catalog || !expected.catalog.floor ||
+      !expected.catalog.building || !expected.catalog.community)
+    failCode("PARAM_ERROR", "资格预读快照缺少物业目录");
+  for (const [kind, id, parentId] of [
+    ["floor", room.floorId, room.buildingId],
+    ["building", room.buildingId, room.communityId],
+    ["community", room.communityId, null],
   ]) {
-    if (!Number.isInteger(value)) failCode("PARAM_ERROR", `资格预读快照缺少 ${label}`);
+    const record = expected.catalog[kind];
+    if (!record || record._id !== id || record.kind !== kind ||
+        (parentId !== null && record.parentId !== parentId) ||
+        !positiveRevision(record.revision))
+      failCode("PARAM_ERROR", `资格预读快照的 ${kind} 目录无效`);
   }
+  if (occupancy.role === "member") {
+    const primary = expected.primary;
+    if (!primary || primary._id !== cycle.primaryOccupancyId ||
+        !positiveRevision(primary.revision))
+      failCode("PARAM_ERROR", "member 资格预读快照缺少有效 primary");
+  }
+  if (occupancy.sponsorOccupancyId !== null && occupancy.sponsorOccupancyId !== undefined) {
+    const sponsor = expected.sponsor;
+    if (!sponsor || sponsor._id !== occupancy.sponsorOccupancyId ||
+        !positiveRevision(sponsor.revision))
+      failCode("PARAM_ERROR", "资格预读快照缺少有效 sponsor");
+  }
+  // lifecycle guard 必须显式给出记录或明确的 null，漏传即视为契约错误。
+  if (!Object.hasOwn(expected, "lifecycleGuard"))
+    failCode("PARAM_ERROR", "资格预读快照缺少 lifecycle guard 基线");
+  const guard = expected.lifecycleGuard;
+  if (guard !== null && (!guard || typeof guard !== "object" ||
+      !nonNegativeEpoch(guard.epoch) || !positiveRevision(guard.revision)))
+    failCode("PARAM_ERROR", "lifecycle guard 基线无效");
   return expected;
 }
 
@@ -132,7 +177,8 @@ export function snapshotEligibility(state, request) {
   const personId = request?.personId ?? null;
   const userId = expected.person?.userId ?? null;
   const primaryId = expected.cycle?.primaryOccupancyId ?? null;
-  const sponsorId = occupancy?.sponsorOccupancyId ?? null;
+  // sponsor 只按预读 ID 读取，绝不相信事务内被改写的新 ID。
+  const sponsorId = expected.occupancy?.sponsorOccupancyId ?? null;
   const catalog = expected.catalog || {};
   const orgId = request?.orgId ?? null;
   return {
@@ -234,6 +280,7 @@ export function validateEligibility(snapshot, request, now) {
       occupancy.cycleId !== expected.occupancy.cycleId ||
       occupancy.roomId !== expected.occupancy.roomId ||
       occupancy.role !== expected.occupancy.role ||
+      (occupancy.sponsorOccupancyId ?? null) !== (expected.occupancy.sponsorOccupancyId ?? null) ||
       occupancy.startsAt !== expected.occupancy.startsAt ||
       occupancy.endsAt !== expected.occupancy.endsAt ||
       occupancy.revision !== expected.occupancy.revision)
@@ -265,7 +312,7 @@ export function validateEligibility(snapshot, request, now) {
   if (room.floorId !== expected.room.floorId ||
       room.buildingId !== expected.room.buildingId ||
       room.communityId !== expected.room.communityId ||
-      (expected.room.revision !== undefined && room.revision !== expected.room.revision))
+      room.revision !== expected.room.revision)
     return reject("REVISION_CONFLICT", "房间物业层级已变化，请刷新后重试", 409);
 
   // R11–R13 物业目录：三级均必填，kind/父子层级/revision 全部复核。
@@ -290,7 +337,7 @@ export function validateEligibility(snapshot, request, now) {
     if (!primary || primary.orgId !== orgId || primary.role !== "primary" ||
         primary.state !== "active" || !activeAt(primary, now))
       return reject("SPONSOR_INACTIVE", "主租客关系已失效，成员不能创建授权", 409);
-    if (expected.primary && primary.revision !== expected.primary.revision)
+    if (primary.revision !== expected.primary.revision)
       return reject("REVISION_CONFLICT", "主租客关系已变化，请刷新后重试", 409);
     if (primary.roomId !== occupancy.roomId || primary.cycleId !== cycle._id ||
         !slot || slot.currentCycleId !== cycle._id ||
@@ -298,21 +345,25 @@ export function validateEligibility(snapshot, request, now) {
         slot.currentPersonId !== primary.personId)
       return reject("SPONSOR_INACTIVE", "主租客关系已失效，成员不能创建授权", 409);
   }
-  if (occupancy.sponsorOccupancyId) {
+  // sponsor 由预读 ID 驱动：清空/改写 ID 已在 R08 返回冲突，这里复核目标记录。
+  if (expected.occupancy.sponsorOccupancyId !== null &&
+      expected.occupancy.sponsorOccupancyId !== undefined) {
     const sponsor = snapshot.sponsor;
     if (!sponsor || sponsor.orgId !== orgId || sponsor.state !== "active" ||
         sponsor._id !== cycle.primaryOccupancyId)
       return reject("SPONSOR_INACTIVE", "邀请人的主租客关系已失效", 409);
-    if (expected.sponsor && sponsor.revision !== expected.sponsor.revision)
+    if (sponsor.revision !== expected.sponsor.revision)
       return reject("REVISION_CONFLICT", "邀请人关系已变化，请刷新后重试", 409);
   }
 
-  // R18 lifecycle guard 只读串行化：epoch/revision 变化即冲突。
+  // R18 lifecycle guard 只读串行化：显式基线为 null 时，事务内出现记录也是冲突。
   const guard = snapshot.lifecycleGuard;
-  if (expected.lifecycleGuard) {
-    if (!guard || guard.epoch !== expected.lifecycleGuard.epoch ||
-        (guard.revision ?? 0) !== (expected.lifecycleGuard.revision ?? 0))
+  if (expected.lifecycleGuard === null) {
+    if (guard)
       return reject("REVISION_CONFLICT", "入住生命周期已变化，请刷新后重试", 409);
+  } else if (!guard || guard.epoch !== expected.lifecycleGuard.epoch ||
+      guard.revision !== expected.lifecycleGuard.revision) {
+    return reject("REVISION_CONFLICT", "入住生命周期已变化，请刷新后重试", 409);
   }
 
   // Q01/Q03 时间：occupancy/cycle 均 activeAt；授权区间须包含于共同有效区间。

@@ -108,6 +108,18 @@
 
 H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
 
+## G. DeepSeek Harness：H2-c 完整资格快照编码
+
+**优先级：P0**
+
+**状态：设计 `bcb2cd6` 已通过；按 C1→C2→C3→C4 分阶段放行。**
+
+**任务卡：** `docs/tasks/HK-AI-04-H2C-ELIGIBILITY-CODING.md`
+
+代码基线为 H2-b `2bc10e3`。先实现共享只读资格 helper，再实现兼容的 `withEligibility.prepareAttempt`，之后接入 createGrant，最后完成 D01–D75。每阶段必须独立提交、全绿并自审。
+
+H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
+
 ## E. Workburry：HK-AI-05A 门禁管理页面演示门禁修复
 
 **优先级：P0**

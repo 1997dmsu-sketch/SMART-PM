@@ -108,6 +108,16 @@
 
 H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
 
+## H. Workburry：微信小程序 beta.18 体验版上线协助
+
+**优先级：P0**
+
+**状态：已发卡；只允许上传体验版，不允许正式发布。**
+
+**任务卡：** `docs/tasks/REL-AI-01-MINIPROGRAM-EXPERIENCE-DEPLOY-2026-11-09.md`
+
+使用唯一冻结标签 `v0.1.0-beta.18-production-test.1` 完成本地预检、live 包摘要、微信开发者工具编译、体验版上传、脱敏冒烟测试和回退记录。不得包含 H2-c、人脸后台、Provider 或设备写能力，不得迁移数据库或提交正式审核。
+
 ## G. DeepSeek Harness：H2-c 完整资格快照编码
 
 **优先级：P0**

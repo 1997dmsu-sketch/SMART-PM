@@ -447,18 +447,18 @@ test("C1 lifecycle guard baseline distinguishes null from an existing record", (
   assert.equal(check(appeared).code, "REVISION_CONFLICT", "基线 null 但事务内出现记录");
 
   const changed = fixture();
-  changed.request.expected.lifecycleGuard = { _id: guardId(ORG), epoch: 1, revision: 1 };
+  changed.request.expected.lifecycleGuard = { _id: guardId(ORG), orgId: ORG, epoch: 1, revision: 1 };
   put(changed.state, "lifecycle_guards", {
     _id: guardId(ORG), orgId: ORG, epoch: 2, revision: 2,
   });
   assert.equal(check(changed).code, "REVISION_CONFLICT");
 
   const vanished = fixture();
-  vanished.request.expected.lifecycleGuard = { _id: guardId(ORG), epoch: 1, revision: 1 };
+  vanished.request.expected.lifecycleGuard = { _id: guardId(ORG), orgId: ORG, epoch: 1, revision: 1 };
   assert.equal(check(vanished).code, "REVISION_CONFLICT");
 
   const stable = fixture();
-  stable.request.expected.lifecycleGuard = { _id: guardId(ORG), epoch: 3, revision: 3 };
+  stable.request.expected.lifecycleGuard = { _id: guardId(ORG), orgId: ORG, epoch: 3, revision: 3 };
   put(stable.state, "lifecycle_guards", {
     _id: guardId(ORG), orgId: ORG, epoch: 3, revision: 3,
   });
@@ -472,4 +472,37 @@ test("C1 shared slot and claim ids are the same primitives used by OccupancyServ
   assert.equal(activeAt({ startsAt: 10, endsAt: null }, 1e9), true);
   assert.equal(minEnd(10, null, undefined, 5), 5);
   assert.equal(minEnd(null, undefined), null);
+});
+
+test("primary 未绑定 cycle.primaryOccupancyId：计划阶段 PARAM_ERROR", () => {
+  const { request, snapshot } = fixture();
+  const bad = structuredClone(request);
+  bad.expected.cycle.primaryOccupancyId = "occ-other";
+  assert.throws(
+    () => validateEligibility(snapshot, bad, NOW),
+    (e) => e.code === "PARAM_ERROR",
+  );
+});
+
+test("lifecycle guard：错误 ID、跨组织 PARAM_ERROR；合法 guard 通过", () => {
+  const { request, snapshot } = fixture();
+  const base = { orgId: ORG, epoch: 0, revision: 1 };
+
+  const wrongId = structuredClone(request);
+  wrongId.expected.lifecycleGuard = { ...base, _id: "guard-other" };
+  assert.throws(
+    () => validateEligibility(snapshot, wrongId, NOW),
+    (e) => e.code === "PARAM_ERROR",
+  );
+
+  const crossOrg = structuredClone(request);
+  crossOrg.expected.lifecycleGuard = { ...base, _id: guardId(ORG), orgId: "org-other" };
+  assert.throws(
+    () => validateEligibility(snapshot, crossOrg, NOW),
+    (e) => e.code === "PARAM_ERROR",
+  );
+
+  const legal = structuredClone(request);
+  legal.expected.lifecycleGuard = { ...base, _id: guardId(ORG) };
+  assert.doesNotThrow(() => validateEligibility(snapshot, legal, NOW));
 });

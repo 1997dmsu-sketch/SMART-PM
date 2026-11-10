@@ -109,6 +109,8 @@ function assertGrantRequest(request) {
         !positiveRevision(record.revision))
       failCode("PARAM_ERROR", `资格预读快照的 ${kind} 目录无效`);
   }
+  if (occupancy.role === "primary" && cycle.primaryOccupancyId !== occupancy._id)
+    failCode("PARAM_ERROR", "primary 入住未绑定周期的 primaryOccupancyId");
   if (occupancy.role === "member") {
     const primary = expected.primary;
     if (!primary || primary._id !== cycle.primaryOccupancyId ||
@@ -128,6 +130,8 @@ function assertGrantRequest(request) {
   if (guard !== null && (!guard || typeof guard !== "object" ||
       !nonNegativeEpoch(guard.epoch) || !positiveRevision(guard.revision)))
     failCode("PARAM_ERROR", "lifecycle guard 基线无效");
+  if (guard !== null && (guard._id !== guardId(request.orgId) || guard.orgId !== request.orgId))
+    failCode("PARAM_ERROR", "lifecycle guard 基线不属于当前组织");
   return expected;
 }
 
@@ -302,6 +306,8 @@ export function validateEligibility(snapshot, request, now) {
     return reject("REVISION_CONFLICT", "入住周期已变化，请刷新后重试", 409);
   if (cycle.state !== "active")
     return reject("INVALID_STATE", "入住周期不在有效状态", 409);
+  if (occupancy.role === "primary" && cycle.primaryOccupancyId !== occupancy._id)
+    return reject("REVISION_CONFLICT", "入住周期主入住关系已变化，请刷新后重试", 409);
 
   // R10 房间：org、未归档、层级绑定与 revision。
   const room = snapshot.room;

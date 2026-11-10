@@ -367,7 +367,8 @@ export function validateEligibility(snapshot, request, now) {
   if (expected.lifecycleGuard === null) {
     if (guard)
       return reject("REVISION_CONFLICT", "入住生命周期已变化，请刷新后重试", 409);
-  } else if (!guard || guard.epoch !== expected.lifecycleGuard.epoch ||
+  } else if (!guard || guard._id !== guardId(orgId) || guard.orgId !== orgId ||
+      guard.epoch !== expected.lifecycleGuard.epoch ||
       guard.revision !== expected.lifecycleGuard.revision) {
     return reject("REVISION_CONFLICT", "入住生命周期已变化，请刷新后重试", 409);
   }

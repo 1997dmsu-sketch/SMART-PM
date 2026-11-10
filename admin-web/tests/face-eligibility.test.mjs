@@ -506,3 +506,23 @@ test("lifecycle guard：错误 ID、跨组织 PARAM_ERROR；合法 guard 通过"
   legal.expected.lifecycleGuard = { ...base, _id: guardId(ORG) };
   assert.doesNotThrow(() => validateEligibility(snapshot, legal, NOW));
 });
+
+test("cycle.primaryOccupancyId 预读后变化 → REVISION_CONFLICT 且状态零变化", () => {
+  const f = fixture();
+  f.state[key("occupancy_cycles", "cycle-1")].primaryOccupancyId = "occ-other";
+  const before = structuredClone(f.state);
+  assert.equal(check(f).code, "REVISION_CONFLICT");
+  assert.deepEqual(f.state, before, "只读校验不得写入");
+});
+
+test("事务内 lifecycle guard 的 _id/orgId 必须匹配当前组织", () => {
+  for (const guard of [
+    { _id: "guard-other", orgId: ORG, epoch: 0, revision: 1 },
+    { _id: guardId(ORG), orgId: "org-other", epoch: 0, revision: 1 },
+  ]) {
+    const f = fixture();
+    f.request.expected.lifecycleGuard = { _id: guardId(ORG), orgId: ORG, epoch: 0, revision: 1 };
+    put(f.state, "lifecycle_guards", guard);
+    assert.equal(check(f).code, "REVISION_CONFLICT");
+  }
+});

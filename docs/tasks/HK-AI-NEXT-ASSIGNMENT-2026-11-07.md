@@ -124,11 +124,11 @@ H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
 
 **优先级：P0**
 
-**状态：`ac9585f` 复审：C2 通过，C1 暂不通过；C3 关闭。**
+**状态：`e4508ea` 复审：C2 通过，C1 暂不通过；C3 关闭。**
 
-**复审记录：** `docs/tasks/HK-AI-04-H2C-C1-C2-REREVIEW-AC9585F-2026-11-09.md`
+**复审记录：** `docs/tasks/HK-AI-04-H2C-C1-REREVIEW-E4508EA-2026-11-10.md`
 
-只修 C1 的两项失败关闭缺口：primary occupancy 必须绑定 `cycle.primaryOccupancyId`；非 null lifecycle guard 必须绑定当前组织固定 guard ID。C2 已通过，不得再扩大或改写。不得修改 `createGrant()` 或进入 C3。
+只修 C1 的事务内 lifecycle guard 身份复核，并补 primaryOccupancyId 预读后变化的竞态测试。C2 已通过，不得再扩大或改写。不得修改 `createGrant()` 或进入 C3。
 
 ## G. DeepSeek Harness：H2-c 完整资格快照编码
 

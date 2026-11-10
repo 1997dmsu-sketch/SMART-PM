@@ -124,11 +124,11 @@ H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
 
 **优先级：P0**
 
-**状态：`e4508ea` 复审：C2 通过，C1 暂不通过；C3 关闭。**
+**状态：`cfacfff` 终审通过；C1/C2 已关闭，C3 可另发编码卡。**
 
-**复审记录：** `docs/tasks/HK-AI-04-H2C-C1-REREVIEW-E4508EA-2026-11-10.md`
+**复审记录：** `docs/tasks/HK-AI-04-H2C-C1-C2-APPROVAL-CFACFFF-2026-11-10.md`
 
-只修 C1 的事务内 lifecycle guard 身份复核，并补 primaryOccupancyId 预读后变化的竞态测试。C2 已通过，不得再扩大或改写。不得修改 `createGrant()` 或进入 C3。
+C1/C2 不再扩大或改写。C3 尚未开始；须另发卡后才可按冻结契约接入 `createGrant()`。H2-d/H3/H4、HTTP、Provider 与设备写操作继续关闭。
 
 ## G. DeepSeek Harness：H2-c 完整资格快照编码
 

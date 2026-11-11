@@ -146,13 +146,13 @@ H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
 
 **优先级：P0**
 
-**状态：`5f7ff33` 暂不通过；仅允许定点修复错误优先级，C4 关闭。**
+**状态：`32c891f` 终审通过；C3 已关闭，允许进入 C4。**
 
 **任务卡：** `docs/tasks/HK-AI-04-H2C-C3-CREATEGRANT-TASK.md`
 
-**复审记录：** `docs/tasks/HK-AI-04-H2C-C3-REVIEW-5F7FF33-2026-11-11.md`
+**复审记录：** `docs/tasks/HK-AI-04-H2C-C3-APPROVAL-32C891F-2026-11-11.md`
 
-基线为 `cfacfff`。当前只修真实名单预读越过事务内权限/operation 优先级的问题及定向测试；保持 Provider 调用 0、HTTP 未注册、设备未连接。C4 可继续准备 fixture 和案例表，但不得开始 C4 验收或宣称 H2-c 已关闭。
+基线为 `cfacfff`。C3 已把完整资格与真实名单接入 `createGrant()`，并关闭并发撤权错误优先级问题。现在可按冻结设计执行 C4 D01–D75；保持 Provider 调用 0、HTTP 未注册、设备未连接，C4 通过前不得宣称 H2-c 已关闭。
 
 ## K. Provider／安全专职 Agent：真实 Hikvision Provider 前置框架
 

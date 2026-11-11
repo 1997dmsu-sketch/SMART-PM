@@ -595,12 +595,30 @@ export class BlacklistService {
   // formal failures and propagate without retry. The hook never computes or
   // forges eligibility and never changes candidates, guards, decisions, retry
   // count or deferBlocked semantics.
+  //
+  // H2-c C3 review: createGrant sets deferPrepareError so a real
+  // prepareEligibility() failure (e.g. NOT_FOUND after a concurrent revoke)
+  // cannot surface before the transaction's permission/operation/credential
+  // checks. In that mode prepareAttempt(null) still plans the qualification
+  // refs, beforeEvaluate runs first inside the same authorization transaction,
+  // and the original prepare error is rethrown only after those checks pass.
+  // Without the explicit option the default remains "fail before the
+  // transaction", so C1/C2 and existing callers are unchanged.
   async withEligibility(request, refs, build, audit,
-    { deferBlocked = false, prepareAttempt = null } = {}) {
+    { deferBlocked = false, prepareAttempt = null, deferPrepareError = false } = {}) {
     if (prepareAttempt !== null && typeof prepareAttempt !== "function")
       failCode("ADAPTER_UNAVAILABLE", "资格准备钩子不可用", 503);
     for (let attempt = 0; attempt < 3; attempt++) {
-      const token = await this.prepareEligibility(request);
+      let token = null;
+      let prepareError = null;
+      try {
+        token = await this.prepareEligibility(request);
+      } catch (error) {
+        // Existing callers keep the immediate failure. Only an explicit
+        // deferPrepareError + hook transaction defers it behind §6.3 prechecks.
+        if (!deferPrepareError || !prepareAttempt) throw error;
+        prepareError = error;
+      }
       const prepared = prepareAttempt ? await prepareAttempt(token) : null;
       if (prepareAttempt && (!prepared || !Array.isArray(prepared.refs) ||
           typeof prepared.beforeEvaluate !== "function"))
@@ -610,7 +628,7 @@ export class BlacklistService {
           Array.isArray(item) || typeof item.collection !== "string" ||
           !item.collection.trim() || typeof item.id !== "string" || !item.id.trim()))
         failCode("ADAPTER_UNAVAILABLE", "资格准备钩子返回的 refs 无效", 503);
-      const attemptRefs = uniqueRefs([...refs, ...hookRefs, ...token.refs]);
+      const attemptRefs = uniqueRefs([...refs, ...hookRefs, ...(token?.refs ?? [])]);
       if (attemptRefs.length > 90)
         // 与 CloudStore 同一上限：超限失败关闭，不拆事务、不省略 refs。
         throw new HttpError(400, "一次操作涉及记录过多，请缩小选择范围");
@@ -619,6 +637,10 @@ export class BlacklistService {
         await this.store.transact(attemptRefs, async (state) => {
           // 资格快照竞态在 beforeEvaluate 内以 BLACKLIST_RETRY 抛出，进入同一重试。
           const context = prepared ? await prepared.beforeEvaluate(state, token) : null;
+          // Permission/operation/credential/qualification passed; now the
+          // deferred blacklist pre-read error may surface. No writes are
+          // returned, so this is still the one authorization transaction.
+          if (prepareError) throw prepareError;
           const eligibility = this.evaluateEligibility(state, token, { deferBlocked });
           const built = await build(state, eligibility, context);
           if (!built || !Array.isArray(built.writes))

@@ -471,6 +471,9 @@ export class FaceCredentialService {
       },
       this.#audit("创建门禁授权"),
       {
+        // 真实 blacklist 预读若在事务前失败（例如并发撤权同时删除 person），
+        // 必须等事务内权限/operation/credential/资格检查完成后再抛出。
+        deferPrepareError: true,
         // C2 钩子：每次 attempt 重新预读资格基线；事务内先做权限/operation/
         // credential/file/资格，再交给真实 evaluateEligibility 判决。
         prepareAttempt: async () => {

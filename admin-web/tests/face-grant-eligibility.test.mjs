@@ -795,3 +795,116 @@ test("C3 合并 refs 恰好 90 进入事务，91 时事务调用为 0", async (t
   assert.equal(calls, 0, "91 条必须在事务开启前失败关闭");
   assert.equal((await store.list("device_access_grants", ORG)).length, 1);
 });
+
+/** 在真实 BlacklistService.prepareEligibility 首次调用前模拟并发提交。 */
+function mutateOnPrepare(blacklist, mutate) {
+  const prepare = blacklist.prepareEligibility.bind(blacklist);
+  let fired = false;
+  blacklist.prepareEligibility = async (request) => {
+    if (!fired) {
+      fired = true;
+      mutate();
+    }
+    return prepare(request);
+  };
+}
+
+const revokeMembershipIn = (store) => {
+  store.data.org_memberships.find((row) => row._id === MEMBERSHIP).permissions = [];
+};
+const deletePersonIn = (store) => {
+  store.data.persons = store.data.persons.filter((row) => row._id !== PERSON);
+};
+const deleteIdentityIn = (store) => {
+  store.data.identity_applications =
+    store.data.identity_applications.filter((row) => row._id !== IDENTITY);
+};
+const conflictIdentityIn = (store) => {
+  store.data.identity_applications.find((row) => row._id === IDENTITY).personId = "person-other";
+};
+
+test("C3 权限预检后撤销：person/identity 预读缺失或冲突仍返回 FORBIDDEN", async (t) => {
+  const cases = [
+    ["person 缺失", deletePersonIn],
+    ["identity 缺失", deleteIdentityIn],
+    ["identity 冲突", conflictIdentityIn],
+  ];
+  for (const [index, [name, mutate]] of cases.entries()) {
+    const { store, blacklist, service } = await setup(t);
+    const before = await snapshot(store);
+    const counts = instrument(blacklist, store);
+    mutateOnPrepare(blacklist, () => {
+      revokeMembershipIn(store);
+      mutate(store);
+    });
+    await assert.rejects(
+      () => service.createGrant(grantInput(), {
+        idempotencyKey: `idem-c3-revoke-${index}-00000001`,
+      }),
+      (error) => error.code === "FORBIDDEN" && error.status === 403,
+      name,
+    );
+    assert.equal(counts.prepare, 1, `${name}: blacklist 预读发生`);
+    assert.equal(counts.evaluate, 0, `${name}: 权限已失败，不进入黑名单判决`);
+    assert.equal(counts.transact, 1, `${name}: 事务内权限复核必须发生`);
+    const after = await snapshot(store);
+    for (const collection of CORE) {
+      assert.deepEqual(after[collection], before[collection], `${name}: ${collection} 零写入`);
+    }
+    assert.deepEqual(after.admin_audit, before.admin_audit, `${name}: 审计零写入`);
+    assert.equal(after.eligibility_guards.length, 0, `${name}: guard 零写入`);
+  }
+});
+
+test("C3 权限仍有效时 person/identity 预读错误保持冻结映射", async (t) => {
+  const cases = [
+    ["person 缺失", deletePersonIn, "NOT_FOUND", 404],
+    ["identity 缺失", deleteIdentityIn, "NOT_FOUND", 404],
+    ["identity 冲突", conflictIdentityIn, "IDENTITY_CONFLICT", 409],
+  ];
+  for (const [index, [name, mutate, code, status]] of cases.entries()) {
+    const { store, blacklist, service } = await setup(t);
+    const before = await snapshot(store);
+    const counts = instrument(blacklist, store);
+    mutateOnPrepare(blacklist, () => mutate(store));
+    await assert.rejects(
+      () => service.createGrant(grantInput(), {
+        idempotencyKey: `idem-c3-valid-${index}-00000001`,
+      }),
+      (error) => error.code === code && error.status === status,
+      name,
+    );
+    assert.equal(counts.transact, 1, `${name}: 仍走同一次授权事务`);
+    assert.equal(counts.evaluate, 0, `${name}: 预读错误不进入黑名单判决`);
+    const after = await snapshot(store);
+    for (const collection of CORE) {
+      assert.deepEqual(after[collection], before[collection], `${name}: ${collection} 零写入`);
+    }
+    assert.equal(after.eligibility_guards.length, 0, `${name}: guard 零写入`);
+  }
+});
+
+test("C3 operation 损坏与资格预读错误并存：operation 错误优先", async (t) => {
+  const { store, blacklist, service } = await setup(t);
+  const input = grantInput();
+  const key = "idem-c3-op-priority-01";
+  await service.createGrant(input, { idempotencyKey: key });
+
+  store.data.operation_keys[0].requestDigest = "corrupt-digest";
+  const before = await snapshot(store);
+  const counts = instrument(blacklist, store);
+  mutateOnPrepare(blacklist, () => deletePersonIn(store));
+
+  await assert.rejects(
+    () => service.createGrant(input, { idempotencyKey: key }),
+    (error) => error.code === "CONFLICT" && error.status === 409,
+  );
+  assert.equal(counts.prepare, 1);
+  assert.equal(counts.transact, 1, "operation 复核仍在同一次事务内");
+  assert.equal(counts.evaluate, 0);
+  const after = await snapshot(store);
+  for (const collection of CORE) {
+    assert.deepEqual(after[collection], before[collection], `${collection} 零新增`);
+  }
+  assert.deepEqual(after.eligibility_guards, before.eligibility_guards);
+});

@@ -88,12 +88,14 @@ function instrument(service, store) {
 let sequence = 0;
 async function probe(service, {
   personId = "person-1", identityApplicationId = "id-1", prepareAttempt = undefined,
-  deferBlocked = undefined, beforeBuild = null, counts = null, extraRefs = [],
+  deferBlocked = undefined, deferPrepareError = undefined, beforeBuild = null,
+  counts = null, extraRefs = [],
 } = {}) {
   const claimId = `hook-claim-${sequence++}`;
   const options = {};
   if (prepareAttempt !== undefined) options.prepareAttempt = prepareAttempt;
   if (deferBlocked !== undefined) options.deferBlocked = deferBlocked;
+  if (deferPrepareError !== undefined) options.deferPrepareError = deferPrepareError;
   return service.withEligibility(
     { personId, occupancyId: `occupancy-${personId}`, identityApplicationId },
     [ref("unique_claims", claimId), ...extraRefs],
@@ -355,4 +357,47 @@ test("C2 a no-op hook keeps guard and decision side effects identical to no hook
   assert.equal((await store.list("blacklist_decisions", ORG)).length, 0);
   assert.equal((await store.list("unique_claims", ORG)).length, 2);
   assert.equal((await store.list("admin_audit")).length, 3);
+});
+
+test("C2 prepare errors stay pre-transaction unless deferPrepareError is requested", async (t) => {
+  const { store, service } = await setup(t);
+  store.data.persons = store.data.persons.filter((row) => row._id !== "person-1");
+  const counts = instrument(service, store);
+
+  await assert.rejects(
+    probe(service, { counts }),
+    (error) => error.code === "NOT_FOUND" && error.status === 404,
+  );
+  await assert.rejects(
+    probe(service, {
+      counts,
+      prepareAttempt: async () => ({ refs: [], beforeEvaluate: () => null }),
+    }),
+    (error) => error.code === "NOT_FOUND" && error.status === 404,
+  );
+  assert.deepEqual(counts, { prepare: 2, evaluate: 0, transact: 0, build: 0 });
+});
+
+test("C2 deferPrepareError runs beforeEvaluate once, then rethrows the prepare error", async (t) => {
+  const { store, service } = await setup(t);
+  store.data.persons = store.data.persons.filter((row) => row._id !== "person-1");
+  const counts = instrument(service, store);
+  const order = [];
+  await assert.rejects(
+    probe(service, {
+      counts,
+      deferPrepareError: true,
+      prepareAttempt: async (token) => {
+        assert.equal(token, null, "prepare 失败时 hook 显式收到 null token");
+        return {
+          refs: [],
+          beforeEvaluate: () => { order.push("before"); return null; },
+        };
+      },
+      beforeBuild: () => { order.push("build"); },
+    }),
+    (error) => error.code === "NOT_FOUND" && error.status === 404,
+  );
+  assert.deepEqual(order, ["before"]);
+  assert.deepEqual(counts, { prepare: 1, evaluate: 0, transact: 1, build: 0 });
 });

@@ -188,6 +188,14 @@ export class LocalStore {
       orgId ? rows.filter((r) => r.orgId === orgId) : rows,
     );
   }
+  // 最小按组织 + ID 点查：与 CloudStore.get 同契约，避免为一条资格/凭证记录
+  // 扫描整个集合；跨组织与缺失同样返回 null。
+  async get(name, id, orgId = null) {
+    const row = (this.data[name] || []).find((r) => r._id === id);
+    if (!row) return null;
+    if (orgId && row.orgId !== orgId) return null;
+    return structuredClone(row);
+  }
   async transact(refs, build, audit) {
     const task = this.queue.then(async () => {
       const next = structuredClone(this.data);
@@ -286,6 +294,27 @@ export class CloudStore {
         throw new HttpError(503, "集合超出本期查询容量，请升级服务端分页查询");
     }
     return result;
+  }
+  /**
+   * 最小按组织 + ID 点查。查询条件 `{_id, orgId}` 由数据库服务端执行，
+   * 不使用 list 的全组织分页，因此目标记录存在时不会受 20,000 行容量拒绝影响。
+   * 缺失与跨组织同态返回 null；SDK/查询故障仍以 503 区分。
+   */
+  async get(name, id, orgId = null) {
+    if (!collections.includes(name)) throw Error("Invalid collection");
+    if (typeof id !== "string" || !id) throw Error("Invalid record id");
+    const where = orgId ? { _id: id, orgId } : { _id: id };
+    let r;
+    try {
+      r = await this.db.collection(name).where(where).limit(1).get();
+    } catch {
+      throw new HttpError(503, "云数据库查询失败");
+    }
+    if (r?.code || !Array.isArray(r?.data))
+      throw new HttpError(503, "云数据库查询失败");
+    const row = r.data[0];
+    if (!row || row._id !== id || (orgId && row.orgId !== orgId)) return null;
+    return row;
   }
   async transact(refs, build, audit) {
     const unique = [

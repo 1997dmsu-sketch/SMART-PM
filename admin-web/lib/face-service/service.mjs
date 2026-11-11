@@ -37,8 +37,15 @@ import {
   publicJobResult,
   publicReviewItem,
 } from "./dto.mjs";
+import { snapshotEligibility, validateEligibility } from "./eligibility.mjs";
+import { prepareGrantEligibility } from "./qualification.mjs";
 
 const ref = (collection, id) => ({ collection, id });
+// 预读业务错配必须延迟到事务内权限/operation/credential 检查之后，保持 §6.3
+// 的错误优先级；PARAM_ERROR/容量上限仍按 helper 契约在事务前失败关闭。
+const DEFERRED_PRE_READ_CODES = new Set([
+  "NOT_FOUND", "REVISION_CONFLICT", "SPONSOR_INACTIVE", "IDENTITY_CONFLICT",
+]);
 const classificationRevision = (record) => (Number.isInteger(record?.revision) ? record.revision + 1 : 1);
 const stable = (value) => (Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable(value[k])])) : value);
 const digestOf = (value) => createHash("sha256").update(JSON.stringify(stable(value))).digest("hex");
@@ -55,8 +62,12 @@ export class FaceCredentialService {
   }
 
   async #membership() {
-    const rows = await this.store.list("org_memberships", this.orgId);
-    const membership = rows.find((m) => m._id === this.actor.membershipId);
+    if (typeof this.actor.membershipId !== "string" || !this.actor.membershipId) {
+      failCode("FORBIDDEN", "组织成员关系已失效或权限不足", 403);
+    }
+    const membership = await this.store.get(
+      "org_memberships", this.actor.membershipId, this.orgId,
+    );
     if (!membership || membership.orgId !== this.orgId || membership.status !== "active") {
       failCode("FORBIDDEN", "组织成员关系已失效或权限不足", 403);
     }
@@ -76,7 +87,8 @@ export class FaceCredentialService {
   }
 
   async #find(collection, id) {
-    return (await this.store.list(collection, this.orgId)).find((row) => row._id === id) || null;
+    if (typeof id !== "string" || !id) return null;
+    return this.store.get(collection, id, this.orgId);
   }
 
   async #opContext(route, idempotencyKey) {
@@ -113,6 +125,51 @@ export class FaceCredentialService {
     return applyOperationKeyDomain(state, {
       realm: op.config.realm, version: op.config.version, fingerprint: op.fingerprint, now,
     });
+  }
+
+  /**
+   * 事务内 §6.3 第 1 步 a–c：权限、operation/K2、credential/file。
+   * 只读检查；合法 replay 仅记录结果，不提前返回。
+   */
+  #grantScopePre(state, { op, parsed, credential, requestDigest, expected }) {
+    const org = state[`organizations/${this.orgId}`];
+    const membership = state[`org_memberships/${this.actor.membershipId}`];
+    if (!org || org.status !== "active" || !membership || membership.orgId !== this.orgId ||
+        membership.status !== "active" ||
+        !(membership.permissions || []).includes("device.access.manage")) {
+      failCode("FORBIDDEN", "当前成员无权创建门禁授权", 403);
+    }
+    // 计算但不提交 H2-a domain writes；K2 记录损坏/换钥仍按既有错误失败关闭。
+    const domainWrites = this.#opDomainWrites(state, op, this.now());
+    const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${op.opKey}`];
+    const replayResult = existing
+      ? this.#replayValid(existing, op, requestDigest, expected)
+      : null;
+
+    const current = state[`${COLLECTIONS.FACE_CREDENTIALS}/${parsed.credentialId}`];
+    if (!current || current.orgId !== this.orgId) failCode("NOT_FOUND", "凭证不存在或不可见", 404);
+    if (current.reviewState !== REVIEW_STATE.APPROVED) {
+      failCode("INVALID_STATE", "凭证尚未审核通过", 409);
+    }
+    if (current.revision !== parsed.expectedCredentialRevision) {
+      failCode("REVISION_CONFLICT", "凭证已被修改，请刷新后重试", 409);
+    }
+    if (current.personId !== credential.personId) {
+      failCode("REVISION_CONFLICT", "凭证人员已变化，请刷新后重试", 409);
+    }
+    this.files.assertBinding(state, {
+      fileId: current.sourceFileId, revision: current.sourceFileRevision,
+    });
+    return { domainWrites, replayResult, credential: current };
+  }
+
+  /** 事务内 §6.3 第 1 步 d：C1 helper 的完整只读资格复核。 */
+  #grantQualificationPre(state, request) {
+    const verdict = validateEligibility(
+      snapshotEligibility(state, request), request, this.now(),
+    );
+    if (!verdict.eligible) failCode(verdict.code, verdict.message, verdict.status);
+    return verdict;
   }
 
   // 1. 提交：只建 credential（人员 + 人脸来源 + 审核/图片状态）。
@@ -238,7 +295,7 @@ export class FaceCredentialService {
     return rows.filter((row) => row.reviewState === REVIEW_STATE.SUBMITTED).map(publicReviewItem);
   }
 
-  // 3. 创建授权（H2-b：device/domain/claim 只读复核 + slot 新占用）。
+  // 3. 创建授权（H2-c：完整资格 → 真实黑名单 → H2-b → 核心写集）。
   async createGrant(input, { idempotencyKey } = {}) {
     await this.#require("device.access.manage");
     const parsed = assertCreateGrantInput(input);
@@ -246,25 +303,25 @@ export class FaceCredentialService {
     const { opKey } = op;
     const requestDigest = digestOf(parsed);
 
+    // 只读预读用于生成 refs 与当次基线；是否放行由事务内 beforeEvaluate 决定。
     const credential = await this.#find(COLLECTIONS.FACE_CREDENTIALS, parsed.credentialId);
     if (!credential) failCode("NOT_FOUND", "凭证不存在或不可见", 404);
+    // 设备预读不再提前判定 H2-b；资格/黑名单错误必须先于设备错误。
     const device = await this.#find("access_devices", parsed.deviceId);
-    if (!device || device.orgId !== this.orgId) failCode("NOT_FOUND", "设备不存在或不可见", 404);
-    try {
-      validateAccessDeviceRecord(device);
-    } catch {
-      failCode("DEVICE_CLAIM_INVALID", "设备缺少有效的 owner claim 绑定", 409);
-    }
-    if (device.status !== "active" || device.capabilities?.face !== true) {
-      failCode("INVALID_STATE", "设备不可用或未启用人脸能力", 409);
-    }
-    if (device.ownerOrgId !== this.orgId) failCode("DEVICE_CLAIM_CONFLICT", "设备归属冲突", 409);
-
-    const claimId = device.claimId;
-    const k1HeadId = deviceDigestDomainKey({ provider: device.provider, digestRealm: device.digestRealm });
-    const k1VersionId = deviceDigestDomainVersionKey({
-      provider: device.provider, digestRealm: device.digestRealm, version: device.keyVersion,
-    });
+    const claimId = typeof device?.claimId === "string" && device.claimId ? device.claimId : null;
+    // provider/digestRealm/keyVersion 任一非法时不推导 K1 key，避免在资格/黑名单
+    // 之前抛 schema 错误；设备记录自身的问题统一留给事务内 H2-b 复核。
+    const domainKeys = device &&
+        typeof device.provider === "string" && device.provider &&
+        typeof device.digestRealm === "string" && device.digestRealm &&
+        Number.isSafeInteger(device.keyVersion) && device.keyVersion >= 1
+      ? {
+        headId: deviceDigestDomainKey({ provider: device.provider, digestRealm: device.digestRealm }),
+        versionId: deviceDigestDomainVersionKey({
+          provider: device.provider, digestRealm: device.digestRealm, version: device.keyVersion,
+        }),
+      }
+      : null;
     const slotId = grantSlotKey({
       orgId: this.orgId, personId: credential.personId,
       deviceId: parsed.deviceId, cycleId: parsed.cycleId,
@@ -273,6 +330,24 @@ export class FaceCredentialService {
     const jobId = `job-${digestOf(opKey + ":enroll").slice(0, 24)}`;
     const logId = deterministicLogId(jobId, "queued");
     const expected = { grantId, jobId, evidenceScope: "simulated" };
+    const baseRefs = [
+      ref(COLLECTIONS.FACE_CREDENTIALS, parsed.credentialId),
+      ref("file_assets", credential.sourceFileId),
+      ref("organizations", this.orgId),
+      ref("org_memberships", this.actor.membershipId),
+      ref("access_devices", parsed.deviceId),
+      ...(claimId ? [ref(COLLECTIONS.DEVICE_CLAIMS, claimId)] : []),
+      ...(domainKeys ? [
+        ref(COLLECTIONS.DEVICE_DIGEST_DOMAINS, domainKeys.headId),
+        ref(COLLECTIONS.DEVICE_DIGEST_DOMAINS, domainKeys.versionId),
+      ] : []),
+      ref(COLLECTIONS.GRANT_SLOT_CLAIMS, slotId),
+      ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId),
+      ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId),
+      ref(COLLECTIONS.DEVICE_OPERATION_LOGS, logId),
+      ref(COLLECTIONS.OPERATION_KEYS, opKey),
+      ...this.#opDomainRefs(op),
+    ];
     let result = null;
 
     await this.blacklist.withEligibility(
@@ -282,33 +357,10 @@ export class FaceCredentialService {
         identityApplicationId: parsed.identityApplicationId,
         restriction: "occupancy.activate",
       },
-      [
-        ref(COLLECTIONS.FACE_CREDENTIALS, parsed.credentialId),
-        ref("file_assets", credential.sourceFileId),
-        ref("organizations", this.orgId),
-        ref("org_memberships", this.actor.membershipId),
-        ref("access_devices", parsed.deviceId),
-        ref(COLLECTIONS.DEVICE_CLAIMS, claimId),
-        ref(COLLECTIONS.DEVICE_DIGEST_DOMAINS, k1HeadId),
-        ref(COLLECTIONS.DEVICE_DIGEST_DOMAINS, k1VersionId),
-        ref(COLLECTIONS.GRANT_SLOT_CLAIMS, slotId),
-        ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId),
-        ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId),
-        ref(COLLECTIONS.DEVICE_OPERATION_LOGS, logId),
-        ref(COLLECTIONS.OPERATION_KEYS, opKey),
-        ...this.#opDomainRefs(op),
-      ],
-      (state, eligibility) => {
-        const org = state[`organizations/${this.orgId}`];
-        const membership = state[`org_memberships/${this.actor.membershipId}`];
-        if (!org || org.status !== "active" || !membership || membership.status !== "active" ||
-            !(membership.permissions || []).includes("device.access.manage")) {
-          failCode("FORBIDDEN", "当前成员无权创建门禁授权", 403);
-        }
-        const domainWrites = this.#opDomainWrites(state, op, this.now());
-        const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${opKey}`];
-        if (existing) {
-          result = this.#replayValid(existing, op, requestDigest, expected);
+      baseRefs,
+      (state, eligibility, pre) => {
+        if (pre.replayResult !== null) {
+          result = pre.replayResult;
           return { writes: [], result };
         }
         if (!eligibility?.eligible) {
@@ -316,17 +368,7 @@ export class FaceCredentialService {
           failCode(code, "资格不满足，无法创建门禁授权", code === "BLACKLIST_DENIED" ? 403 : 409);
         }
 
-        const current = state[`${COLLECTIONS.FACE_CREDENTIALS}/${parsed.credentialId}`];
-        if (!current || current.orgId !== this.orgId) failCode("NOT_FOUND", "凭证不存在或不可见", 404);
-        if (current.reviewState !== REVIEW_STATE.APPROVED) failCode("INVALID_STATE", "凭证尚未审核通过", 409);
-        if (current.revision !== parsed.expectedCredentialRevision) {
-          failCode("REVISION_CONFLICT", "凭证已被修改，请刷新后重试", 409);
-        }
-        if (current.personId !== credential.personId) {
-          failCode("REVISION_CONFLICT", "凭证人员已变化，请刷新后重试", 409);
-        }
-        this.files.assertBinding(state, { fileId: current.sourceFileId, revision: current.sourceFileRevision });
-
+        // §6.3 第 3 步：H2-b device/K1/owner claim/slot 只读复核。
         const dev = state[`access_devices/${parsed.deviceId}`];
         if (!dev || dev.orgId !== this.orgId) failCode("NOT_FOUND", "设备不存在或不可见", 404);
         try {
@@ -334,6 +376,7 @@ export class FaceCredentialService {
         } catch {
           failCode("DEVICE_CLAIM_INVALID", "设备缺少有效的 owner claim 绑定", 409);
         }
+        if (!device) failCode("NOT_FOUND", "设备不存在或不可见", 404);
         const sameSnapshot =
           dev.revision === device.revision && dev.claimId === device.claimId &&
           dev.ownerOrgId === device.ownerOrgId && dev.provider === device.provider &&
@@ -346,9 +389,12 @@ export class FaceCredentialService {
         if (dev.status !== "active" || dev.capabilities?.face !== true) {
           failCode("INVALID_STATE", "设备不可用或未启用人脸能力", 409);
         }
+        if (!claimId || !domainKeys) {
+          failCode("DEVICE_CLAIM_INVALID", "设备缺少有效的 owner claim 绑定", 409);
+        }
 
-        const head = state[`${COLLECTIONS.DEVICE_DIGEST_DOMAINS}/${k1HeadId}`];
-        const versionRecord = state[`${COLLECTIONS.DEVICE_DIGEST_DOMAINS}/${k1VersionId}`];
+        const head = state[`${COLLECTIONS.DEVICE_DIGEST_DOMAINS}/${domainKeys.headId}`];
+        const versionRecord = state[`${COLLECTIONS.DEVICE_DIGEST_DOMAINS}/${domainKeys.versionId}`];
         const domainMatch = digestDomainMatchesDevice(head, versionRecord, {
           provider: dev.provider, digestRealm: dev.digestRealm, keyVersion: dev.keyVersion,
         });
@@ -371,9 +417,10 @@ export class FaceCredentialService {
         if (slot) failCode("GRANT_SLOT_CONFLICT", "授权槽位冲突", 409);
 
         const now = this.now();
+        const personId = pre.credential.personId;
         const grantRecord = {
           orgId: this.orgId, revision: 1, credentialId: parsed.credentialId,
-          personId: current.personId, deviceId: parsed.deviceId,
+          personId, deviceId: parsed.deviceId,
           occupancyId: parsed.occupancyId, cycleId: parsed.cycleId,
           claimId, slotId,
           state: GRANT_STATE.PENDING, evidenceScope: "simulated",
@@ -393,13 +440,13 @@ export class FaceCredentialService {
 
         return {
           writes: [
-            ...domainWrites,
+            ...pre.domainWrites,
             { collection: COLLECTIONS.DEVICE_ACCESS_GRANTS, id: grantId, data: grantRecord },
             { collection: COLLECTIONS.DEVICE_OPERATION_JOBS, id: jobId, data: job },
             {
               collection: COLLECTIONS.GRANT_SLOT_CLAIMS, id: slotId,
               data: {
-                orgId: this.orgId, personId: current.personId, deviceId: parsed.deviceId,
+                orgId: this.orgId, personId, deviceId: parsed.deviceId,
                 cycleId: parsed.cycleId, activeClaimId: grantId, state: "active",
                 revision: 1, createdAt: now, updatedAt: now, activatedAt: now,
               },
@@ -423,6 +470,42 @@ export class FaceCredentialService {
         };
       },
       this.#audit("创建门禁授权"),
+      {
+        // C2 钩子：每次 attempt 重新预读资格基线；事务内先做权限/operation/
+        // credential/file/资格，再交给真实 evaluateEligibility 判决。
+        prepareAttempt: async () => {
+          let planned = null;
+          let deferredError = null;
+          try {
+            planned = await prepareGrantEligibility(this.store, {
+              orgId: this.orgId,
+              personId: credential.personId,
+              occupancyId: parsed.occupancyId,
+              cycleId: parsed.cycleId,
+              identityApplicationId: parsed.identityApplicationId,
+              validFrom: parsed.validFrom,
+              validUntil: parsed.validUntil,
+              baseRefs,
+            });
+          } catch (error) {
+            if (!DEFERRED_PRE_READ_CODES.has(error?.code)) throw error;
+            deferredError = error;
+          }
+          return {
+            refs: planned?.refs ?? [],
+            beforeEvaluate: (state) => {
+              const scope = this.#grantScopePre(state, {
+                op, parsed, credential, requestDigest, expected,
+              });
+              if (deferredError) throw deferredError;
+              return {
+                ...scope,
+                qualification: this.#grantQualificationPre(state, planned.request),
+              };
+            },
+          };
+        },
+      },
     );
 
     return result;

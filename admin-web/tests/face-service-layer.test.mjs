@@ -1,4 +1,4 @@
-﻿import { makeAccessDeviceFixture, makeDigestDomainFixture, makeOwnerClaimFixture } from "./helpers/face-fixtures.mjs";
+import { makeAccessDeviceFixture, makeDigestDomainFixture, makeOwnerClaimFixture } from "./helpers/face-fixtures.mjs";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -9,6 +9,7 @@ import { LocalStore } from "../lib/store.mjs";
 import { FileService } from "../lib/files.mjs";
 import { MockFaceAccessProvider } from "../lib/face-service/index.mjs";
 import { FaceCredentialService } from "../lib/face-service/service.mjs";
+import { occupancyClaimId, primarySlotId } from "../lib/face-service/eligibility.mjs";
 import { deviceClaimKey, deviceClaimConfig, deviceDigestDomainKey, deviceDigestDomainVersionKey, operationKey, operationKeyConfig } from "../lib/face-service/collections.mjs";
 
 let store, dir;
@@ -18,11 +19,23 @@ const ref = (collection, id) => ({ collection, id });
 let eligible = { eligible: true, entryIds: [], decisionId: null };
 let shared = null;
 
+const GRANT_FROM = 1_699_999_999_000;
+const GRANT_UNTIL = 1_700_000_001_000;
+const QUAL_START = 1_600_000_000_000;
+const QUAL_END = 1_800_000_000_000;
+// credentialId -> 该凭证的完整资格 fixture；H2-b 用例仍只验证设备/ID/slot 契约。
+const qualifications = new Map();
+
 const blacklist = {
-  withEligibility: async (request, refs, build) => {
+  withEligibility: async (request, refs, build, _audit, options = {}) => {
+    const prepared = options.prepareAttempt
+      ? await options.prepareAttempt({ personId: request.personId })
+      : null;
+    const merged = [...refs, ...(prepared?.refs ?? [])];
     let result;
-    await store.transact(refs, async (state) => {
-      const built = await build(state, eligible);
+    await store.transact(merged, async (state) => {
+      const pre = prepared ? await prepared.beforeEvaluate(state, {}) : null;
+      const built = await build(state, eligible, pre);
       result = built.result;
       return built.writes;
     }, audit);
@@ -59,7 +72,79 @@ const counts = async () => {
   };
 };
 
-async function approvedCredential(suffix) {
+async function seedQualification(suffix, cycleId) {
+  const personId = `person-${suffix}`;
+  const identityApplicationId = `id-${suffix}`;
+  const occupancyId = `occ-${suffix}`;
+  const roomId = `room-${suffix}`;
+  const floorId = `floor-${suffix}`;
+  const buildingId = `building-${suffix}`;
+  const communityId = `community-${suffix}`;
+  const writes = [
+    {
+      collection: "persons", id: personId,
+      data: { orgId, status: "active", userId: null, revision: 1 },
+    },
+    {
+      collection: "identity_applications", id: identityApplicationId,
+      data: {
+        orgId, personId, state: "approved",
+        identityDigest: `digest-${suffix}`, keyVersion: 1, revision: 1,
+      },
+    },
+    {
+      collection: "occupancies", id: occupancyId,
+      data: {
+        orgId, personId, roomId, cycleId, role: "primary", state: "active",
+        startsAt: QUAL_START, endsAt: QUAL_END, sponsorOccupancyId: null, revision: 1,
+      },
+    },
+    {
+      collection: "occupancy_cycles", id: cycleId,
+      data: {
+        orgId, roomId, state: "active", primaryOccupancyId: occupancyId,
+        startsAt: QUAL_START, endsAt: QUAL_END, endedAt: null, epoch: 1, revision: 1,
+      },
+    },
+    {
+      collection: "rooms", id: roomId,
+      data: {
+        orgId, status: "active", floorId, buildingId, communityId, revision: 1,
+      },
+    },
+    {
+      collection: "property_catalog", id: floorId,
+      data: {
+        orgId, kind: "floor", status: "active", parentId: buildingId, revision: 1,
+      },
+    },
+    {
+      collection: "property_catalog", id: buildingId,
+      data: {
+        orgId, kind: "building", status: "active", parentId: communityId, revision: 1,
+      },
+    },
+    {
+      collection: "property_catalog", id: communityId,
+      data: { orgId, kind: "community", status: "active", revision: 1 },
+    },
+    {
+      collection: "unique_claims", id: occupancyClaimId(orgId, roomId, cycleId, personId),
+      data: { orgId, state: "bound", ownerId: occupancyId, revision: 1 },
+    },
+    {
+      collection: "room_primary_slots", id: primarySlotId(orgId, roomId),
+      data: {
+        orgId, currentCycleId: cycleId, currentOccupancyId: occupancyId,
+        currentPersonId: personId, revision: 1,
+      },
+    },
+  ];
+  await store.transact(writes.map((w) => ref(w.collection, w.id)), () => writes, audit);
+  return { personId, identityApplicationId, occupancyId, cycleId };
+}
+
+async function approvedCredential(suffix, { cycleId = "cycle-1" } = {}) {
   const out = await service("mem-submit").submit(
     { personId: `person-${suffix}`, sourceFileId: "file-1" },
     { idempotencyKey: `idem-sub-${suffix}-00000001` },
@@ -69,19 +154,24 @@ async function approvedCredential(suffix) {
     { decision: "approved", expectedRevision: 1 },
     { idempotencyKey: `idem-rev-${suffix}-00000001` },
   );
+  qualifications.set(out.credentialId, await seedQualification(suffix, cycleId));
   return out.credentialId;
 }
 
-const grantInput = (credentialId) => ({
-  credentialId,
-  expectedCredentialRevision: 2,
-  deviceId: "device-1",
-  occupancyId: "occ-1",
-  cycleId: "cycle-1",
-  identityApplicationId: "id-1",
-  validFrom: 1000,
-  validUntil: 2000,
-});
+const grantInput = (credentialId) => {
+  const qualification = qualifications.get(credentialId);
+  if (!qualification) throw Error(`缺少资格 fixture: ${credentialId}`);
+  return {
+    credentialId,
+    expectedCredentialRevision: 2,
+    deviceId: "device-1",
+    occupancyId: qualification.occupancyId,
+    cycleId: qualification.cycleId,
+    identityApplicationId: qualification.identityApplicationId,
+    validFrom: GRANT_FROM,
+    validUntil: GRANT_UNTIL,
+  };
+};
 
 before(async () => {
   process.env.DEVICE_CLAIM_HMAC_KEY_B64 = Buffer.alloc(32, 7).toString("base64");
@@ -365,8 +455,8 @@ test("换钥后授权失败关闭且业务集合零变化", async () => {
 });
 
 test("同设备不同住户不同 slot 均成功，owner claim 内容不变", async () => {
-  const p1 = await approvedCredential("h");
-  const p2 = await approvedCredential("i");
+  const p1 = await approvedCredential("h", { cycleId: "cycle-h1" });
+  const p2 = await approvedCredential("i", { cycleId: "cycle-h2" });
   const claimsBefore = structuredClone(await store.list("device_claims"));
   const first = await service("mem-manage").createGrant(
     { ...grantInput(p1), deviceId: "device-3", cycleId: "cycle-h1" },
@@ -381,7 +471,7 @@ test("同设备不同住户不同 slot 均成功，owner claim 内容不变", as
 });
 
 test("同 person/device/cycle 第二次请求 → GRANT_SLOT_CONFLICT 零写入", async () => {
-  const credentialId = await approvedCredential("j");
+  const credentialId = await approvedCredential("j", { cycleId: "cycle-j1" });
   const input = { ...grantInput(credentialId), deviceId: "device-2", cycleId: "cycle-j1" };
   await service("mem-manage").createGrant(input, { idempotencyKey: "idem-grant-j-0000001" });
   const before = await counts();
@@ -393,7 +483,7 @@ test("同 person/device/cycle 第二次请求 → GRANT_SLOT_CONFLICT 零写入"
 });
 
 test("released slot 也不得复用", async () => {
-  const credentialId = await approvedCredential("k");
+  const credentialId = await approvedCredential("k", { cycleId: "cycle-k1" });
   const input = { ...grantInput(credentialId), deviceId: "device-2", cycleId: "cycle-k1" };
   const created = await service("mem-manage").createGrant(input, { idempotencyKey: "idem-grant-k-0000001" });
   const grant = (await store.list("device_access_grants", orgId)).find((g) => g._id === created.grantId);
@@ -411,7 +501,7 @@ test("released slot 也不得复用", async () => {
 });
 
 test("owner claim released / 绑定不一致 → DEVICE_CLAIM_INVALID", async () => {
-  const credentialId = await approvedCredential("l");
+  const credentialId = await approvedCredential("l", { cycleId: "cycle-l1" });
   const claimId = "claim-device-4";
   const original = structuredClone((await store.list("device_claims")).find((c) => c._id === claimId));
   const released = {
@@ -466,9 +556,9 @@ const businessSnapshot = async () => structuredClone({
 
 const withPreMutation = async (mutate, fn) => {
   const original = blacklist.withEligibility;
-  blacklist.withEligibility = async (request, refs, build) => {
+  blacklist.withEligibility = async (...args) => {
     await mutate();
-    return original(request, refs, build);
+    return original(...args);
   };
   try {
     return await fn();
@@ -478,7 +568,7 @@ const withPreMutation = async (mutate, fn) => {
 };
 
 test("personId 预读后变化 → REVISION_CONFLICT 且零写入", async () => {
-  const credentialId = await approvedCredential("m");
+  const credentialId = await approvedCredential("m", { cycleId: "cycle-m1" });
   const manager = service("mem-manage");
   const original = structuredClone((await store.list("face_credentials", orgId)).find((c) => c._id === credentialId));
   const before = await businessSnapshot();
@@ -498,7 +588,7 @@ test("personId 预读后变化 → REVISION_CONFLICT 且零写入", async () => 
 });
 
 test("device revision/claimId 事务前变化 → DEVICE_CLAIM_INVALID 且零写入", async () => {
-  const credentialId = await approvedCredential("n1");
+  const credentialId = await approvedCredential("n1", { cycleId: "cycle-n1" });
   const manager = service("mem-manage");
   const original = structuredClone((await store.list("access_devices")).find((d) => d._id === "device-3"));
   for (const patch of [{ revision: 2 }, { claimId: "claim-missing" }]) {
@@ -519,7 +609,7 @@ test("device revision/claimId 事务前变化 → DEVICE_CLAIM_INVALID 且零写
 });
 
 test("K1 domain 损坏 → DOMAIN_INCOMPLETE；配置不一致 → DEVICE_DIGEST_CONFIG_CHANGED", async () => {
-  const credentialId = await approvedCredential("n2");
+  const credentialId = await approvedCredential("n2", { cycleId: "cycle-n2" });
   const manager = service("mem-manage");
   const headId = deviceDigestDomainKey({ provider: "hikvision", digestRealm: "test-realm" });
   const versionId = deviceDigestDomainVersionKey({ provider: "hikvision", digestRealm: "test-realm", version: 1 });
@@ -549,7 +639,7 @@ test("K1 domain 损坏 → DOMAIN_INCOMPLETE；配置不一致 → DEVICE_DIGEST
 });
 
 test("claim 缺失、结构损坏、绑定不一致 → DEVICE_CLAIM_INVALID 且零写入", async () => {
-  const credentialId = await approvedCredential("n3");
+  const credentialId = await approvedCredential("n3", { cycleId: "cycle-n3" });
   const manager = service("mem-manage");
   const deviceId = "device-5";
   const device = structuredClone((await store.list("access_devices")).find((d) => d._id === deviceId));
@@ -579,7 +669,7 @@ test("claim 缺失、结构损坏、绑定不一致 → DEVICE_CLAIM_INVALID 且
 });
 
 test("并发竞争同一 slot：仅一个成功，另一个 GRANT_SLOT_CONFLICT", async () => {
-  const credentialId = await approvedCredential("n4");
+  const credentialId = await approvedCredential("n4", { cycleId: "cycle-race" });
   const input = { ...grantInput(credentialId), deviceId: "device-3", cycleId: "cycle-race" };
   const manager = service("mem-manage");
   const before = await businessSnapshot();
@@ -600,7 +690,7 @@ test("并发竞争同一 slot：仅一个成功，另一个 GRANT_SLOT_CONFLICT"
 });
 
 test("K1 domain：head/version 缺失、内部矛盾、realm/version 不匹配", async () => {
-  const credentialId = await approvedCredential("q1");
+  const credentialId = await approvedCredential("q1", { cycleId: "cycle-q1" });
   const manager = service("mem-manage");
   const headId = deviceDigestDomainKey({ provider: "hikvision", digestRealm: "test-realm" });
   const versionId = deviceDigestDomainVersionKey({ provider: "hikvision", digestRealm: "test-realm", version: 1 });
@@ -641,7 +731,7 @@ test("K1 domain：head/version 缺失、内部矛盾、realm/version 不匹配",
 });
 
 test("device 其余冻结字段预读后变化 → 失败关闭", async () => {
-  const credentialId = await approvedCredential("q2");
+  const credentialId = await approvedCredential("q2", { cycleId: "cycle-q2" });
   const manager = service("mem-manage");
   const device = structuredClone((await store.list("access_devices")).find((d) => d._id === "device-5"));
   const cases = [
@@ -671,7 +761,7 @@ test("device 其余冻结字段预读后变化 → 失败关闭", async () => {
 });
 
 test("active/released slot 冲突：完整业务快照深比较", async () => {
-  const credentialId = await approvedCredential("q3");
+  const credentialId = await approvedCredential("q3", { cycleId: "cycle-q3" });
   const manager = service("mem-manage");
   const input = { ...grantInput(credentialId), deviceId: "device-3", cycleId: "cycle-q3" };
   const created = await manager.createGrant(input, { idempotencyKey: "idem-q3-00000011" });
@@ -697,7 +787,7 @@ test("active/released slot 冲突：完整业务快照深比较", async () => {
 });
 
 test("并发成功路径：job/log/op key、claimId 与 device/claim 内容一致", async () => {
-  const credentialId = await approvedCredential("q4");
+  const credentialId = await approvedCredential("q4", { cycleId: "cycle-q4" });
   const input = { ...grantInput(credentialId), deviceId: "device-3", cycleId: "cycle-q4" };
   const manager = service("mem-manage");
   const claimsBefore = structuredClone(await store.list("device_claims"));

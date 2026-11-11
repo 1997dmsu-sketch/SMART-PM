@@ -359,6 +359,14 @@ export class FaceCredentialService {
       },
       baseRefs,
       (state, eligibility, pre) => {
+        // C4 D75：适配器丢弃 prepareAttempt 时 build 不能以 TypeError 泄露，
+        // 必须按契约返回 ADAPTER_UNAVAILABLE/503；正常上下文形状也在此收紧。
+        if (!pre || typeof pre !== "object" || !pre.credential ||
+            !Array.isArray(pre.domainWrites) ||
+            !Object.hasOwn(pre, "replayResult") ||
+            (pre.replayResult !== null && typeof pre.replayResult !== "object")) {
+          failCode("ADAPTER_UNAVAILABLE", "资格准备上下文缺失或无效", 503);
+        }
         if (pre.replayResult !== null) {
           result = pre.replayResult;
           return { writes: [], result };
@@ -476,7 +484,10 @@ export class FaceCredentialService {
         deferPrepareError: true,
         // C2 钩子：每次 attempt 重新预读资格基线；事务内先做权限/operation/
         // credential/file/资格，再交给真实 evaluateEligibility 判决。
-        prepareAttempt: async () => {
+        // D75：以 token 对象身份绑定 prepareAttempt 与 beforeEvaluate；同一 attempt
+        // 的事务 callback 可被 SDK 重跑，跨 attempt 复用旧 hook 会收到新 token 并失败关闭。
+        prepareAttempt: async (token) => {
+          const boundToken = token;
           let planned = null;
           let deferredError = null;
           try {
@@ -496,10 +507,13 @@ export class FaceCredentialService {
           }
           return {
             refs: planned?.refs ?? [],
-            beforeEvaluate: (state) => {
+            beforeEvaluate: (state, currentToken) => {
               const scope = this.#grantScopePre(state, {
                 op, parsed, credential, requestDigest, expected,
               });
+              if (currentToken !== boundToken) {
+                failCode("ADAPTER_UNAVAILABLE", "资格准备上下文与当前 token 不一致", 503);
+              }
               if (deferredError) throw deferredError;
               return {
                 ...scope,

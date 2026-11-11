@@ -28,13 +28,15 @@ const qualifications = new Map();
 
 const blacklist = {
   withEligibility: async (request, refs, build, _audit, options = {}) => {
+    // D75：mock 也必须把同一个 token 对象传入 prepareAttempt 与 beforeEvaluate。
+    const token = { personId: request.personId };
     const prepared = options.prepareAttempt
-      ? await options.prepareAttempt({ personId: request.personId })
+      ? await options.prepareAttempt(token)
       : null;
     const merged = [...refs, ...(prepared?.refs ?? [])];
     let result;
     await store.transact(merged, async (state) => {
-      const pre = prepared ? await prepared.beforeEvaluate(state, {}) : null;
+      const pre = prepared ? await prepared.beforeEvaluate(state, token) : null;
       const built = await build(state, eligible, pre);
       result = built.result;
       return built.writes;

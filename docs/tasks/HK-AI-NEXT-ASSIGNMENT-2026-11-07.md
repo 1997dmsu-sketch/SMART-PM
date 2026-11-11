@@ -152,7 +152,23 @@ H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
 
 **复审记录：** `docs/tasks/HK-AI-04-H2C-C3-APPROVAL-32C891F-2026-11-11.md`
 
-基线为 `cfacfff`。C3 已把完整资格与真实名单接入 `createGrant()`，并关闭并发撤权错误优先级问题。现在可按冻结设计执行 C4 D01–D75；保持 Provider 调用 0、HTTP 未注册、设备未连接，C4 通过前不得宣称 H2-c 已关闭。
+基线为 `cfacfff`。C3 已把完整资格与真实名单接入 `createGrant()`，并关闭并发撤权错误优先级问题。后续 C4 D01–D75 已由 `feaa1e0` 完成并终审通过，H2-c 现已关闭；后续工作转入 H2-d 独立任务卡。
+
+## L. DeepSeek Harness：H2-d 全链回归与并发验收
+
+**优先级：P0**
+
+**状态：已发卡；H2-c C4 `feaa1e0` 终审通过。**
+
+**代码基线：** `feaa1e0`
+
+**任务卡：** `docs/tasks/HK-AI-04-H2D-INTEGRATION-ACCEPTANCE-TASK-2026-11-11.md`
+
+**复审记录：** `docs/tasks/HK-AI-04-H2C-C4-FINAL-APPROVAL-FEAA1E0-2026-11-11.md`
+
+只允许执行 H1 8 项恢复核对、H2 全链矩阵、20 次并发稳定性、敏感数据扫描与整体验收证据。发现生产缺陷必须停止并报告，不得在本卡混入生产修复。
+
+H2-d 通过前 H2 整体不关闭；H3/H4、HTTP、Provider 调用、设备写、main 合并与生产云操作继续关闭。
 
 ## K. Provider／安全专职 Agent：真实 Hikvision Provider 前置框架
 

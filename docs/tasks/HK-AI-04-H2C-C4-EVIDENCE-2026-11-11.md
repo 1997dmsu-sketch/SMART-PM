@@ -13,7 +13,7 @@
 | C4 生产定点修复 | `34580abfdd9b7a38fba6931327f5cfc8a7bd7094`（D75 适配器契约失败关闭，单独提交） |
 | C4 测试提交 | 本文所在提交（`test(face): H2-c C4 落实 D01–D75 场景矩阵`） |
 | 测试文件 | `admin-web/tests/face-grant-d-matrix.test.mjs` |
-| 运行环境 | Node.js `v24.19.0`，本地 `LocalStore`，不连接生产云 |
+| 运行环境 | Node.js `v24.21.0`，本地 `LocalStore`，不连接生产云 |
 
 C4 只增加场景测试与 D75 定点失败关闭修复；未修改 `server.mjs`、HTTP 注册、业务 Provider、设备连接/写入，未进入 H2-d/H3/H4，未合并 `main`。
 

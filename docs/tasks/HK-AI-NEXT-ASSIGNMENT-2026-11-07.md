@@ -142,10 +142,32 @@ C1/C2 不再扩大或改写。C3 尚未开始；须另发卡后才可按冻结�
 
 H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
 
+## J. DeepSeek Harness：H2-c C3 `createGrant()` 接线
+
+**优先级：P0**
+
+**状态：已发卡；只放行单一主实现代理执行 C3。**
+
+**任务卡：** `docs/tasks/HK-AI-04-H2C-C3-CREATEGRANT-TASK.md`
+
+基线为 `cfacfff`。只允许把已批准的 C1/C2 接入 `createGrant()`，使用真实 `BlacklistService`，保持 Provider 调用 0、HTTP 未注册、设备未连接。C4 可并行准备 fixture 和案例表，但 C3 通过前不得宣称 H2-c 已关闭。
+
+## K. Provider／安全专职 Agent：真实 Hikvision Provider 前置框架
+
+**优先级：P0**
+
+**状态：已发卡；只放行默认关闭框架与纯离线测试。**
+
+**任务卡：** `docs/tasks/HK-AI-06-HIKVISION-PROVIDER-PREFLIGHT-TASK-2026-11-11.md`
+
+允许准备 Provider 选择、内网代理契约、不透明 secret、双门禁、kill switch、脱敏观测与 fake transport 测试。禁止猜测端点、连接设备、启用设备写或改变白名单；真实端点实现必须等待 HK-AI-02 现场只读证据与再次复审。
+
 ## E. Workburry：HK-AI-05A 门禁管理页面演示门禁修复
 
 **优先级：P0**
+**状态：`2e8966b` 终审通过；仅批准 Mock 演示 UI。**
 **分支：** `feat/hk-face-admin`，基线 `708c3ab`，只允许追加提交。
 **任务卡：** `docs/tasks/HK-AI-05A-ADMIN-UI-REMEDIATION.md`
+**复审记录：** `docs/tasks/HK-AI-05A-UI-APPROVAL-2E8966B-2026-11-11.md`
 
-修复持续 Mock 边界、六类页面状态、权限提示、UNKNOWN_RESULT 人工对账与审计禁显位；只使用合成 fixture，不接 API、不修改后端、不连接设备。完成后更新独立截图目录并交 Codex 复审，通过前不得制作演示包或合并 main。
+持续 Mock 边界、六类页面状态、权限提示、UNKNOWN_RESULT 人工对账与审计禁显位已通过。页面仍不接 API、Provider 或真实设备；真实 API 接线须等待 HTTP 终审后另发卡。

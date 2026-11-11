@@ -62,7 +62,7 @@ const SCOPED = [
   "access_devices", "device_claims", "blacklist_entries", "blacklist_decisions",
   "eligibility_guards",
 ];
-const GLOBAL = ["organizations", "users", "device_digest_domains", "operation_key_domains", "admin_audit"];
+const GLOBAL = ["users", "device_digest_domains", "operation_key_domains", "admin_audit"];
 const ALL_COLLECTIONS = [...SCOPED, ...GLOBAL];
 
 const entryRecord = (id, overrides = {}) => ({

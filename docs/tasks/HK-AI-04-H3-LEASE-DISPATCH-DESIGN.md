@@ -5,7 +5,7 @@
 ## 当前证据
 
 - [任务卡](https://github.com/1997dmsu-sketch/SMART-PM/blob/f97489fb00ad605edf893653614a5707722a89da/docs/tasks/HK-AI-04-H3-LEASE-DISPATCH-DESIGN-TASK-2026-11-12.md) 和 [H2-d 最终批准](https://github.com/1997dmsu-sketch/SMART-PM/blob/f97489fb00ad605edf893653614a5707722a89da/docs/tasks/HK-AI-04-H2D-FINAL-APPROVAL-90CC848-2026-11-12.md) 将本轮限定为设计。
-- service 第 126–174 行按权限、K2 与重放、凭证及文件、资格复核处理。第 299–425 行规划 refs、使用真实名单并复核 device/K1/claim/slot。第 428–480 行同事务提交 grant、job、slot、queued 日志、operation key 及必要域写入，grant 为 pending，job 为 queued/test/mock/simulated，attempts 为 0，租约为 null。第 482–525 行每轮 prepare 绑定 token，合法重放返回原结果且零写。见 [service](../../admin-web/lib/face-service/service.mjs)。
+- service 第 126–174 行按权限、K2 与重放、凭证及文件、资格复核处理。第 299–425 行规划 refs、使用真实名单并复核 device/K1/claim/slot。第 428–480 行同事务提交 grant、job、slot、queued 日志、operation key 及必要域写入，grant 为 pending，job 为 queued/test/mock/simulated，attempts 为 0，租约为 null。第 482–525 行每轮 prepare 绑定 token，合法重放返回原结果且授权核心写集为空。见 [service](../../admin-web/lib/face-service/service.mjs)。
 - collections 第 55–97 行通用 validator 仅检查基本形状与枚举。第 395–408、447–467 行提供安全整数、确定性日志 ID 和 leasePatch，递增结果还需校验溢出。第 520–620 行校验设备、claim、slot 及域关系。见 [collections](../../admin-web/lib/face-service/collections.mjs)。
 - DTO 第 42–109 行定义 job 枚举、错误类、上下文和 enroll 六字段。现有 DTO 时间只要求有限数，H3 加强为安全整数。state 第 20–43 行定义 grant/job 边，第 64–115 行要求同一 org/device/grant/credential/job/action 的 succeeded job 和受信 device_ack/device/device_verified，同时业务授权有效，才投影 deviceEffective。见 [DTO](../../admin-web/lib/face-service/dto.mjs)、[状态机](../../admin-web/lib/face-service/state.mjs)。
 - Mock 第 26–63、135–183、192–203 行定义场景、调用记录与分类。缓存按 org/action/actorType/actorId/key 并核对规范输入摘要，同键异摘要冲突。calls 记录新操作的 action/jobId/orgId，明确 pre-send 失败也计调用且不缓存，未知及终态可能缓存 null。缓存为进程内 Map，重复调用和重启均须由平台控制。duplicate_callback、revoke_fail 属于其他路径，本设计仅 enroll。见 [Mock](../../admin-web/lib/face-service/mock-provider.mjs)。
@@ -32,13 +32,15 @@
 
 ## Q02 领取与 fencing
 
+现有 LocalStore/CloudStore 的 transact 即使返回空写集也追加 admin_audit，并对写入记录自动填 updatedAt。两者分别使用进程内队列和云事务，现有接口未提供 H3 所需的事务时钟与明确的提交确认契约。H3 须独立验证适配器能力后才能启用。对拒绝、过期候选失效和 CAS 失败，事务必须在构造写计划前退出或回滚，不能靠返回空写集实现零写。派发迁移要求 job 与确定性日志原子提交，且不能附带通用 audit 或隐式字段。若使用「同事务读取目标日志不存在后写入」实现 create-only，必须验证适配器也保护不存在的读引用。H2 保留其现有 audit 行为。见 [事务实现](../../admin-web/lib/store.mjs) 第 199–237、319–356 行。
+
 只有同 org 的合法 queued enroll/test/mock/simulated job 且 snapshot 绑定有效、到达 nextAttemptAt（初次为 null）、无活动租约才可领取。短事务 T1 点读 job/snapshot/目标日志，比较调用方 expectedRevision，执行 leasePatch，原子写 sending、attempts+1、revision+1、leaseGeneration+1、租约及日志。attempts 为领取次数，初始 0，范围 0–4。generation 初始 0，只在领取时递增。每个 worker 进程实例使用唯一不透明 owner，重启更换。fence 为 orgId/jobId/owner/generation/attempts 加当前期望 revision，后续 T2 生成的提交 revision 交给 T3。revision 对每次 job 写入递增。
 
-时间取可信存储侧 UTC 毫秒时钟，事务每轮重新采样，`now < leaseExpiresAt` 有效，等号已过期。提议固定租期 60 秒，Mock 等待上限 10 秒。T2 至少剩余 10 秒才可授权调用，否则按 Q03 明确未发送终结。T2 提交后调用前再核对本地可信时钟，窗口不足则尝试用仍有效的 fence 提交明确未发送结果，否则由扫描处理。时钟不可用、回拨或安全整数溢出时失败关闭。H3 禁止续期和同 owner 重入。callback 可重复执行，只构造写计划，唯一已确认提交的 T1 获胜；T1/T2 提交确认丢失时停止本次调用。跨 org/缺失统一 NOT_FOUND。旧 worker、过期、错 owner/generation/attempt/revision、重复结果一律 LEASE_FENCE_REJECTED，零写且零日志。
+时间取可信存储侧 UTC 毫秒时钟，事务每轮重新采样，`now < leaseExpiresAt` 有效，等号已过期。提议固定租期 60 秒，Mock 等待上限 10 秒。T2 至少剩余 10 秒才可授权调用，否则按 Q03 明确未发送终结。T2 提交后调用前用与事务时钟同源或已验证偏差上界的时钟计算保守剩余时间（扣除最大偏差），窗口不足则尝试用仍有效的 fence 提交明确未发送结果，否则由扫描处理。时钟不可用、回拨或安全整数溢出时失败关闭。H3 禁止续期和同 owner 重入。callback 可重复执行，只构造写计划，唯一已确认提交的 T1 获胜；T1/T2 提交确认丢失时停止本次调用。跨 org/缺失统一 NOT_FOUND。旧 worker、过期、错 owner/generation/attempt/revision、重复结果一律 LEASE_FENCE_REJECTED，零写且零日志。
 
 ## Q03 发送前重验
 
-T2 为独立短事务。顺序为 job/fence → grant/credential/file 与授权主体 → 完整资格与真实黑名单 → device/K1/owner claim/slot。使用与 T1 不同的事务。复用 BlacklistService.prepareEligibility/evaluateEligibility（blacklist.mjs 第 545–588、607–667 行），并按同一 token 合并候选及 guard refs；不直接调用会追加 guard 写的 H2 withEligibility 包装层。T2 适配器必须验证完整事务读集（含缺席 refs），保证与真实名单变更写 guard 的串行化。BLACKLIST_RETRY 整轮重建 token 和 refs，最多三轮且每轮重验 fence；预算耗尽且 fence 仍有效时使用 ADAPTER_UNAVAILABLE，无法完成受 fence 保护的写则由 Q06 扫描。权限和错误优先级在事务内裁决。成功时只写 job.dispatchAuthorizedAt 和 revision，返回一次性进程内调用许可和 DTO。只有确认 T2 提交的当前执行栈可用许可，使用前即消费，不能从数据库重建或转交。T2 再入返回 LEASE_FENCE_REJECTED。T2 校验与 Mock 调用间仍有竞态窗口，H3 保持 grant pending 且不发真实写；T3 可记录模拟结果，但不得恢复后来失效的业务资格。
+T2 为独立短事务。顺序为 job/fence → grant/credential/file 与授权主体 → 完整资格与真实黑名单 → device/K1/owner claim/slot。使用与 T1 不同的事务。复用 BlacklistService.prepareEligibility/evaluateEligibility（blacklist.mjs 第 545–588、607–667 行），并按同一 token 合并候选及 guard refs；不直接调用会追加 guard 写的 H2 withEligibility 包装层。T2 适配器必须验证完整事务读集（含缺席 refs），保证与真实名单变更写 guard 的串行化。若能力验证失败，停止 H3 启用，不绕过 guard 或在两个事务间拆分验证。BLACKLIST_RETRY 整轮重建 token 和 refs，最多三轮且每轮重验 fence；预算耗尽且 fence 仍有效时使用 ADAPTER_UNAVAILABLE，无法完成受 fence 保护的写则由 Q06 扫描。权限和错误优先级在事务内裁决。成功时只写 job.dispatchAuthorizedAt 和 revision，返回一次性进程内调用许可和 DTO。只有确认 T2 提交的当前执行栈可用许可，使用前即消费，不能从数据库重建或转交。T2 再入返回 LEASE_FENCE_REJECTED。T2 校验与 Mock 调用间仍有竞态窗口，H3 保持 grant pending 且不发真实写；T3 可记录模拟结果，但不得恢复后来失效的业务资格。
 
 | 首个失败 | 固定返回或规范化原因 | 处理 |
 | --- | --- | --- |
@@ -139,7 +141,7 @@ sequenceDiagram
 
 ## 测试矩阵
 
-以下均为未来合成用例。本轮只设计。每行 Provider 数为所述阶段对 enrollFace 方法入口的增量，已完成阶段的次数按前置状态计。Z 表示全库内容级零变化（完整记录、排序后的 ID 与计数均相同）。J 表示仅更新指定 job 和 create-only 一条确定性目标日志，A 表示只写 job 授权时间与 revision，H 表示 H2 原创建写集加一条 snapshot。写入行同时断言白名单、revision 增量、无额外日志、其余记录内容级不变；竞态注入的外部写以注入后快照为对照。调用成功链以 T1、T2、T3 分段断言 J/A/J。所有分支同时断言 grant、凭证、文件、名单、设备与 claim 不被 dispatcher 改写。
+以下均为未来合成用例。本轮只设计。每行 Provider 数为所述阶段对 enrollFace 方法入口的增量，已完成阶段的次数按前置状态计。Z 表示全库内容级零变化（完整记录、排序后的 ID 与计数均相同）。J 表示仅更新指定 job 和 create-only 一条确定性目标日志，A 表示只写 job 授权时间与 revision，H 表示 H2 原创建写集加一条 snapshot。写入行同时断言白名单、revision 增量、无额外日志、其余记录内容级不变；竞态注入的外部写以注入后快照为对照。调用成功链以 T1、T2、T3 分段断言 J/A/J。所有分支同时断言 grant、凭证、文件、名单、设备与 claim 不被 dispatcher 改写。H2 合法重放的 Z 断言针对授权核心写集，既有事务 admin_audit 与名单 guard 写入单独记录并维持基线；所有派发 Z 行须断言 admin_audit 内容级不变。H 包含 H2 原有审计和名单 guard 写入。
 
 | ID | 前置状态 | 竞态或故障注入点 | 期望 | Provider | 写集 |
 | --- | --- | --- | --- | ---: | --- |
@@ -166,7 +168,7 @@ sequenceDiagram
 | D21 | sending | T2 通过，Mock success | succeeded，grant pending，deviceEffective=false | 1 | A+J |
 | D22 | sending | T2 通过，Mock terminal_fail | terminal_failed | 1 | A+J |
 | D23 | sending | Mock 契约返回 NOT_CONFIGURED | terminal_failed，配置告警 | 1 | A+J |
-| D24 | sending | T2 检测 live 或非 Mock 配置 | 失败关闭，无外部调用 | 0 | J |
+| D24 | sending | 已合法领取后运行配置切换为 live 或非 Mock | terminal_failed / NOT_CONFIGURED，配置告警 | 0 | J |
 | D25 | sending 已授权 | T3 callback 重跑或重投 | 仅一次结果日志，重投 fence 拒绝 | 0 | J |
 | D26 | 已合法创建 | 相同 createGrant 请求重放 | 原 grantId/jobId，不创建 snapshot 副本 | 0 | Z |
 | D27 | sending | 并发执行两次 T2，同 owner | 仅一份许可，随后至多一次调用 | 1 | A+J |
@@ -205,6 +207,10 @@ sequenceDiagram
 | D60 | sending | T1 后房间归档 | terminal_failed / ROOM_ARCHIVED | 0 | J |
 | D61 | sending 已授权 | 错 revision 或 attempt 回写 | LEASE_FENCE_REJECTED | 0 | Z |
 | D62 | sending | T2 时剩余窗口不足但租约尚有效 | terminal_failed / PRE_SEND_WINDOW_CLOSED | 0 | J |
+| D63 | sending | fence 拒绝分支尝试返回空写集 | LEASE_FENCE_REJECTED，拒绝任何 admin_audit 副作用 | 0 | Z |
+| D64 | sending | T2 读取缺席名单 guard 后、提交前插入 guard 及命中名单 | 当轮回滚并刷新 token，新裁定 BLACKLIST_REVIEW_REQUIRED | 0 | J |
+| D65 | sending 已授权 | T2 已确认但保守剩余时间不足，租约仍有效 | terminal_failed / PRE_SEND_WINDOW_CLOSED，无 Mock 调用 | 0 | J |
+| D66 | queued | 适配器能力探针不能证明缺席读保护或可信时钟 | dispatcher 启用失败 | 0 | Z |
 
 ## 阶段边界与待 Codex 裁定
 
@@ -213,7 +219,7 @@ H2 的授予、幂等、真实名单、归属与权限顺序作为基线。H3 �
 请 Codex 裁定以下提案后再发编码卡。
 
 1. 独立 snapshot、旧 H2 记录隔离及迁移授权。确认无 revision 的记录类型如何保证关键变化的可观察性，以及失败隔离如何避免持续选中旧 job。
-2. 审批固定 60 秒租约、10 秒调用窗口、禁止续期、可信时钟来源和提交确认丢失策略。若目标适配器无法提供必要时钟和提交语义，禁止启用 dispatcher。
+2. 审批固定 60 秒租约、10 秒调用窗口、禁止续期、可信时钟来源和提交确认丢失策略。审批提供纯派发事务语义的适配器方案，确认完整读集与缺席读保护、无附带审计写入和 create-only 日志。若目标适配器无法提供必要时钟和提交语义，禁止启用 dispatcher。
 3. 确认发起成员持续授权约束、固定 system actor、最小权限及人工重试主体的内部鉴权接线。
 4. 确认 Mock success 维持 pending、资格失败终结、过期全部进入 awaiting_result，以及对账由后续独立审批承担。
 5. 确认三次重试解释为初次领取外三次、人工遵守相同退避、告警以不可变日志表示及合成保留组清理政策。

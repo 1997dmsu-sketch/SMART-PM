@@ -328,9 +328,6 @@ export class MockFaceDispatcher {
             const data = { dispatchAuthorizedAt: now, updatedAt: now, revision: increment(current.revision) };
             return { writes: [{ ...jobRef, data }], value: { job: { ...current, ...data }, input } };
           } catch (error) {
-            // 租约/fence 失败必须在构造任何写计划前退出（零写、零日志、零 audit），
-            // 不能被下面的“确定性 pre-send 拒绝”路径吞成 terminal_failed。
-            if (error.code === "LEASE_FENCE_REJECTED") throw error;
             if (error.code === "BLACKLIST_RETRY" && attempt < 2) throw error;
             const code = REASONS.has(error.code) ? error.code : "ADAPTER_UNAVAILABLE";
             const result = finish(current, now, "terminal_failed", "PRE_SEND_BLOCKED", code);

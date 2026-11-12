@@ -1504,7 +1504,7 @@ async function dispatchFixture(t, scenario = "success", options = {}) {
   return { ...h, ...result, provider, worker, setTime: (value) => { now = value; } };
 }
 
-test("H3 concurrent dispatch: one call outside every transaction, simulated success stays pending", async (t) => {
+test("H3 D46 concurrent dispatch: one call outside every transaction, simulated success stays pending", async (t) => {
   const h = await dispatchFixture(t);
   const before = structuredClone(h.store.data);
   const transact = h.store.transactFaceDispatch.bind(h.store);
@@ -1549,7 +1549,7 @@ test("H3 concurrent dispatch: one call outside every transaction, simulated succ
   }
 });
 
-test("H3 explicitly pre-send Mock failures get three retries and exhaust from sending", async (t) => {
+test("H3 D41/D42 explicitly pre-send Mock failures get three retries and exhaust from sending", async (t) => {
   const h = await dispatchFixture(t, "pre_send_fail");
   const worker = h.worker();
   let now = NOW;
@@ -1580,7 +1580,7 @@ test("H3 explicitly pre-send Mock failures get three retries and exhaust from se
   assert.equal(h.provider.calls.length, 4);
 });
 
-test("H3 unknown result never requeues", async (t) => {
+test("H3 D53 unknown result never requeues", async (t) => {
   const h = await dispatchFixture(t, "post_send_unknown");
   const worker = h.worker();
   const unknown = await worker.dispatch(h.jobId);
@@ -1595,7 +1595,7 @@ test("H3 unknown result never requeues", async (t) => {
   assert.equal(h.provider.calls.length, 1);
 });
 
-test("H3 lost claim commit acknowledgement expires without a send", async (t) => {
+test("H3 D19/D58 lost claim commit acknowledgement expires without a send", async (t) => {
   const h = await dispatchFixture(t);
   const worker = h.worker();
   const transact = h.store.transactFaceDispatch.bind(h.store);
@@ -1645,7 +1645,7 @@ test("H3 changed source file blocks Mock and leaves only deterministic job logs"
   assert.deepEqual(h.store.data.admin_audit, before.admin_audit);
 });
 
-test("H3 legacy H2 job without a snapshot fails closed", async (t) => {
+test("H3 D50 legacy H2 job without a snapshot fails closed", async (t) => {
   const h = await dispatchFixture(t, "success", { syntheticDispatch: false });
   const before = structuredClone(h.store.data);
   await assert.rejects(h.worker().dispatch(h.jobId), { code: "DISPATCH_SNAPSHOT_REQUIRED" });
@@ -1653,7 +1653,7 @@ test("H3 legacy H2 job without a snapshot fails closed", async (t) => {
   assert.equal(h.provider.calls.length, 0);
 });
 
-test("H3 authentic blacklist changes between prepare and T2 refresh the token and block enrollment", async (t) => {
+test("H3 D64 authentic blacklist changes between prepare and T2 refresh the token and block enrollment", async (t) => {
   const h = await dispatchFixture(t);
   const before = structuredClone(h.store.data);
   const transact = h.store.transactFaceDispatch.bind(h.store);
@@ -1677,7 +1677,7 @@ test("H3 authentic blacklist changes between prepare and T2 refresh the token an
   assert.deepEqual(h.store.data.admin_audit, before.admin_audit);
 });
 
-test("H3 lost authorization acknowledgement never consumes the permit", async (t) => {
+test("H3 D55 lost authorization acknowledgement never consumes the permit", async (t) => {
   const h = await dispatchFixture(t);
   const worker = h.worker();
   const transact = h.store.transactFaceDispatch.bind(h.store);
@@ -1716,7 +1716,7 @@ test("H3 terminal and unrecognized Mock errors never schedule a retry", async (t
   }
 });
 
-test("H3 manual retry requires current membership permission and shares the automatic CAS", async (t) => {
+test("H3 D54 manual retry requires current membership permission and shares the automatic CAS", async (t) => {
   const h = await dispatchFixture(t, "pre_send_fail");
   const worker = h.worker();
   const failed = await worker.dispatch(h.jobId);
@@ -2009,6 +2009,7 @@ test("H3 D13 回写时 now 等于 expiresAt：LEASE_FENCE_REJECTED，Z", async (
 
   // T3 回写边界：调用已发生，但结果提交时租约等号即过期。
   const late = await dispatchFixture(t);
+  const auditBefore = structuredClone(late.store.data.admin_audit);
   const enroll = late.provider.enrollFace.bind(late.provider);
   late.provider.enrollFace = async (input, context) => {
     late.setTime(NOW + 60_000);
@@ -2022,6 +2023,7 @@ test("H3 D13 回写时 now 等于 expiresAt：LEASE_FENCE_REJECTED，Z", async (
   assert.equal(late.provider.calls.length, 1);
   const grant = late.store.data.device_access_grants.find((row) => row._id === late.grantId);
   assert.equal(grant.state, "pending");
+  assert.deepEqual(late.store.data.admin_audit, auditBefore, "T3 fence 拒绝不得写 audit");
 });
 
 test("H3 D14 错 generation 回写：LEASE_FENCE_REJECTED，Z", async (t) => {
@@ -2610,6 +2612,10 @@ test("H3 D65 T2 已确认但保守剩余不足：不调用 Mock，terminal_faile
   assert.equal(job.result.errorKind, "PRE_SEND_BLOCKED");
   assert.equal(job.result.reasonCode, "PRE_SEND_WINDOW_CLOSED");
   assert.equal(job.leaseOwner, null);
+  assert.equal(job.leaseExpiresAt, null);
+  assert.equal(job.dispatchAuthorizedAt, null);
+  assert.equal(job.nextAttemptAt, null);
+  assert.equal(job.leaseGeneration, 1);
   assert.equal(h.provider.calls.length, 0);
   assert.deepEqual(h3Logs(h).map((log) => log.state), ["queued", "sending", "terminal_failed"]);
   assertH3OnlyJobLogs(h, before);
@@ -2670,4 +2676,75 @@ test("H3 D66 适配器能力不足：dispatcher 拒绝启用，零写", async (t
   }), (error) => error.code === "ADAPTER_UNAVAILABLE");
   assert.deepEqual(h.store.data, before, "启用探针不得产生任何写");
   assert.equal(provider.calls.length, 0);
+});
+
+test("H3 D44 attempts=4 明确 pre-send RETRYABLE：RETRY_EXHAUSTED，之后重试零写", async (t) => {
+  const h = await dispatchFixture(t, "pre_send_fail");
+  const worker = h.worker();
+  let now = NOW;
+  for (const delay of [30_000, 120_000, 600_000]) {
+    const failed = await worker.dispatch(h.jobId);
+    assert.equal(failed.state, "retryable_failed");
+    now += delay;
+    h.setTime(now);
+    assert.equal((await worker.requeue(h.jobId, failed.revision)).state, "queued");
+  }
+  const exhausted = await worker.dispatch(h.jobId);
+  assert.equal(exhausted.state, "terminal_failed");
+  assert.equal(exhausted.attempts, 4);
+  assert.equal(exhausted.result.errorKind, "RETRYABLE");
+  assert.equal(exhausted.result.reasonCode, "RETRY_EXHAUSTED");
+  assert.equal(h3Logs(h).at(-1).alertCode, "RETRY_EXHAUSTED");
+  assert.equal(h.provider.calls.length, 4);
+  const before = structuredClone(h.store.data);
+  await assert.rejects(worker.requeue(h.jobId, exhausted.revision), { code: "INVALID_JOB" });
+  assert.deepEqual(h.store.data, before, "RETRY_EXHAUSTED 后重试必须零写");
+  assert.equal(h.provider.calls.length, 4);
+});
+
+test("H3 D63 fence 拒绝与空写集都不产生 admin_audit 副作用", async (t) => {
+  const empty = await dispatchFixture(t);
+  const before = structuredClone(empty.store.data);
+  const returned = await empty.store.transactFaceDispatch(
+    [ref("device_operation_jobs", empty.jobId)], () => [],
+  );
+  assert.equal(returned, undefined);
+  assert.deepEqual(empty.store.data, before, "空写集派发事务不得追加 audit 或任何记录");
+
+  const fence = await h3FenceCase(t, (h) => patchRecord(h, "device_operation_jobs", h.jobId, {
+    leaseOwner: "other-owner",
+  }));
+  assert.deepEqual(fence.store.data.admin_audit, fence.h3Baseline.admin_audit);
+});
+
+test("H3 补充 Q03 credential 状态/revision 变化：CREDENTIAL_CHANGED，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "face_credentials", CREDENTIAL, {
+    revision: 3,
+  }), "CREDENTIAL_CHANGED");
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "face_credentials", CREDENTIAL, {
+    reviewState: "revoked",
+  }), "CREDENTIAL_CHANGED");
+});
+
+test("H3 补充 T2 已确认后派发时钟不可用：失败关闭，Provider 0，零 audit", async (t) => {
+  const h = await dispatchFixture(t);
+  const beforeAudit = structuredClone(h.store.data.admin_audit);
+  const transact = h.store.transactFaceDispatch.bind(h.store);
+  let calls = 0;
+  h.store.transactFaceDispatch = async (...args) => {
+    const value = await transact(...args);
+    if (++calls === 2) h.setTime(1.5);
+    return value;
+  };
+  await assert.rejects(
+    h.worker().dispatch(h.jobId),
+    (error) => error.status === 503 && error.code === null,
+  );
+  const job = h3JobRow(h);
+  assert.equal(job.state, "sending");
+  assert.equal(job.revision, 3);
+  assert.equal(job.dispatchAuthorizedAt, NOW);
+  assert.deepEqual(h3Logs(h).map((log) => log.state), ["queued", "sending"]);
+  assert.equal(h.provider.calls.length, 0);
+  assert.deepEqual(h.store.data.admin_audit, beforeAudit);
 });

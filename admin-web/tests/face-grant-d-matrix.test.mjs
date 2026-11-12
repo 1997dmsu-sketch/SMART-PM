@@ -1397,3 +1397,22 @@ test("C4 D73/D74 隔离 CloudStore 合约：90 refs 可进入，91 refs 事务�
   assert.equal(built91, 0, "91 条必须在 build 前失败");
   assert.deepEqual(at91.stats, { transactions: 0, gets: 0 });
 });
+
+test("H2-d 同 operation key 并发：两请求返回同一结果且核心写集只提交一次", async (t) => {
+  const h = await setup(t);
+  const before = await snapshot(h.store);
+  const key = "idem-h2d-same-operation-0001";
+  const results = await Promise.allSettled([
+    h.service.createGrant(h.input(), { idempotencyKey: key }),
+    h.service.createGrant(h.input(), { idempotencyKey: key }),
+  ]);
+  assert.equal(results.filter((item) => item.status === "fulfilled").length, 2);
+  assert.deepEqual(results[0].value, results[1].value);
+  const after = await snapshot(h.store);
+  assertCoreCreated(before, after);
+  assertUnchanged(before, after, new Set([...CORE, "eligibility_guards", "admin_audit"]));
+  assert.equal(after.admin_audit.length, before.admin_audit.length + 2, "两次事务各追加一条审计");
+  assert.equal(after.eligibility_guards.length, before.eligibility_guards.length + 2,
+    "重放只覆盖同一组 subject guards");
+  assertProviderZero(h);
+});

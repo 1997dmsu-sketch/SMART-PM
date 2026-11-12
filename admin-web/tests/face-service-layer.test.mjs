@@ -10,6 +10,7 @@ import { FileService } from "../lib/files.mjs";
 import { MockFaceAccessProvider } from "../lib/face-service/index.mjs";
 import { FaceCredentialService } from "../lib/face-service/service.mjs";
 import { occupancyClaimId, primarySlotId } from "../lib/face-service/eligibility.mjs";
+import { projectAccess } from "../lib/face-service/state.mjs";
 import { deviceClaimKey, deviceClaimConfig, deviceDigestDomainKey, deviceDigestDomainVersionKey, operationKey, operationKeyConfig } from "../lib/face-service/collections.mjs";
 
 let store, dir;
@@ -524,16 +525,59 @@ test("owner claim released / 绑定不一致 → DEVICE_CLAIM_INVALID", async ()
   await store.transact([ref("device_claims", claimId)], () => [{ collection: "device_claims", id: claimId, data: original }], audit);
 });
 
-test("成功写入不含序列号/MAC/IP/原始幂等键", async () => {
-  const dump = JSON.stringify({
+test("成功写入、错误信封与日志不含敏感字段，Mock 投影不得设备生效", async () => {
+  let failure;
+  try {
+    await service("mem-manage").createGrant({
+      ...shared.input,
+      validFrom: shared.input.validUntil,
+    }, {
+      idempotencyKey: "idem-sensitive-scan-0001",
+    });
+    assert.fail("非法有效期必须失败关闭");
+  } catch (error) {
+    failure = { code: error.code, status: error.status, message: error.message };
+  }
+  assert.equal(failure.code, "PARAM_ERROR");
+
+  const records = {
     grants: await store.list("device_access_grants", orgId),
     jobs: await store.list("device_operation_jobs", orgId),
     slots: await store.list("grant_slot_claims", orgId),
     logs: await store.list("device_operation_logs", orgId),
     keys: await store.list("operation_keys", orgId),
-  });
-  for (const token of ["serialNumber", "SN-", "MAC", "\"ip\"", "idem-grant", "idem-sub", "idem-rev"]) {
+  };
+  const dump = JSON.stringify({ records, failure });
+  const forbiddenKeys = new Set([
+    "faceImage", "imageBytes", "objectKey", "checksum", "checksumPrefix",
+    "residentName", "phone", "idCard", "serialNumber", "mac", "ip",
+    "username", "password", "secret", "certificateFingerprint", "idempotencyKey",
+  ]);
+  const visit = (value) => {
+    if (Array.isArray(value)) return value.forEach(visit);
+    if (!value || typeof value !== "object") return;
+    for (const [key, child] of Object.entries(value)) {
+      assert.equal(forbiddenKeys.has(key), false, `禁止字段 ${key}`);
+      visit(child);
+    }
+  };
+  visit({ records, failure });
+  for (const token of ["SN-", "idem-grant", "idem-sub", "idem-rev", "idem-sensitive", "@", "1380000"]) {
     assert.equal(dump.includes(token), false, token);
+  }
+  for (const job of records.jobs) {
+    assert.equal(job.executionMode, "test");
+    assert.equal(job.provider, "mock");
+    assert.equal(job.evidenceScope, "simulated");
+  }
+  for (const grant of records.grants) {
+    assert.equal(grant.evidenceScope, "simulated");
+    assert.equal(projectAccess({
+      grant,
+      eligibility: { allowed: true },
+      jobs: records.jobs,
+      deviceEvidence: null,
+    }).deviceEffective, false);
   }
   assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
 });

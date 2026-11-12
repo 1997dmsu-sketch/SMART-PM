@@ -79,11 +79,25 @@ export class OrgService {
     );
     return { orgId: id };
   }
-  async grantMembership({ orgId, principalType, principalId, role }, audit) {
+  async grantMembership({ orgId, principalType, principalId, role, permissions = [] }, audit) {
     if (!["adminAccount", "user"].includes(principalType))
       failCode("PARAM_ERROR", "成员类型无效");
     if (!["admin", "editor", "viewer", "resident"].includes(role))
       failCode("PARAM_ERROR", "组织角色无效");
+    // Explicit permission points (DATA-MODEL §5): sensitive capabilities such
+    // as identity review or private-document reads are never implied by role.
+    const GRANTABLE = [
+      "identity.review",
+      "identity.readPrivate",
+      "blacklist.manage",
+      "blacklist.read",
+      "blacklist.review",
+    ];
+    if (
+      !Array.isArray(permissions) ||
+      permissions.some((p) => !GRANTABLE.includes(p))
+    )
+      failCode("PARAM_ERROR", "权限点无效");
     if (typeof principalId !== "string" || !principalId)
       failCode("PARAM_ERROR", "成员编号无效");
     const org = await this.organization(orgId);
@@ -105,7 +119,7 @@ export class OrgService {
               principalId,
               role,
               status: "active",
-              permissions: [],
+              permissions: [...permissions],
               ...base(),
             },
           },

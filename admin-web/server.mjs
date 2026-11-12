@@ -8,6 +8,8 @@ import { PropertyService } from "./lib/property.mjs";
 import { OrgService } from "./lib/org.mjs";
 import { OrgPropertyService, OpReplay } from "./lib/property-v2.mjs";
 import { PersonService } from "./lib/persons.mjs";
+import { VerificationService } from "./lib/verification.mjs";
+import { IdentityService } from "./lib/identity.mjs";
 import { operationKeyId } from "./lib/claims.mjs";
 import { LocalStore, CloudStore } from "./lib/store.mjs";
 import { resolvePublicFile } from "./lib/static-path.mjs";
@@ -48,6 +50,33 @@ async function body(req, limit = 65536, raw = false) {
     fail("JSON 格式错误");
   }
 }
+// DB-04 review F01: public demonstration keys are confined to demo mode.
+// Live startup fails closed before opening a store or creating an HTTP server.
+// Error messages deliberately identify only the setting, never its value.
+export function identityKeyConfig(mode, env = process.env) {
+  const live = mode === "live";
+  let hmacKey = env.IDENTITY_HMAC_KEY;
+  if (!hmacKey) {
+    if (live) throw Error("Live mode requires IDENTITY_HMAC_KEY");
+    hmacKey = "demo-identity-hmac-key-not-for-production";
+  }
+  if (typeof hmacKey !== "string" || hmacKey.length < 16)
+    throw Error("IDENTITY_HMAC_KEY must contain at least 16 characters");
+  const configuredEncryptionKey = env.IDENTITY_ENCRYPTION_KEY;
+  if (!configuredEncryptionKey) {
+    if (live) throw Error("Live mode requires IDENTITY_ENCRYPTION_KEY");
+    return { hmacKey, encryptionKey: Buffer.alloc(32, 7) };
+  }
+  if (
+    typeof configuredEncryptionKey !== "string" ||
+    !/^[0-9a-fA-F]{64}$/.test(configuredEncryptionKey)
+  )
+    throw Error("IDENTITY_ENCRYPTION_KEY must be exactly 64 hexadecimal characters");
+  const encryptionKey = Buffer.from(configuredEncryptionKey, "hex");
+  if (encryptionKey.length !== 32)
+    throw Error("IDENTITY_ENCRYPTION_KEY must decode to exactly 32 bytes");
+  return { hmacKey, encryptionKey };
+}
 export async function createApp({
   mode = "demo",
   directory = join(root, ".data", mode),
@@ -56,6 +85,8 @@ export async function createApp({
   origin,
   secure = false,
   org,
+  fileValidator = null,
+  identityGateway = null,
 } = {}) {
   if (!["demo", "live"].includes(mode))
     throw Error("ADMIN_MODE must be demo or live");
@@ -63,6 +94,7 @@ export async function createApp({
     throw Error("Live mode requires ADMIN_ORIGIN");
   if (mode === "live" && !store)
     throw Error("Live mode requires a configured cloud store");
+  const { hmacKey: identityHmacKey, encryptionKey } = identityKeyConfig(mode);
   store = store || (await new LocalStore(directory).init());
   accounts = accounts || (await new Accounts(directory).init());
   if (
@@ -89,6 +121,12 @@ export async function createApp({
     );
   const sessions = new Map(),
     attempts = new Map();
+  // fileValidator is the DB-07 interface hook — unconfigured means private
+  // submissions fail closed (503).
+  const identityService = new IdentityService(store, {
+    hmacKey: identityHmacKey,
+    gateway: identityGateway,
+  });
   const sessionAge = 8 * 60 * 60 * 1000;
   const server = http.createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -305,6 +343,12 @@ export async function createApp({
             const persons = new PersonService(store, orgId, {
               membershipId: membership._id,
             });
+            const verification = new VerificationService(
+              store,
+              orgId,
+              { membershipId: membership._id },
+              { identity: identityService, encryptionKey, fileValidator },
+            );
             const auditV2 = (action) => ({
               actor: account.username,
               actorId: account._id,
@@ -335,6 +379,29 @@ export async function createApp({
                 nextCursor,
               );
             }
+            if (path === "/api/v2/identity-applications" && method === "GET") {
+              const { data, nextCursor } = await verification.listApplications(query);
+              return ok(data, 200, nextCursor);
+            }
+            const privateMatch = path.match(
+              /^\/api\/v2\/identity-applications\/([^/]+)\/private$/,
+            );
+            if (privateMatch && method === "GET")
+              return ok(
+                await verification.readPrivate(
+                  decodeURIComponent(privateMatch[1]),
+                  auditV2("读取实名私有资料"),
+                ),
+              );
+            const applicationMatch = path.match(
+              /^\/api\/v2\/identity-applications\/([^/]+)$/,
+            );
+            if (applicationMatch && method === "GET")
+              return ok(
+                await verification.getApplication(
+                  decodeURIComponent(applicationMatch[1]),
+                ),
+              );
             if (method === "POST") {
               const data = await body(req);
               const key = req.headers["idempotency-key"];
@@ -389,6 +456,28 @@ export async function createApp({
                   await persons.createPerson(data, auditV2("新增人员档案"), op),
                   201,
                 );
+              if (path === "/api/v2/identity-applications")
+                return ok(
+                  await verification.createApplication(data, auditV2("新建实名申请"), op),
+                  201,
+                );
+              const actionMatch = path.match(
+                /^\/api\/v2\/identity-applications\/([^/]+)\/(submit|supplement|review|provider-start)$/,
+              );
+              if (actionMatch) {
+                const id = decodeURIComponent(actionMatch[1]);
+                const action = actionMatch[2];
+                if (action === "provider-start")
+                  return ok(await verification.providerStart());
+                return ok(
+                  await verification[action](
+                    id,
+                    data,
+                    auditV2({ submit: "提交实名资料", supplement: "补充实名资料", review: "审核实名申请" }[action]),
+                    op,
+                  ),
+                );
+              }
               const archiveMatch = path.match(
                 /^\/api\/v2\/property\/(community|building|floor|layout|room|house)\/([^/]+)\/archive$/,
               );

@@ -17,6 +17,9 @@ const collections = [
   "auth_identities",
   "persons",
   "identity_domains",
+  "identity_applications",
+  "identity_reviews",
+  "identity_private",
 ];
 export function seed() {
   return {

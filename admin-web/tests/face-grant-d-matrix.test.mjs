@@ -12,9 +12,10 @@ import { MockFaceDispatcher } from "../lib/face-service/dispatcher.mjs";
 import { MockFaceAccessProvider } from "../lib/face-service/mock-provider.mjs";
 import { projectAccess } from "../lib/face-service/state.mjs";
 import { occupancyClaimId, primarySlotId } from "../lib/face-service/eligibility.mjs";
-import { eligibilityGuardId } from "../lib/claims.mjs";
+import { eligibilityGuardId, guardId } from "../lib/claims.mjs";
 import {
   applyOperationKeyDomain,
+  deterministicLogId,
   grantSlotKey,
   operationKeyConfig,
   operationKeyFingerprint,
@@ -1496,7 +1497,9 @@ async function dispatchFixture(t, scenario = "success", options = {}) {
   const provider = new MockFaceAccessProvider({ scenario });
   const worker = () => new MockFaceDispatcher({
     store: h.store, orgId: ORG, files: h.files, blacklist: h.blacklist, provider,
+    ...(options.runtimeConfig ? { runtimeConfig: options.runtimeConfig } : {}),
   });
+  if (options.prepare) await options.prepare(h);
   const result = await h.service.createGrant(h.input(), { idempotencyKey: h.nextKey() });
   return { ...h, ...result, provider, worker, setTime: (value) => { now = value; } };
 }
@@ -1528,7 +1531,9 @@ test("H3 concurrent dispatch: one call outside every transaction, simulated succ
   };
   const outcomes = await Promise.allSettled([h.worker().dispatch(h.jobId), h.worker().dispatch(h.jobId)]);
   const success = outcomes.find((outcome) => outcome.status === "fulfilled")?.value;
+  const rejected = outcomes.find((outcome) => outcome.status === "rejected");
   assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1, JSON.stringify(outcomes));
+  assert.equal(rejected.reason.code, "INVALID_JOB", "同一 revision 的第二个领取必须被拒");
   assert.equal(success.state, "succeeded", JSON.stringify(success.result));
   assert.equal(calls, 1);
   assert.equal(h.provider.calls.length, 1);
@@ -1569,6 +1574,10 @@ test("H3 explicitly pre-send Mock failures get three retries and exhaust from se
   assert.equal(final.result.reasonCode, "RETRY_EXHAUSTED");
   assert.equal(h.provider.calls.length, 4);
   assert.equal(h.store.data.device_operation_logs.at(-1).alertCode, "RETRY_EXHAUSTED");
+  const terminal = structuredClone(h.store.data);
+  await assert.rejects(worker.requeue(h.jobId, final.revision), { code: "INVALID_JOB" });
+  assert.deepEqual(h.store.data, terminal, "预算耗尽后重试必须零写");
+  assert.equal(h.provider.calls.length, 4);
 });
 
 test("H3 unknown result never requeues", async (t) => {
@@ -1576,6 +1585,9 @@ test("H3 unknown result never requeues", async (t) => {
   const worker = h.worker();
   const unknown = await worker.dispatch(h.jobId);
   assert.equal(unknown.state, "awaiting_result");
+  assert.equal(unknown.result.errorKind, "UNKNOWN_RESULT");
+  assert.equal(unknown.result.reasonCode, "RESULT_UNKNOWN");
+  assert.equal(h.store.data.device_operation_logs.at(-1).alertCode, "RESULT_UNKNOWN");
   const before = structuredClone(h.store.data);
   await assert.rejects(worker.requeue(h.jobId, unknown.revision), { code: "INVALID_JOB" });
   await assert.rejects(worker.dispatch(h.jobId), { code: "INVALID_JOB" });
@@ -1593,6 +1605,10 @@ test("H3 lost claim commit acknowledgement expires without a send", async (t) =>
   };
   await assert.rejects(worker.dispatch(h.jobId), /acknowledgement loss/);
   h.store.transactFaceDispatch = transact;
+  const afterLostClaim = structuredClone(h.store.data);
+  await assert.rejects(worker.dispatch(h.jobId), { code: "INVALID_JOB" }, "同 owner 重入不得恢复许可");
+  assert.deepEqual(h.store.data, afterLostClaim, "重入不得零写之外的任何变化");
+  assert.equal(h.provider.calls.length, 0);
   h.setTime(NOW + 59_999);
   const before = structuredClone(h.store.data);
   await assert.rejects(worker.expire(h.jobId), { code: "LEASE_FENCE_REJECTED" });
@@ -1603,12 +1619,15 @@ test("H3 lost claim commit acknowledgement expires without a send", async (t) =>
   const job = await h.store.get("device_operation_jobs", h.jobId, ORG);
   assert.equal(job.state, "awaiting_result");
   assert.equal(job.result.reasonCode, "LEASE_EXPIRED_UNKNOWN");
+  assert.equal(h.store.data.device_operation_logs.filter((log) => log.jobId === h.jobId &&
+    log.state === "awaiting_result").length, 1, "并发扫描只提交一条结果日志");
   assert.equal(h.provider.calls.length, 0);
   assert.deepEqual(h.store.data.admin_audit, before.admin_audit);
 });
 
 test("H3 changed source file blocks Mock and leaves only deterministic job logs", async (t) => {
   const h = await dispatchFixture(t);
+  const before = structuredClone(h.store.data);
   const transact = h.store.transactFaceDispatch.bind(h.store);
   let calls = 0;
   h.store.transactFaceDispatch = async (...args) => {
@@ -1621,6 +1640,9 @@ test("H3 changed source file blocks Mock and leaves only deterministic job logs"
   assert.equal(job.result.reasonCode, "FILE_BINDING_CHANGED");
   assert.equal(h.provider.calls.length, 0);
   assert.deepEqual(h.store.data.device_operation_logs.map((log) => log.state), ["queued", "sending", "terminal_failed"]);
+  const grant = h.store.data.device_access_grants.find((row) => row._id === h.grantId);
+  assert.equal(grant.state, "pending");
+  assert.deepEqual(h.store.data.admin_audit, before.admin_audit);
 });
 
 test("H3 legacy H2 job without a snapshot fails closed", async (t) => {
@@ -1633,6 +1655,7 @@ test("H3 legacy H2 job without a snapshot fails closed", async (t) => {
 
 test("H3 authentic blacklist changes between prepare and T2 refresh the token and block enrollment", async (t) => {
   const h = await dispatchFixture(t);
+  const before = structuredClone(h.store.data);
   const transact = h.store.transactFaceDispatch.bind(h.store);
   let transactions = 0;
   h.store.transactFaceDispatch = (refs, build) => {
@@ -1646,7 +1669,12 @@ test("H3 authentic blacklist changes between prepare and T2 refresh the token an
   assert.equal(job.state, "terminal_failed");
   assert.equal(job.result.reasonCode, "BLACKLIST_REVIEW_REQUIRED");
   assert.equal(h.provider.calls.length, 0);
-  assert.equal(transactions, 3);
+  assert.equal(transactions, 3, "首轮 BLACKLIST_RETRY 后必须重建 token 并重验");
+  assert.equal(h.store.data.device_operation_logs.filter((log) => log.jobId === h.jobId &&
+    log.state === "terminal_failed").length, 1);
+  const grant = h.store.data.device_access_grants.find((row) => row._id === h.grantId);
+  assert.equal(grant.state, "pending");
+  assert.deepEqual(h.store.data.admin_audit, before.admin_audit);
 });
 
 test("H3 lost authorization acknowledgement never consumes the permit", async (t) => {
@@ -1706,4 +1734,940 @@ test("H3 manual retry requires current membership permission and shares the auto
   assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
   assert.equal(h.provider.calls.length, 1);
   assert.equal(h.store.data.device_operation_logs.filter((log) => log.state === "queued").length, 2);
+});
+
+// ---------------------------------------------------------------------------
+// H3 复审：D01–D66 逐项可复验证据。
+// 所有派发用例只使用隔离合成 LocalStore + 进程内 MockFaceAccessProvider。
+// 断言约定：Z = 整库内容级不变（含 admin_audit），J = 仅 job + 一条确定性日志，
+// A = 仅 job 的 dispatchAuthorizedAt + revision。
+// ---------------------------------------------------------------------------
+const H3_WRITE_COLLECTIONS = ["device_operation_jobs", "device_operation_logs"];
+
+const h3Logs = (h) => h.store.data.device_operation_logs.filter((log) => log.jobId === h.jobId);
+
+function assertH3OnlyJobLogs(h, baseline) {
+  for (const name of Object.keys(baseline)) {
+    if (H3_WRITE_COLLECTIONS.includes(name)) continue;
+    assert.deepEqual(h.store.data[name], baseline[name], `${name} 不得被派发改写`);
+  }
+  assert.deepEqual(h.store.data.admin_audit, baseline.admin_audit, "派发不得追加 admin_audit");
+}
+
+// 在 T1 提交后注入外部写/损坏，并固定注入后的完整快照作为零写对照。
+function h3AfterT1(h, mutate) {
+  const transact = h.store.transactFaceDispatch.bind(h.store);
+  let calls = 0;
+  h.store.transactFaceDispatch = async (refs, build) => {
+    const value = await transact(refs, build);
+    if (++calls === 1) {
+      mutate(h);
+      h.h3Baseline = structuredClone(h.store.data);
+    }
+    return value;
+  };
+}
+
+// T1 提交后立即中断（用于只观察领取写集，不进入 T2）。
+function h3StopAfterT1(h) {
+  const transact = h.store.transactFaceDispatch.bind(h.store);
+  let calls = 0;
+  h.store.transactFaceDispatch = async (refs, build) => {
+    const value = await transact(refs, build);
+    if (++calls === 1) {
+      const error = new Error("stop-after-T1");
+      error.code = "TEST_STOP";
+      throw error;
+    }
+    return value;
+  };
+}
+
+function h3ExpectTerminal(h, code) {
+  assert.equal(h.provider.calls.length, 0, "pre-send 拒绝不得调用 Provider");
+  const job = h.store.data.device_operation_jobs.find((row) => row._id === h.jobId);
+  assert.ok(job, "job 必须存在");
+  assert.equal(job.state, "terminal_failed");
+  assert.equal(job.result.outcome, "terminal_failed");
+  assert.equal(job.result.errorKind, "PRE_SEND_BLOCKED");
+  assert.equal(job.result.reasonCode, code);
+  assert.equal(job.result.attempt, 1);
+  assert.equal(job.leaseOwner, null);
+  assert.equal(job.leaseExpiresAt, null);
+  assert.equal(job.dispatchAuthorizedAt, null);
+  assert.deepEqual(h3Logs(h).map((log) => log.state), ["queued", "sending", "terminal_failed"]);
+  assert.equal(h3Logs(h).at(-1).reasonCode, code);
+  const grant = h.store.data.device_access_grants.find((row) => row._id === h.grantId);
+  const grantBefore = h.h3Baseline.device_access_grants.find((row) => row._id === h.grantId);
+  assert.deepEqual(grant, grantBefore, "grant 不得被 dispatcher 改写");
+  assertH3OnlyJobLogs(h, h.h3Baseline);
+  return job;
+}
+
+test("H3 D01 queued→sending：单条确定性领取日志，attempt=1/generation=1，J 且零 audit", async (t) => {
+  const h = await dispatchFixture(t);
+  const before = structuredClone(h.store.data);
+  h3StopAfterT1(h);
+  await assert.rejects(h.worker().dispatch(h.jobId), { code: "TEST_STOP" });
+  const job = h.store.data.device_operation_jobs.find((row) => row._id === h.jobId);
+  assert.equal(job.state, "sending");
+  assert.equal(job.attempts, 1);
+  assert.equal(job.leaseGeneration, 1);
+  assert.equal(job.revision, 2);
+  assert.equal(typeof job.leaseOwner, "string");
+  assert.ok(job.leaseOwner.length > 0);
+  assert.equal(job.leaseExpiresAt, NOW + 60_000);
+  assert.equal(job.nextAttemptAt, null);
+  assert.equal(job.result, null);
+  assert.equal(job.dispatchAuthorizedAt, null);
+  assert.deepEqual(h3Logs(h).map((log) => log.state), ["queued", "sending"]);
+  assert.deepEqual(h3Logs(h).map((log) => log.revision), [1, 2]);
+  assert.equal(h3Logs(h)[1].leaseGeneration, 1);
+  assert.equal(h3Logs(h)[1].attempt, 1);
+  assert.equal(h3Logs(h)[1].evidenceScope, "simulated");
+  assert.equal(h.provider.calls.length, 0);
+  assertH3OnlyJobLogs(h, before);
+});
+
+test("H3 D02 两个 owner 同 revision 并发 T1：仅一个领取提交，另一个 INVALID_JOB，J", async (t) => {
+  const h = await dispatchFixture(t);
+  const before = structuredClone(h.store.data);
+  h3StopAfterT1(h);
+  const outcomes = await Promise.allSettled([
+    h.worker().dispatch(h.jobId), h.worker().dispatch(h.jobId),
+  ]);
+  const codes = outcomes.map((outcome) => outcome.status === "rejected" ? outcome.reason.code : "OK").sort();
+  assert.deepEqual(codes, ["INVALID_JOB", "TEST_STOP"]);
+  const job = h.store.data.device_operation_jobs.find((row) => row._id === h.jobId);
+  assert.equal(job.state, "sending");
+  assert.equal(job.revision, 2);
+  assert.deepEqual(h3Logs(h).map((log) => log.state), ["queued", "sending"]);
+  assert.equal(h.provider.calls.length, 0);
+  assertH3OnlyJobLogs(h, before);
+});
+
+test("H3 D03 事务 callback 回滚并重跑：sending log 只提交一条，J", async (t) => {
+  const h = await dispatchFixture(t);
+  const before = structuredClone(h.store.data);
+  const transact = h.store.transactFaceDispatch.bind(h.store);
+  let planBuilds = 0;
+  h.store.transactFaceDispatch = (refs, build) => transact(refs, (state, now) => {
+    planBuilds += 1;
+    const discarded = build(structuredClone(state), now);
+    planBuilds += 1;
+    const final = build(state, now);
+    assert.deepEqual(final, discarded, "重跑必须得到同一写计划");
+    return final;
+  });
+  h3StopAfterT1(h);
+  await assert.rejects(h.worker().dispatch(h.jobId), { code: "TEST_STOP" });
+  assert.equal(planBuilds, 2);
+  assert.deepEqual(h3Logs(h).map((log) => log.state), ["queued", "sending"]);
+  assert.equal(h3Logs(h).length, 2);
+  assert.equal(h.store.data.device_operation_jobs.filter((row) => row._id === h.jobId).length, 1);
+  assertH3OnlyJobLogs(h, before);
+});
+
+test("H3 D04 succeeded 再次领取：INVALID_JOB，Z", async (t) => {
+  const h = await dispatchFixture(t);
+  const done = await h.worker().dispatch(h.jobId);
+  assert.equal(done.state, "succeeded");
+  const before = structuredClone(h.store.data);
+  await assert.rejects(h.worker().dispatch(h.jobId), { code: "INVALID_JOB" });
+  assert.deepEqual(h.store.data, before);
+  assert.equal(h.provider.calls.length, 1);
+});
+
+test("H3 D05 领取参数损坏：缺 grantId → INVALID_JOB，Z", async (t) => {
+  const h = await dispatchFixture(t);
+  const job = h.store.data.device_operation_jobs.find((row) => row._id === h.jobId);
+  delete job.grantId;
+  const before = structuredClone(h.store.data);
+  await assert.rejects(h.worker().dispatch(h.jobId), { code: "INVALID_JOB" });
+  assert.deepEqual(h.store.data, before);
+  assert.equal(h.provider.calls.length, 0);
+});
+
+test("H3 D06 跨组织领取：统一 NOT_FOUND，Z", async (t) => {
+  const h = await dispatchFixture(t);
+  patchRecord(h, "device_operation_jobs", h.jobId, { orgId: ORG_OTHER });
+  const before = structuredClone(h.store.data);
+  await assert.rejects(h.worker().dispatch(h.jobId), { code: "NOT_FOUND", status: 404 });
+  assert.deepEqual(h.store.data, before);
+  assert.equal(h.provider.calls.length, 0);
+});
+
+test("H3 D07 错 action 领取：INVALID_JOB，Z", async (t) => {
+  const h = await dispatchFixture(t);
+  patchRecord(h, "device_operation_jobs", h.jobId, { action: "update" });
+  const before = structuredClone(h.store.data);
+  await assert.rejects(h.worker().dispatch(h.jobId), { code: "INVALID_JOB" });
+  assert.deepEqual(h.store.data, before);
+  assert.equal(h.provider.calls.length, 0);
+});
+
+test("H3 D08 空白 leaseOwner：INVALID_JOB，Z", async (t) => {
+  const h = await dispatchFixture(t);
+  patchRecord(h, "device_operation_jobs", h.jobId, { leaseOwner: "" });
+  const before = structuredClone(h.store.data);
+  await assert.rejects(h.worker().dispatch(h.jobId), { code: "INVALID_JOB" });
+  assert.deepEqual(h.store.data, before);
+  assert.equal(h.provider.calls.length, 0);
+});
+
+test("H3 D09 不安全时间字段：INVALID_JOB；小数时钟失败关闭，均零写", async (t) => {
+  const unsafe = await dispatchFixture(t);
+  patchRecord(unsafe, "device_operation_jobs", unsafe.jobId, { createdAt: 1.5 });
+  const beforeUnsafe = structuredClone(unsafe.store.data);
+  await assert.rejects(unsafe.worker().dispatch(unsafe.jobId), { code: "INVALID_JOB" });
+  assert.deepEqual(unsafe.store.data, beforeUnsafe);
+
+  const expiring = await dispatchFixture(t);
+  patchRecord(expiring, "device_operation_jobs", expiring.jobId, { leaseExpiresAt: 1.5 });
+  const beforeExpiring = structuredClone(expiring.store.data);
+  await assert.rejects(expiring.worker().dispatch(expiring.jobId), { code: "INVALID_JOB" });
+  assert.deepEqual(expiring.store.data, beforeExpiring);
+
+  const clock = await dispatchFixture(t);
+  clock.setTime(1.5);
+  const beforeClock = structuredClone(clock.store.data);
+  await assert.rejects(
+    clock.worker().dispatch(clock.jobId),
+    (error) => error.status === 503 && error.code === null,
+  );
+  assert.deepEqual(clock.store.data, beforeClock);
+  assert.equal(clock.provider.calls.length, 0);
+
+  const rollback = await dispatchFixture(t);
+  assert.equal((await rollback.worker().dispatch(rollback.jobId)).state, "succeeded");
+  rollback.setTime(NOW - 1);
+  const beforeRollback = structuredClone(rollback.store.data);
+  await assert.rejects(
+    rollback.worker().scanExpired(),
+    (error) => error.status === 503 && error.code === null,
+  );
+  assert.deepEqual(rollback.store.data, beforeRollback);
+});
+
+test("H3 D10 revision 非安全整数或将溢出：INVALID_JOB，Z", async (t) => {
+  const fractional = await dispatchFixture(t);
+  patchRecord(fractional, "device_operation_jobs", fractional.jobId, { revision: 1.5 });
+  const beforeFractional = structuredClone(fractional.store.data);
+  await assert.rejects(fractional.worker().dispatch(fractional.jobId), { code: "INVALID_JOB" });
+  assert.deepEqual(fractional.store.data, beforeFractional);
+
+  const overflow = await dispatchFixture(t);
+  patchRecord(overflow, "device_operation_jobs", overflow.jobId, { revision: Number.MAX_SAFE_INTEGER });
+  const beforeOverflow = structuredClone(overflow.store.data);
+  await assert.rejects(overflow.worker().dispatch(overflow.jobId), { code: "INVALID_JOB" });
+  assert.deepEqual(overflow.store.data, beforeOverflow);
+  assert.equal(overflow.provider.calls.length, 0);
+});
+
+test("H3 D11 attempts 负数/非安全整数/超预算：INVALID_JOB，Z", async (t) => {
+  for (const [patch, label] of [
+    [{ attempts: -1 }, "负数"],
+    [{ attempts: 1.5 }, "小数"],
+    [{ attempts: 5, leaseGeneration: 5 }, "超过 4"],
+  ]) {
+    const h = await dispatchFixture(t);
+    patchRecord(h, "device_operation_jobs", h.jobId, patch);
+    const before = structuredClone(h.store.data);
+    await assert.rejects(h.worker().dispatch(h.jobId), { code: "INVALID_JOB" }, label);
+    assert.deepEqual(h.store.data, before, label);
+    assert.equal(h.provider.calls.length, 0, label);
+  }
+});
+
+async function h3FenceCase(t, mutate) {
+  const h = await dispatchFixture(t);
+  h3AfterT1(h, mutate);
+  await assert.rejects(h.worker().dispatch(h.jobId), { code: "LEASE_FENCE_REJECTED" });
+  assert.deepEqual(h.store.data, h.h3Baseline, "fence 拒绝必须零写（含日志与 audit）");
+  assert.equal(h.provider.calls.length, 0);
+  const job = h.store.data.device_operation_jobs.find((row) => row._id === h.jobId);
+  assert.equal(job.state, "sending");
+  return h;
+}
+
+test("H3 D12 旧 worker 在新 generation 回写：LEASE_FENCE_REJECTED，Z", async (t) => {
+  await h3FenceCase(t, (h) => patchRecord(h, "device_operation_jobs", h.jobId, {
+    leaseOwner: "new-owner",
+    leaseGeneration: 2,
+    attempts: 2,
+    revision: 3,
+    leaseExpiresAt: NOW + 120_000,
+  }));
+});
+
+test("H3 D13 回写时 now 等于 expiresAt：LEASE_FENCE_REJECTED，Z", async (t) => {
+  const h = await dispatchFixture(t);
+  h3AfterT1(h, (harness) => harness.setTime(NOW + 60_000));
+  await assert.rejects(h.worker().dispatch(h.jobId), { code: "LEASE_FENCE_REJECTED" });
+  assert.deepEqual(h.store.data, h.h3Baseline);
+  assert.equal(h.provider.calls.length, 0);
+
+  // T3 回写边界：调用已发生，但结果提交时租约等号即过期。
+  const late = await dispatchFixture(t);
+  const enroll = late.provider.enrollFace.bind(late.provider);
+  late.provider.enrollFace = async (input, context) => {
+    late.setTime(NOW + 60_000);
+    return enroll(input, context);
+  };
+  await assert.rejects(late.worker().dispatch(late.jobId), { code: "LEASE_FENCE_REJECTED" });
+  const job = h3JobRow(late);
+  assert.equal(job.state, "sending");
+  assert.equal(job.revision, 3);
+  assert.deepEqual(h3Logs(late).map((log) => log.state), ["queued", "sending"]);
+  assert.equal(late.provider.calls.length, 1);
+  const grant = late.store.data.device_access_grants.find((row) => row._id === late.grantId);
+  assert.equal(grant.state, "pending");
+});
+
+test("H3 D14 错 generation 回写：LEASE_FENCE_REJECTED，Z", async (t) => {
+  await h3FenceCase(t, (h) => patchRecord(h, "device_operation_jobs", h.jobId, { leaseGeneration: 2 }));
+});
+
+test("H3 D15 错 owner 回写：LEASE_FENCE_REJECTED，Z", async (t) => {
+  await h3FenceCase(t, (h) => patchRecord(h, "device_operation_jobs", h.jobId, { leaseOwner: "other-owner" }));
+});
+
+test("H3 D16 同 owner 重入 T2：LEASE_FENCE_REJECTED，零许可零写", async (t) => {
+  const h = await dispatchFixture(t);
+  h3AfterT1(h, () => {});
+  const transact = h.store.transactFaceDispatch.bind(h.store);
+  let calls = 0;
+  h.store.transactFaceDispatch = (refs, build) => transact(refs, (state, now) => {
+    const first = build(state, now);
+    if (++calls === 2) {
+      // 模拟适配器已应用首次 T2 写计划后 rerun callback。
+      for (const write of first) {
+        const key = `${write.collection}/${write.id}`;
+        state[key] = { ...(state[key] || {}), ...write.data, _id: write.id };
+      }
+      return build(state, now);
+    }
+    return first;
+  });
+  await assert.rejects(h.worker().dispatch(h.jobId), { code: "LEASE_FENCE_REJECTED" });
+  assert.deepEqual(h.store.data, h.h3Baseline);
+  assert.equal(h.provider.calls.length, 0);
+  const job = h.store.data.device_operation_jobs.find((row) => row._id === h.jobId);
+  assert.equal(job.state, "sending");
+  assert.equal(job.dispatchAuthorizedAt, null);
+  assert.equal(job.revision, 2);
+});
+
+test("H3 D61 错 revision 或 attempt 回写：LEASE_FENCE_REJECTED，Z", async (t) => {
+  await h3FenceCase(t, (h) => patchRecord(h, "device_operation_jobs", h.jobId, { revision: 3 }));
+  await h3FenceCase(t, (h) => patchRecord(h, "device_operation_jobs", h.jobId, {
+    attempts: 2, leaseGeneration: 2,
+  }));
+});
+
+function h3JobRow(h) {
+  return h.store.data.device_operation_jobs.find((row) => row._id === h.jobId);
+}
+
+// 在 Provider 入口挂起，用于构造“已确认 T2/已调用但 T3 未提交”的窗口。
+function h3GateProvider(h) {
+  let release;
+  let markEntered;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const entered = new Promise((resolve) => { markEntered = resolve; });
+  const enroll = h.provider.enrollFace.bind(h.provider);
+  h.provider.enrollFace = async (input, context) => {
+    markEntered();
+    await gate;
+    return enroll(input, context);
+  };
+  return { entered, release };
+}
+
+test("H3 D17 明确 pre-send RETRYABLE：retryable_failed + 30s 退避，A+J", async (t) => {
+  const h = await dispatchFixture(t, "pre_send_fail");
+  const before = structuredClone(h.store.data);
+  const job = await h.worker().dispatch(h.jobId);
+  assert.equal(job.state, "retryable_failed");
+  assert.equal(job.attempts, 1);
+  assert.equal(job.nextAttemptAt, NOW + 30_000);
+  assert.equal(job.result.outcome, "retryable_failed");
+  assert.equal(job.result.errorKind, "RETRYABLE");
+  assert.equal(job.result.reasonCode, "PROVIDER_PRE_SEND");
+  assert.equal(h.provider.calls.length, 1);
+  assert.deepEqual(h3Logs(h).map((log) => log.state), ["queued", "sending", "retryable_failed"]);
+  assert.equal(h3Logs(h).at(-1).errorKind, "RETRYABLE");
+  const grant = h.store.data.device_access_grants.find((row) => row._id === h.grantId);
+  assert.equal(grant.state, "pending");
+  assertH3OnlyJobLogs(h, before);
+});
+
+test("H3 D18 post_send_unknown：awaiting_result + RESULT_UNKNOWN 告警，A+J", async (t) => {
+  const h = await dispatchFixture(t, "post_send_unknown");
+  const before = structuredClone(h.store.data);
+  const job = await h.worker().dispatch(h.jobId);
+  assert.equal(job.state, "awaiting_result");
+  assert.equal(job.result.outcome, "awaiting_result");
+  assert.equal(job.result.errorKind, "UNKNOWN_RESULT");
+  assert.equal(job.result.reasonCode, "RESULT_UNKNOWN");
+  assert.equal(h3Logs(h).at(-1).alertCode, "RESULT_UNKNOWN");
+  assert.equal(h3Logs(h).at(-1).reasonCode, "RESULT_UNKNOWN");
+  assert.equal(h.provider.calls.length, 1);
+  assertH3OnlyJobLogs(h, before);
+});
+
+test("H3 D20 已授权且调用一次后崩溃：T3 缺失，过期扫描只转 awaiting_result", async (t) => {
+  const h = await dispatchFixture(t);
+  const worker = h.worker();
+  const { entered, release } = h3GateProvider(h);
+  const pending = worker.dispatch(h.jobId);
+  await entered;
+  assert.equal(h3JobRow(h).dispatchAuthorizedAt, NOW);
+  h.setTime(NOW + 60_000);
+  const scanned = await worker.scanExpired();
+  assert.deepEqual(scanned, [{ jobId: h.jobId, state: "awaiting_result" }]);
+  const baseline = structuredClone(h.store.data);
+  release();
+  await assert.rejects(pending, { code: "LEASE_FENCE_REJECTED" });
+  assert.deepEqual(h.store.data, baseline, "晚到 T3 必须零写");
+  assert.equal(h.provider.calls.length, 1);
+  assert.equal(h3JobRow(h).result.reasonCode, "LEASE_EXPIRED_UNKNOWN");
+});
+
+test("H3 D21 Mock success：succeeded 但 grant pending 且 deviceEffective=false，A+J", async (t) => {
+  const h = await dispatchFixture(t);
+  const before = structuredClone(h.store.data);
+  const transact = h.store.transactFaceDispatch.bind(h.store);
+  let calls = 0;
+  let afterT1;
+  let afterT2;
+  h.store.transactFaceDispatch = async (...args) => {
+    const value = await transact(...args);
+    if (++calls === 1) afterT1 = structuredClone(h.store.data);
+    if (calls === 2) afterT2 = structuredClone(h.store.data);
+    return value;
+  };
+  const job = await h.worker().dispatch(h.jobId);
+  assert.equal(job.state, "succeeded");
+  assert.deepEqual(job.result, {
+    attempt: 1, outcome: "succeeded", errorKind: null, reasonCode: null, finishedAt: NOW,
+  });
+  // T1 = J；T2 = A（仅 job 授权时间与 revision）；T3 = J（结果与一条确定性日志）。
+  assert.ok(afterT1 && afterT2);
+  const t1Job = afterT1.device_operation_jobs.find((row) => row._id === h.jobId);
+  const t2Job = afterT2.device_operation_jobs.find((row) => row._id === h.jobId);
+  assert.deepEqual({ ...t1Job, dispatchAuthorizedAt: NOW, revision: 3, updatedAt: NOW }, t2Job);
+  assert.deepEqual(afterT2.device_operation_logs, afterT1.device_operation_logs, "T2 不得追加日志");
+  for (const [name, rows] of Object.entries(afterT1)) {
+    if (name === "device_operation_jobs") continue;
+    assert.deepEqual(afterT2[name], rows, `T2 只能写 job：${name}`);
+  }
+  assert.deepEqual(job.result.outcome, "succeeded");
+  const grant = h.store.data.device_access_grants.find((row) => row._id === h.grantId);
+  assert.equal(grant.state, "pending");
+  assert.equal(projectAccess({ grant, jobs: [job], eligibility: { allowed: true } }).deviceEffective, false);
+  assert.equal(h.store.data.device_operation_logs.filter((log) => log.state === "device_verified").length, 0);
+  assert.equal(h.provider.calls.length, 1);
+  assert.deepEqual(h3Logs(h).map((log) => log.state), ["queued", "sending", "succeeded"]);
+  assertH3OnlyJobLogs(h, before);
+});
+
+test("H3 D22 Mock terminal_fail：terminal_failed，不排重试", async (t) => {
+  const h = await dispatchFixture(t, "terminal_fail");
+  const before = structuredClone(h.store.data);
+  const job = await h.worker().dispatch(h.jobId);
+  assert.equal(job.state, "terminal_failed");
+  assert.equal(job.nextAttemptAt, null);
+  assert.equal(job.result.errorKind, "TERMINAL");
+  assert.equal(job.result.reasonCode, "DEVICE_REJECTED");
+  assert.equal(h3Logs(h).at(-1).alertCode, null);
+  assert.equal(h.provider.calls.length, 1);
+  assertH3OnlyJobLogs(h, before);
+});
+
+test("H3 D23 Mock 契约返回 NOT_CONFIGURED：terminal_failed + CONFIGURATION_BLOCKED，A+J", async (t) => {
+  const h = await dispatchFixture(t);
+  const before = structuredClone(h.store.data);
+  const enroll = h.provider.enrollFace.bind(h.provider);
+  h.provider.enrollFace = async (...args) => {
+    enroll(...args);
+    const error = new Error("synthetic not configured");
+    error.code = "NOT_CONFIGURED";
+    throw error;
+  };
+  const job = await h.worker().dispatch(h.jobId);
+  assert.equal(job.state, "terminal_failed");
+  assert.equal(job.result.errorKind, "NOT_CONFIGURED");
+  assert.equal(job.result.reasonCode, "NOT_CONFIGURED");
+  assert.equal(h3Logs(h).at(-1).alertCode, "CONFIGURATION_BLOCKED");
+  assert.equal(h.provider.calls.length, 1);
+  assert.equal(job.nextAttemptAt, null);
+  assertH3OnlyJobLogs(h, before);
+});
+
+test("H3 D24 领取后运行配置切为 live：terminal_failed/NOT_CONFIGURED，Provider 0，J", async (t) => {
+  let runtime = { executionMode: "test", provider: null };
+  const h = await dispatchFixture(t, "success", { runtimeConfig: () => runtime });
+  runtime = { executionMode: "test", provider: h.provider };
+  h3AfterT1(h, () => { runtime = { executionMode: "live", provider: h.provider }; });
+  const job = await h.worker().dispatch(h.jobId);
+  assert.equal(job.state, "terminal_failed");
+  assert.equal(job.result.errorKind, "NOT_CONFIGURED");
+  assert.equal(job.result.reasonCode, "NOT_CONFIGURED");
+  assert.equal(h3Logs(h).at(-1).alertCode, "CONFIGURATION_BLOCKED");
+  assert.equal(h.provider.calls.length, 0);
+  assertH3OnlyJobLogs(h, h.h3Baseline);
+});
+
+test("H3 D25 T3 callback 重跑：只提交一条结果日志；重投零写", async (t) => {
+  const h = await dispatchFixture(t);
+  const transact = h.store.transactFaceDispatch.bind(h.store);
+  let plans = 0;
+  h.store.transactFaceDispatch = (refs, build) => transact(refs, (state, now) => {
+    plans += 1;
+    const first = build(structuredClone(state), now);
+    plans += 1;
+    const second = build(state, now);
+    assert.deepEqual(first, second);
+    return second;
+  });
+  const job = await h.worker().dispatch(h.jobId);
+  assert.equal(job.state, "succeeded");
+  assert.equal(plans, 6);
+  assert.deepEqual(h3Logs(h).map((log) => log.state), ["queued", "sending", "succeeded"]);
+  const before = structuredClone(h.store.data);
+  await assert.rejects(h.worker().dispatch(h.jobId), { code: "INVALID_JOB" });
+  assert.deepEqual(h.store.data, before);
+});
+
+test("H3 D26 相同 createGrant 请求重放：原 grantId/jobId，无 snapshot 副本/核心写", async (t) => {
+  const h = await setup(t, {
+    syntheticDispatch: true, validUntil: NOW + 900_000, qualificationEnd: NOW + 900_001,
+  });
+  const key = "idem-h3-d26-replay-0001";
+  const first = await h.service.createGrant(h.input(), { idempotencyKey: key });
+  const snapshots = h.store.data.face_dispatch_snapshots.slice();
+  assert.equal(snapshots.length, 1);
+  const before = structuredClone(h.store.data);
+  const second = await h.service.createGrant(h.input(), { idempotencyKey: key });
+  assert.deepEqual(second, first);
+  assert.deepEqual(h.store.data.face_dispatch_snapshots, snapshots);
+  for (const name of CORE) {
+    assert.deepEqual(h.store.data[name], before[name], `${name} 不得因重放变化`);
+  }
+  assert.equal(h.store.data.admin_audit.length, before.admin_audit.length + 1);
+  assert.equal(h.providerCalls.enroll, 0);
+});
+
+// T1 后外部写导致的逐类资格/授权状态变化。基线 = 注入后完整快照。
+async function h3PreSendMutation(t, options, mutate, code) {
+  const h = await dispatchFixture(t, "success", options);
+  h3AfterT1(h, mutate);
+  await h.worker().dispatch(h.jobId);
+  return h3ExpectTerminal(h, code);
+}
+
+function h3AddBlacklistDeny(h, id = "entry-h3-deny") {
+  h.store.data.blacklist_entries ||= [];
+  h.store.data.blacklist_entries.push({ _id: id, ...entryRecord(id).data });
+  const headId = blacklistDecisionHeadId(ORG, OCCUPANCY, "occupancy.activate");
+  h.store.data.blacklist_decisions ||= [];
+  const index = h.store.data.blacklist_decisions.findIndex((row) => row._id === headId);
+  const data = {
+    orgId: ORG, occupancyId: OCCUPANCY, restriction: "occupancy.activate",
+    entryIds: [id], entryRevisions: [1], decision: "deny",
+    latestDecisionId: "decision-h3-deny", expiresAt: null, recordType: "current", revision: 1,
+  };
+  if (index < 0) h.store.data.blacklist_decisions.push({ _id: headId, ...data });
+  else Object.assign(h.store.data.blacklist_decisions[index], data);
+}
+
+test("H3 D28 T1 后人员归档：terminal_failed/INVALID_STATE，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "persons", PERSON, { status: "archived" }), "INVALID_STATE");
+});
+
+test("H3 D29 T1 后固定实名申请撤销（另有 approved）：IDENTITY_NOT_APPROVED，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => {
+    patchRecord(h, "identity_applications", IDENTITY, { state: "revoked" });
+    h.store.data.identity_applications.push({
+      _id: "id-c4-other", orgId: ORG, personId: PERSON, state: "approved",
+      identityDigest: "digest-other", keyVersion: 1, revision: 1,
+    });
+  }, "IDENTITY_NOT_APPROVED");
+});
+
+test("H3 D30 T1 后入住关系 revision 变化：REVISION_CONFLICT，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "occupancies", OCCUPANCY, { revision: 2 }),
+    "REVISION_CONFLICT");
+});
+
+test("H3 D31 T1 后周期 epoch 变化：REVISION_CONFLICT，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "occupancy_cycles", CYCLE, { epoch: 2 }),
+    "REVISION_CONFLICT");
+});
+
+test("H3 D32 T1 后目录 revision 变化：REVISION_CONFLICT，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "property_catalog", FLOOR, { revision: 2 }),
+    "REVISION_CONFLICT");
+});
+
+test("H3 D33 T1 后真名单明确 deny：BLACKLIST_DENIED，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => h3AddBlacklistDeny(h), "BLACKLIST_DENIED");
+});
+
+test("H3 D34 T1 后文件 revision 变化：FILE_BINDING_CHANGED，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "file_assets", FILE, { revision: 2 }),
+    "FILE_BINDING_CHANGED");
+});
+
+test("H3 D35 T1 后设备绑定变化：DEVICE_CLAIM_INVALID，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "access_devices", DEVICE, { claimId: "claim-other" }),
+    "DEVICE_CLAIM_INVALID");
+});
+
+test("H3 D36 T1 后 owner claim 释放：DEVICE_CLAIM_INVALID，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => {
+    const claim = h.store.data.device_claims.find((row) => row._id === CLAIM);
+    delete claim.boundDeviceId;
+    delete claim.activatedAt;
+    delete claim.activatedByAuditId;
+    Object.assign(claim, {
+      state: "released", releasedAt: 2, releasedByAuditId: "audit-h3-d36", releaseReason: "retired",
+    });
+  }, "DEVICE_CLAIM_INVALID");
+});
+
+test("H3 D37 T1 后 grant slot activeClaimId 变化：GRANT_SLOT_CONFLICT，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "grant_slot_claims",
+    grantSlotKey({ orgId: ORG, personId: PERSON, deviceId: DEVICE, cycleId: CYCLE }),
+    { activeClaimId: "grant-other" }), "GRANT_SLOT_CONFLICT");
+});
+
+test("H3 D38 T1 后 grant revoked：GRANT_INACTIVE，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "device_access_grants", h.grantId, { state: "revoked" }),
+    "GRANT_INACTIVE");
+});
+
+test("H3 D39 T1 后 grant 有效期终点到达：GRANT_INACTIVE，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "device_access_grants", h.grantId, { validUntil: NOW }),
+    "GRANT_INACTIVE");
+});
+
+test("H3 D40 T1 后 grant suspended：GRANT_INACTIVE，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "device_access_grants", h.grantId, { state: "suspended" }),
+    "GRANT_INACTIVE");
+});
+
+test("H3 D47 T1 后撤销发起成员 device.access.manage：FORBIDDEN，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "org_memberships", MEMBERSHIP, {
+    permissions: ["device.face.submit"],
+  }), "FORBIDDEN");
+});
+
+test("H3 D48 T1 后 lifecycle guard 从缺席变为存在：REVISION_CONFLICT，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => {
+    h.store.data.lifecycle_guards ||= [];
+    h.store.data.lifecycle_guards.push({
+      _id: guardId(ORG), orgId: ORG, epoch: 1, revision: 1, createdAt: NOW,
+    });
+  }, "REVISION_CONFLICT");
+});
+
+test("H3 D49 T1 后 member 对应主租房间 slot 解绑：SPONSOR_INACTIVE，J", async (t) => {
+  await h3PreSendMutation(t, { role: "member" }, (h) => patchRecord(h, "room_primary_slots",
+    primarySlotId(ORG, ROOM), { currentOccupancyId: "occ-other" }), "SPONSOR_INACTIVE");
+});
+
+test("H3 D56 T1 后 K1 版本与设备不一致：DEVICE_DIGEST_CONFIG_CHANGED，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "access_devices", DEVICE, { keyVersion: 2 }),
+    "DEVICE_DIGEST_CONFIG_CHANGED");
+});
+
+test("H3 D60 T1 后房间归档：ROOM_ARCHIVED，J", async (t) => {
+  await h3PreSendMutation(t, {}, (h) => patchRecord(h, "rooms", ROOM, { status: "archived" }), "ROOM_ARCHIVED");
+});
+
+test("H3 D43 600s 退避边界：到期前人工与自动均拒，到期后并发仅一方排队", async (t) => {
+  const h = await dispatchFixture(t, "pre_send_fail");
+  const worker = h.worker();
+  let now = NOW;
+  let third;
+  for (const [index, delay] of [30_000, 120_000, 600_000].entries()) {
+    third = await worker.dispatch(h.jobId);
+    assert.equal(third.state, "retryable_failed");
+    assert.equal(third.nextAttemptAt, now + delay);
+    if (index < 2) {
+      now += delay;
+      h.setTime(now);
+      assert.equal((await worker.requeue(h.jobId, third.revision)).state, "queued");
+    }
+  }
+  assert.equal(third.attempts, 3);
+  assert.equal(third.nextAttemptAt, NOW + 750_000);
+  patchRecord(h, "org_memberships", MEMBERSHIP, {
+    permissions: ["device.access.manage", "device.operation.retry"],
+  });
+  const actor = { membershipId: MEMBERSHIP, actorId: MEMBERSHIP };
+  h.setTime(third.nextAttemptAt - 1);
+  const beforeBoundary = structuredClone(h.store.data);
+  await assert.rejects(worker.requeue(h.jobId, third.revision), { code: "RETRY_NOT_DUE" });
+  await assert.rejects(worker.requeue(h.jobId, third.revision, actor), { code: "RETRY_NOT_DUE" });
+  assert.deepEqual(h.store.data, beforeBoundary, "未到期的人工/自动重排必须零写");
+  h.setTime(third.nextAttemptAt);
+  const outcomes = await Promise.allSettled([
+    worker.requeue(h.jobId, third.revision), worker.requeue(h.jobId, third.revision, actor),
+  ]);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1,
+    "人工与自动必须争用同一 CAS");
+  assert.equal(h.provider.calls.length, 3);
+  const queued = h.store.data.device_operation_jobs.find((row) => row._id === h.jobId);
+  assert.equal(queued.state, "queued");
+  const exhausted = await worker.dispatch(h.jobId);
+  assert.equal(exhausted.state, "terminal_failed");
+  assert.equal(exhausted.attempts, 4);
+  assert.equal(exhausted.result.reasonCode, "RETRY_EXHAUSTED");
+  assert.equal(h.store.data.device_operation_logs.at(-1).alertCode, "RETRY_EXHAUSTED");
+  assert.equal(h.provider.calls.length, 4);
+  const terminal = structuredClone(h.store.data);
+  await assert.rejects(worker.requeue(h.jobId, exhausted.revision, actor), { code: "INVALID_JOB" });
+  assert.deepEqual(h.store.data, terminal, "RETRY_EXHAUSTED 后人工重试必须零写");
+});
+
+test("H3 D45 源记录/返回对象注入敏感字段：Provider 入参、结果、日志、快照均不泄露", async (t) => {
+  const MARKER = "synthetic-sensitive-marker-8f2c";
+  const h = await dispatchFixture(t, "success", {
+    prepare: async (harness) => {
+      patchRecord(harness, "face_credentials", CREDENTIAL, {
+        objectKey: `private/${MARKER}`, checksum: MARKER, identityDigest: MARKER,
+        rawResponse: { secret: MARKER },
+      });
+      patchRecord(harness, "persons", PERSON, { identityDigest: MARKER, privateNote: MARKER });
+      patchRecord(harness, "file_assets", FILE, { objectKey: `private/${MARKER}`, checksum: MARKER });
+      patchRecord(harness, "occupancies", OCCUPANCY, { privateNote: MARKER });
+    },
+  });
+  const captured = [];
+  const enroll = h.provider.enrollFace.bind(h.provider);
+  h.provider.enrollFace = async (input, context) => {
+    captured.push({ input, context: { ...context, permissions: [...context.permissions] } });
+    const result = await enroll(input, context);
+    return { ...result, rawResponse: { secret: MARKER }, checksum: MARKER, stack: MARKER };
+  };
+  const job = await h.worker().dispatch(h.jobId);
+  assert.equal(job.state, "succeeded");
+  assert.equal(captured.length, 1);
+  assert.deepEqual(Object.keys(captured[0].input).sort(),
+    ["deviceId", "grantId", "personId", "sourceFileId", "validFrom", "validUntil"]);
+  assert.deepEqual(Object.keys(captured[0].context).sort(),
+    ["actorId", "actorType", "executionMode", "idempotencyKey", "orgId", "permissions"]);
+  assert.deepEqual(captured[0].context.permissions, ["device.access.manage"]);
+  const snapshot = h.store.data.face_dispatch_snapshots[0];
+  assert.deepEqual(Object.keys(snapshot).sort(), [
+    "_id", "claimId", "createdAt", "creatorActorId", "cycleId", "domainHeadId", "domainVersionId",
+    "fileId", "identityApplicationId", "jobId", "membershipId", "occupancyId", "orgId", "personId",
+    "restriction", "schemaVersion", "slotId", "versions",
+  ]);
+  for (const item of snapshot.versions) {
+    assert.deepEqual(Object.keys(item).sort(),
+      ["collection", "epoch", "id", "keyVersion", "present", "revision"]);
+  }
+  const serialized = JSON.stringify([
+    snapshot, job, h3Logs(h), job.result,
+  ]);
+  assert.ok(!serialized.includes(MARKER), "敏感标记不得进入快照/job/结果/日志");
+  for (const field of ["objectKey", "checksum", "rawResponse", "stack", "identityDigest", "privateNote"]) {
+    assert.ok(!serialized.includes(`"${field}"`), field);
+  }
+  assert.ok(!serialized.includes("idem-c4-"), "原始用户幂等键不得持久化");
+  assert.ok(!/private\/[^\s"]+\.jpg/.test(serialized), "私密文件位置不得进入派发记录");
+});
+
+test("H3 D51 有效期内结果先提交：过期扫描比较失败零写，T3 继续 succeeded", async (t) => {
+  const h = await dispatchFixture(t);
+  const worker = h.worker();
+  const { entered, release } = h3GateProvider(h);
+  const pending = worker.dispatch(h.jobId);
+  await entered;
+  h.setTime(NOW + 59_999);
+  const beforeScan = structuredClone(h.store.data);
+  await assert.rejects(worker.expire(h.jobId), { code: "LEASE_FENCE_REJECTED" });
+  assert.deepEqual(h.store.data, beforeScan, "有效期内扫描必须零写");
+  release();
+  const job = await pending;
+  assert.equal(job.state, "succeeded");
+  assert.equal(h.provider.calls.length, 1);
+  assert.deepEqual(h3Logs(h).map((log) => log.state), ["queued", "sending", "succeeded"]);
+});
+
+test("H3 D52 目标日志 ID 已存在：事务回滚，原日志内容保留", async (t) => {
+  const sending = await dispatchFixture(t);
+  const conflictId = deterministicLogId(sending.jobId, "sending", 2);
+  sending.store.data.device_operation_logs.push({
+    _id: conflictId, orgId: ORG, jobId: sending.jobId, action: "enroll",
+    fromState: "queued", state: "sending", actorType: "system", actorId: "external",
+    at: NOW, revision: 2, attempt: 1, leaseGeneration: 1,
+    evidenceScope: "simulated", errorKind: null, reasonCode: null, alertCode: "ORIGINAL",
+  });
+  const beforeSending = structuredClone(sending.store.data);
+  await assert.rejects(sending.worker().dispatch(sending.jobId), { code: "CONFLICT", status: 409 });
+  assert.deepEqual(sending.store.data, beforeSending, "领取日志冲突必须整事务回滚");
+  const kept = sending.store.data.device_operation_logs.find((log) => log._id === conflictId);
+  assert.equal(kept.alertCode, "ORIGINAL");
+  assert.equal(sending.store.data.device_operation_jobs.find((row) => row._id === sending.jobId).state, "queued");
+  assert.equal(sending.provider.calls.length, 0);
+
+  const result = await dispatchFixture(t);
+  const resultLogId = deterministicLogId(result.jobId, "succeeded", 4);
+  result.store.data.device_operation_logs.push({
+    _id: resultLogId, orgId: ORG, jobId: result.jobId, action: "enroll",
+    fromState: "sending", state: "succeeded", actorType: "system", actorId: "external",
+    at: NOW, revision: 4, attempt: 1, leaseGeneration: 1,
+    evidenceScope: "simulated", errorKind: null, reasonCode: null, alertCode: "ORIGINAL",
+  });
+  const beforeResult = structuredClone(result.store.data);
+  await assert.rejects(result.worker().dispatch(result.jobId), { code: "CONFLICT", status: 409 });
+  const job = result.store.data.device_operation_jobs.find((row) => row._id === result.jobId);
+  assert.equal(job.state, "sending", "T3 冲突不得提交 job 写");
+  assert.equal(job.dispatchAuthorizedAt, NOW);
+  assert.equal(result.store.data.device_operation_logs.find((log) => log._id === resultLogId).alertCode, "ORIGINAL");
+  assert.deepEqual(result.store.data.admin_audit, beforeResult.admin_audit);
+  assert.equal(result.provider.calls.length, 1);
+});
+
+test("H3 D57 异常形状/超时统一 UNKNOWN_RESULT；晚到回调零写", async (t) => {
+  const weird = await dispatchFixture(t);
+  const enroll = weird.provider.enrollFace.bind(weird.provider);
+  weird.provider.enrollFace = async (input, context) => {
+    const result = await enroll(input, context);
+    return { ...result, jobId: 42, rawResponse: { secret: "marker" } };
+  };
+  const unknown = await weird.worker().dispatch(weird.jobId);
+  assert.equal(unknown.state, "awaiting_result");
+  assert.equal(unknown.result.errorKind, "UNKNOWN_RESULT");
+  assert.equal(weird.provider.calls.length, 1);
+  const before = structuredClone(weird.store.data);
+  await assert.rejects(weird.worker().dispatch(weird.jobId), { code: "INVALID_JOB" });
+  assert.deepEqual(weird.store.data, before);
+
+  const timeout = await dispatchFixture(t);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let markEntered;
+  const entered = new Promise((resolve) => { markEntered = resolve; });
+  const hang = timeout.provider.enrollFace.bind(timeout.provider);
+  timeout.provider.enrollFace = async (input, context) => {
+    await hang(input, context);
+    markEntered();
+    return new Promise(() => {});
+  };
+  const pending = timeout.worker().dispatch(timeout.jobId);
+  await entered;
+  t.mock.timers.tick(10_000);
+  const timedOut = await pending;
+  assert.equal(timedOut.state, "awaiting_result");
+  assert.equal(timedOut.result.reasonCode, "RESULT_UNKNOWN");
+  assert.equal(timeout.provider.calls.length, 1);
+  assert.deepEqual(h3Logs(timeout).map((log) => log.state), ["queued", "sending", "awaiting_result"]);
+});
+
+test("H3 D59 同 operation key 并发创建：结果一致且仅一条 snapshot，H", async (t) => {
+  const h = await setup(t, {
+    syntheticDispatch: true, validUntil: NOW + 900_000, qualificationEnd: NOW + 900_001,
+  });
+  const key = "idem-h3-d59-concurrent-01";
+  const counts = Object.fromEntries(Object.entries(h.store.data).map(([name, rows]) => [name, rows.length]));
+  const results = await Promise.all([
+    h.service.createGrant(h.input(), { idempotencyKey: key }),
+    h.service.createGrant(h.input(), { idempotencyKey: key }),
+  ]);
+  assert.deepEqual(results[0], results[1]);
+  assert.equal(h.store.data.face_dispatch_snapshots.length, (counts.face_dispatch_snapshots ?? 0) + 1);
+  for (const name of CORE) {
+    assert.equal(h.store.data[name].length, (counts[name] ?? 0) + 1, `${name} 只能创建一条`);
+  }
+  assert.equal(h.providerCalls.enroll, 0);
+});
+
+test("H3 D62 T2 时剩余窗口不足：terminal_failed/PRE_SEND_WINDOW_CLOSED，Provider 0，J", async (t) => {
+  const h = await dispatchFixture(t);
+  h3AfterT1(h, (harness) => harness.setTime(NOW + 55_000));
+  await h.worker().dispatch(h.jobId);
+  const job = h3ExpectTerminal(h, "PRE_SEND_WINDOW_CLOSED");
+  assert.equal(job.result.alertCode, undefined);
+});
+
+test("H3 D65 T2 已确认但保守剩余不足：不调用 Mock，terminal_failed/PRE_SEND_WINDOW_CLOSED", async (t) => {
+  const h = await dispatchFixture(t);
+  const before = structuredClone(h.store.data);
+  const transact = h.store.transactFaceDispatch.bind(h.store);
+  let calls = 0;
+  h.store.transactFaceDispatch = async (...args) => {
+    const value = await transact(...args);
+    if (++calls === 2) h.setTime(NOW + 55_000);
+    return value;
+  };
+  const job = await h.worker().dispatch(h.jobId);
+  assert.equal(job.state, "terminal_failed");
+  assert.equal(job.result.errorKind, "PRE_SEND_BLOCKED");
+  assert.equal(job.result.reasonCode, "PRE_SEND_WINDOW_CLOSED");
+  assert.equal(job.leaseOwner, null);
+  assert.equal(h.provider.calls.length, 0);
+  assert.deepEqual(h3Logs(h).map((log) => log.state), ["queued", "sending", "terminal_failed"]);
+  assertH3OnlyJobLogs(h, before);
+});
+
+test("H3 D27 同一 dispatcher 并发两次 dispatch：至多一次领取与一次 Mock 调用", async (t) => {
+  const h = await dispatchFixture(t);
+  const worker = h.worker();
+  const outcomes = await Promise.allSettled([worker.dispatch(h.jobId), worker.dispatch(h.jobId)]);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+  const rejected = outcomes.find((outcome) => outcome.status === "rejected");
+  assert.equal(rejected.reason.code, "INVALID_JOB");
+  assert.equal(h.provider.calls.length, 1);
+  assert.deepEqual(h3Logs(h).map((log) => log.state), ["queued", "sending", "succeeded"]);
+  assert.equal(h3JobRow(h).state, "succeeded");
+});
+
+test("H3 D50/D52 快照不可覆盖、重放内容级一致、内容篡改失败关闭", async (t) => {
+  const h = await dispatchFixture(t);
+  const snapshot = h.store.data.face_dispatch_snapshots[0];
+  const before = structuredClone(h.store.data);
+  await assert.rejects(
+    () => h.store.transact([ref("face_dispatch_snapshots", snapshot._id)], () => [{
+      collection: "face_dispatch_snapshots", id: snapshot._id,
+      data: { ...snapshot, personId: "person-tampered" },
+    }], audit),
+    (error) => error.status === 409,
+  );
+  await assert.rejects(
+    () => h.store.change("face_dispatch_snapshots", snapshot._id, () => ({ personId: "person-tampered" }), audit),
+    (error) => error.status === 409,
+  );
+  assert.deepEqual(h.store.data, before, "快照覆盖必须被拒绝且零写");
+
+  const personVersion = h.store.data.face_dispatch_snapshots[0].versions
+    .find((item) => item.collection === "persons" && item.id === PERSON);
+  personVersion.revision = 999;
+  const tampered = structuredClone(h.store.data);
+  const job = await h.worker().dispatch(h.jobId);
+  assert.equal(job.state, "terminal_failed");
+  assert.equal(job.result.reasonCode, "REVISION_CONFLICT");
+  assert.equal(h.provider.calls.length, 0);
+  assertH3OnlyJobLogs(h, tampered);
+});
+
+test("H3 D66 适配器能力不足：dispatcher 拒绝启用，零写", async (t) => {
+  const h = await dispatchFixture(t);
+  const before = structuredClone(h.store.data);
+  const provider = new MockFaceAccessProvider();
+  const fake = { transactFaceDispatch() {}, faceDispatchTime() { return NOW; } };
+  assert.throws(() => new MockFaceDispatcher({
+    store: fake, orgId: ORG, files: h.files, blacklist: h.blacklist, provider,
+  }), (error) => error.code === "ADAPTER_UNAVAILABLE");
+  const noClock = Object.create(h.store);
+  noClock.faceDispatchTime = undefined;
+  assert.throws(() => new MockFaceDispatcher({
+    store: noClock, orgId: ORG, files: h.files, blacklist: h.blacklist, provider,
+  }), (error) => error.code === "ADAPTER_UNAVAILABLE");
+  assert.deepEqual(h.store.data, before, "启用探针不得产生任何写");
+  assert.equal(provider.calls.length, 0);
 });

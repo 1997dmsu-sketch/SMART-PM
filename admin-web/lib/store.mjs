@@ -238,9 +238,13 @@ export class LocalStore {
         if (w.collection === "face_dispatch_snapshots" && index >= 0) {
           throw new HttpError(409, "派发快照不可覆盖");
         }
-        if (dispatch && (w.collection !== "device_operation_jobs" &&
-            (w.collection !== "device_operation_logs" || index >= 0))) {
-          throw Error("Invalid dispatch write");
+        if (dispatch && w.collection !== "device_operation_jobs" &&
+            w.collection !== "device_operation_logs") {
+          throw new HttpError(409, "派发事务不允许写该集合", "CONFLICT");
+        }
+        if (dispatch && w.collection === "device_operation_logs" && index >= 0) {
+          // 确定性日志同 ID 已存在：整个事务回滚，原日志内容不覆盖。
+          throw new HttpError(409, "确定性派发日志已存在", "CONFLICT");
         }
         const record = {
           ...(index < 0 ? {} : rows[index]),

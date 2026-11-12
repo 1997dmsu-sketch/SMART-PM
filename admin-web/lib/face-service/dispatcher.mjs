@@ -47,6 +47,9 @@ function assertJob(job, orgId) {
     for (const field of ["_id", "orgId", "credentialId", "grantId", "deviceId"]) assertOpaqueId(job[field], field);
     for (const field of ["createdAt", "updatedAt", "attempts"]) assertSafeInt(job[field], field);
     assertSafeInt(job.revision, "revision", { min: 1 });
+    // 后续迁移还需 revision+1；没有余量时在领取/回写前就失败关闭，避免
+    // 在构造日志 ref 时溢出成内部 PARAM_ERROR。
+    denyUnless(job.revision <= Number.MAX_SAFE_INTEGER - 2, "INVALID_JOB");
     denyUnless(job.attempts <= 4 && job.action === "enroll" && job.provider === "mock" &&
       job.executionMode === "test" && job.evidenceScope === "simulated", "INVALID_JOB");
     if (job.snapshotId === undefined) reject("DISPATCH_SNAPSHOT_REQUIRED");
@@ -166,17 +169,36 @@ export class MockFaceDispatcher {
   #owner = randomUUID();
   #provider;
   #store;
+  #runtimeConfig;
 
-  constructor({ store, orgId, files, blacklist, provider, executionMode = "test" }) {
-    denyUnless(store instanceof LocalStore && typeof store.transactFaceDispatch === "function", "ADAPTER_UNAVAILABLE");
+  constructor({
+    store, orgId, files, blacklist, provider, executionMode = "test", runtimeConfig = null,
+  }) {
+    // 合成派发只信任单一 LocalStore：其串行队列在整库快照上完成读到写的隔离，
+    // 缺席读也受同一克隆保护；时钟由 faceDispatchTime() 提供单调安全整数。
+    // 其他适配器即使声明同名方法也没有可验证的缺失读保护，直接拒绝启用。
+    denyUnless(store instanceof LocalStore &&
+      typeof store.transactFaceDispatch === "function" &&
+      typeof store.faceDispatchTime === "function", "ADAPTER_UNAVAILABLE");
     denyUnless(provider instanceof MockFaceAccessProvider && executionMode === "test", "NOT_CONFIGURED");
     denyUnless(files?.store === store && files.orgId === orgId && blacklist?.store === store && blacklist.orgId === orgId, "ADAPTER_UNAVAILABLE");
+    denyUnless(runtimeConfig === null || typeof runtimeConfig === "function", "ADAPTER_UNAVAILABLE");
     assertOpaqueId(orgId, "orgId");
     this.#store = store;
     this.#provider = provider;
+    this.#runtimeConfig = runtimeConfig;
+    this.executionMode = executionMode;
     this.orgId = orgId;
     this.files = files;
     this.blacklist = blacklist;
+  }
+
+  #configured() {
+    const current = this.#runtimeConfig
+      ? this.#runtimeConfig()
+      : { executionMode: this.executionMode, provider: this.#provider };
+    return Boolean(current) && current.executionMode === "test" &&
+      current.provider instanceof MockFaceAccessProvider;
   }
 
   async #transact(refs, build) {
@@ -306,6 +328,9 @@ export class MockFaceDispatcher {
             const data = { dispatchAuthorizedAt: now, updatedAt: now, revision: increment(current.revision) };
             return { writes: [{ ...jobRef, data }], value: { job: { ...current, ...data }, input } };
           } catch (error) {
+            // 租约/fence 失败必须在构造任何写计划前退出（零写、零日志、零 audit），
+            // 不能被下面的“确定性 pre-send 拒绝”路径吞成 terminal_failed。
+            if (error.code === "LEASE_FENCE_REJECTED") throw error;
             if (error.code === "BLACKLIST_RETRY" && attempt < 2) throw error;
             const code = REASONS.has(error.code) ? error.code : "ADAPTER_UNAVAILABLE";
             const result = finish(current, now, "terminal_failed", "PRE_SEND_BLOCKED", code);
@@ -331,6 +356,13 @@ export class MockFaceDispatcher {
 
   async dispatch(jobId) {
     const { job, snapshot } = await this.#claim(await this.#readJob(jobId));
+    // 环境配置在领取后、任何资格/Provider 工作前重新采样；切换为 live 或非 Mock
+    // 时只写一条明确终态，Provider 0 次。
+    if (!this.#configured()) {
+      return this.#finish(job, (record, now) =>
+        finish(record, now, "terminal_failed", "NOT_CONFIGURED", "NOT_CONFIGURED", "CONFIGURATION_BLOCKED"),
+      ["terminal_failed"]);
+    }
     const authorized = await this.#authorize(job, snapshot);
     if (!authorized.input) return authorized.job;
     const current = authorized.job;

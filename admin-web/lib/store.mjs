@@ -145,7 +145,11 @@ export function seed() {
   };
 }
 export class LocalStore {
-  constructor(directory) {
+  #dispatchNow;
+  #dispatchTime = 0;
+
+  constructor(directory, { dispatchNow = Date.now } = {}) {
+    this.#dispatchNow = dispatchNow;
     this.directory = directory;
     this.queue = Promise.resolve();
   }
@@ -197,6 +201,22 @@ export class LocalStore {
     return structuredClone(row);
   }
   async transact(refs, build, audit) {
+    return this.#transact(refs, build, audit);
+  }
+  // H3 runs only on a single, shared synthetic LocalStore instance.
+  faceDispatchTime() {
+    const now = this.#dispatchNow();
+    if (!Number.isSafeInteger(now) || now < this.#dispatchTime) {
+      throw new HttpError(503, "派发时钟不可用");
+    }
+    this.#dispatchTime = now;
+    return now;
+  }
+  async transactFaceDispatch(refs, build) {
+    if (refs.length > 90) throw new HttpError(400, "派发事务引用超限");
+    return this.#transact(refs, (state) => build(state, this.faceDispatchTime()), null, true);
+  }
+  async #transact(refs, build, audit, dispatch = false) {
     const task = this.queue.then(async () => {
       const next = structuredClone(this.data);
       const state = Object.fromEntries(
@@ -208,22 +228,30 @@ export class LocalStore {
         ]),
       );
       const writes = await build(state);
+      if (dispatch && writes.length === 0) return;
       const allowed = new Set(refs.map((r) => `${r.collection}/${r.id}`));
       for (const w of writes) {
         if (!allowed.has(`${w.collection}/${w.id}`))
           throw Error("Undeclared transaction write");
         const rows = (next[w.collection] ||= []);
         const index = rows.findIndex((r) => r._id === w.id);
+        if (w.collection === "face_dispatch_snapshots" && index >= 0) {
+          throw new HttpError(409, "派发快照不可覆盖");
+        }
+        if (dispatch && (w.collection !== "device_operation_jobs" &&
+            (w.collection !== "device_operation_logs" || index >= 0))) {
+          throw Error("Invalid dispatch write");
+        }
         const record = {
           ...(index < 0 ? {} : rows[index]),
           ...w.data,
           _id: w.id,
-          updatedAt: Date.now(),
+          ...(!dispatch && w.collection !== "face_dispatch_snapshots" ? { updatedAt: Date.now() } : {}),
         };
         if (index < 0) rows.push(record);
         else rows[index] = record;
       }
-      next.admin_audit.unshift({
+      if (!dispatch) next.admin_audit.unshift({
         ...audit,
         _id: randomUUID(),
         target: writes.map((w) => `${w.collection}/${w.id}`).join(", "),
@@ -236,6 +264,7 @@ export class LocalStore {
     return task;
   }
   async change(name, id, build, audit) {
+    if (name === "face_dispatch_snapshots") throw new HttpError(409, "派发快照不可覆盖");
     const task = this.queue.then(async () => {
       const next = structuredClone(this.data);
       const rows = next[name];

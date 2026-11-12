@@ -2,11 +2,12 @@
  * HK-AI-04 服务层（H2-a）。
  *
  * 已实现：submit、review、reviewQueue、queryJob、createGrant（原子授权事务）。
- * 未实现：H2-b 设备 claim 模型、H3 租约派发、H4 撤权闭环；不调用 Provider。
+ * H3 合成模式可在创建事务中固定派发快照。服务本身不调用 Provider。
  */
 import { createHash } from "node:crypto";
 
 import { failCode } from "../model.mjs";
+import { LocalStore } from "../store.mjs";
 import {
   COLLECTIONS,
   deterministicLogId,
@@ -39,6 +40,7 @@ import {
 } from "./dto.mjs";
 import { snapshotEligibility, validateEligibility } from "./eligibility.mjs";
 import { prepareGrantEligibility } from "./qualification.mjs";
+import { createDispatchSnapshot, DISPATCH_SNAPSHOTS, snapshotIdFor } from "./dispatch-snapshot.mjs";
 
 const ref = (collection, id) => ({ collection, id });
 // 预读业务错配必须延迟到事务内权限/operation/credential 检查之后，保持 §6.3
@@ -51,7 +53,7 @@ const stable = (value) => (Array.isArray(value) ? value.map(stable) : value && t
 const digestOf = (value) => createHash("sha256").update(JSON.stringify(stable(value))).digest("hex");
 
 export class FaceCredentialService {
-  constructor({ store, orgId, actor, files, blacklist, provider, now = () => Date.now() }) {
+  constructor({ store, orgId, actor, files, blacklist, provider, now = () => Date.now(), syntheticDispatch = false }) {
     this.store = store;
     this.orgId = orgId;
     this.actor = actor;
@@ -59,6 +61,10 @@ export class FaceCredentialService {
     this.blacklist = blacklist;
     this.provider = provider;
     this.now = now;
+    if (syntheticDispatch && !(store instanceof LocalStore)) {
+      failCode("ADAPTER_UNAVAILABLE", "合成派发适配器不可用", 503);
+    }
+    this.syntheticDispatch = syntheticDispatch;
   }
 
   async #membership() {
@@ -329,6 +335,7 @@ export class FaceCredentialService {
     const grantId = `grant-${digestOf(opKey).slice(0, 24)}`;
     const jobId = `job-${digestOf(opKey + ":enroll").slice(0, 24)}`;
     const logId = deterministicLogId(jobId, "queued");
+    const snapshotId = snapshotIdFor(jobId);
     const expected = { grantId, jobId, evidenceScope: "simulated" };
     const baseRefs = [
       ref(COLLECTIONS.FACE_CREDENTIALS, parsed.credentialId),
@@ -345,6 +352,7 @@ export class FaceCredentialService {
       ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId),
       ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId),
       ref(COLLECTIONS.DEVICE_OPERATION_LOGS, logId),
+      ...(this.syntheticDispatch ? [ref(DISPATCH_SNAPSHOTS, snapshotId)] : []),
       ref(COLLECTIONS.OPERATION_KEYS, opKey),
       ...this.#opDomainRefs(op),
     ];
@@ -442,6 +450,30 @@ export class FaceCredentialService {
           evidenceScope: "simulated", attempts: 0,
           leaseOwner: null, leaseExpiresAt: null, createdAt: now,
         };
+        const slotRecord = {
+          orgId: this.orgId, personId, deviceId: parsed.deviceId,
+          cycleId: parsed.cycleId, activeClaimId: grantId, state: "active",
+          revision: 1, createdAt: now, updatedAt: now, activatedAt: now,
+        };
+        const snapshotWrites = [];
+        if (this.syntheticDispatch) {
+          if (state[`${DISPATCH_SNAPSHOTS}/${snapshotId}`]) {
+            failCode("CONFLICT", "派发快照已存在", 409);
+          }
+          Object.assign(job, {
+            snapshotId, leaseGeneration: 0, nextAttemptAt: null,
+            dispatchAuthorizedAt: null, result: null, updatedAt: now,
+          });
+          snapshotWrites.push({
+            collection: DISPATCH_SNAPSHOTS, id: snapshotId,
+            data: createDispatchSnapshot({
+              jobId, orgId: this.orgId, actor: this.actor, now, request: pre.dispatchRequest,
+              state, grant: grantRecord, grantId, slot: slotRecord, credential: pre.credential,
+              credentialId: parsed.credentialId, fileId: pre.credential.sourceFileId,
+              deviceId: parsed.deviceId, claimId, domainKeys, slotId,
+            }),
+          });
+        }
         validateRecord(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantRecord);
         validateRecord(COLLECTIONS.DEVICE_OPERATION_JOBS, job);
         result = { grantId, jobId, evidenceScope: "simulated" };
@@ -449,15 +481,12 @@ export class FaceCredentialService {
         return {
           writes: [
             ...pre.domainWrites,
+            ...snapshotWrites,
             { collection: COLLECTIONS.DEVICE_ACCESS_GRANTS, id: grantId, data: grantRecord },
             { collection: COLLECTIONS.DEVICE_OPERATION_JOBS, id: jobId, data: job },
             {
               collection: COLLECTIONS.GRANT_SLOT_CLAIMS, id: slotId,
-              data: {
-                orgId: this.orgId, personId, deviceId: parsed.deviceId,
-                cycleId: parsed.cycleId, activeClaimId: grantId, state: "active",
-                revision: 1, createdAt: now, updatedAt: now, activatedAt: now,
-              },
+              data: slotRecord,
             },
             {
               collection: COLLECTIONS.DEVICE_OPERATION_LOGS, id: logId,
@@ -518,6 +547,7 @@ export class FaceCredentialService {
               return {
                 ...scope,
                 qualification: this.#grantQualificationPre(state, planned.request),
+                dispatchRequest: planned.request,
               };
             },
           };

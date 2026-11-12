@@ -8,6 +8,9 @@ import { LocalStore, CloudStore } from "../lib/store.mjs";
 import { FileService } from "../lib/files.mjs";
 import { BlacklistService, blacklistDecisionHeadId } from "../lib/blacklist.mjs";
 import { FaceCredentialService } from "../lib/face-service/service.mjs";
+import { MockFaceDispatcher } from "../lib/face-service/dispatcher.mjs";
+import { MockFaceAccessProvider } from "../lib/face-service/mock-provider.mjs";
+import { projectAccess } from "../lib/face-service/state.mjs";
 import { occupancyClaimId, primarySlotId } from "../lib/face-service/eligibility.mjs";
 import { eligibilityGuardId } from "../lib/claims.mjs";
 import {
@@ -135,7 +138,7 @@ function grantFixture(options = {}) {
       collection: "occupancies", id: occupancyId,
       data: {
         orgId: ORG, personId, roomId, cycleId, role, state: "active",
-        startsAt: QUAL_START, endsAt: QUAL_END, sponsorOccupancyId: sponsorId,
+        startsAt: QUAL_START, endsAt: options.qualificationEnd ?? QUAL_END, sponsorOccupancyId: sponsorId,
         revision: 1, ...(options.occupancy || {}),
       },
     },
@@ -144,7 +147,7 @@ function grantFixture(options = {}) {
       data: {
         orgId: ORG, roomId, state: "active",
         primaryOccupancyId: member ? OCC_PRIMARY : occupancyId,
-        startsAt: QUAL_START, endsAt: QUAL_END, endedAt: null, epoch: 1, revision: 1,
+        startsAt: QUAL_START, endsAt: options.qualificationEnd ?? QUAL_END, endedAt: null, epoch: 1, revision: 1,
         ...(options.cycle || {}),
       },
     },
@@ -207,7 +210,7 @@ function grantFixture(options = {}) {
       collection: "occupancies", id: OCC_PRIMARY,
       data: {
         orgId: ORG, personId: PRIMARY_PERSON, roomId, cycleId, role: "primary",
-        state: options.primaryState ?? "active", startsAt: QUAL_START, endsAt: QUAL_END,
+        state: options.primaryState ?? "active", startsAt: QUAL_START, endsAt: options.qualificationEnd ?? QUAL_END,
         sponsorOccupancyId: null, revision: 1,
       },
     });
@@ -217,7 +220,7 @@ function grantFixture(options = {}) {
       collection: "occupancies", id: OCC_SPONSOR,
       data: {
         orgId: ORG, personId: "person-c4-sponsor", roomId, cycleId, role: "member",
-        state: "active", startsAt: QUAL_START, endsAt: QUAL_END,
+        state: "active", startsAt: QUAL_START, endsAt: options.qualificationEnd ?? QUAL_END,
         sponsorOccupancyId: null, revision: 1,
       },
     });
@@ -262,7 +265,7 @@ async function setup(t, options = {}) {
 
   const dir = await mkdtemp(join(tmpdir(), "smartpm-h2c-c4-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const store = await new LocalStore(dir).init();
+  const store = await new LocalStore(dir, { dispatchNow: options.dispatchNow }).init();
   const writes = grantFixture(options);
 
   // 预建有效 K2 domain：成功路径不得再写 operation_key_domains（S 断言）。
@@ -293,7 +296,7 @@ async function setup(t, options = {}) {
   const service = new FaceCredentialService({
     store, orgId: ORG,
     actor: { membershipId: MEMBERSHIP, actorType: "user", actorId: MEMBERSHIP },
-    files, blacklist, provider, now: () => NOW,
+    files, blacklist, provider, now: () => NOW, syntheticDispatch: options.syntheticDispatch,
   });
 
   const h = {
@@ -1482,4 +1485,225 @@ test("H2-d 真实链 K1 配置不一致：真实资格评价后 DEVICE_DIGEST_CO
     "K1 复核必须在真实资格/名单评价之后执行");
   assert.equal(h.lastEligibility.eligible, true);
   assertProviderZero(h);
+});
+
+async function dispatchFixture(t, scenario = "success", options = {}) {
+  let now = NOW;
+  const h = await setup(t, {
+    dispatchNow: () => now, syntheticDispatch: true, validUntil: NOW + 900_000, qualificationEnd: NOW + 900_001,
+    ...options,
+  });
+  const provider = new MockFaceAccessProvider({ scenario });
+  const worker = () => new MockFaceDispatcher({
+    store: h.store, orgId: ORG, files: h.files, blacklist: h.blacklist, provider,
+  });
+  const result = await h.service.createGrant(h.input(), { idempotencyKey: h.nextKey() });
+  return { ...h, ...result, provider, worker, setTime: (value) => { now = value; } };
+}
+
+test("H3 concurrent dispatch: one call outside every transaction, simulated success stays pending", async (t) => {
+  const h = await dispatchFixture(t);
+  const before = structuredClone(h.store.data);
+  const transact = h.store.transactFaceDispatch.bind(h.store);
+  const enroll = h.provider.enrollFace.bind(h.provider);
+  let transactionDepth = 0;
+  let calls = 0;
+  h.store.transactFaceDispatch = (refs, build) => transact(refs, (state, now) => {
+    transactionDepth++;
+    try {
+      const first = build(state, now);
+      assert.deepEqual(build(state, now), first);
+      return first;
+    } finally {
+      transactionDepth--;
+    }
+  });
+  h.provider.enrollFace = (input, context) => {
+    assert.equal(transactionDepth, 0);
+    assert.deepEqual(Object.keys(input).sort(), ["deviceId", "grantId", "personId", "sourceFileId", "validFrom", "validUntil"]);
+    assert.equal(context.executionMode, "test");
+    assert.match(context.idempotencyKey, /^h3-v1:[a-f0-9]{64}$/);
+    calls++;
+    return enroll(input, context);
+  };
+  const outcomes = await Promise.allSettled([h.worker().dispatch(h.jobId), h.worker().dispatch(h.jobId)]);
+  const success = outcomes.find((outcome) => outcome.status === "fulfilled")?.value;
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1, JSON.stringify(outcomes));
+  assert.equal(success.state, "succeeded", JSON.stringify(success.result));
+  assert.equal(calls, 1);
+  assert.equal(h.provider.calls.length, 1);
+  const grant = await h.store.get("device_access_grants", h.grantId, ORG);
+  assert.equal(grant.state, "pending");
+  assert.equal(projectAccess({ grant, jobs: [success], eligibility: { allowed: true } }).deviceEffective, false);
+  assert.deepEqual(h.store.data.device_operation_logs.map((log) => log.state), ["queued", "sending", "succeeded"]);
+  assert.deepEqual(h.store.data.device_operation_logs.map((log) => log.revision), [1, 2, 4]);
+  for (const [collection, records] of Object.entries(before)) {
+    if (!["device_operation_jobs", "device_operation_logs"].includes(collection)) {
+      assert.deepEqual(h.store.data[collection], records, collection);
+    }
+  }
+});
+
+test("H3 explicitly pre-send Mock failures get three retries and exhaust from sending", async (t) => {
+  const h = await dispatchFixture(t, "pre_send_fail");
+  const worker = h.worker();
+  let now = NOW;
+  for (const [index, delay] of [30_000, 120_000, 600_000].entries()) {
+    const failed = await worker.dispatch(h.jobId);
+    assert.equal(failed.state, "retryable_failed");
+    assert.equal(failed.attempts, index + 1);
+    assert.equal(failed.nextAttemptAt, now + delay);
+    const before = structuredClone(h.store.data);
+    h.setTime(now + delay - 1);
+    await assert.rejects(worker.requeue(h.jobId, failed.revision), { code: "RETRY_NOT_DUE" });
+    assert.deepEqual(h.store.data, before);
+    now += delay;
+    h.setTime(now);
+    const queued = await worker.requeue(h.jobId, failed.revision);
+    assert.equal(queued.state, "queued");
+    assert.equal(queued.attempts, failed.attempts);
+  }
+  const final = await worker.dispatch(h.jobId);
+  assert.equal(final.state, "terminal_failed");
+  assert.equal(final.attempts, 4);
+  assert.equal(final.result.reasonCode, "RETRY_EXHAUSTED");
+  assert.equal(h.provider.calls.length, 4);
+  assert.equal(h.store.data.device_operation_logs.at(-1).alertCode, "RETRY_EXHAUSTED");
+});
+
+test("H3 unknown result never requeues", async (t) => {
+  const h = await dispatchFixture(t, "post_send_unknown");
+  const worker = h.worker();
+  const unknown = await worker.dispatch(h.jobId);
+  assert.equal(unknown.state, "awaiting_result");
+  const before = structuredClone(h.store.data);
+  await assert.rejects(worker.requeue(h.jobId, unknown.revision), { code: "INVALID_JOB" });
+  await assert.rejects(worker.dispatch(h.jobId), { code: "INVALID_JOB" });
+  assert.deepEqual(h.store.data, before);
+  assert.equal(h.provider.calls.length, 1);
+});
+
+test("H3 lost claim commit acknowledgement expires without a send", async (t) => {
+  const h = await dispatchFixture(t);
+  const worker = h.worker();
+  const transact = h.store.transactFaceDispatch.bind(h.store);
+  h.store.transactFaceDispatch = async (...args) => {
+    await transact(...args);
+    throw Error("synthetic commit acknowledgement loss");
+  };
+  await assert.rejects(worker.dispatch(h.jobId), /acknowledgement loss/);
+  h.store.transactFaceDispatch = transact;
+  h.setTime(NOW + 59_999);
+  const before = structuredClone(h.store.data);
+  await assert.rejects(worker.expire(h.jobId), { code: "LEASE_FENCE_REJECTED" });
+  assert.deepEqual(h.store.data, before);
+  h.setTime(NOW + 60_000);
+  const outcomes = await Promise.allSettled([worker.expire(h.jobId), h.worker().expire(h.jobId)]);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+  const job = await h.store.get("device_operation_jobs", h.jobId, ORG);
+  assert.equal(job.state, "awaiting_result");
+  assert.equal(job.result.reasonCode, "LEASE_EXPIRED_UNKNOWN");
+  assert.equal(h.provider.calls.length, 0);
+  assert.deepEqual(h.store.data.admin_audit, before.admin_audit);
+});
+
+test("H3 changed source file blocks Mock and leaves only deterministic job logs", async (t) => {
+  const h = await dispatchFixture(t);
+  const transact = h.store.transactFaceDispatch.bind(h.store);
+  let calls = 0;
+  h.store.transactFaceDispatch = async (...args) => {
+    const result = await transact(...args);
+    if (++calls === 1) patchRecord(h, "file_assets", FILE, { revision: 2 });
+    return result;
+  };
+  const job = await h.worker().dispatch(h.jobId);
+  assert.equal(job.state, "terminal_failed");
+  assert.equal(job.result.reasonCode, "FILE_BINDING_CHANGED");
+  assert.equal(h.provider.calls.length, 0);
+  assert.deepEqual(h.store.data.device_operation_logs.map((log) => log.state), ["queued", "sending", "terminal_failed"]);
+});
+
+test("H3 legacy H2 job without a snapshot fails closed", async (t) => {
+  const h = await dispatchFixture(t, "success", { syntheticDispatch: false });
+  const before = structuredClone(h.store.data);
+  await assert.rejects(h.worker().dispatch(h.jobId), { code: "DISPATCH_SNAPSHOT_REQUIRED" });
+  assert.deepEqual(h.store.data, before);
+  assert.equal(h.provider.calls.length, 0);
+});
+
+test("H3 authentic blacklist changes between prepare and T2 refresh the token and block enrollment", async (t) => {
+  const h = await dispatchFixture(t);
+  const transact = h.store.transactFaceDispatch.bind(h.store);
+  let transactions = 0;
+  h.store.transactFaceDispatch = (refs, build) => {
+    if (++transactions === 2) {
+      addCandidate(h);
+      bumpPersonGuard(h);
+    }
+    return transact(refs, build);
+  };
+  const job = await h.worker().dispatch(h.jobId);
+  assert.equal(job.state, "terminal_failed");
+  assert.equal(job.result.reasonCode, "BLACKLIST_REVIEW_REQUIRED");
+  assert.equal(h.provider.calls.length, 0);
+  assert.equal(transactions, 3);
+});
+
+test("H3 lost authorization acknowledgement never consumes the permit", async (t) => {
+  const h = await dispatchFixture(t);
+  const worker = h.worker();
+  const transact = h.store.transactFaceDispatch.bind(h.store);
+  let transactions = 0;
+  h.store.transactFaceDispatch = async (...args) => {
+    const result = await transact(...args);
+    if (++transactions === 2) throw Error("authorization acknowledgement loss");
+    return result;
+  };
+  await assert.rejects(worker.dispatch(h.jobId), /authorization acknowledgement loss/);
+  assert.equal(h.provider.calls.length, 0);
+  const sending = await h.store.get("device_operation_jobs", h.jobId, ORG);
+  assert.equal(sending.dispatchAuthorizedAt, NOW);
+  h.setTime(NOW + 60_000);
+  assert.deepEqual(await worker.scanExpired(), [{ jobId: h.jobId, state: "awaiting_result" }]);
+  assert.deepEqual(await worker.scanExpired(), []);
+});
+
+test("H3 terminal and unrecognized Mock errors never schedule a retry", async (t) => {
+  const terminal = await dispatchFixture(t, "terminal_fail");
+  assert.equal((await terminal.worker().dispatch(terminal.jobId)).state, "terminal_failed");
+  assert.equal(terminal.provider.calls.length, 1);
+
+  const unknown = await dispatchFixture(t);
+  const syntheticMarker = "synthetic-error-private-marker";
+  unknown.provider.enrollFace = async () => { throw Error(syntheticMarker); };
+  assert.equal((await unknown.worker().dispatch(unknown.jobId)).state, "awaiting_result");
+  const output = [
+    ...unknown.store.data.device_operation_jobs, ...unknown.store.data.device_operation_logs,
+    ...unknown.store.data.face_dispatch_snapshots,
+  ];
+  const serialized = JSON.stringify(output);
+  assert.ok(!serialized.includes(syntheticMarker));
+  for (const field of ["identityDigest", "objectKey", "sourceFileRevision", "idempotencyKey", "stack"]) {
+    assert.ok(!serialized.includes('"' + field + '":'), field);
+  }
+});
+
+test("H3 manual retry requires current membership permission and shares the automatic CAS", async (t) => {
+  const h = await dispatchFixture(t, "pre_send_fail");
+  const worker = h.worker();
+  const failed = await worker.dispatch(h.jobId);
+  h.setTime(failed.nextAttemptAt);
+  const actor = { membershipId: MEMBERSHIP, actorId: MEMBERSHIP };
+  const before = structuredClone(h.store.data);
+  await assert.rejects(worker.requeue(h.jobId, failed.revision, actor), { code: "FORBIDDEN" });
+  assert.deepEqual(h.store.data, before);
+  patchRecord(h, "org_memberships", MEMBERSHIP, {
+    permissions: ["device.access.manage", "device.operation.retry"],
+  });
+  const outcomes = await Promise.allSettled([
+    worker.requeue(h.jobId, failed.revision, actor), h.worker().requeue(h.jobId, failed.revision),
+  ]);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+  assert.equal(h.provider.calls.length, 1);
+  assert.equal(h.store.data.device_operation_logs.filter((log) => log.state === "queued").length, 2);
 });

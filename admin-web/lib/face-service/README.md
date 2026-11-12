@@ -69,3 +69,17 @@ executionMode: demo|test|live
 - `/api/v2/face-credentials`、`/review-queue`、`/:id/review`、`/:id/image`
 - `/api/v2/device-access-grants/:grantId/revoke`
 - `/api/v2/device-operation-jobs`、`/:jobId/retry`、`/:jobId/reconcile`
+
+## H3 合成派发
+
+在隔离的测试数据目录使用单个共享的 `LocalStore` 实例。创建服务时显式设
+`syntheticDispatch: true`，以便新 grant 在创建事务内固定 dispatch snapshot。
+旧 job 缺少 snapshot 时失败关闭。
+
+测试调用方构造 `MockFaceDispatcher`，传入同一 store、组织、文件服务、真实名单服务
+和进程内 `MockFaceAccessProvider`。内部入口为 `dispatch(jobId)`、
+`scanExpired(limit)` 和 `requeue(jobId, expectedRevision, actor)`。
+调度器需主动调用这些方法。人工重排由可信调用方传递经鉴权的 actor，
+事务内再复核成员权限。共享存储的测试时钟可通过 LocalStore 的 `dispatchNow` 注入。
+
+此入口只支持单实例合成测试。云适配器、网络入口及生产调度未接线。

@@ -158,7 +158,7 @@ H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
 
 **优先级：P0**
 
-**状态：已发卡；H2-c C4 `feaa1e0` 终审通过。**
+**状态：`90cc848` 终审通过；H2-d 与 H2 整体已关闭。**
 
 **代码基线：** `feaa1e0`
 
@@ -166,9 +166,23 @@ H2-d/H3/H4、HTTP、Provider 和设备写操作继续关闭。
 
 **复审记录：** `docs/tasks/HK-AI-04-H2C-C4-FINAL-APPROVAL-FEAA1E0-2026-11-11.md`
 
-只允许执行 H1 8 项恢复核对、H2 全链矩阵、20 次并发稳定性、敏感数据扫描与整体验收证据。发现生产缺陷必须停止并报告，不得在本卡混入生产修复。
+H1 八项、H2 全链、真实名单、内容级快照、敏感扫描及五组 20 次稳定性均已通过。复审记录：`docs/tasks/HK-AI-04-H2D-FINAL-APPROVAL-90CC848-2026-11-12.md`。
 
-H2-d 通过前 H2 整体不关闭；H3/H4、HTTP、Provider 调用、设备写、main 合并与生产云操作继续关闭。
+H2 不再扩大。H3 只放行独立契约设计，生产编码仍关闭。
+
+## M. DeepSeek Harness：H3 租约、Mock 派发与结果迁移契约设计
+
+**优先级：P0**
+
+**状态：已发设计卡；生产编码关闭。**
+
+**代码证据基线：** `90cc848`
+
+**任务卡：** `docs/tasks/HK-AI-04-H3-LEASE-DISPATCH-DESIGN-TASK-2026-11-12.md`
+
+先冻结发送前资格引用、租约 fencing、事务外 Mock 调用、结果迁移、租约过期未知结果与重试策略。只允许 Markdown；设计终审通过后才可另发 H3 编码卡。
+
+H3 生产代码、H4、HTTP、真实 Provider、设备连接与设备写继续关闭。
 
 ## K. Provider／安全专职 Agent：真实 Hikvision Provider 前置框架
 

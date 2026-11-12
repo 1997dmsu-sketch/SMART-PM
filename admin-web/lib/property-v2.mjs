@@ -24,7 +24,7 @@ export const OP_KEY_TTL = 24 * 3600 * 1000;
 // keeps concurrent retries safe; the pre-read in the server is only a fast path.
 // Expired keys are rejected: callers must query state before retrying with a
 // new key (API-CONTRACT §1), so a stale retry can never silently re-execute.
-function opWrite(state, op, result) {
+export function opWrite(state, op, result) {
   if (!op) return [];
   const existing = state[`operation_keys/${op.id}`];
   if (existing) {
@@ -108,7 +108,7 @@ function claimRelease(state, id) {
     },
   ];
 }
-function page(rows, { cursor, limit }) {
+export function page(rows, { cursor, limit }) {
   rows.sort((a, b) => (a._id < b._id ? -1 : a._id > b._id ? 1 : 0));
   let start = 0;
   if (cursor) {

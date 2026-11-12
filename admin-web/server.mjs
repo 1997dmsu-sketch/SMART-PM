@@ -7,6 +7,7 @@ import { join, resolve, extname } from "node:path";
 import { PropertyService } from "./lib/property.mjs";
 import { OrgService } from "./lib/org.mjs";
 import { OrgPropertyService, OpReplay } from "./lib/property-v2.mjs";
+import { PersonService } from "./lib/persons.mjs";
 import { operationKeyId } from "./lib/claims.mjs";
 import { LocalStore, CloudStore } from "./lib/store.mjs";
 import { resolvePublicFile } from "./lib/static-path.mjs";
@@ -301,6 +302,9 @@ export async function createApp({
             const service = new OrgPropertyService(store, orgId, {
               membershipId: membership._id,
             });
+            const persons = new PersonService(store, orgId, {
+              membershipId: membership._id,
+            });
             const auditV2 = (action) => ({
               actor: account.username,
               actorId: account._id,
@@ -315,6 +319,21 @@ export async function createApp({
             if (path === "/api/v2/rooms" && method === "GET") {
               const { data, nextCursor } = await service.listRooms(query);
               return ok(data, 200, nextCursor);
+            }
+            if (path === "/api/v2/persons" && method === "GET") {
+              const { data, nextCursor } = await persons.listPersons(query);
+              return ok(
+                data.map((p) => ({
+                  personId: p._id,
+                  orgId: p.orgId,
+                  userId: p.userId,
+                  nameMasked: p.nameMasked,
+                  status: p.status,
+                  revision: p.revision,
+                })),
+                200,
+                nextCursor,
+              );
             }
             if (method === "POST") {
               const data = await body(req);
@@ -364,6 +383,11 @@ export async function createApp({
               if (path === "/api/v2/property/layout")
                 return ok(
                   await service.batchLayout(data, auditV2("批量设置户型"), op),
+                );
+              if (path === "/api/v2/persons")
+                return ok(
+                  await persons.createPerson(data, auditV2("新增人员档案"), op),
+                  201,
                 );
               const archiveMatch = path.match(
                 /^\/api\/v2\/property\/(community|building|floor|layout|room|house)\/([^/]+)\/archive$/,

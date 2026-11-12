@@ -422,3 +422,57 @@ test("R2-02: vr-download never serves org-scoped records; legacy records still d
   assert.match(ok.headers.get("content-disposition"), /^attachment/);
   assert.equal(await ok.text(), bytes.toString());
 });
+
+test("DB-03: persons HTTP endpoints are org-admin only and org-scoped", async () => {
+  const created = await post("persons", { name: "张无账" });
+  assert.equal(created.status, 201);
+  assert.equal(created.data.data.orgId, "org-demo");
+  assert.equal(created.data.data.nameMasked, "张**");
+  assert.ok(!JSON.stringify(created.data).includes("张无账"));
+  const list = await request("persons?limit=20");
+  assert.equal(list.status, 200);
+  const row = list.data.data.find((p) => p.personId === created.data.data.personId);
+  assert.equal(row.userId, null);
+  assert.ok(!("phone" in row));
+  // Idempotent replay of the same creation returns the stored person.
+  const key = randomUUID();
+  const first = await post("persons", { name: "幂等人员" }, { headers: { "Idempotency-Key": key } });
+  const replay = await post("persons", { name: "幂等人员" }, { headers: { "Idempotency-Key": key } });
+  assert.equal(replay.data.data.personId, first.data.data.personId);
+  // viewer2 holds an org-demo viewer membership: read yes, write no.
+  const viewerRead = await request("persons?limit=5", { auth: viewer });
+  assert.equal(viewerRead.status, 200);
+  const viewerWrite = await post("persons", { name: "越权人员" }, { auth: viewer });
+  assert.equal(viewerWrite.status, 403);
+  // A forged org context is indistinguishable from a missing one.
+  const forged = await request("persons?limit=5", { headers: { "X-Org-Id": "org-other" } });
+  assert.equal(forged.status, 404);
+});
+
+test("F01: persons HTTP pagination defaults, validation and cursor pages", async () => {
+  // Default request (no limit) must return existing persons, not an empty page.
+  const fallback = await request("persons");
+  assert.equal(fallback.status, 200);
+  assert.ok(fallback.data.data.length > 0);
+  for (const bad of ["0", "-1", "101", "abc", "1.5"]) {
+    const r = await request(`persons?limit=${bad}`);
+    assert.equal(r.status, 400);
+    assert.equal(r.data.error.code, "PARAM_ERROR");
+  }
+  const stringNumeric = await request("persons?limit=5");
+  assert.equal(stringNumeric.status, 200);
+  assert.ok(stringNumeric.data.data.length > 0 && stringNumeric.data.data.length <= 5);
+  for (let i = 0; i < 21; i++)
+    await post("persons", { name: `分页人员${String(i).padStart(2, "0")}` });
+  const first = await request("persons?limit=20");
+  assert.equal(first.data.data.length, 20);
+  assert.ok(first.data.nextCursor);
+  const second = await request(
+    `persons?limit=20&cursor=${encodeURIComponent(first.data.nextCursor)}`,
+  );
+  assert.ok(second.data.data.length > 0);
+  const ids = new Set([...first.data.data, ...second.data.data].map((p) => p.personId));
+  assert.equal(ids.size, first.data.data.length + second.data.data.length);
+  const badCursor = await request("persons?limit=20&cursor=no-such-cursor");
+  assert.equal(badCursor.status, 400);
+});

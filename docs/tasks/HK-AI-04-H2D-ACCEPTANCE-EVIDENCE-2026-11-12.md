@@ -1,18 +1,29 @@
 # HK-AI-04 H2-d 全链回归与并发验收证据
 
-日期：2026-11-12  
-分支：`test/hk-face-service-h2d-acceptance`  
+日期：2026-11-12
+
+分支：`test/hk-face-service-h2d-acceptance`
+
 基线：`feaa1e04e6ca5d64e4028301fb02a9b6b5227e68`
+
+原复核提交：`29172d3f6fa8c4b410d7bbb7795f5565446c21af`
+
+本轮复审提交：分支 HEAD（本地验证通过后创建）
 
 ## 1. 范围与结论
 
-本提交只增加/收紧测试、稳定性验证脚本和本证据文档，生产代码改动为 0。
+本提交只增加/收紧测试、稳定性验证脚本和本证据文档，生产代码改动为 0。本轮复审在 `29172d3` 基础上补齐：
+
+- 真实 `BlacklistService` 下的 H2-a/H2-b K2 损坏重放、配置换钥、K1 domain 损坏/配置不一致；
+- H2-b 换钥、slot 冲突、released slot、claim invalid 失败路径的内容级深比较；
+- 敏感扫描扩展到 `admin_audit`、`eligibility_guards`、`address`、`faceBytes`、`imageBase64` 等变体；
+- 正式任务卡来源记录。
 
 验收结果：
 
 - H1 独立回归：8/8；
-- H1/H2 组合：160/160；
-- Admin 全量：450/450；
+- H1/H2 组合：164/164；
+- Admin 全量：454/454；
 - 根测试：51/51；
 - 五组稳定性：每组 20 轮，共 100 轮，0 失败；
 - Provider/HTTP/设备：0／未注册／未连接；
@@ -41,6 +52,8 @@ ef1fb1c9b4887ad34fa97e07acb4e94e07d09b59
 
 对 `724d888..feaa1e0` 的生产历史逐项检查，仅包含已批准的 H1、H2-a、H2-b、H2-c C1–C4 及其定点返工；本分支没有新增生产差异。
 
+正式任务卡来源：`docs/lock-01-fast-track` 的 `86e5c9f`（提交信息 `docs(face): approve H2-c and assign H2-d`），文件 `docs/tasks/HK-AI-04-H2D-INTEGRATION-ACCEPTANCE-TASK-2026-11-11.md`。该任务卡不在 `feaa1e0`/`29172d3` 树内，本轮从该远端 docs 提交读取并记录来源。
+
 ## 3. H1 八项独立回归
 
 文件：`admin-web/tests/face-service-h1-regression.test.mjs`
@@ -62,8 +75,8 @@ ef1fb1c9b4887ad34fa97e07acb4e94e07d09b59
 
 | 范围 | 主要证据 |
 | --- | --- |
-| H2-a K2/domain/严格重放 | `face-service-layer.test.mjs` 的 operation domain、换钥、同键同摘要/异摘要、损坏 result；`face-grant-d-matrix.test.mjs` D67–D69 |
-| H2-b device/K1/claim/slot | `face-service-layer.test.mjs` 的 owner claim、domain、active/released slot、全字段快照、双请求竞争；C4 D64–D66 |
+| H2-a K2/domain/严格重放 | 真实链：`face-grant-d-matrix.test.mjs` D67–D69 及新增 `H2-d 真实链 K2 损坏重放结果`、`H2-d 真实链 K2 配置换钥`；`face-service-layer.test.mjs` 的 operation domain、同键同摘要/异摘要、损坏 result 仅作为组件契约回归 |
+| H2-b device/K1/claim/slot | 真实链：C4 D64–D66 及新增 `H2-d 真实链 K1 domain 损坏`、`H2-d 真实链 K1 配置不一致`；`face-service-layer.test.mjs` 的 owner claim、domain、active/released slot、全字段快照、双请求竞争仅作为组件契约回归 |
 | H2-c C1 helper | `face-eligibility.test.mjs` 17 项资格、关系、时间、refs 与竞态 |
 | H2-c C2 hook | `blacklist-prepare-attempt.test.mjs` 12 项 attempt、顺序、重试、90/91 与非法契约 |
 | H2-c C3 接线 | `face-grant-eligibility.test.mjs` 20 项真实名单、错误优先级、重放与核心写集 |
@@ -71,7 +84,9 @@ ef1fb1c9b4887ad34fa97e07acb4e94e07d09b59
 | 同 operation key 并发 | H2-d 新增用例：两个请求均返回同一 result，核心写集只提交一次 |
 | 容量 | 去重后 90 refs 进入事务，91 refs 在事务前 400 |
 
-失败用例以故障注入后的 state 为基线，对 grant、job、slot、log、operation key 等核心集合进行内容级深比较，不以集合数量替代内容检查。
+H2-a/H2-b 的**全链证据**以 C4 真实服务用例与新增 `H2-d 真实链` 用例为准。`face-service-layer.test.mjs` 仍保留既有 `eligible=true` 组件桩，只用于 H2-a/H2-b 的 device/ID/slot 组件契约回归，不再作为全链资格评价证据；全链用例断言真实 `BlacklistService` 的 prepare/evaluate 调用计数，K2 失败按冻结优先级在评价前失败、K1 失败在真实评价后失败。
+
+失败用例以故障注入后的 state 为基线，对 grant、job、slot、claim、log、operation key、domain、guard、audit 等集合进行内容级深比较。H2-b 的换钥、slot 冲突、released slot、claim invalid 失败路径已从集合数量比较升级为 `businessSnapshot()` 深比较。
 
 ## 5. 20 轮稳定性
 
@@ -104,12 +119,15 @@ node scripts/verify-face-h2d-stability.mjs
 
 `face-service-layer.test.mjs` 对成功写集、错误信封与日志执行递归字段扫描和原始值扫描：
 
-- 禁止字段：人脸字节/图片、`objectKey`、checksum、姓名、手机号、地址/证件标识、序列号、MAC、IP、账号密码、secret、证书指纹、原始幂等键；
-- 禁止值：测试序列号前缀及原始 submit/review/grant/扫描幂等键；
+- 扫描集合：grant、job、slot、`device_operation_logs`、`operation_keys`、`eligibility_guards`、`admin_audit`；
+- 禁止字段：人脸字节/图片及 `faceBytes`/`imageBase64`/`faceData`/`imageData`/`imageBytes` 变体、`objectKey`、checksum、姓名、手机号、`address`、证件标识（`idCard`/`idNumber`）、序列号、MAC、IP、账号密码、secret、证书指纹、原始幂等键；
+- 禁止值：测试序列号前缀、原始 submit/review/grant/扫描幂等键，以及 Person 源记录中的姓名/地址/证件/人脸字节/图片 base64/checksum/objectKey 哨兵值；
 - 所有 job 均为 `executionMode=test`、`provider=mock`、`evidenceScope=simulated`；
 - 所有 grant 均为 `evidenceScope=simulated`；
 - 使用 `projectAccess()` 验证无受信设备回执时 `deviceEffective=false`；
 - Provider 计数保持 `{enroll:0,revoke:0}`。
+
+哨兵值只存在于 Person 源记录，成功写集、错误信封、`device_operation_logs` 与 `admin_audit` 均未复制；失败信封仅含 `code/status/message`。
 
 ## 7. 固定回归命令
 
@@ -119,17 +137,27 @@ node --test --test-isolation=none \
   tests/cloud-store-point-read.test.mjs \
   tests/face-grant-eligibility.test.mjs \
   tests/face-service-layer.test.mjs \
+  tests/face-service-h1-regression.test.mjs \
   tests/face-eligibility.test.mjs \
   tests/blacklist-prepare-attempt.test.mjs \
-  tests/face-grant-d-matrix.test.mjs \
-  tests/face-service-h1-regression.test.mjs
+  tests/face-grant-d-matrix.test.mjs
+# 164/164 PASS
+
 node --test --test-isolation=none tests/*.test.mjs
+# 454/454 PASS
+
+node scripts/verify-face-h2d-stability.mjs
+# {"result":"PASS","groups":5,"totalRuns":100,"totalFailures":0}
+
 cd ..
 npm test
+# 51/51 PASS
+
 git diff --check
+# 通过（无输出）
 ```
 
-环境：Node `v24.19.0`、npm `11.9.0`、Linux `6.18.57 x86_64`。
+环境：Windows、Node `v24.19.0`、npm `11.17.0`。DSH `workspace-write` 沙箱会拦截 Node 子进程管道（`spawnSync`/`node --test` 默认按文件 spawn 时 `EPERM`），因此稳定性脚本与根 `npm test` 在完整权限下执行；未修改测试或放宽断言规避。
 
 ## 8. 未开放范围
 

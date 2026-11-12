@@ -63,17 +63,16 @@ const service = (membershipId) =>
     blacklist, provider, now: () => 1_700_000_000_000,
   });
 
-const counts = async () => {
-  const of = async (name) => (await store.list(name, orgId)).length;
-  return {
-    grants: await of("device_access_grants"),
-    jobs: await of("device_operation_jobs"),
-    slots: await of("grant_slot_claims"),
-    claims: await of("device_claims"),
-    logs: await of("device_operation_logs"),
-    keys: await of("operation_keys"),
-  };
-};
+// H2-d 复审：失败路径必须对核心写集做内容级深比较，不能只比较集合数量。
+const businessSnapshot = async () => structuredClone({
+  grants: await store.list("device_access_grants", orgId),
+  jobs: await store.list("device_operation_jobs", orgId),
+  slots: await store.list("grant_slot_claims", orgId),
+  claims: await store.list("device_claims"),
+  logs: await store.list("device_operation_logs", orgId),
+  keys: await store.list("operation_keys", orgId),
+  domains: await store.list("device_digest_domains"),
+});
 
 async function seedQualification(suffix, cycleId) {
   const personId = `person-${suffix}`;
@@ -86,7 +85,18 @@ async function seedQualification(suffix, cycleId) {
   const writes = [
     {
       collection: "persons", id: personId,
-      data: { orgId, status: "active", userId: null, revision: 1 },
+      data: {
+        orgId, status: "active", userId: null, revision: 1,
+        // 敏感值哨兵：只存在于源记录，成功写集不得复制。
+        residentName: "NAME-SENTINEL-9137",
+        phone: "13800009137",
+        address: "ADDR-SENTINEL-9137",
+        idCard: "IDCARD-SENTINEL-9137",
+        faceBytes: "FACE_BYTES_SENTINEL",
+        imageBase64: "IMAGE_BASE64_SENTINEL",
+        checksum: "CHECKSUM-SENTINEL-9137",
+        objectKey: "OBJECT_KEY_SENTINEL_9137",
+      },
     },
     {
       collection: "identity_applications", id: identityApplicationId,
@@ -261,10 +271,10 @@ test("createGrant：同事务写 domain/claim/slot/pending grant/queued job/log/
 
 test("幂等重放：同键同摘要返回旧结果、零新增、零 Provider；异摘要 CONFLICT", async () => {
   const manager = service("mem-manage");
-  const before = await counts();
+  const before = await businessSnapshot();
   const replay = await manager.createGrant(shared.input, { idempotencyKey: shared.key });
   assert.deepEqual(replay, shared.result);
-  assert.deepEqual(await counts(), before);
+  assert.deepEqual(await businessSnapshot(), before);
   await assert.rejects(
     () => manager.createGrant({ ...shared.input, cycleId: "cycle-2" }, { idempotencyKey: shared.key }),
     (e) => e.code === "CONFLICT",
@@ -275,7 +285,7 @@ test("幂等重放：同键同摘要返回旧结果、零新增、零 Provider�
 test("资格阻断与未知/停用/跨组织设备：零写入", async () => {
   const credentialId = await approvedCredential("c");
   const manager = service("mem-manage");
-  const before = await counts();
+  const before = await businessSnapshot();
   const input = { ...grantInput(credentialId), deviceId: "device-2" };
 
   eligible = { eligible: false, code: "BLACKLIST_REVIEW_REQUIRED", entryIds: ["e1"], decisionId: null };
@@ -301,7 +311,7 @@ test("资格阻断与未知/停用/跨组织设备：零写入", async () => {
     () => manager.createGrant({ ...input, expectedCredentialRevision: 99 }, { idempotencyKey: "idem-grant-c-0005" }),
     (e) => e.code === "REVISION_CONFLICT",
   );
-  assert.deepEqual(await counts(), before);
+  assert.deepEqual(await businessSnapshot(), before);
 });
 
 test("owner claim 归属冲突：DEVICE_CLAIM_CONFLICT 且零写入", async () => {
@@ -312,7 +322,7 @@ test("owner claim 归属冲突：DEVICE_CLAIM_CONFLICT 且零写入", async () =
     collection: "device_claims", id: claimId,
     data: { ...original, ownerOrgId: "org-other" },
   }], audit);
-  const before = await counts();
+  const before = await businessSnapshot();
   await assert.rejects(
     () => service("mem-manage").createGrant(
       { ...grantInput(credentialId), deviceId: "device-3" },
@@ -320,19 +330,19 @@ test("owner claim 归属冲突：DEVICE_CLAIM_CONFLICT 且零写入", async () =
     ),
     (e) => e.code === "DEVICE_CLAIM_CONFLICT",
   );
-  assert.deepEqual(await counts(), before);
+  assert.deepEqual(await businessSnapshot(), before);
   await store.transact([ref("device_claims", claimId)], () => [{
     collection: "device_claims", id: claimId, data: { ...original },
   }], audit);
 });
 
 test("撤权仍为 STAGE_CLOSED，零写入零 Provider", async () => {
-  const before = await counts();
+  const before = await businessSnapshot();
   await assert.rejects(
     () => service("mem-manage").revoke("grant-1", { idempotencyKey: "idem-revoke-h2-0001" }),
     (e) => e.code === "STAGE_CLOSED",
   );
-  assert.deepEqual(await counts(), before);
+  assert.deepEqual(await businessSnapshot(), before);
   assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
 });
 
@@ -351,7 +361,7 @@ test("operation_keys 元数据与三条路径共用同一 domain", async () => {
 test("K2 配置缺失：503 NOT_CONFIGURED 且零写入", async () => {
   const saved = process.env.OPERATION_KEY_HMAC_KEY_B64;
   delete process.env.OPERATION_KEY_HMAC_KEY_B64;
-  const before = await counts();
+  const before = await businessSnapshot();
   await assert.rejects(
     () => service("mem-submit").submit(
       { personId: "person-k2", sourceFileId: "file-1" },
@@ -360,7 +370,7 @@ test("K2 配置缺失：503 NOT_CONFIGURED 且零写入", async () => {
     (e) => e.code === "NOT_CONFIGURED" && e.status === 503,
   );
   process.env.OPERATION_KEY_HMAC_KEY_B64 = saved;
-  assert.deepEqual(await counts(), before);
+  assert.deepEqual(await businessSnapshot(), before);
 });
 
 test("重放结果损坏（null/{}/[]/错 ID/异常时间）→ CONFLICT、Provider 零调用、业务无变化", async () => {
@@ -429,12 +439,12 @@ test("domain 损坏 → DOMAIN_INCOMPLETE 且业务零变化", async () => {
     collection: "operation_key_domains", id: head._id,
     data: { ...state["operation_key_domains/" + head._id], kind: "version" },
   }], audit);
-  const before = await counts();
+  const before = await businessSnapshot();
   await assert.rejects(
     () => service("mem-manage").createGrant({ ...grantInput(credentialId), deviceId: "device-5" }, { idempotencyKey: "idem-grant-f-0000001" }),
     (e) => e.code === "DOMAIN_INCOMPLETE",
   );
-  assert.deepEqual(await counts(), before);
+  assert.deepEqual(await businessSnapshot(), before);
 });
 
 test("换钥后授权失败关闭且业务集合零变化", async () => {
@@ -448,13 +458,13 @@ test("换钥后授权失败关闭且业务集合零变化", async () => {
   const credentialId = await approvedCredential("g");
   const savedKey = process.env.OPERATION_KEY_HMAC_KEY_B64;
   process.env.OPERATION_KEY_HMAC_KEY_B64 = Buffer.alloc(32, 11).toString("base64");
-  const before = await counts();
+  const before = await businessSnapshot();
   await assert.rejects(
     () => service("mem-manage").createGrant({ ...grantInput(credentialId), deviceId: "device-4" }, { idempotencyKey: "idem-grant-g-0000001" }),
     (e) => e.code === "DOMAIN_MISMATCH",
   );
   process.env.OPERATION_KEY_HMAC_KEY_B64 = savedKey;
-  assert.deepEqual(await counts(), before);
+  assert.deepEqual(await businessSnapshot(), before);
 });
 
 test("同设备不同住户不同 slot 均成功，owner claim 内容不变", async () => {
@@ -477,12 +487,12 @@ test("同 person/device/cycle 第二次请求 → GRANT_SLOT_CONFLICT 零写入"
   const credentialId = await approvedCredential("j", { cycleId: "cycle-j1" });
   const input = { ...grantInput(credentialId), deviceId: "device-2", cycleId: "cycle-j1" };
   await service("mem-manage").createGrant(input, { idempotencyKey: "idem-grant-j-0000001" });
-  const before = await counts();
+  const before = await businessSnapshot();
   await assert.rejects(
     () => service("mem-manage").createGrant(input, { idempotencyKey: "idem-grant-j-0000002" }),
     (e) => e.code === "GRANT_SLOT_CONFLICT",
   );
-  assert.deepEqual(await counts(), before);
+  assert.deepEqual(await businessSnapshot(), before);
 });
 
 test("released slot 也不得复用", async () => {
@@ -495,12 +505,12 @@ test("released slot 也不得复用", async () => {
     collection: "grant_slot_claims", id: slot._id,
     data: { ...slot, activeClaimId: undefined, state: "released", releasedAt: 5, releasedByJobId: created.jobId },
   }], audit);
-  const before = await counts();
+  const before = await businessSnapshot();
   await assert.rejects(
     () => service("mem-manage").createGrant(input, { idempotencyKey: "idem-grant-k-0000002" }),
     (e) => e.code === "GRANT_SLOT_CONFLICT",
   );
-  assert.deepEqual(await counts(), before);
+  assert.deepEqual(await businessSnapshot(), before);
 });
 
 test("owner claim released / 绑定不一致 → DEVICE_CLAIM_INVALID", async () => {
@@ -513,7 +523,7 @@ test("owner claim released / 绑定不一致 → DEVICE_CLAIM_INVALID", async ()
     releasedAt: 5, releasedByAuditId: "audit-2", releaseReason: "retired",
   };
   await store.transact([ref("device_claims", claimId)], () => [{ collection: "device_claims", id: claimId, data: released }], audit);
-  const before = await counts();
+  const before = await businessSnapshot();
   await assert.rejects(
     () => service("mem-manage").createGrant(
       { ...grantInput(credentialId), deviceId: "device-4", cycleId: "cycle-l1" },
@@ -521,7 +531,7 @@ test("owner claim released / 绑定不一致 → DEVICE_CLAIM_INVALID", async ()
     ),
     (e) => e.code === "DEVICE_CLAIM_INVALID",
   );
-  assert.deepEqual(await counts(), before);
+  assert.deepEqual(await businessSnapshot(), before);
   await store.transact([ref("device_claims", claimId)], () => [{ collection: "device_claims", id: claimId, data: original }], audit);
 });
 
@@ -546,11 +556,15 @@ test("成功写入、错误信封与日志不含敏感字段，Mock 投影不得
     slots: await store.list("grant_slot_claims", orgId),
     logs: await store.list("device_operation_logs", orgId),
     keys: await store.list("operation_keys", orgId),
+    guards: await store.list("eligibility_guards", orgId),
+    adminAudit: await store.list("admin_audit"),
   };
   const dump = JSON.stringify({ records, failure });
   const forbiddenKeys = new Set([
-    "faceImage", "imageBytes", "objectKey", "checksum", "checksumPrefix",
-    "residentName", "phone", "idCard", "serialNumber", "mac", "ip",
+    "faceImage", "faceBytes", "imageBase64", "faceData", "imageData", "imageBytes",
+    "objectKey", "checksum", "checksumPrefix",
+    "residentName", "phone", "address", "idCard", "idNumber",
+    "serialNumber", "mac", "ip",
     "username", "password", "secret", "certificateFingerprint", "idempotencyKey",
   ]);
   const visit = (value) => {
@@ -562,7 +576,12 @@ test("成功写入、错误信封与日志不含敏感字段，Mock 投影不得
     }
   };
   visit({ records, failure });
-  for (const token of ["SN-", "idem-grant", "idem-sub", "idem-rev", "idem-sensitive", "@", "1380000"]) {
+  for (const token of [
+    "SN-", "idem-grant", "idem-sub", "idem-rev", "idem-sensitive", "@", "1380000",
+    "NAME-SENTINEL-9137", "ADDR-SENTINEL-9137", "IDCARD-SENTINEL-9137",
+    "FACE_BYTES_SENTINEL", "IMAGE_BASE64_SENTINEL",
+    "CHECKSUM-SENTINEL-9137", "OBJECT_KEY_SENTINEL_9137",
+  ]) {
     assert.equal(dump.includes(token), false, token);
   }
   for (const job of records.jobs) {
@@ -588,16 +607,6 @@ const coreSnapshot = async () => structuredClone({
   slots: await store.list("grant_slot_claims", orgId),
   logs: await store.list("device_operation_logs", orgId),
   keys: await store.list("operation_keys", orgId),
-});
-
-const businessSnapshot = async () => structuredClone({
-  grants: await store.list("device_access_grants", orgId),
-  jobs: await store.list("device_operation_jobs", orgId),
-  slots: await store.list("grant_slot_claims", orgId),
-  claims: await store.list("device_claims"),
-  logs: await store.list("device_operation_logs", orgId),
-  keys: await store.list("operation_keys", orgId),
-  domains: await store.list("device_digest_domains"),
 });
 
 const withPreMutation = async (mutate, fn) => {

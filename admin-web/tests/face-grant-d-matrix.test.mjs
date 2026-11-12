@@ -1416,3 +1416,70 @@ test("H2-d 同 operation key 并发：两请求返回同一结果且核心写集
     "重放只覆盖同一组 subject guards");
   assertProviderZero(h);
 });
+
+// H2-d 复审补充：以下用例使用 setup() 的真实 LocalStore + BlacklistService +
+// FaceCredentialService，不使用 eligible=true 资格桩；失败基线为注入后的完整快照。
+test("H2-d 真实链 K2 损坏重放结果：真实 BlacklistService 预读后 CONFLICT 且内容不变", async (t) => {
+  const h = await setup(t);
+  const first = await expectSuccess(h);
+  const keyRecord = h.store.data.operation_keys.find((row) => row.orgId === ORG);
+  assert.ok(keyRecord, "成功授权必须写入 operation key");
+  patchRecord(h, "operation_keys", keyRecord._id, {
+    result: { ...keyRecord.result, grantId: "grant-h2d-wrong" },
+  });
+  resetCounts(h);
+  await expectFailure(h, h.input(), { code: "CONFLICT", status: 409, key: first.key });
+  assert.deepEqual(h.counts, { prepare: 1, evaluate: 0, transact: 1, build: 0 },
+    "K2 失败按冻结优先级发生在资格评价之前，但必须经过真实 BlacklistService 预读");
+  assert.equal(h.lastEligibility, null);
+  assertProviderZero(h);
+});
+
+test("H2-d 真实链 K2 配置换钥：真实 BlacklistService 预读后 DOMAIN_MISMATCH 且内容不变", async (t) => {
+  const h = await setup(t);
+  const first = await expectSuccess(h);
+  const savedKey = process.env.OPERATION_KEY_HMAC_KEY_B64;
+  resetCounts(h);
+  try {
+    process.env.OPERATION_KEY_HMAC_KEY_B64 = Buffer.alloc(32, 11).toString("base64");
+    await expectFailure(h, h.input(), {
+      code: "DOMAIN_MISMATCH", status: undefined, key: first.key,
+    });
+  } finally {
+    process.env.OPERATION_KEY_HMAC_KEY_B64 = savedKey;
+  }
+  assert.deepEqual(h.counts, { prepare: 1, evaluate: 0, transact: 1, build: 0 },
+    "换钥失败按冻结优先级发生在资格评价之前，但必须经过真实 BlacklistService 预读");
+  assert.equal(h.lastEligibility, null);
+  assertProviderZero(h);
+});
+
+test("H2-d 真实链 K1 domain 损坏：真实资格评价后 DOMAIN_INCOMPLETE 且内容不变", async (t) => {
+  const h = await setup(t);
+  const version = h.store.data.device_digest_domains.find((row) => row.kind === "version");
+  assert.ok(version, "fixture 必须具备 K1 version 记录");
+  dropRecord(h, "device_digest_domains", version._id);
+  resetCounts(h);
+  await expectFailure(h, h.input(), { code: "DOMAIN_INCOMPLETE", status: 503 });
+  assert.deepEqual(h.counts, { prepare: 1, evaluate: 1, transact: 1, build: 1 },
+    "K1 复核必须在真实资格/名单评价之后执行");
+  assert.equal(h.lastEligibility.eligible, true);
+  assertProviderZero(h);
+});
+
+test("H2-d 真实链 K1 配置不一致：真实资格评价后 DEVICE_DIGEST_CONFIG_CHANGED 且内容不变", async (t) => {
+  const h = await setup(t);
+  for (const row of h.store.data.device_digest_domains) {
+    patchRecord(h, "device_digest_domains", row._id, {
+      provider: "other-provider", digestRealm: "other-realm",
+    });
+  }
+  resetCounts(h);
+  await expectFailure(h, h.input(), {
+    code: "DEVICE_DIGEST_CONFIG_CHANGED", status: 503,
+  });
+  assert.deepEqual(h.counts, { prepare: 1, evaluate: 1, transact: 1, build: 1 },
+    "K1 复核必须在真实资格/名单评价之后执行");
+  assert.equal(h.lastEligibility.eligible, true);
+  assertProviderZero(h);
+});

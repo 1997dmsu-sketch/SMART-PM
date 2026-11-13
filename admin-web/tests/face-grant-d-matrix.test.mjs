@@ -1501,8 +1501,8 @@ test("H2-d 真实链 K1 配置不一致：真实资格评价后 DEVICE_DIGEST_CO
   assertProviderZero(h);
 });
 
-async function setupH3(t, scenario = "success") {
-  const h = await setup(t, { syntheticDispatch: true });
+async function setupH3(t, scenario = "success", options = {}) {
+  const h = await setup(t, { ...options, syntheticDispatch: true });
   const created = await expectSuccess(h);
   resetCounts(h);
   let clock = NOW;
@@ -1606,6 +1606,106 @@ test("H3-b D44/D45：pre_send 瞬态统一预算、退避到期 CAS 重排后再
   assert.equal(x.provider.calls.length, 2);
 });
 
+test("H3-b D42/D43：第二、三次失败严格使用 120000/600000 退避边界", async (t) => {
+  for (const [priorAttempts, delay] of [[1, 120_000], [2, 600_000]]) {
+    const x = await setupH3(t, "pre_send_fail");
+    patchRecord(x.h, "device_operation_jobs", x.created.result.jobId, {
+      attempts: priorAttempts, leaseGeneration: priorAttempts, revision: priorAttempts * 2 + 1,
+      nextAttemptAt: NOW,
+      result: { attempt: priorAttempts, outcome: "retryable_failed", errorKind: "RETRYABLE",
+        reasonCode: "PRIOR", finishedAt: NOW },
+    });
+    const failed = await x.dispatcher.dispatch(x.created.result.jobId);
+    assert.equal(failed.attempts, priorAttempts + 1);
+    assert.equal(failed.nextAttemptAt, NOW + delay);
+    x.setClock(failed.nextAttemptAt - 1);
+    await assert.rejects(() => x.dispatcher.requeue(failed._id, failed.revision),
+      (error) => error.code === "RETRY_NOT_DUE");
+    x.setClock(failed.nextAttemptAt);
+    assert.equal((await x.dispatcher.requeue(failed._id, failed.revision)).state, "queued");
+  }
+});
+
+test("H3-b D46：T2/T3 callback 重跑仍只调用一次 Provider", async (t) => {
+  const x = await setupH3(t);
+  const original = x.h.store.transact.bind(x.h.store);
+  const replayed = new Map();
+  x.h.store.transact = (refs, build, auditInfo) => original(refs, (state) => {
+    if (["发送前复核合成门禁任务", "记录合成门禁派发结果"].includes(auditInfo?.action)) {
+      build(state);
+      replayed.set(auditInfo.action, (replayed.get(auditInfo.action) ?? 0) + 1);
+    }
+    return build(state);
+  }, auditInfo);
+  const result = await x.dispatcher.dispatch(x.created.result.jobId);
+  assert.equal(result.state, "succeeded");
+  assert.equal(x.provider.calls.length, 1);
+  assert.equal(replayed.get("发送前复核合成门禁任务"), 1);
+  assert.equal(replayed.get("记录合成门禁派发结果"), 1);
+});
+
+test("H3-b D55/D58：T1/T2 提交确认丢失均不误调 Provider且可过期收敛", async (t) => {
+  for (const lostAction of ["领取合成门禁任务", "发送前复核合成门禁任务"]) {
+    const x = await setupH3(t);
+    const original = x.h.store.transact.bind(x.h.store);
+    let lost = false;
+    x.h.store.transact = async (refs, build, auditInfo) => {
+      const value = await original(refs, build, auditInfo);
+      if (!lost && auditInfo?.action === lostAction) {
+        lost = true;
+        throw new Error("ACK_LOST");
+      }
+      return value;
+    };
+    await assert.rejects(() => x.dispatcher.dispatch(x.created.result.jobId), /ACK_LOST/);
+    assert.equal(x.provider.calls.length, 0);
+    const sending = await x.h.store.get("device_operation_jobs", x.created.result.jobId, ORG);
+    assert.equal(sending.state, "sending");
+    x.setClock(sending.leaseExpiresAt);
+    const expired = await x.dispatcher.scanExpired();
+    assert.equal(expired.length, 1);
+    assert.equal(expired[0].state, "awaiting_result");
+  }
+});
+
+test("H3-b D57：确定性 10s 超时进入 unknown，迟到结果不再写业务记录", async (t) => {
+  const x = await setupH3(t);
+  let resolveProvider;
+  x.provider.enrollFace = async (...args) => {
+    x.provider.calls.push({ args });
+    return new Promise((resolve) => { resolveProvider = resolve; });
+  };
+  const dispatcher = new H3MockDispatcher({
+    store: x.h.store, orgId: ORG, files: x.h.files, blacklist: x.h.blacklist,
+    provider: x.provider, now: () => NOW, owner: "worker-timeout",
+    timeout: async (milliseconds) => { assert.equal(milliseconds, 10_000); },
+  });
+  const result = await dispatcher.dispatch(x.created.result.jobId);
+  assert.equal(result.state, "awaiting_result");
+  const before = await snapshot(x.h.store);
+  resolveProvider({ status: "succeeded", jobId: "late-result" });
+  await new Promise((resolve) => setImmediate(resolve));
+  const after = await snapshot(x.h.store);
+  for (const name of CORE) assert.deepEqual(after[name], before[name], `${name} 迟到结果零写入`);
+});
+
+test("H3-b T3 grant 时间字段严格拒绝字符串与非法区间", async (t) => {
+  for (const mutation of [
+    { validFrom: String(VALID_FROM) }, { validUntil: String(VALID_UNTIL) },
+    { validFrom: -1 }, { validFrom: NOW + 1, validUntil: NOW },
+  ]) {
+    const x = await setupH3(t);
+    const original = x.provider.enrollFace.bind(x.provider);
+    x.provider.enrollFace = async (...args) => {
+      patchRecord(x.h, "device_access_grants", x.created.result.grantId, mutation);
+      return original(...args);
+    };
+    const result = await x.dispatcher.dispatch(x.created.result.jobId);
+    assert.equal(result.state, "terminal_failed");
+    assert.equal(result.result.reasonCode, "GRANT_INACTIVE_AFTER_SEND");
+  }
+});
+
 test("H3-b D32/D40：post_send unknown 与异常结果进入 awaiting_result，禁止重排", async (t) => {
   for (const mode of ["post_send_unknown", "malformed"]) {
     const x = await setupH3(t, mode === "malformed" ? "success" : mode);
@@ -1683,6 +1783,23 @@ test("H3-b D44：BLACKLIST_RETRY 保码且 Provider=0", async (t) => {
   assert.equal(result.result.reasonCode, "BLACKLIST_RETRY");
   assert.equal(x.provider.calls.length, 0);
   assert.equal(x.h.counts.prepare, 3);
+});
+
+test("H3-b D33：真实 BlacklistService deny 在 T2 终止且 Provider=0", async (t) => {
+  const x = await setupH3(t);
+  const denied = entryRecord("entry-h3-deny");
+  x.h.store.data.blacklist_entries ||= [];
+  x.h.store.data.blacklist_entries.push({ _id: denied.id, ...denied.data });
+  const head = blacklistDecisionHeadId(ORG, OCCUPANCY, "occupancy.activate");
+  const decision = decisionRecord(head, {
+    entryIds: [denied.id], entryRevisions: [1], decision: "deny",
+  });
+  x.h.store.data.blacklist_decisions ||= [];
+  x.h.store.data.blacklist_decisions.push({ _id: head, ...decision.data });
+  const result = await x.dispatcher.dispatch(x.created.result.jobId);
+  assert.equal(result.state, "terminal_failed");
+  assert.equal(result.result.reasonCode, "BLACKLIST_DENIED");
+  assert.equal(x.provider.calls.length, 0);
 });
 
 test("H3-b D28-D40/D47/D56/D60：T1 后固定源变化按序失败，Provider=0", async (t) => {
@@ -1775,6 +1892,31 @@ test("H3-b D44：attempt=4 的名单瞬态与 Mock pre_send 均耗尽终态", as
   }
 });
 
+test("H3-b 超 90 refs 在 attempt=4 原子落 terminal_failed 而非未声明日志写", async (t) => {
+  const x = await setupH3(t);
+  patchRecord(x.h, "device_operation_jobs", x.created.result.jobId, {
+    attempts: 3, leaseGeneration: 3, revision: 7, nextAttemptAt: NOW,
+    result: { attempt: 3, outcome: "retryable_failed", errorKind: "RETRYABLE",
+      reasonCode: "PRIOR", finishedAt: NOW },
+  });
+  const original = x.h.blacklist.prepareEligibility.bind(x.h.blacklist);
+  x.h.blacklist.prepareEligibility = async (...args) => {
+    const token = await original(...args);
+    return { ...token, refs: [...token.refs, ...Array.from({ length: 91 }, (_, index) => ({
+      collection: "rooms", id: `overflow-${index}`,
+    }))] };
+  };
+  const result = await x.dispatcher.dispatch(x.created.result.jobId);
+  assert.equal(result.state, "terminal_failed");
+  assert.equal(result.result.reasonCode, "ADAPTER_UNAVAILABLE");
+  assert.equal(result.result.alertCode, undefined);
+  assert.equal(x.provider.calls.length, 0);
+  const logs = (await x.h.store.list("device_operation_logs", ORG))
+    .filter((item) => item.jobId === result._id && item.state === "terminal_failed");
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].alertCode, "RETRY_EXHAUSTED");
+});
+
 test("H3-b D54：人工重排要求 device.operation.retry，自动重排共享 CAS", async (t) => {
   const x = await setupH3(t, "pre_send_fail");
   const failed = await x.dispatcher.dispatch(x.created.result.jobId);
@@ -1790,6 +1932,19 @@ test("H3-b D54：人工重排要求 device.operation.retry，自动重排共享 
   ]);
   assert.equal(settled.filter((item) => item.status === "fulfilled").length, 1);
   assert.equal(settled.filter((item) => item.status === "rejected").length, 1);
+});
+
+test("H3-b 人工重排 actor 与 revision 参数先失败关闭", async (t) => {
+  const x = await setupH3(t, "pre_send_fail");
+  const failed = await x.dispatcher.dispatch(x.created.result.jobId);
+  for (const [revision, actor] of [
+    ["1", null], [failed.revision, {}],
+    [failed.revision, { membershipId: "", actorId: MEMBERSHIP }],
+    [failed.revision, { membershipId: MEMBERSHIP, actorId: "\u0000" }],
+  ]) {
+    await assert.rejects(() => x.dispatcher.requeue(failed._id, revision, actor),
+      (error) => ["PARAM_ERROR", "INVALID_ID"].includes(error.code));
+  }
 });
 
 test("H3-b D63/D66：仅 LocalStore+Mock，日志冲突与 fence 拒绝内容级零变化", async (t) => {

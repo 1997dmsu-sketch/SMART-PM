@@ -45,7 +45,7 @@
 | D30 | 同上：occupancy revision |
 | D31 | 同上：cycle epoch |
 | D32 | 同上；C4 `D38/D41/D44/D47` 目录见证 |
-| D33 | C4 `D57/D58/D59/D61/D62` 真实 BlacklistService；T2 复用同一评价器 |
+| D33 | `H3-b D33`：T1 后写入真实 deny 决定，T2 由真实 BlacklistService 阻断且 Provider=0 |
 | D34 | `H3-b D28-D40...`：file revision |
 | D35 | 同上：device claimId |
 | D36 | 同上：owner claim released |
@@ -54,11 +54,11 @@
 | D39 | `D21c` expired + T2 grant 有效期检查 |
 | D40 | `D21c` suspended |
 | D41 | `H3-b D44/D45`：29999 拒绝、30000 成功 |
-| D42 | `retryPlan` 固定 `DELAYS[1]=120000`，同 CAS/边界实现；attempt 边界由 D44 覆盖 |
-| D43 | `retryPlan` 固定 `DELAYS[2]=600000`；`H3-b D54` 人工/自动同 CAS |
+| D42 | `H3-b D42/D43`：第二次失败精确 120000，119999 拒绝、120000 可重排 |
+| D43 | `H3-b D42/D43`：第三次失败精确 600000，599999 拒绝、600000 可重排 |
 | D44 | `H3-b D44 attempt=4` 两类瞬态，原码与 Provider 次数 |
 | D45 | `H3-b` 敏感扫描 + Provider input/context 白名单 |
-| D46 | `H3-b D01/D21a`：T2 audit 后事务外调用、T3 独立事务；C4 callback 重跑 |
+| D46 | `H3-b D46`：T2/T3 callback 各重跑一次，Provider 仍只调用一次 |
 | D47 | `H3-b D28-D40...`：权限撤销 |
 | D48 | C4 lifecycle guard 竞态；T2 snapshot/witness 复核 |
 | D49 | C4 member primary/slot/sponsor 真实资格矩阵；T2 复用 helper |
@@ -67,10 +67,10 @@
 | D52 | `face-h3a` deterministic log collision；`H3-b D63/D66` |
 | D53 | `H3-b D32/D40`：awaiting_result 不可重排 |
 | D54 | `H3-b D54`：权限与人工/自动 CAS |
-| D55 | `H3-b D38/D50`：无进程内许可恢复，过期保守 |
+| D55 | `H3-b D55/D58`：T2 已提交但确认丢失，Provider=0，租约过期后保守收敛 |
 | D56 | C4 K1 domain 全变体；T2 `digestDomainMatchesDevice` |
-| D57 | `H3-b D32/D40`：异常形状 awaiting_result；超时共享同分支 |
-| D58 | `face-h3a` 同 owner 重入拒绝 + `H3-b D19/D51` 到期扫描 |
+| D57 | `H3-b D57`：注入确定性 10000ms 超时，迟到成功结果对核心业务零写入 |
+| D58 | `H3-b D55/D58`：T1 已提交但确认丢失，Provider=0，租约过期后保守收敛 |
 | D59 | C4/H2-d operation key 并发、90/91 refs 与 snapshot 深比较 |
 | D60 | `H3-b D28-D40...`：room archived |
 | D61 | `face-h3a` fence revision/attempt mismatch |

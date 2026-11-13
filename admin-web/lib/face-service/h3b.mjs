@@ -201,13 +201,15 @@ export class H3MockDispatcher {
   #clock;
   #owner;
   #runtimeConfig;
+  #timeout;
 
   constructor({ store, orgId, files, blacklist, provider, now = Date.now,
-    owner = randomUUID(), runtimeConfig = null }) {
+    owner = randomUUID(), runtimeConfig = null, timeout = null }) {
     if (!(store instanceof LocalStore) || !(provider instanceof MockFaceAccessProvider) ||
         files?.store !== store || blacklist?.store !== store || files.orgId !== orgId ||
         blacklist.orgId !== orgId || typeof now !== "function" ||
-        (runtimeConfig !== null && typeof runtimeConfig !== "function")) {
+        (runtimeConfig !== null && typeof runtimeConfig !== "function") ||
+        (timeout !== null && typeof timeout !== "function")) {
       fail("NOT_CONFIGURED", "H3-b 仅支持单进程 LocalStore/Mock", 503);
     }
     this.#store = store;
@@ -217,6 +219,7 @@ export class H3MockDispatcher {
     this.#clock = now;
     this.#owner = owner;
     this.#runtimeConfig = runtimeConfig;
+    this.#timeout = timeout;
     this.orgId = orgId;
     this.files = files;
     this.blacklist = blacklist;
@@ -276,8 +279,10 @@ export class H3MockDispatcher {
       const refs = unique([jobRef, ...snapshotRefs, ...(planned?.refs ?? []), ...(token?.refs ?? []),
         terminalRef, retryRef]);
       if (refs.length > 90) {
+        const exhausted = claimed.job.attempts >= 4;
         const failed = await this.#finishFence(fence,
-          (job, now) => retryPlan(job, now, "ADAPTER_UNAVAILABLE"), ["retryable_failed"]);
+          (job, now) => retryPlan(job, now, "ADAPTER_UNAVAILABLE"),
+          [exhausted ? "terminal_failed" : "retryable_failed"]);
         return { job: failed };
       }
       try {
@@ -343,7 +348,9 @@ export class H3MockDispatcher {
           grant.occupancyId === current.dispatchSnapshot.occupancyId &&
           grant.cycleId === current.dispatchSnapshot.cycleId &&
           grant.claimId === current.dispatchSnapshot.claimId && grant.slotId === current.dispatchSnapshot.slotId &&
-          grant.evidenceScope === "simulated" && grant.validFrom <= now && now < grant.validUntil;
+          grant.evidenceScope === "simulated" && Number.isSafeInteger(grant.validFrom) &&
+          Number.isSafeInteger(grant.validUntil) && grant.validFrom >= 0 &&
+          grant.validFrom < grant.validUntil && grant.validFrom <= now && now < grant.validUntil;
         if (!unchanged) return terminalPlan(current, now, "GRANT_INACTIVE_AFTER_SEND", "SIMULATED_RESULT_DISCARDED");
         const plan = transition(current, "succeeded", now);
         const nextGrant = { ...grant, state: "effective", revision: grant.revision + 1, updatedAt: now };
@@ -380,10 +387,10 @@ export class H3MockDispatcher {
     let timer;
     let kind = "UNKNOWN_RESULT";
     try {
-      const response = await Promise.race([
-        this.#provider.enrollFace(authorized.input, context),
-        new Promise((resolve) => { timer = setTimeout(resolve, WINDOW_MS); }),
-      ]);
+      const timeout = this.#timeout
+        ? this.#timeout(WINDOW_MS)
+        : new Promise((resolve) => { timer = setTimeout(resolve, WINDOW_MS); });
+      const response = await Promise.race([this.#provider.enrollFace(authorized.input, context), timeout]);
       if (response?.status === "succeeded" && typeof response.jobId === "string") kind = "SUCCESS";
     } catch (error) {
       kind = classifyProviderError(error);
@@ -435,6 +442,13 @@ export class H3MockDispatcher {
   }
 
   async requeue(jobId, expectedRevision, actor = null) {
+    assertBoundedId(jobId, "jobId");
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) fail("PARAM_ERROR", "expectedRevision 非法", 400);
+    if (actor !== null) {
+      if (!actor || typeof actor !== "object" || Array.isArray(actor)) fail("PARAM_ERROR", "actor 非法", 400);
+      assertBoundedId(actor.membershipId, "membershipId");
+      assertBoundedId(actor.actorId, "actorId");
+    }
     const found = await this.#store.get(JOBS, jobId, this.orgId);
     if (!found) fail("NOT_FOUND", "任务不存在", 404);
     const job = validateDispatchJob(found);

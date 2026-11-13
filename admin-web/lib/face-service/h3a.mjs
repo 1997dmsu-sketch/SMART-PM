@@ -1,5 +1,6 @@
 /** H3-a: embedded dispatch snapshot and lease/fence helpers. No Provider calls. */
 import { HttpError } from "../model.mjs";
+import { LocalStore } from "../store.mjs";
 import {
   assertBoundedId, assertSafeInt, deterministicLogId, leasePatch,
 } from "./collections.mjs";
@@ -92,7 +93,7 @@ export function createDispatchSnapshot({
   return snapshot;
 }
 
-export function validateDispatchSnapshot(snapshot) {
+export function validateDispatchSnapshot(snapshot, job = null) {
   if (!exactFields(snapshot, SNAPSHOT_FIELDS) || snapshot.schemaVersion !== 1 ||
       snapshot.restriction !== "occupancy.activate" || !Array.isArray(snapshot.versions)) {
     fail("DISPATCH_SNAPSHOT_REQUIRED", "派发快照结构非法");
@@ -119,7 +120,42 @@ export function validateDispatchSnapshot(snapshot) {
   if (Buffer.byteLength(JSON.stringify(snapshot), "utf8") > 16 * 1024) {
     fail("PARAM_ERROR", "派发快照超过 16 KiB", 400);
   }
+  if (job) requireSnapshotBindings(snapshot, job);
   return snapshot;
+}
+
+function requireSnapshotBindings(snapshot, job) {
+  const required = [
+    ["organizations", job.orgId],
+    ["org_memberships", snapshot.membershipId],
+    ["persons", snapshot.personId],
+    ["identity_applications", snapshot.identityApplicationId],
+    ["occupancies", snapshot.occupancyId],
+    ["occupancy_cycles", snapshot.cycleId],
+    ["device_access_grants", job.grantId],
+    ["face_credentials", job.credentialId],
+    ["file_assets", snapshot.fileId],
+    ["access_devices", job.deviceId],
+    ["device_claims", snapshot.claimId],
+    ["grant_slot_claims", snapshot.slotId],
+    ["device_digest_domains", snapshot.domainHeadId],
+    ["device_digest_domains", snapshot.domainVersionId],
+  ];
+  const versions = new Map(snapshot.versions.map((item) => [keyOf(item), item]));
+  for (const [collection, id] of required) {
+    const witness = versions.get(`${collection}/${id}`);
+    if (!witness?.present) fail("DISPATCH_SNAPSHOT_REQUIRED", `派发快照缺少 ${collection} 版本见证`);
+  }
+}
+
+function validateResult(result, attempts, state) {
+  const fields = new Set(["attempt", "outcome", "errorKind", "reasonCode", "finishedAt"]);
+  if (!exactFields(result, fields) || result.attempt !== attempts || result.outcome !== state) {
+    fail("INVALID_JOB", "任务结果结构非法");
+  }
+  assertSafeInt(result.finishedAt, "result.finishedAt");
+  if (result.errorKind !== null) assertBoundedId(result.errorKind, "result.errorKind");
+  if (result.reasonCode !== null) assertBoundedId(result.reasonCode, "result.reasonCode");
 }
 
 export function validateDispatchJob(job, { requireSnapshot = true } = {}) {
@@ -127,7 +163,7 @@ export function validateDispatchJob(job, { requireSnapshot = true } = {}) {
   if (requireSnapshot && job.dispatchSnapshot === undefined) {
     fail("DISPATCH_SNAPSHOT_REQUIRED", "旧任务缺少派发快照");
   }
-  if (job.dispatchSnapshot !== undefined) validateDispatchSnapshot(job.dispatchSnapshot);
+  if (job.dispatchSnapshot !== undefined) validateDispatchSnapshot(job.dispatchSnapshot, job);
   if (!exactFields(job, JOB_FIELDS)) fail("INVALID_JOB", "任务字段不完整或包含未知字段");
   for (const field of ["_id", "orgId", "credentialId", "grantId", "deviceId"]) {
     assertBoundedId(job[field], `job.${field}`);
@@ -135,9 +171,42 @@ export function validateDispatchJob(job, { requireSnapshot = true } = {}) {
   assertSafeInt(job.revision, "job.revision", { min: 1 });
   assertSafeInt(job.attempts, "job.attempts");
   assertSafeInt(job.leaseGeneration, "job.leaseGeneration");
+  assertSafeInt(job.createdAt, "job.createdAt");
+  assertSafeInt(job.updatedAt, "job.updatedAt");
   if (job.revision > Number.MAX_SAFE_INTEGER - 2 || job.attempts > 4) fail("INVALID_JOB", "任务计数越界");
   if (job.action !== "enroll" || job.executionMode !== "test" || job.provider !== "mock" ||
       job.evidenceScope !== "simulated") fail("INVALID_JOB", "任务不属于 H3 合成派发");
+  if (job.leaseGeneration !== job.attempts) fail("INVALID_JOB", "leaseGeneration 与 attempts 不一致");
+  const noLease = job.leaseOwner === null && job.leaseExpiresAt === null && job.dispatchAuthorizedAt === null;
+  if (job.state === "queued") {
+    if (!noLease || (job.attempts === 0
+      ? job.leaseGeneration !== 0 || job.nextAttemptAt !== null || job.result !== null
+      : job.attempts >= 4 || !Number.isSafeInteger(job.nextAttemptAt) || !job.result)) {
+      fail("INVALID_JOB", "queued 状态字段非法");
+    }
+    if (job.attempts > 0) validateResult(job.result, job.attempts, "retryable_failed");
+  } else if (job.state === "sending") {
+    assertBoundedId(job.leaseOwner, "job.leaseOwner");
+    assertSafeInt(job.leaseExpiresAt, "job.leaseExpiresAt", { min: 1 });
+    if (job.attempts < 1 || job.nextAttemptAt !== null || job.result !== null ||
+        (job.dispatchAuthorizedAt !== null &&
+          (!Number.isSafeInteger(job.dispatchAuthorizedAt) || job.dispatchAuthorizedAt >= job.leaseExpiresAt))) {
+      fail("INVALID_JOB", "sending 状态字段非法");
+    }
+  } else if (job.state === "retryable_failed") {
+    if (!noLease || job.attempts < 1 || job.attempts >= 4 || !Number.isSafeInteger(job.nextAttemptAt)) {
+      fail("INVALID_JOB", "retryable_failed 状态字段非法");
+    }
+    validateResult(job.result, job.attempts, job.state);
+  } else if (["succeeded", "terminal_failed", "awaiting_result"].includes(job.state)) {
+    if (!noLease || job.attempts < 1 || job.nextAttemptAt !== null) fail("INVALID_JOB", "终态字段非法");
+    validateResult(job.result, job.attempts, job.state);
+  } else if (job.state === "cancelled") {
+    if (!noLease || job.nextAttemptAt !== null) fail("INVALID_JOB", "cancelled 状态字段非法");
+    if (job.result !== null) validateResult(job.result, job.attempts, job.state);
+  } else {
+    fail("INVALID_JOB", "任务状态非法");
+  }
   return job;
 }
 
@@ -154,6 +223,7 @@ export function buildClaimPlan(job, { owner, now, leaseMs = 60_000 }) {
   validateDispatchJob(job);
   assertSafeInt(now, "now");
   assertSafeInt(leaseMs, "leaseMs", { min: 1 });
+  if (now > Number.MAX_SAFE_INTEGER - leaseMs) fail("INVALID_JOB", "租约时间溢出");
   if (!isDispatchCandidate(job, now)) fail("INVALID_JOB", "任务不可领取");
   const patch = leasePatch({
     owner, now, expiresAt: now + leaseMs, attempts: job.attempts, revision: job.revision,
@@ -206,8 +276,10 @@ export async function claimDispatchJob({ store, orgId, jobId, owner, now = Date.
   assertBoundedId(jobId, "jobId");
   assertBoundedId(owner, "owner");
   if (typeof now !== "function") fail("INVALID_JOB", "now 必须是函数");
-  const before = validateDispatchJob(await store.get("device_operation_jobs", jobId, orgId));
-  if (before.orgId !== orgId) fail("NOT_FOUND", "任务不存在", 404);
+  if (!(store instanceof LocalStore)) fail("NOT_CONFIGURED", "H3-a 仅支持 LocalStore", 503);
+  const found = await store.get("device_operation_jobs", jobId, orgId);
+  if (!found) fail("NOT_FOUND", "任务不存在", 404);
+  const before = validateDispatchJob(found);
   const provisional = buildClaimPlan(before, { owner, now: checkedNow(now) });
   const jobRef = { collection: "device_operation_jobs", id: jobId };
   const logRef = { collection: "device_operation_logs", id: provisional.logId };
@@ -231,4 +303,3 @@ function checkedNow(now) {
   assertSafeInt(value, "now");
   return value;
 }
-

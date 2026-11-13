@@ -66,12 +66,52 @@ test("H3-a embedded snapshot is strict, bounded and version witnessed", () => {
     ...value.versions, { collection: "persons", id: "unversioned", present: true,
       revision: null, epoch: null, keyVersion: null },
   ] }), (error) => error.code === "DISPATCH_SNAPSHOT_REQUIRED");
-  const huge = { ...value, versions: Array.from({ length: 150 }, (_, index) => ({
-    collection: "persons", id: `person-${index}-${"x".repeat(80)}`, present: true,
-    revision: 1, epoch: null, keyVersion: null,
-  })) };
-  assert.throws(() => validateDispatchSnapshot(huge),
-    (error) => error.code === "PARAM_ERROR" || error.code === "DISPATCH_SNAPSHOT_REQUIRED");
+  const versions = [...value.versions];
+  let below = value;
+  let over = null;
+  for (let index = 0; index < 200; index += 1) {
+    versions.push({ collection: "persons", id: `padding-${index}-${"x".repeat(100)}`,
+      present: true, revision: 1, epoch: null, keyVersion: null });
+    const candidate = { ...value, versions: [...versions] };
+    if (Buffer.byteLength(JSON.stringify(candidate), "utf8") > 16 * 1024) {
+      over = candidate;
+      break;
+    }
+    below = candidate;
+  }
+  assert.ok(over, "必须构造出跨越 16 KiB 的快照");
+  assert.ok(Buffer.byteLength(JSON.stringify(below), "utf8") <= 16 * 1024);
+  assert.ok(Buffer.byteLength(JSON.stringify(over), "utf8") > 16 * 1024);
+  assert.equal(validateDispatchSnapshot(below), below);
+  assert.throws(() => validateDispatchSnapshot(over),
+    (error) => error.code === "PARAM_ERROR" && error.status === 400);
+});
+
+test("H3-a snapshot is bound to every required job reference and keeps planned witnesses", () => {
+  const value = snapshot();
+  const current = job({ dispatchSnapshot: value });
+  assert.equal(validateDispatchJob(current), current);
+  for (const [collection, id] of [
+    ["organizations", "org"], ["org_memberships", "member"], ["persons", "person"],
+    ["identity_applications", "identity"], ["occupancies", "occupancy"],
+    ["occupancy_cycles", "cycle"], ["device_access_grants", "grant"],
+    ["face_credentials", "credential"], ["file_assets", "file"],
+    ["access_devices", "device"], ["device_claims", "claim"],
+    ["grant_slot_claims", "slot"], ["device_digest_domains", "head"],
+    ["device_digest_domains", "version"],
+  ]) {
+    const broken = structuredClone(current);
+    broken.dispatchSnapshot.versions = broken.dispatchSnapshot.versions
+      .filter((item) => !(item.collection === collection && item.id === id));
+    assert.throws(() => validateDispatchJob(broken),
+      (error) => error.code === "DISPATCH_SNAPSHOT_REQUIRED", `${collection}/${id} 必需`);
+  }
+  const wrongPerson = structuredClone(current);
+  wrongPerson.dispatchSnapshot.personId = "person-other";
+  assert.throws(() => validateDispatchJob(wrongPerson),
+    (error) => error.code === "DISPATCH_SNAPSHOT_REQUIRED");
+  const keys = value.versions.map((item) => `${item.collection}/${item.id}`);
+  assert.equal(new Set(keys).size, keys.length, "planned refs 必须唯一");
 });
 
 test("H3-a old jobs are excluded and direct validation fails closed", () => {
@@ -80,6 +120,18 @@ test("H3-a old jobs are excluded and direct validation fails closed", () => {
   assert.equal(isDispatchCandidate(legacy, NOW), false);
   assert.throws(() => validateDispatchJob(legacy),
     (error) => error.code === "DISPATCH_SNAPSHOT_REQUIRED");
+});
+
+test("H3-a rejects polluted queued state and generation/attempt mismatch", () => {
+  for (const polluted of [
+    job({ leaseOwner: "worker" }), job({ leaseExpiresAt: NOW + 1 }),
+    job({ dispatchAuthorizedAt: NOW }), job({ nextAttemptAt: NOW }),
+    job({ result: { attempt: 0, outcome: "queued", errorKind: null, reasonCode: null, finishedAt: NOW } }),
+    job({ leaseGeneration: 1 }), job({ attempts: 1 }),
+  ]) {
+    assert.equal(isDispatchCandidate(polluted, NOW), false);
+    assert.throws(() => validateDispatchJob(polluted), (error) => error.code === "INVALID_JOB");
+  }
 });
 
 test("H3-a synthetic snapshot mode fails closed outside LocalStore", () => {
@@ -112,6 +164,9 @@ test("H3-a claim plan is deterministic and fence rejects stale workers and expir
   assert.equal(assertLeaseFence(first.job, first.fence, NOW + 60_000, { expired: true }), first.job);
   assert.throws(() => buildClaimPlan(first.job, { owner: "worker-a", now: NOW + 1 }),
     (error) => error.code === "INVALID_JOB", "same owner cannot renew/re-enter");
+  assert.throws(() => buildClaimPlan(current, {
+    owner: "worker-a", now: Number.MAX_SAFE_INTEGER - 10, leaseMs: 60_000,
+  }), (error) => error.code === "INVALID_JOB");
 });
 
 async function storedJob(t, overrides = {}) {
@@ -159,4 +214,24 @@ test("H3-a deterministic log collision rolls back job and admin audit", async (t
   assert.deepEqual(await store.get("device_operation_jobs", "job", "org"), beforeJob);
   assert.deepEqual(await store.list("admin_audit"), audits);
   assert.equal((await store.list("device_operation_logs", "org"))[0].state, "sentinel");
+});
+
+test("H3-a claim is LocalStore-only and missing/cross-org jobs are homonymous 404", async (t) => {
+  await assert.rejects(
+    claimDispatchJob({ store: { get() { throw Error("must not read"); } }, orgId: "org",
+      jobId: "job", owner: "worker", now: () => NOW }),
+    (error) => error.code === "NOT_CONFIGURED" && error.status === 503,
+  );
+  const missing = await storedJob(t);
+  await assert.rejects(
+    claimDispatchJob({ store: missing.store, orgId: "org", jobId: "missing",
+      owner: "worker", now: () => NOW }),
+    (error) => error.code === "NOT_FOUND" && error.status === 404,
+  );
+  const cross = await storedJob(t, { orgId: "org-other" });
+  await assert.rejects(
+    claimDispatchJob({ store: cross.store, orgId: "org", jobId: "job",
+      owner: "worker", now: () => NOW }),
+    (error) => error.code === "NOT_FOUND" && error.status === 404,
+  );
 });

@@ -40,7 +40,7 @@ import {
 } from "./dto.mjs";
 import { snapshotEligibility, validateEligibility } from "./eligibility.mjs";
 import { prepareGrantEligibility } from "./qualification.mjs";
-import { createDispatchSnapshot } from "./h3a.mjs";
+import { createDispatchSnapshot, validateDispatchJob } from "./h3a.mjs";
 
 const ref = (collection, id) => ({ collection, id });
 // 预读业务错配必须延迟到事务内权限/operation/credential 检查之后，保持 §6.3
@@ -465,6 +465,7 @@ export class FaceCredentialService {
             leaseGeneration: 0, dispatchAuthorizedAt: null, nextAttemptAt: null,
             result: null, updatedAt: now,
           });
+          validateDispatchJob({ ...job, _id: jobId });
         }
         validateRecord(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantRecord);
         validateRecord(COLLECTIONS.DEVICE_OPERATION_JOBS, job);

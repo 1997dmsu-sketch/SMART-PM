@@ -1241,6 +1241,11 @@ test("C4 D73 最大布局容量：去重后 58 candidates/90 refs 单事务成�
   const [job] = await at58.store.list("device_operation_jobs", ORG);
   assert.equal(job.dispatchSnapshot.schemaVersion, 1);
   assert.ok(Buffer.byteLength(JSON.stringify(job.dispatchSnapshot)) <= 16 * 1024);
+  const witnesses = job.dispatchSnapshot.versions.map(({ collection, id }) => `${collection}/${id}`);
+  assert.equal(new Set(witnesses).size, witnesses.length, "planned refs 必须去重");
+  for (const prefix of [
+    "property_catalog/", "room_primary_slots/", "lifecycle_guards/",
+  ]) assert.ok(witnesses.some((key) => key.startsWith(prefix)), `保留 ${prefix} planned ref`);
 });
 
 // D74

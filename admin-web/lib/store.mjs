@@ -44,6 +44,67 @@ const collections = [
   "access_devices",
   "operation_key_domains",
 ];
+const AUDIT_INPUT_FIELDS = new Set([
+  "auditId",
+  "orgId",
+  "actorId",
+  "actorType",
+  "action",
+]);
+function boundedAuditField(value, field) {
+  if (
+    typeof value !== "string" ||
+    value.trim() === "" ||
+    value.length > 128 ||
+    /[\u0000-\u001f\u007f]/.test(value)
+  )
+    throw new HttpError(400, `${field} 非法`);
+  return value;
+}
+function deterministicAudit(audit) {
+  if (!audit || typeof audit !== "object" || Array.isArray(audit) ||
+      !Object.hasOwn(audit, "auditId")) return null;
+  for (const key of Object.keys(audit)) {
+    if (!AUDIT_INPUT_FIELDS.has(key))
+      throw new HttpError(400, `确定性审计字段非法: ${key}`);
+  }
+  return {
+    auditId: boundedAuditField(audit.auditId, "auditId"),
+    orgId: boundedAuditField(audit.orgId, "orgId"),
+    actorId: boundedAuditField(audit.actorId, "actorId"),
+    actorType: boundedAuditField(audit.actorType, "actorType"),
+    action: boundedAuditField(audit.action, "action"),
+  };
+}
+function uniqueRefs(refs) {
+  if (!Array.isArray(refs)) throw new HttpError(400, "事务引用非法");
+  return [...new Map(refs.map((item) => [
+    `${item?.collection}/${item?.id}`,
+    item,
+  ])).values()];
+}
+function prepareDeterministicAudit(refs, audit) {
+  const config = deterministicAudit(audit);
+  if (!config) return { config: null, refs };
+  const normalized = uniqueRefs(refs);
+  if (normalized.length > 90)
+    throw new HttpError(400, "一次操作涉及记录过多，请缩小选择范围");
+  if (!normalized.some(({ collection, id }) =>
+    collection === "admin_audit" && id === config.auditId))
+    throw new HttpError(400, "确定性审计引用缺失");
+  return { config, refs: normalized };
+}
+function auditRecord(config, writes, createdAt) {
+  return {
+    _id: config.auditId,
+    orgId: config.orgId,
+    actorId: config.actorId,
+    actorType: config.actorType,
+    action: config.action,
+    target: writes.map((write) => `${write.collection}/${write.id}`).join(", "),
+    createdAt,
+  };
+}
 export function seed() {
   return {
     houses: Array.from({ length: 16 }, (_, i) => ({
@@ -197,19 +258,24 @@ export class LocalStore {
     return structuredClone(row);
   }
   async transact(refs, build, audit) {
+    const prepared = prepareDeterministicAudit(refs, audit);
     const task = this.queue.then(async () => {
       const next = structuredClone(this.data);
       const state = Object.fromEntries(
-        refs.map(({ collection, id }) => [
+        prepared.refs.map(({ collection, id }) => [
           `${collection}/${id}`,
           structuredClone(
             (next[collection] || []).find((r) => r._id === id) || null,
           ),
         ]),
       );
+      if (prepared.config && state[`admin_audit/${prepared.config.auditId}`])
+        throw new HttpError(409, "确定性审计记录已存在");
       const writes = await build(state);
-      const allowed = new Set(refs.map((r) => `${r.collection}/${r.id}`));
+      const allowed = new Set(prepared.refs.map((r) => `${r.collection}/${r.id}`));
       for (const w of writes) {
+        if (prepared.config && w.collection === "admin_audit")
+          throw new HttpError(400, "确定性审计记录只能由 Store 写入");
         if (!allowed.has(`${w.collection}/${w.id}`))
           throw Error("Undeclared transaction write");
         const rows = (next[w.collection] ||= []);
@@ -223,12 +289,14 @@ export class LocalStore {
         if (index < 0) rows.push(record);
         else rows[index] = record;
       }
-      next.admin_audit.unshift({
-        ...audit,
-        _id: randomUUID(),
-        target: writes.map((w) => `${w.collection}/${w.id}`).join(", "),
-        createdAt: Date.now(),
-      });
+      next.admin_audit.unshift(prepared.config
+        ? auditRecord(prepared.config, writes, Date.now())
+        : {
+            ...audit,
+            _id: randomUUID(),
+            target: writes.map((w) => `${w.collection}/${w.id}`).join(", "),
+            createdAt: Date.now(),
+          });
       await this.persist(next);
       this.data = next;
     });
@@ -317,9 +385,8 @@ export class CloudStore {
     return row;
   }
   async transact(refs, build, audit) {
-    const unique = [
-      ...new Map(refs.map((r) => [`${r.collection}/${r.id}`, r])).values(),
-    ];
+    const prepared = prepareDeterministicAudit(refs, audit);
+    const unique = prepared.config ? prepared.refs : uniqueRefs(refs);
     if (unique.length > 90)
       throw new HttpError(400, "一次操作涉及记录过多，请缩小选择范围");
     return this.db.runTransaction(async (tx) => {
@@ -331,15 +398,29 @@ export class CloudStore {
           ? result.data[0]
           : result.data;
       }
+      if (prepared.config && state[`admin_audit/${prepared.config.auditId}`])
+        throw new HttpError(409, "确定性审计记录已存在");
       const writes = await build(state);
       const allowed = new Set(unique.map((r) => `${r.collection}/${r.id}`));
       for (const w of writes) {
+        if (prepared.config && w.collection === "admin_audit")
+          throw new HttpError(400, "确定性审计记录只能由 Store 写入");
         const k = `${w.collection}/${w.id}`;
         if (!allowed.has(k)) throw Error("Undeclared transaction write");
         const data = { ...state[k], ...w.data, updatedAt: Date.now() };
         delete data._id;
         const result = await tx.collection(w.collection).doc(w.id).set(data);
         if (result.code) throw new HttpError(503, "批量写入失败，整批回滚");
+      }
+      if (prepared.config) {
+        const record = auditRecord(prepared.config, writes, Date.now());
+        delete record._id;
+        const logged = await tx
+          .collection("admin_audit")
+          .doc(prepared.config.auditId)
+          .set(record);
+        if (logged?.code) throw new HttpError(503, "日志保存失败，整批回滚");
+        return;
       }
       const logged = await tx
         .collection("admin_audit")

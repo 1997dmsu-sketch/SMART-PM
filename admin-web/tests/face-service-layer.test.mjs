@@ -429,6 +429,30 @@ test("H4-a claim/device 与 slot/grant 绑定损坏均零写", async () => {
   assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
 });
 
+test("H4-a pending/effective/suspended/expired 均可立即撤权", async () => {
+  for (const [index, state] of ["pending", "effective", "suspended", "expired"].entries()) {
+    const suffix = `h4-state-${index}`;
+    const cycleId = `cycle-${suffix}`;
+    const credentialId = await approvedCredential(suffix, { cycleId });
+    const created = await service("mem-manage").createGrant(
+      { ...grantInput(credentialId), deviceId: "device-replay", cycleId },
+      { idempotencyKey: `idem-grant-${suffix}-001` },
+    );
+    if (state !== "pending") await store.transact(
+      [ref("device_access_grants", created.grantId)],
+      (snapshot) => [{
+        collection: "device_access_grants", id: created.grantId,
+        data: { ...snapshot[`device_access_grants/${created.grantId}`], state },
+      }], audit,
+    );
+    const revoked = await service("mem-manage").revoke(
+      created.grantId, { idempotencyKey: `idem-revoke-${suffix}-01` },
+    );
+    assert.equal(revoked.grantState, "revoked");
+  }
+  assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
+});
+
 test("operation_keys 元数据与三条路径共用同一 domain", async () => {
   const keys = await store.list("operation_keys", orgId);
   assert.ok(keys.length >= 3);

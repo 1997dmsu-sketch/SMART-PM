@@ -8,6 +8,7 @@ export * from "./dto.mjs";
 export * from "./state.mjs";
 export * from "./routes.mjs";
 export * from "./mock-provider.mjs";
+export * from "./h4b.mjs";
 
 import { MockFaceAccessProvider } from "./mock-provider.mjs";
 

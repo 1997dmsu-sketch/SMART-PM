@@ -12,7 +12,7 @@ import { MockFaceAccessProvider } from "../lib/face-service/index.mjs";
 import { FaceCredentialService } from "../lib/face-service/service.mjs";
 import { occupancyClaimId, primarySlotId } from "../lib/face-service/eligibility.mjs";
 import { projectAccess } from "../lib/face-service/state.mjs";
-import { deviceClaimKey, deviceClaimConfig, deviceDigestDomainKey, deviceDigestDomainVersionKey, operationKey, operationKeyConfig } from "../lib/face-service/collections.mjs";
+import { deterministicLogId, deviceClaimKey, deviceClaimConfig, deviceDigestDomainKey, deviceDigestDomainVersionKey, operationKey, operationKeyConfig } from "../lib/face-service/collections.mjs";
 
 let store, dir;
 const orgId = "org-demo";
@@ -451,6 +451,50 @@ test("H4-a pending/effective/suspended/expired 均可立即撤权", async () => 
     assert.equal(revoked.grantState, "revoked");
   }
   assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
+});
+
+test("H4-a job/log/op 预占分别冲突且核心内容零变化", async () => {
+  const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  for (const kind of ["job", "log", "op"]) {
+    const suffix = `h4-pre-${kind}`;
+    const cycleId = `cycle-${suffix}`;
+    const credentialId = await approvedCredential(suffix, { cycleId });
+    const created = await service("mem-manage").createGrant(
+      { ...grantInput(credentialId), deviceId: "device-replay", cycleId },
+      { idempotencyKey: `idem-grant-${suffix}-001` },
+    );
+    const key = `idem-revoke-${suffix}-01`;
+    const jobId = `job-revoke-v1:${digest([orgId, created.grantId])}`;
+    const logId = deterministicLogId(jobId, "queued");
+    const opId = operationKey({ orgId, method: "face.revoke", actorType: "user", actorId: "mem-manage", idempotencyKey: key, config: operationKeyConfig(process.env) });
+    const [collection, id, data] = kind === "job"
+      ? ["device_operation_jobs", jobId, { orgId, revision: 1, marker: "occupied" }]
+      : kind === "log"
+        ? ["device_operation_logs", logId, { orgId, revision: 1, marker: "occupied" }]
+        : ["operation_keys", opId, { orgId, realm: "test-realm", keyVersion: 1, requestDigest: "bad", result: {}, createdAt: 1 }];
+    await store.transact([ref(collection, id)], () => [{ collection, id, data }], audit);
+    const before = await businessSnapshot();
+    await assert.rejects(
+      () => service("mem-manage").revoke(created.grantId, { idempotencyKey: key }),
+      (e) => e.status === 409,
+    );
+    assert.deepEqual(await businessSnapshot(), before);
+    store.data[collection] = store.data[collection].filter((row) => row._id !== id);
+  }
+  assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
+});
+
+test("H4-a 成功 job/snapshot 严格脱敏且不超过 4KiB", async () => {
+  const jobs = (await store.list("device_operation_jobs", orgId)).filter((job) => job.action === "revoke");
+  assert.ok(jobs.length >= 1);
+  const allowedJob = new Set(["_id","orgId","revision","credentialId","grantId","deviceId","action","state","executionMode","provider","evidenceScope","attempts","leaseGeneration","leaseOwner","leaseExpiresAt","dispatchAuthorizedAt","nextAttemptAt","result","cleanupPhase","providerOutcome","finalizeAttempts","cleanupSnapshot","createdAt","updatedAt"]);
+  const allowedSnapshot = new Set(["schemaVersion","grantId","grantRevision","credentialId","credentialRevision","deviceId","deviceRevision","claimId","claimRevision","slotId","slotRevision","releaseGuardId","releaseGuardRevision","releaseGuardEpoch","originalGrantState","createdAt"]);
+  for (const job of jobs) {
+    assert.deepEqual(Object.keys(job).filter((key) => !allowedJob.has(key)), []);
+    assert.deepEqual(Object.keys(job.cleanupSnapshot).filter((key) => !allowedSnapshot.has(key)), []);
+    assert.ok(Buffer.byteLength(JSON.stringify(job.cleanupSnapshot)) <= 4096);
+    assert.doesNotMatch(JSON.stringify(job), /idem-|SN-|serialNumber|\bIP\b|\bMAC\b|image|objectKey|sourceFile/i);
+  }
 });
 
 test("operation_keys 元数据与三条路径共用同一 domain", async () => {

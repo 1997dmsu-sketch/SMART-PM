@@ -50,11 +50,11 @@ H4-c 的 confirmed_removed/confirmed_present/still_unknown 人工对账不在本
 | R26 | success 完整闭环 |
 | R27 | shared effective grant 使 claim 保持 active |
 | R28 | 无 blocker 时 claim released，device 保留 claimId |
-| R29 | relevant candidate 分类将 revoked+cleanupPending 作为 blocker |
+| R29 | `revoked cleanupPending candidate blocks owner claim release` |
 | R30 | candidate-scan phantom 被 release-guard CAS 阻止 |
 | R31 | 82/90 成功；83/91 pre-send 拒绝；post-send 转 local finalize |
 | R32 | other-job tombstone 拒绝且不覆盖 |
-| R33 | released/损坏 claim 在 T2/T3 失败关闭 |
+| R33 | `T2 rejects ... claim` 与 `T3 refuses released or structurally corrupt owner claim` |
 | R34 | pre-send attempt 1 → 30 秒 |
 | R35 | attempt 2/3 → 120/600 秒精确边界 |
 | R36 | attempt 4 → terminal_failed/RETRY_EXHAUSTED |
@@ -63,13 +63,13 @@ H4-c 的 confirmed_removed/confirmed_present/still_unknown 人工对账不在本
 | R39 | 10 秒 timeout 与迟到 success 零写 |
 | R40 | T1/T2 ack loss 后 expire，不重发 |
 | R41 | T3 callback/ack loss，Provider 始终 1 |
-| R42 | fence/CAS 与 expire 由同一 job revision 线性化 |
+| R42 | `T3 and expiry race commits only one legal terminal state` |
 | R43 | manual retry 权限、revision、due 全部复核 |
-| R44 | awaiting_result 不进入 requeue/dispatch 候选 |
-| R48 | 共享设备 blocker 路径只释放目标 slot，不释放 owner claim |
+| R44 | `awaiting_result rejects every automatic or manual continuation` |
+| R48 | `two shared-device revoke jobs release claim only after both slots close` |
 | R49 | scan 后并发授权由 guard CAS 阻止 claim 释放 |
 | R50 | Provider 最小 payload/context 与敏感扫描 |
-| R51 | strict validator/safe integer/exact fields 及全量反例回归 |
+| R51 | `validator rejects unknown fields, unsafe numbers and phase contradictions` |
 | R52 | Cloud/live/non-Mock 构造或 T2 失败关闭 |
 | R53 | H4-0B 既有 guard 首建/递增/replay 回归随 Admin 全量通过 |
 | R54 | H4-0B 57/90、58/91 createGrant 回归随 Admin 全量通过 |
@@ -79,3 +79,6 @@ H4-c 的 confirmed_removed/confirmed_present/still_unknown 人工对账不在本
 | R58 | Provider success 后 Store/83 candidates → confirmed_removed/finalize |
 | R59 | local finalize 恢复与第 4 次 LOCAL_FINALIZE_EXHAUSTED，Provider=1 |
 | R60 | local/T3 callback 与确认丢失收敛，Provider 不增加 |
+
+补充 TOCTOU 证据：`T3 rejects every pre-read candidate that disappears or leaves scope`
+覆盖候选在扫描后缺失、改 deviceId、改 claimId，均进入 local-finalize，绝不释放资源。

@@ -401,8 +401,8 @@ export class H4MockRevoker {
             guard.claimId !== claim._id)
           fail("DEVICE_CLAIM_INVALID");
         const currentCandidates = candidates.map((item) => state[`${GRANTS}/${item._id}`]);
-        if (currentCandidates.some((item) =>
-          candidateDisposition(item, job.grantId, job.deviceId, job.cleanupSnapshot.claimId) === "invalid"))
+        if (currentCandidates.some((item) => !["block", "clear"].includes(
+          candidateDisposition(item, job.grantId, job.deviceId, job.cleanupSnapshot.claimId))))
           fail("INVALID_STATE");
         const blockers = currentCandidates.filter((item) =>
           candidateDisposition(item, job.grantId, job.deviceId, job.cleanupSnapshot.claimId) === "block");

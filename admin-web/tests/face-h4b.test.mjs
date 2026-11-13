@@ -648,3 +648,172 @@ test("H4-b Cloud/live/non-Mock configurations fail closed", async () => {
     } finally { await rm(h.dir, { recursive: true, force: true }); }
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test("H4-b T3 rejects every pre-read candidate that disappears or leaves scope", async () => {
+  for (const kind of ["missing", "device", "claim"]) {
+    const h = await harness();
+    await addBlockers(h, 1, `scope-${kind}`);
+    const candidateId = `grant-scope-${kind}-0`;
+    const original = h.store.transact.bind(h.store);
+    let injected = false;
+    h.store.transact = (refs, build, txAudit) => {
+      if (!injected && txAudit?.action === "H4 finalize") {
+        injected = true;
+        const index = h.store.data.device_access_grants.findIndex((row) => row._id === candidateId);
+        if (kind === "missing") h.store.data.device_access_grants.splice(index, 1);
+        else h.store.data.device_access_grants[index][kind === "device" ? "deviceId" : "claimId"] = `${kind}-other`;
+      }
+      return original(refs, build, txAudit);
+    };
+    try {
+      const pending = await h.dispatcher.dispatch(h.jobId);
+      assert.equal(pending.cleanupPhase, "finalize", kind);
+      assert.equal(pending.providerOutcome, "confirmed_removed", kind);
+      assert.equal((await h.store.get("grant_slot_claims", h.slotId, ORG)).state, "active", kind);
+      assert.equal((await h.store.get("device_claims", h.claimId)).state, "active", kind);
+      assert.equal(h.provider.calls.length, 1, kind);
+    } finally { await rm(h.dir, { recursive: true, force: true }); }
+  }
+});
+
+test("H4-b revoked cleanupPending candidate blocks owner claim release", async () => {
+  const h = await harness();
+  try {
+    await addBlockers(h, 1, "revoked-pending");
+    const blocker = h.store.data.device_access_grants.at(-1);
+    blocker.state = "revoked";
+    blocker.cleanupPending = true;
+    blocker.cleanupJobId = "job-other-cleanup";
+    assert.equal((await h.dispatcher.dispatch(h.jobId)).state, "succeeded");
+    assert.equal((await h.store.get("grant_slot_claims", h.slotId, ORG)).state, "released");
+    assert.equal((await h.store.get("device_claims", h.claimId)).state, "active");
+    assert.equal(h.provider.calls.length, 1);
+  } finally { await rm(h.dir, { recursive: true, force: true }); }
+});
+
+test("H4-b T3 refuses released or structurally corrupt owner claim", async () => {
+  for (const kind of ["released", "corrupt"]) {
+    const h = await harness();
+    const original = h.provider.revokeFace.bind(h.provider);
+    h.provider.revokeFace = async (...args) => {
+      const result = await original(...args);
+      const claim = h.store.data.device_claims[0];
+      if (kind === "released") Object.assign(claim, { state: "released", revision: 2,
+        releasedAt: h.now.value, releasedByAuditId: "audit-other", releaseReason: "other-cleanup",
+        boundDeviceId: undefined, activatedAt: undefined, activatedByAuditId: undefined });
+      else claim.provider = "";
+      return result;
+    };
+    try {
+      const pending = await h.dispatcher.dispatch(h.jobId);
+      assert.equal(pending.cleanupPhase, "finalize", kind);
+      assert.equal((await h.store.get(GRANTS, h.grantId, ORG)).cleanupPending, true, kind);
+      assert.equal((await h.store.get("grant_slot_claims", h.slotId, ORG)).state, "active", kind);
+      assert.equal(h.provider.calls.length, 1, kind);
+    } finally { await rm(h.dir, { recursive: true, force: true }); }
+  }
+});
+
+test("H4-b T3 and expiry race commits only one legal terminal state", async () => {
+  const h = await harness();
+  let resolveProvider;
+  h.provider.revokeFace = (...args) => {
+    h.provider.calls.push({ action: "revoke", args });
+    return new Promise((resolve) => { resolveProvider = resolve; });
+  };
+  try {
+    const dispatch = h.dispatcher.dispatch(h.jobId);
+    while (!resolveProvider) await new Promise((resolve) => setImmediate(resolve));
+    h.now.value += 60_000;
+    const expiry = h.dispatcher.expire(h.jobId);
+    resolveProvider({ status: "succeeded", jobId: "provider-race" });
+    await Promise.allSettled([dispatch, expiry]);
+    const job = await h.store.get(JOBS, h.jobId, ORG);
+    assert.ok(["succeeded", "awaiting_result"].includes(job.state));
+    assert.equal(h.provider.calls.length, 1);
+    const terminalLogs = (await h.store.list("device_operation_logs", ORG))
+      .filter((row) => row.jobId === h.jobId && ["succeeded", "awaiting_result"].includes(row.state));
+    assert.equal(terminalLogs.length, 1);
+  } finally { await rm(h.dir, { recursive: true, force: true }); }
+});
+
+test("H4-b awaiting_result rejects every automatic or manual continuation", async () => {
+  const h = await harness({ scenario: "post_send_unknown" });
+  try {
+    const unknown = await h.dispatcher.dispatch(h.jobId);
+    assert.equal(unknown.state, "awaiting_result");
+    for (const action of [
+      () => h.dispatcher.dispatch(h.jobId),
+      () => h.dispatcher.requeue(h.jobId),
+      () => h.dispatcher.finalize(h.jobId),
+    ]) await assert.rejects(action, (error) => error.code === "INVALID_JOB");
+    assert.equal(h.provider.calls.length, 1);
+  } finally { await rm(h.dir, { recursive: true, force: true }); }
+});
+
+test("H4-b two shared-device revoke jobs release claim only after both slots close", async () => {
+  const h = await harness();
+  const secondJobId = "job-revoke-h4-second";
+  const secondGrantId = "grant-h4-second";
+  const secondCredentialId = "credential-h4-second";
+  const secondSlotId = "slot-h4-second";
+  const guard = h.store.data.device_claim_release_guards[0];
+  guard.epoch = 2; guard.revision = 2;
+  h.store.data.device_operation_jobs[0].cleanupSnapshot.releaseGuardEpoch = 2;
+  h.store.data.device_operation_jobs[0].cleanupSnapshot.releaseGuardRevision = 2;
+  const writes = [
+    { collection: "face_credentials", id: secondCredentialId, data: { orgId: ORG,
+      personId: "person-h4-second", reviewState: "approved", imageState: "verified",
+      sourceFileId: "file-h4-second", sourceFileRevision: 1, evidenceScope: "simulated",
+      revision: 2, createdAt: 1, updatedAt: 1 } },
+    { collection: GRANTS, id: secondGrantId, data: { orgId: ORG, personId: "person-h4-second",
+      occupancyId: "occ-h4-second", cycleId: "cycle-h4-second", credentialId: secondCredentialId,
+      deviceId: "device-h4", claimId: h.claimId, slotId: secondSlotId, state: "revoked",
+      cleanupPending: true, cleanupJobId: secondJobId, evidenceScope: "simulated", revision: 2,
+      validFrom: 1, validUntil: 2_000_000_000_000, createdAt: 1, updatedAt: 1 } },
+    { collection: "grant_slot_claims", id: secondSlotId, data: { orgId: ORG,
+      personId: "person-h4-second", deviceId: "device-h4", cycleId: "cycle-h4-second",
+      activeClaimId: secondGrantId, state: "active", revision: 1, createdAt: 1,
+      updatedAt: 1, activatedAt: 1 } },
+    { collection: JOBS, id: secondJobId, data: { orgId: ORG, revision: 1,
+      credentialId: secondCredentialId, grantId: secondGrantId, deviceId: "device-h4",
+      action: "revoke", state: "queued", executionMode: "test", provider: "mock",
+      evidenceScope: "simulated", attempts: 0, leaseGeneration: 0, leaseOwner: null,
+      leaseExpiresAt: null, dispatchAuthorizedAt: null, nextAttemptAt: null, result: null,
+      cleanupPhase: "dispatch", providerOutcome: null, finalizeAttempts: 0,
+      cleanupSnapshot: { schemaVersion: 1, grantId: secondGrantId, grantRevision: 1,
+        credentialId: secondCredentialId, credentialRevision: 2, deviceId: "device-h4",
+        deviceRevision: 1, claimId: h.claimId, claimRevision: 1, slotId: secondSlotId,
+        slotRevision: 1, releaseGuardId: h.guardId, releaseGuardRevision: 2,
+        releaseGuardEpoch: 2, originalGrantState: "effective", createdAt: 1 },
+      createdAt: 1, updatedAt: 1 } },
+  ];
+  await h.store.transact(writes.map((write) => ref(write.collection, write.id)), () => writes, audit);
+  const second = new H4MockRevoker({ store: h.store, orgId: ORG, provider: h.provider,
+    owner: "worker-h4-second", now: () => h.now.value });
+  try {
+    const results = await Promise.all([h.dispatcher.dispatch(h.jobId), second.dispatch(secondJobId)]);
+    assert.deepEqual(results.map((job) => job.state), ["succeeded", "succeeded"]);
+    assert.equal((await h.store.get("grant_slot_claims", h.slotId, ORG)).state, "released");
+    assert.equal((await h.store.get("grant_slot_claims", secondSlotId, ORG)).state, "released");
+    assert.equal((await h.store.get("device_claims", h.claimId)).state, "released");
+    assert.equal(h.provider.calls.length, 2);
+  } finally { await rm(h.dir, { recursive: true, force: true }); }
+});
+
+test("H4 revoke validator rejects unknown fields, unsafe numbers and phase contradictions", async () => {
+  const h = await harness();
+  try {
+    const valid = await h.store.get(JOBS, h.jobId, ORG);
+    const invalid = [
+      { ...valid, unexpected: true },
+      { ...valid, revision: "1" },
+      { ...valid, attempts: -1 },
+      { ...valid, leaseGeneration: Number.MAX_SAFE_INTEGER + 1 },
+      { ...valid, cleanupPhase: "dispatch", providerOutcome: "confirmed_removed" },
+      { ...valid, cleanupPhase: "finalize", providerOutcome: null },
+      { ...valid, finalizeAttempts: "0" },
+    ];
+    for (const record of invalid) assert.throws(() => validateRevokeJob(record));
+  } finally { await rm(h.dir, { recursive: true, force: true }); }
+});

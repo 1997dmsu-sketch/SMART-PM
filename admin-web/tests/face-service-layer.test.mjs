@@ -74,6 +74,12 @@ const businessSnapshot = async () => structuredClone({
   keys: await store.list("operation_keys", orgId),
   domains: await store.list("device_digest_domains"),
 });
+const h4FullSnapshot = async () => structuredClone({
+  ...(await businessSnapshot()),
+  audits: await store.list("admin_audit"),
+  guards: await store.list("device_claim_release_guards", orgId),
+  operationDomains: await store.list("operation_key_domains"),
+});
 
 async function seedQualification(suffix, cycleId) {
   const personId = `person-${suffix}`;
@@ -495,6 +501,76 @@ test("H4-a 成功 job/snapshot 严格脱敏且不超过 4KiB", async () => {
     assert.ok(Buffer.byteLength(JSON.stringify(job.cleanupSnapshot)) <= 4096);
     assert.doesNotMatch(JSON.stringify(job), /idem-|SN-|serialNumber|\bIP\b|\bMAC\b|image|objectKey|sourceFile/i);
   }
+});
+
+test("H4-a revoke 专属 K2 domain 损坏与同版本换钥均失败关闭", async () => {
+  const suffix = "h4-k2-domain";
+  const cycleId = `cycle-${suffix}`;
+  const credentialId = await approvedCredential(suffix, { cycleId });
+  const created = await service("mem-manage").createGrant(
+    { ...grantInput(credentialId), deviceId: "device-replay", cycleId },
+    { idempotencyKey: "idem-grant-h4-k2-domain" },
+  );
+  const originalDomains = structuredClone(store.data.operation_key_domains);
+  const head = originalDomains.find((row) => row.kind === "head");
+  const version = originalDomains.find((row) => row.kind === "version");
+  const corruptions = [
+    { label: "head missing", rows: [version], code: "DOMAIN_INCOMPLETE" },
+    { label: "version missing", rows: [head], code: "DOMAIN_INCOMPLETE" },
+    { label: "kind conflict", rows: originalDomains.map((row) => row._id === version._id ? { ...row, kind: "head" } : row), code: "DOMAIN_INCOMPLETE" },
+    { label: "fingerprint conflict", rows: originalDomains.map((row) => row._id === version._id ? { ...row, keyFingerprint: "f".repeat(64) } : row), code: "DOMAIN_INCOMPLETE" },
+  ];
+  for (const [index, scenario] of corruptions.entries()) {
+    store.data.operation_key_domains = structuredClone(scenario.rows);
+    const before = await h4FullSnapshot();
+    await assert.rejects(
+      () => service("mem-manage").revoke(created.grantId, { idempotencyKey: `idem-revoke-h4-k2-${index}` }),
+      (error) => error.code === scenario.code,
+      scenario.label,
+    );
+    assert.deepEqual(await h4FullSnapshot(), before, scenario.label);
+    assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
+  }
+  store.data.operation_key_domains = structuredClone(originalDomains);
+  const oldKey = process.env.OPERATION_KEY_HMAC_KEY_B64;
+  process.env.OPERATION_KEY_HMAC_KEY_B64 = Buffer.alloc(32, 91).toString("base64");
+  const beforeKeyChange = await h4FullSnapshot();
+  await assert.rejects(
+    () => service("mem-manage").revoke(created.grantId, { idempotencyKey: "idem-revoke-h4-k2-keychange" }),
+    (error) => error.code === "DOMAIN_MISMATCH",
+  );
+  assert.deepEqual(await h4FullSnapshot(), beforeKeyChange);
+  process.env.OPERATION_KEY_HMAC_KEY_B64 = oldKey;
+  store.data.operation_key_domains = originalDomains;
+});
+
+test("H4-a 外层检查后事务内权限撤销或成员停用均 403 零写", async () => {
+  for (const mode of ["permission", "inactive"]) {
+    const suffix = `h4-auth-race-${mode}`;
+    const cycleId = `cycle-${suffix}`;
+    const credentialId = await approvedCredential(suffix, { cycleId });
+    const created = await service("mem-manage").createGrant(
+      { ...grantInput(credentialId), deviceId: "device-replay", cycleId },
+      { idempotencyKey: `idem-grant-${suffix}` },
+    );
+    const originalTransact = store.transact.bind(store);
+    store.transact = async (refs, build, txAudit) => originalTransact(refs, (state) => {
+      const key = "org_memberships/mem-manage";
+      const member = state[key];
+      state[key] = mode === "permission"
+        ? { ...member, permissions: (member.permissions || []).filter((permission) => permission !== "device.access.manage") }
+        : { ...member, status: "inactive" };
+      return build(state);
+    }, txAudit);
+    const before = await h4FullSnapshot();
+    await assert.rejects(
+      () => service("mem-manage").revoke(created.grantId, { idempotencyKey: `idem-revoke-${suffix}` }),
+      (error) => error.code === "FORBIDDEN" && error.status === 403,
+    );
+    assert.deepEqual(await h4FullSnapshot(), before);
+    store.transact = originalTransact;
+  }
+  assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
 });
 
 test("operation_keys 元数据与三条路径共用同一 domain", async () => {

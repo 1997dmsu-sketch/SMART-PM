@@ -1,8 +1,8 @@
 ﻿/**
  * HK-AI-04 服务层（H2-a）。
  *
- * 已实现：H2 createGrant；H3-a 可为 LocalStore 合成任务内嵌派发快照。
- * 未实现：H3-b Mock 派发与结果迁移、H4 撤权闭环；本服务不调用 Provider。
+ * 已实现：H2 createGrant、H3-a 合成派发快照、H4-a 立即业务撤权。
+ * 未实现：H4-b 清理派发与本地 finalize；本服务不调用 Provider。
  */
 import { createHash } from "node:crypto";
 
@@ -10,6 +10,8 @@ import { failCode } from "../model.mjs";
 import { LocalStore } from "../store.mjs";
 import {
   COLLECTIONS,
+  assertBoundedId,
+  assertSafeInt,
   deterministicLogId,
   deviceClaimKey,
   deviceDigestDomainKey,
@@ -20,6 +22,7 @@ import {
   validateAccessDeviceRecord,
   validateOwnerClaimRecord,
   validateDeviceClaimReleaseGuard,
+  validateGrantSlotRecord,
   grantSlotKey,
   nextRevision,
   applyOperationKeyDomain,
@@ -53,6 +56,18 @@ const DEFERRED_PRE_READ_CODES = new Set([
 const classificationRevision = (record) => (Number.isInteger(record?.revision) ? record.revision + 1 : 1);
 const stable = (value) => (Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, stable(value[k])])) : value);
 const digestOf = (value) => createHash("sha256").update(JSON.stringify(stable(value))).digest("hex");
+const CLEANUP_FIELDS = new Set(["schemaVersion","grantId","grantRevision","credentialId","credentialRevision","deviceId","deviceRevision","claimId","claimRevision","slotId","slotRevision","releaseGuardId","releaseGuardRevision","releaseGuardEpoch","originalGrantState","createdAt"]);
+function validateCleanupSnapshot(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.schemaVersion !== 1 ||
+      Object.keys(value).some((key) => !CLEANUP_FIELDS.has(key))) failCode("CLEANUP_SNAPSHOT_REQUIRED", "清理快照结构非法", 409);
+  try {
+    for (const field of ["grantId","credentialId","deviceId","claimId","slotId","releaseGuardId"]) assertBoundedId(value[field], field);
+    for (const field of ["grantRevision","credentialRevision","deviceRevision","claimRevision","slotRevision","releaseGuardRevision","releaseGuardEpoch"]) assertSafeInt(value[field], field, { min: 1 });
+    assertSafeInt(value.createdAt, "createdAt");
+  } catch { failCode("CLEANUP_SNAPSHOT_REQUIRED", "清理快照字段非法", 409); }
+  if (![GRANT_STATE.PENDING,GRANT_STATE.EFFECTIVE,GRANT_STATE.SUSPENDED,GRANT_STATE.EXPIRED].includes(value.originalGrantState) || Buffer.byteLength(JSON.stringify(value)) > 4096) failCode("CLEANUP_SNAPSHOT_REQUIRED", "清理快照非法或超限", 409);
+  return value;
+}
 
 export class FaceCredentialService {
   constructor({ store, orgId, actor, files, blacklist, provider, now = () => Date.now(), syntheticDispatch = false }) {
@@ -633,11 +648,74 @@ export class FaceCredentialService {
     return result;
   }
 
-  // 4. 撤销：H1 阶段关闭（H4 撤权闭环未开放）。
+  // 4. H4-a：立即业务撤权；只建清理任务，不调用 Provider。
   async revoke(grantId, { idempotencyKey } = {}) {
     await this.#require("device.access.manage");
-    if (typeof grantId !== "string" || !grantId.trim()) failCode("PARAM_ERROR", "grantId 必填", 400);
-    failCode("STAGE_CLOSED", "撤权尚未开放（H4）", 501);
+    try { assertBoundedId(grantId, "grantId"); } catch { failCode("PARAM_ERROR", "grantId 非法", 400); }
+    const op = await this.#opContext("face.revoke", idempotencyKey);
+    const requestDigest = digestOf({ grantId });
+    const jobId = `job-revoke-v1:${digestOf([this.orgId, grantId])}`;
+    const logId = deterministicLogId(jobId, "queued");
+    const auditId = `audit-h4-v1:${digestOf([this.orgId, jobId, "queue", 1])}`;
+    const expected = { grantId, jobId, grantState: "revoked", cleanupPending: true, evidenceScope: "simulated" };
+    const grant = await this.#find(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId);
+    if (!grant) failCode("NOT_FOUND", "授权不存在或不可见", 404);
+    let guardId;
+    try {
+      guardId = deviceClaimReleaseGuardKey({ orgId: this.orgId, claimId: grant.claimId });
+      for (const value of [grant.credentialId, grant.deviceId, grant.claimId, grant.slotId]) assertBoundedId(value, "bindingId");
+    } catch { failCode("CLEANUP_SNAPSHOT_REQUIRED", "授权缺少清理绑定", 409); }
+    const refs = [
+      ref("organizations", this.orgId), ref("org_memberships", this.actor.membershipId),
+      ...this.#opDomainRefs(op), ref(COLLECTIONS.OPERATION_KEYS, op.opKey),
+      ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantId), ref(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId),
+      ref(COLLECTIONS.DEVICE_OPERATION_LOGS, logId), ref(COLLECTIONS.FACE_CREDENTIALS, grant.credentialId),
+      ref("access_devices", grant.deviceId), ref(COLLECTIONS.DEVICE_CLAIMS, grant.claimId),
+      ref(COLLECTIONS.GRANT_SLOT_CLAIMS, grant.slotId), ref(COLLECTIONS.DEVICE_CLAIM_RELEASE_GUARDS, guardId),
+      ref("admin_audit", auditId),
+    ];
+    let result;
+    await this.store.transact(refs, (state) => {
+      const org = state[`organizations/${this.orgId}`];
+      const member = state[`org_memberships/${this.actor.membershipId}`];
+      if (!org || org.status !== "active" || !member || member.orgId !== this.orgId || member.status !== "active" || !(member.permissions || []).includes("device.access.manage")) failCode("FORBIDDEN", "当前成员无权撤销门禁授权", 403);
+      const domainWrites = this.#opDomainWrites(state, op, this.now());
+      const existing = state[`${COLLECTIONS.OPERATION_KEYS}/${op.opKey}`];
+      if (existing) { result = this.#replayValid(existing, op, requestDigest, expected); return []; }
+      const current = state[`${COLLECTIONS.DEVICE_ACCESS_GRANTS}/${grantId}`];
+      if (!current || current.orgId !== this.orgId) failCode("NOT_FOUND", "授权不存在或不可见", 404);
+      if (![GRANT_STATE.PENDING,GRANT_STATE.EFFECTIVE,GRANT_STATE.SUSPENDED,GRANT_STATE.EXPIRED].includes(current.state)) failCode("INVALID_STATE", "授权状态不允许撤销", 409);
+      if (current.revision !== grant.revision || ["credentialId","deviceId","claimId","slotId"].some((field) => current[field] !== grant[field])) failCode("REVISION_CONFLICT", "授权已变化", 409);
+      try { assertSafeInt(current.revision, "grant.revision", { min: 1 }); } catch { failCode("INVALID_STATE", "授权版本非法", 409); }
+      if (current.revision === Number.MAX_SAFE_INTEGER) failCode("INVALID_STATE", "授权版本溢出", 409);
+      const credential = state[`${COLLECTIONS.FACE_CREDENTIALS}/${current.credentialId}`];
+      const device = state[`access_devices/${current.deviceId}`];
+      const claim = state[`${COLLECTIONS.DEVICE_CLAIMS}/${current.claimId}`];
+      const slot = state[`${COLLECTIONS.GRANT_SLOT_CLAIMS}/${current.slotId}`];
+      const guard = state[`${COLLECTIONS.DEVICE_CLAIM_RELEASE_GUARDS}/${guardId}`];
+      if (!credential || credential.orgId !== this.orgId || !device || !claim || !slot || !guard) failCode("CLEANUP_SNAPSHOT_REQUIRED", "清理绑定缺失", 409);
+      try {
+        validateAccessDeviceRecord(device); validateOwnerClaimRecord(claim); validateGrantSlotRecord(slot);
+        validateDeviceClaimReleaseGuard(Object.hasOwn(guard,"_id") ? guard : { ...guard, _id: guardId });
+        for (const record of [credential,device,claim,slot,guard]) assertSafeInt(record.revision, "revision", { min: 1 });
+      } catch { failCode("CLEANUP_SNAPSHOT_REQUIRED", "清理绑定损坏", 409); }
+      if (device.orgId !== this.orgId || device.claimId !== current.claimId || claim.ownerOrgId !== this.orgId || claim.boundDeviceId !== current.deviceId || claim.state !== "active" || slot.orgId !== this.orgId || slot.deviceId !== current.deviceId || slot.activeClaimId !== grantId || slot.state !== "active" || guard.orgId !== this.orgId || guard.claimId !== current.claimId) failCode("CLEANUP_SNAPSHOT_REQUIRED", "清理绑定不一致", 409);
+      if (state[`${COLLECTIONS.DEVICE_OPERATION_JOBS}/${jobId}`] || state[`${COLLECTIONS.DEVICE_OPERATION_LOGS}/${logId}`]) failCode("CONFLICT", "清理任务或日志已存在", 409);
+      const now = this.now();
+      try { assertSafeInt(now, "now"); } catch { failCode("INVALID_STATE", "当前时间非法", 409); }
+      const cleanupSnapshot = validateCleanupSnapshot({ schemaVersion:1, grantId, grantRevision:current.revision, credentialId:current.credentialId, credentialRevision:credential.revision, deviceId:current.deviceId, deviceRevision:device.revision, claimId:current.claimId, claimRevision:claim.revision, slotId:current.slotId, slotRevision:slot.revision, releaseGuardId:guardId, releaseGuardRevision:guard.revision, releaseGuardEpoch:guard.epoch, originalGrantState:current.state, createdAt:now });
+      const nextGrant = { ...current, state:GRANT_STATE.REVOKED, cleanupPending:true, cleanupJobId:jobId, revokedAt:now, revokedByActorId:this.actor.actorId, revision:current.revision+1, updatedAt:now };
+      const job = { orgId:this.orgId, revision:1, credentialId:current.credentialId, grantId, deviceId:current.deviceId, action:"revoke", state:JOB_STATE.QUEUED, executionMode:"test", provider:"mock", evidenceScope:"simulated", attempts:0, leaseGeneration:0, leaseOwner:null, leaseExpiresAt:null, dispatchAuthorizedAt:null, nextAttemptAt:null, result:null, cleanupSnapshot, createdAt:now, updatedAt:now };
+      validateRecord(COLLECTIONS.DEVICE_ACCESS_GRANTS,nextGrant); validateRecord(COLLECTIONS.DEVICE_OPERATION_JOBS,job);
+      result = expected;
+      return [...domainWrites,
+        {collection:COLLECTIONS.DEVICE_ACCESS_GRANTS,id:grantId,data:nextGrant},
+        {collection:COLLECTIONS.DEVICE_OPERATION_JOBS,id:jobId,data:job},
+        {collection:COLLECTIONS.DEVICE_OPERATION_LOGS,id:logId,data:{orgId:this.orgId,jobId,state:"queued",action:"revoke",actorId:this.actor.actorId,at:now,revision:1}},
+        {collection:COLLECTIONS.OPERATION_KEYS,id:op.opKey,data:{orgId:this.orgId,realm:op.config.realm,keyVersion:op.config.version,requestDigest,result,createdAt:now}},
+      ];
+    }, { auditId, orgId:this.orgId, actorId:this.actor.actorId, actorType:this.actor.actorType || "user", action:"撤销门禁授权" });
+    return result;
   }
 
   // 5. 查询任务：org 内最小 DTO。

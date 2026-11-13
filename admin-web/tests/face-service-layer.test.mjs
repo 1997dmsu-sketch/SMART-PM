@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 import { LocalStore } from "../lib/store.mjs";
 import { FileService } from "../lib/files.mjs";
@@ -336,11 +337,69 @@ test("owner claim 归属冲突：DEVICE_CLAIM_CONFLICT 且零写入", async () =
   }], audit);
 });
 
-test("撤权仍为 STAGE_CLOSED，零写入零 Provider", async () => {
+test("H4-a 撤权立即失效、重放零写且 Provider=0", async () => {
+  const manager = service("mem-manage");
+  const key = "idem-revoke-h4-0001";
+  const out = await manager.revoke(shared.result.grantId, { idempotencyKey: key });
+  assert.equal(out.grantState, "revoked");
+  assert.equal(out.cleanupPending, true);
+  const grant = (await store.list("device_access_grants", orgId)).find((row) => row._id === shared.result.grantId);
+  const job = (await store.list("device_operation_jobs", orgId)).find((row) => row._id === out.jobId);
+  assert.equal(grant.state, "revoked");
+  assert.equal(job.action, "revoke");
+  assert.equal(job.cleanupSnapshot.grantId, grant._id);
+  const before = await businessSnapshot();
+  assert.deepEqual(await manager.revoke(shared.result.grantId, { idempotencyKey: key }), out);
+  assert.deepEqual(await businessSnapshot(), before);
+  assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
+});
+
+test("H4-a 已撤权异 key、权限与不可见失败关闭", async () => {
   const before = await businessSnapshot();
   await assert.rejects(
-    () => service("mem-manage").revoke("grant-1", { idempotencyKey: "idem-revoke-h2-0001" }),
-    (e) => e.code === "STAGE_CLOSED",
+    () => service("mem-manage").revoke(shared.result.grantId, { idempotencyKey: "idem-revoke-h4-other" }),
+    (e) => e.code === "INVALID_STATE",
+  );
+  await assert.rejects(
+    () => service("mem-review").revoke(shared.result.grantId, { idempotencyKey: "idem-revoke-h4-denied" }),
+    (e) => e.code === "FORBIDDEN",
+  );
+  await assert.rejects(
+    () => service("mem-manage").revoke("grant-not-visible", { idempotencyKey: "idem-revoke-h4-missing" }),
+    (e) => e.code === "NOT_FOUND",
+  );
+  assert.deepEqual(await businessSnapshot(), before);
+});
+
+test("H4-a 两个不同 key 并发撤权仅一个成功", async () => {
+  const credentialId = await approvedCredential("h4-race", { cycleId: "cycle-h4-race" });
+  const input = { ...grantInput(credentialId), deviceId: "device-2", cycleId: "cycle-h4-race" };
+  const created = await service("mem-manage").createGrant(input, { idempotencyKey: "idem-grant-h4-race-01" });
+  const settled = await Promise.allSettled([
+    service("mem-manage").revoke(created.grantId, { idempotencyKey: "idem-revoke-h4-race-a" }),
+    service("mem-manage").revoke(created.grantId, { idempotencyKey: "idem-revoke-h4-race-b" }),
+  ]);
+  assert.equal(settled.filter((item) => item.status === "fulfilled").length, 1);
+  const rejected = settled.find((item) => item.status === "rejected");
+  assert.equal(rejected.reason.code, "INVALID_STATE");
+  assert.equal((await store.list("device_operation_jobs", orgId)).filter((job) => job.action === "revoke" && job.grantId === created.grantId).length, 1);
+  assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
+});
+
+test("H4-a 确定性 audit 预占使业务完整回滚", async () => {
+  const credentialId = await approvedCredential("h4-audit", { cycleId: "cycle-h4-audit" });
+  const input = { ...grantInput(credentialId), deviceId: "device-4", cycleId: "cycle-h4-audit" };
+  const created = await service("mem-manage").createGrant(input, { idempotencyKey: "idem-grant-h4-audit-1" });
+  const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  const jobId = `job-revoke-v1:${digest([orgId, created.grantId])}`;
+  const auditId = `audit-h4-v1:${digest([orgId, jobId, "queue", 1])}`;
+  await store.transact([ref("admin_audit", auditId)], () => [{
+    collection: "admin_audit", id: auditId, data: { orgId, action: "预占", actorId: "system" },
+  }], audit);
+  const before = await businessSnapshot();
+  await assert.rejects(
+    () => service("mem-manage").revoke(created.grantId, { idempotencyKey: "idem-revoke-h4-audit" }),
+    (e) => e.status === 409,
   );
   assert.deepEqual(await businessSnapshot(), before);
   assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });

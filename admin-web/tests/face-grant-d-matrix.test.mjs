@@ -8,6 +8,10 @@ import { LocalStore, CloudStore } from "../lib/store.mjs";
 import { FileService } from "../lib/files.mjs";
 import { BlacklistService, blacklistDecisionHeadId } from "../lib/blacklist.mjs";
 import { FaceCredentialService } from "../lib/face-service/service.mjs";
+import { H3MockDispatcher } from "../lib/face-service/h3b.mjs";
+import { MockFaceAccessProvider } from "../lib/face-service/mock-provider.mjs";
+import { claimDispatchJob } from "../lib/face-service/h3a.mjs";
+import { projectAccess } from "../lib/face-service/state.mjs";
 import { occupancyClaimId, primarySlotId } from "../lib/face-service/eligibility.mjs";
 import { eligibilityGuardId } from "../lib/claims.mjs";
 import {
@@ -1495,4 +1499,336 @@ test("H2-d 真实链 K1 配置不一致：真实资格评价后 DEVICE_DIGEST_CO
     "K1 复核必须在真实资格/名单评价之后执行");
   assert.equal(h.lastEligibility.eligible, true);
   assertProviderZero(h);
+});
+
+async function setupH3(t, scenario = "success") {
+  const h = await setup(t, { syntheticDispatch: true });
+  const created = await expectSuccess(h);
+  resetCounts(h);
+  let clock = NOW;
+  const provider = new MockFaceAccessProvider({ scenario });
+  const dispatcher = new H3MockDispatcher({
+    store: h.store, orgId: ORG, files: h.files, blacklist: h.blacklist, provider,
+    now: () => clock, owner: "worker-h3b-test",
+  });
+  return { h, created, provider, dispatcher, setClock: (value) => { clock = value; } };
+}
+
+async function businessRows(h, created) {
+  const grant = await h.store.get("device_access_grants", created.result.grantId, ORG);
+  const jobs = await h.store.list("device_operation_jobs", ORG);
+  return { grant, jobs };
+}
+
+test("H3-b D01/D21a：T2 后事务外 Mock 至多一次，T3 原子 succeeded/effective", async (t) => {
+  const x = await setupH3(t);
+  const original = x.provider.enrollFace.bind(x.provider);
+  let input;
+  let context;
+  x.provider.enrollFace = async (nextInput, nextContext) => {
+    input = structuredClone(nextInput);
+    context = { ...nextContext, permissions: [...nextContext.permissions] };
+    return original(nextInput, nextContext);
+  };
+  const beforeAudit = (await x.h.store.list("admin_audit")).length;
+  const result = await x.dispatcher.dispatch(x.created.result.jobId);
+  const { grant, jobs } = await businessRows(x.h, x.created);
+  assert.equal(result.state, "succeeded");
+  assert.equal(grant.state, "effective");
+  assert.equal(x.provider.calls.length, 1);
+  assert.deepEqual(Object.keys(input).sort(),
+    ["deviceId", "grantId", "personId", "sourceFileId", "validFrom", "validUntil"].sort());
+  assert.deepEqual(Object.keys(context).sort(),
+    ["actorId", "actorType", "executionMode", "idempotencyKey", "orgId", "permissions"].sort());
+  assert.deepEqual(context.permissions, ["device.access.manage"]);
+  assert.equal(context.executionMode, "test");
+  const projection = projectAccess({ grant, eligibility: { allowed: true }, jobs });
+  assert.equal(projection.businessAllowed, true);
+  assert.equal(projection.deviceEffective, false);
+  assert.equal((await x.h.store.list("admin_audit")).length, beforeAudit + 3);
+});
+
+test("H3-b D21b：调用期间资格失效仍 succeeded/effective，实时投影关闭", async (t) => {
+  const x = await setupH3(t);
+  const original = x.provider.enrollFace.bind(x.provider);
+  x.provider.enrollFace = async (...args) => {
+    patchRecord(x.h, "occupancies", OCCUPANCY, { state: "ended" });
+    return original(...args);
+  };
+  const result = await x.dispatcher.dispatch(x.created.result.jobId);
+  const { grant, jobs } = await businessRows(x.h, x.created);
+  assert.equal(result.state, "succeeded");
+  assert.equal(grant.state, "effective");
+  assert.equal(x.provider.calls.length, 1);
+  const projection = projectAccess({ grant, eligibility: { allowed: false }, jobs });
+  assert.equal(projection.businessAllowed, false);
+  assert.equal(projection.deviceEffective, false);
+});
+
+test("H3-b D21c：调用期间 grant revoked/expired/suspended/改绑均不复活", async (t) => {
+  for (const mutation of [
+    { state: "revoked" }, { state: "expired" }, { state: "suspended" }, { claimId: "claim-rebound" },
+  ]) {
+    const x = await setupH3(t);
+    const original = x.provider.enrollFace.bind(x.provider);
+    x.provider.enrollFace = async (...args) => {
+      patchRecord(x.h, "device_access_grants", x.created.result.grantId, mutation);
+      return original(...args);
+    };
+    const result = await x.dispatcher.dispatch(x.created.result.jobId);
+    const grant = await x.h.store.get("device_access_grants", x.created.result.grantId, ORG);
+    assert.equal(result.state, "terminal_failed");
+    assert.equal(result.result.reasonCode, "GRANT_INACTIVE_AFTER_SEND");
+    assert.notEqual(grant.state, "effective");
+    assert.equal(x.provider.calls.length, 1);
+  }
+});
+
+test("H3-b D44/D45：pre_send 瞬态统一预算、退避到期 CAS 重排后再发", async (t) => {
+  const x = await setupH3(t, "pre_send_fail");
+  const first = await x.dispatcher.dispatch(x.created.result.jobId);
+  assert.equal(first.state, "retryable_failed");
+  assert.equal(first.nextAttemptAt, NOW + 30_000);
+  assert.equal(x.provider.calls.length, 1);
+  x.setClock(NOW + 29_999);
+  await assert.rejects(() => x.dispatcher.requeue(first._id, first.revision),
+    (error) => error.code === "RETRY_NOT_DUE");
+  x.setClock(NOW + 30_000);
+  const queued = await x.dispatcher.requeue(first._id, first.revision);
+  assert.equal(queued.state, "queued");
+  x.provider.scenario = "success";
+  patchRecord(x.h, "occupancies", OCCUPANCY, { endsAt: NOW + 100_000 });
+  patchRecord(x.h, "occupancy_cycles", CYCLE, { endsAt: NOW + 100_000 });
+  patchRecord(x.h, "device_access_grants", x.created.result.grantId, { validUntil: NOW + 90_000 });
+  const second = await x.dispatcher.dispatch(first._id);
+  assert.equal(second.state, "succeeded");
+  assert.equal(second.attempts, 2);
+  assert.equal(x.provider.calls.length, 2);
+});
+
+test("H3-b D32/D40：post_send unknown 与异常结果进入 awaiting_result，禁止重排", async (t) => {
+  for (const mode of ["post_send_unknown", "malformed"]) {
+    const x = await setupH3(t, mode === "malformed" ? "success" : mode);
+    if (mode === "malformed") x.provider.enrollFace = async () => ({ status: "succeeded" });
+    const result = await x.dispatcher.dispatch(x.created.result.jobId);
+    assert.equal(result.state, "awaiting_result");
+    await assert.rejects(() => x.dispatcher.requeue(result._id, result.revision),
+      (error) => error.code === "INVALID_JOB");
+  }
+});
+
+test("H3-b D22/D23：明确终态与 Provider NOT_CONFIGURED 均终止且不重发", async (t) => {
+  for (const mode of ["terminal_fail", "not-configured"]) {
+    const x = await setupH3(t, mode === "not-configured" ? "success" : mode);
+    if (mode === "not-configured") x.provider.enrollFace = async () => {
+      const error = new Error("未配置"); error.code = "NOT_CONFIGURED"; throw error;
+    };
+    const result = await x.dispatcher.dispatch(x.created.result.jobId);
+    assert.equal(result.state, "terminal_failed");
+    assert.equal(result.result.reasonCode, mode === "not-configured" ? "NOT_CONFIGURED" : "DEVICE_REJECTED");
+    await assert.rejects(() => x.dispatcher.dispatch(result._id), (error) => error.code === "INVALID_JOB");
+  }
+});
+
+test("H3-b D38/D50：过期租约保守 awaiting_result；扫描排除旧 job", async (t) => {
+  const x = await setupH3(t);
+  const claimed = await claimDispatchJob({
+    store: x.h.store, orgId: ORG, jobId: x.created.result.jobId,
+    owner: "worker-expire", now: () => NOW,
+  });
+  x.setClock(claimed.fence.expiresAt);
+  const results = await x.dispatcher.scanExpired();
+  assert.equal(results.length, 1);
+  assert.equal(results[0].state, "awaiting_result");
+  const legacy = { ...(await x.h.store.get("device_operation_jobs", x.created.result.jobId, ORG)) };
+  delete legacy.dispatchSnapshot;
+  legacy._id = "job-legacy-h2";
+  legacy.state = "sending";
+  legacy.leaseOwner = "old";
+  legacy.leaseExpiresAt = NOW;
+  x.h.store.data.device_operation_jobs.push(legacy);
+  assert.deepEqual(await x.dispatcher.scanExpired(), []);
+  await assert.rejects(() => x.dispatcher.dispatch("job-legacy-h2"),
+    (error) => error.code === "DISPATCH_SNAPSHOT_REQUIRED");
+});
+
+test("H3-b D19/D51：双扫描或结果/过期竞争只允许一个终态提交", async (t) => {
+  const x = await setupH3(t);
+  const claimed = await claimDispatchJob({
+    store: x.h.store, orgId: ORG, jobId: x.created.result.jobId,
+    owner: "worker-expire-race", now: () => NOW,
+  });
+  x.setClock(claimed.fence.expiresAt);
+  const settled = await Promise.allSettled([
+    x.dispatcher.scanExpired(), x.dispatcher.scanExpired(),
+  ]);
+  assert.equal(settled.filter((item) => item.status === "fulfilled").length, 2);
+  assert.equal(settled.flatMap((item) => item.status === "fulfilled" ? item.value : []).length, 1);
+  const job = await x.h.store.get("device_operation_jobs", x.created.result.jobId, ORG);
+  assert.equal(job.state, "awaiting_result");
+  const logs = (await x.h.store.list("device_operation_logs", ORG))
+    .filter((item) => item.jobId === job._id && item.state === "awaiting_result");
+  assert.equal(logs.length, 1);
+});
+
+test("H3-b D44：BLACKLIST_RETRY 保码且 Provider=0", async (t) => {
+  const x = await setupH3(t);
+  x.h.blacklist.evaluateEligibility = () => {
+    const error = new Error("竞态");
+    error.code = "BLACKLIST_RETRY";
+    throw error;
+  };
+  const result = await x.dispatcher.dispatch(x.created.result.jobId);
+  assert.equal(result.state, "retryable_failed");
+  assert.equal(result.result.reasonCode, "BLACKLIST_RETRY");
+  assert.equal(x.provider.calls.length, 0);
+  assert.equal(x.h.counts.prepare, 3);
+});
+
+test("H3-b D28-D40/D47/D56/D60：T1 后固定源变化按序失败，Provider=0", async (t) => {
+  const cases = [
+    ["persons", PERSON, { status: "archived" }, "INVALID_STATE"],
+    ["identity_applications", IDENTITY, { state: "revoked" }, "IDENTITY_NOT_APPROVED"],
+    ["occupancies", OCCUPANCY, { revision: 2 }, "REVISION_CONFLICT"],
+    ["occupancy_cycles", CYCLE, { epoch: 2 }, "REVISION_CONFLICT"],
+    ["file_assets", FILE, { revision: 2 }, "FILE_BINDING_CHANGED"],
+    ["access_devices", DEVICE, { claimId: "claim-other" }, "DEVICE_CLAIM_INVALID"],
+    ["device_claims", CLAIM, { state: "released", boundDeviceId: undefined,
+      releasedAt: NOW, releasedByAuditId: "audit-release", releaseReason: "test" }, "DEVICE_CLAIM_INVALID"],
+    ["grant_slot_claims", null, { activeClaimId: "grant-other" }, "GRANT_SLOT_CONFLICT"],
+    ["org_memberships", MEMBERSHIP, { permissions: [] }, "FORBIDDEN"],
+    ["rooms", ROOM, { status: "archived" }, "ROOM_ARCHIVED"],
+  ];
+  for (const [collection, staticId, mutation, code] of cases) {
+    const x = await setupH3(t);
+    const id = staticId ?? x.created.after.grant_slot_claims.at(-1)._id;
+    patchRecord(x.h, collection, id, mutation);
+    const result = await x.dispatcher.dispatch(x.created.result.jobId);
+    assert.equal(result.state, "terminal_failed", `${collection} 状态`);
+    assert.equal(result.result.reasonCode, code, `${collection} 错误码`);
+    assert.equal(x.provider.calls.length, 0, `${collection} Provider=0`);
+  }
+});
+
+test("H3-b D24/D62/D65：运行配置关闭与发送窗口不足均 Provider=0", async (t) => {
+  const h = await setup(t, { syntheticDispatch: true });
+  const created = await expectSuccess(h);
+  const provider = new MockFaceAccessProvider();
+  const closed = new H3MockDispatcher({
+    store: h.store, orgId: ORG, files: h.files, blacklist: h.blacklist, provider,
+    now: () => NOW, owner: "worker-runtime-off",
+    runtimeConfig: () => ({ executionMode: "live", provider: "mock" }),
+  });
+  const result = await closed.dispatch(created.result.jobId);
+  assert.equal(result.state, "terminal_failed");
+  assert.equal(result.result.reasonCode, "NOT_CONFIGURED");
+  assert.equal(provider.calls.length, 0);
+
+  const y = await setupH3(t);
+  patchRecord(y.h, "occupancies", OCCUPANCY, { endsAt: NOW + 100_000 });
+  patchRecord(y.h, "occupancy_cycles", CYCLE, { endsAt: NOW + 100_000 });
+  patchRecord(y.h, "device_access_grants", y.created.result.grantId, { validUntil: NOW + 90_000 });
+  let ticks = 0;
+  const shortWindow = new H3MockDispatcher({
+    store: y.h.store, orgId: ORG, files: y.h.files, blacklist: y.h.blacklist,
+    provider: y.provider, owner: "worker-short-window",
+    now: () => (ticks++ < 2 ? NOW : NOW + 50_001),
+  });
+  const short = await shortWindow.dispatch(y.created.result.jobId);
+  assert.equal(short.state, "terminal_failed");
+  assert.equal(short.result.reasonCode, "PRE_SEND_WINDOW_CLOSED");
+  assert.equal(y.provider.calls.length, 0);
+});
+
+test("H3-b D27：并发 dispatcher 对同一 queued job 仅一个取得许可并调用", async (t) => {
+  const x = await setupH3(t);
+  const other = new H3MockDispatcher({
+    store: x.h.store, orgId: ORG, files: x.h.files, blacklist: x.h.blacklist,
+    provider: x.provider, now: () => NOW, owner: "worker-h3b-other",
+  });
+  const settled = await Promise.allSettled([
+    x.dispatcher.dispatch(x.created.result.jobId), other.dispatch(x.created.result.jobId),
+  ]);
+  assert.equal(settled.filter((item) => item.status === "fulfilled").length, 1);
+  assert.equal(settled.filter((item) => item.status === "rejected").length, 1);
+  assert.equal(x.provider.calls.length, 1);
+});
+
+test("H3-b D44：attempt=4 的名单瞬态与 Mock pre_send 均耗尽终态", async (t) => {
+  for (const mode of ["blacklist", "provider"]) {
+    const x = await setupH3(t, mode === "provider" ? "pre_send_fail" : "success");
+    patchRecord(x.h, "device_operation_jobs", x.created.result.jobId, {
+      attempts: 3, leaseGeneration: 3, revision: 7, nextAttemptAt: NOW,
+      result: { attempt: 3, outcome: "retryable_failed", errorKind: "RETRYABLE",
+        reasonCode: "PRIOR", finishedAt: NOW },
+    });
+    if (mode === "blacklist") x.h.blacklist.evaluateEligibility = () => {
+      const error = new Error("竞态"); error.code = "BLACKLIST_RETRY"; throw error;
+    };
+    const result = await x.dispatcher.dispatch(x.created.result.jobId);
+    assert.equal(result.state, "terminal_failed");
+    assert.equal(result.result.reasonCode, mode === "blacklist" ? "BLACKLIST_RETRY" : "PROVIDER_PRE_SEND");
+    assert.equal(result.attempts, 4);
+    assert.equal(x.provider.calls.length, mode === "provider" ? 1 : 0);
+    await assert.rejects(() => x.dispatcher.requeue(result._id, result.revision),
+      (error) => error.code === "INVALID_JOB");
+  }
+});
+
+test("H3-b D54：人工重排要求 device.operation.retry，自动重排共享 CAS", async (t) => {
+  const x = await setupH3(t, "pre_send_fail");
+  const failed = await x.dispatcher.dispatch(x.created.result.jobId);
+  x.setClock(failed.nextAttemptAt);
+  await assert.rejects(() => x.dispatcher.requeue(failed._id, failed.revision, {
+    membershipId: MEMBERSHIP, actorId: MEMBERSHIP,
+  }), (error) => error.code === "FORBIDDEN");
+  patchRecord(x.h, "org_memberships", MEMBERSHIP,
+    { permissions: ["device.access.manage", "device.operation.retry"] });
+  const settled = await Promise.allSettled([
+    x.dispatcher.requeue(failed._id, failed.revision, { membershipId: MEMBERSHIP, actorId: MEMBERSHIP }),
+    x.dispatcher.requeue(failed._id, failed.revision),
+  ]);
+  assert.equal(settled.filter((item) => item.status === "fulfilled").length, 1);
+  assert.equal(settled.filter((item) => item.status === "rejected").length, 1);
+});
+
+test("H3-b D63/D66：仅 LocalStore+Mock，日志冲突与 fence 拒绝内容级零变化", async (t) => {
+  const h = await setup(t, { syntheticDispatch: true });
+  const provider = new MockFaceAccessProvider();
+  assert.throws(() => new H3MockDispatcher({
+    store: {}, orgId: ORG, files: h.files, blacklist: h.blacklist, provider,
+  }), (error) => error.code === "NOT_CONFIGURED");
+  const created = await expectSuccess(h);
+  const claimed = await claimDispatchJob({
+    store: h.store, orgId: ORG, jobId: created.result.jobId, owner: "worker-fence", now: () => NOW,
+  });
+  const before = await snapshot(h.store);
+  h.store.data.device_operation_logs.push({
+    _id: `log:${Buffer.from(created.result.jobId).toString("base64url")}:${Buffer.from("awaiting_result").toString("base64url")}:${claimed.job.revision + 1}`,
+    orgId: ORG,
+  });
+  const dispatcher = new H3MockDispatcher({
+    store: h.store, orgId: ORG, files: h.files, blacklist: h.blacklist, provider,
+    now: () => claimed.fence.expiresAt, owner: "worker-fence",
+  });
+  await assert.rejects(() => dispatcher.expire(created.result.jobId));
+  const after = await snapshot(h.store);
+  for (const name of CORE) {
+    if (name !== "device_operation_logs") assert.deepEqual(after[name], before[name]);
+  }
+  assert.equal(after.admin_audit.length, before.admin_audit.length);
+});
+
+test("H3-b 敏感扫描：job/log/audit/snapshot 不含设备原值和私密字段", async (t) => {
+  const x = await setupH3(t);
+  await x.dispatcher.dispatch(x.created.result.jobId);
+  const records = {
+    jobs: await x.h.store.list("device_operation_jobs", ORG),
+    logs: await x.h.store.list("device_operation_logs", ORG),
+    audit: await x.h.store.list("admin_audit"),
+  };
+  const text = JSON.stringify(records);
+  for (const forbidden of ["SN-", "serialNumber", "objectKey", "identityDigest", "checksum", "MAC", "ipAddress"]) {
+    assert.equal(text.includes(forbidden), false, `不得出现 ${forbidden}`);
+  }
 });

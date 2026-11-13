@@ -542,7 +542,7 @@ export class BlacklistService {
       ],
     };
   }
-  evaluateEligibility(state, token, { deferBlocked = false } = {}) {
+  evaluateEligibility(state, token, { deferBlocked = false, now = this.now() } = {}) {
     const person = state[`persons/${token.personId}`];
     if (!person || person.orgId !== this.orgId || person.revision !== token.personRevision ||
         (person.userId ?? null) !== token.boundUserId) retry();
@@ -554,7 +554,8 @@ export class BlacklistService {
     }
     for (const id of token.guardIds)
       if ((state[`eligibility_guards/${id}`]?.epoch ?? 0) !== token.guardEpochs[id]) retry();
-    const now = this.now();
+    if (!Number.isSafeInteger(now) || now < 0)
+      failCode("ADAPTER_UNAVAILABLE", "资格时钟不可用", 503);
     const hits = [];
     for (const id of token.candidateIds) {
       const entry = state[`blacklist_entries/${id}`];

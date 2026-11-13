@@ -699,13 +699,22 @@ export class FaceCredentialService {
         validateDeviceClaimReleaseGuard(Object.hasOwn(guard,"_id") ? guard : { ...guard, _id: guardId });
         for (const record of [credential,device,claim,slot,guard]) assertSafeInt(record.revision, "revision", { min: 1 });
       } catch { failCode("CLEANUP_SNAPSHOT_REQUIRED", "清理绑定损坏", 409); }
-      if (device.orgId !== this.orgId || device.claimId !== current.claimId || claim.ownerOrgId !== this.orgId || claim.boundDeviceId !== current.deviceId || claim.state !== "active" || slot.orgId !== this.orgId || slot.deviceId !== current.deviceId || slot.activeClaimId !== grantId || slot.state !== "active" || guard.orgId !== this.orgId || guard.claimId !== current.claimId) failCode("CLEANUP_SNAPSHOT_REQUIRED", "清理绑定不一致", 409);
+      if (credential.personId !== current.personId ||
+          device.orgId !== this.orgId || device.claimId !== current.claimId ||
+          claim.ownerOrgId !== this.orgId || claim.state !== "active" ||
+          !ownerClaimMatchesDevice(claim, device, current.deviceId) ||
+          slot.orgId !== this.orgId || slot.personId !== current.personId ||
+          slot.deviceId !== current.deviceId || slot.cycleId !== current.cycleId ||
+          slot.activeClaimId !== grantId || slot.state !== "active" ||
+          guard.orgId !== this.orgId || guard.claimId !== current.claimId) {
+        failCode("CLEANUP_SNAPSHOT_REQUIRED", "清理绑定不一致", 409);
+      }
       if (state[`${COLLECTIONS.DEVICE_OPERATION_JOBS}/${jobId}`] || state[`${COLLECTIONS.DEVICE_OPERATION_LOGS}/${logId}`]) failCode("CONFLICT", "清理任务或日志已存在", 409);
       const now = this.now();
       try { assertSafeInt(now, "now"); } catch { failCode("INVALID_STATE", "当前时间非法", 409); }
       const cleanupSnapshot = validateCleanupSnapshot({ schemaVersion:1, grantId, grantRevision:current.revision, credentialId:current.credentialId, credentialRevision:credential.revision, deviceId:current.deviceId, deviceRevision:device.revision, claimId:current.claimId, claimRevision:claim.revision, slotId:current.slotId, slotRevision:slot.revision, releaseGuardId:guardId, releaseGuardRevision:guard.revision, releaseGuardEpoch:guard.epoch, originalGrantState:current.state, createdAt:now });
       const nextGrant = { ...current, state:GRANT_STATE.REVOKED, cleanupPending:true, cleanupJobId:jobId, revokedAt:now, revokedByActorId:this.actor.actorId, revision:current.revision+1, updatedAt:now };
-      const job = { orgId:this.orgId, revision:1, credentialId:current.credentialId, grantId, deviceId:current.deviceId, action:"revoke", state:JOB_STATE.QUEUED, executionMode:"test", provider:"mock", evidenceScope:"simulated", attempts:0, leaseGeneration:0, leaseOwner:null, leaseExpiresAt:null, dispatchAuthorizedAt:null, nextAttemptAt:null, result:null, cleanupSnapshot, createdAt:now, updatedAt:now };
+      const job = { orgId:this.orgId, revision:1, credentialId:current.credentialId, grantId, deviceId:current.deviceId, action:"revoke", state:JOB_STATE.QUEUED, executionMode:"test", provider:"mock", evidenceScope:"simulated", attempts:0, leaseGeneration:0, leaseOwner:null, leaseExpiresAt:null, dispatchAuthorizedAt:null, nextAttemptAt:null, result:null, cleanupPhase:"dispatch", providerOutcome:null, finalizeAttempts:0, cleanupSnapshot, createdAt:now, updatedAt:now };
       validateRecord(COLLECTIONS.DEVICE_ACCESS_GRANTS,nextGrant); validateRecord(COLLECTIONS.DEVICE_OPERATION_JOBS,job);
       result = expected;
       return [...domainWrites,

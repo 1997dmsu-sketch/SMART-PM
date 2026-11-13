@@ -347,6 +347,9 @@ test("H4-a 撤权立即失效、重放零写且 Provider=0", async () => {
   const job = (await store.list("device_operation_jobs", orgId)).find((row) => row._id === out.jobId);
   assert.equal(grant.state, "revoked");
   assert.equal(job.action, "revoke");
+  assert.equal(job.cleanupPhase, "dispatch");
+  assert.equal(job.providerOutcome, null);
+  assert.equal(job.finalizeAttempts, 0);
   assert.equal(job.cleanupSnapshot.grantId, grant._id);
   const before = await businessSnapshot();
   assert.deepEqual(await manager.revoke(shared.result.grantId, { idempotencyKey: key }), out);
@@ -402,6 +405,27 @@ test("H4-a 确定性 audit 预占使业务完整回滚", async () => {
     (e) => e.status === 409,
   );
   assert.deepEqual(await businessSnapshot(), before);
+  assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
+});
+
+test("H4-a claim/device 与 slot/grant 绑定损坏均零写", async () => {
+  const credentialId = await approvedCredential("h4-bind", { cycleId: "cycle-h4-bind" });
+  const input = { ...grantInput(credentialId), deviceId: "device-5", cycleId: "cycle-h4-bind" };
+  const created = await service("mem-manage").createGrant(input, { idempotencyKey: "idem-grant-h4-bind-01" });
+  const claimId = "claim-device-5";
+  const original = structuredClone((await store.list("device_claims")).find((row) => row._id === claimId));
+  await store.transact([ref("device_claims", claimId)], () => [{
+    collection: "device_claims", id: claimId, data: { ...original, provider: "other-provider" },
+  }], audit);
+  const before = await businessSnapshot();
+  await assert.rejects(
+    () => service("mem-manage").revoke(created.grantId, { idempotencyKey: "idem-revoke-h4-bind" }),
+    (e) => e.code === "CLEANUP_SNAPSHOT_REQUIRED",
+  );
+  assert.deepEqual(await businessSnapshot(), before);
+  await store.transact([ref("device_claims", claimId)], () => [{
+    collection: "device_claims", id: claimId, data: { ...original },
+  }], audit);
   assert.deepEqual(providerCalls, { enroll: 0, revoke: 0 });
 });
 

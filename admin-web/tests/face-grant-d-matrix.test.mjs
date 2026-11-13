@@ -294,6 +294,7 @@ async function setup(t, options = {}) {
     store, orgId: ORG,
     actor: { membershipId: MEMBERSHIP, actorType: "user", actorId: MEMBERSHIP },
     files, blacklist, provider, now: () => NOW,
+    syntheticDispatch: options.syntheticDispatch === true,
   });
 
   const h = {
@@ -1143,7 +1144,7 @@ test("C4 D66 同资格不同 op key 并发同 slot：正反顺序各一成功一
 
 // D67
 test("C4 D67 同 op key 同摘要合法重放：返回原 result，核心 writes=[]，R", async (t) => {
-  const h = await setup(t);
+  const h = await setup(t, { syntheticDispatch: true });
   const first = await expectSuccess(h);
   resetCounts(h);
   const before = await snapshot(h.store);
@@ -1151,6 +1152,8 @@ test("C4 D67 同 op key 同摘要合法重放：返回原 result，核心 writes
   const after = await snapshot(h.store);
   assert.deepEqual(replay, first.result);
   for (const name of CORE) assert.deepEqual(after[name], before[name], `${name} 重放不变`);
+  assert.deepEqual(after.device_operation_jobs[0].dispatchSnapshot,
+    before.device_operation_jobs[0].dispatchSnapshot, "内嵌快照逐字节不变");
   assertUnchanged(before, after, new Set(["eligibility_guards", "admin_audit"]));
   assert.deepEqual(h.counts, { prepare: 1, evaluate: 1, transact: 1, build: 1 });
   assertProviderZero(h);
@@ -1227,7 +1230,7 @@ test("C4 D72 非空 sponsor 非 active 或不等于 cycle.primaryOccupancyId：S
 // sponsorOccupancyId === cycle.primaryOccupancyId，同一 collection/id 必然去重，
 // 因此最大合法布局实测为 32+N：57/89、58/90、59/91。下列测试明确记录该差异。
 test("C4 D73 最大布局容量：去重后 58 candidates/90 refs 单事务成功（57/89 亦记录）", async (t) => {
-  const base = { role: "member", userId: USER1, sponsor: "primary" };
+  const base = { role: "member", userId: USER1, sponsor: "primary", syntheticDispatch: true };
   const at57 = await setup(t, { ...base, candidates: 57 });
   await expectSuccess(at57, at57.input(), { guardDelta: 3 });
   assert.equal(at57.lastRefs, 89, "57 candidates 实际 89 refs（设计写 90）");
@@ -1235,11 +1238,14 @@ test("C4 D73 最大布局容量：去重后 58 candidates/90 refs 单事务成�
   const at58 = await setup(t, { ...base, candidates: 58 });
   await expectSuccess(at58, at58.input(), { guardDelta: 3 });
   assert.equal(at58.lastRefs, 90, "58 candidates 实际 90 refs");
+  const [job] = await at58.store.list("device_operation_jobs", ORG);
+  assert.equal(job.dispatchSnapshot.schemaVersion, 1);
+  assert.ok(Buffer.byteLength(JSON.stringify(job.dispatchSnapshot)) <= 16 * 1024);
 });
 
 // D74
 test("C4 D74 最大布局容量：去重后 59 candidates/91 refs -> 400，58/90 可进入", async (t) => {
-  const base = { role: "member", userId: USER1, sponsor: "primary" };
+  const base = { role: "member", userId: USER1, sponsor: "primary", syntheticDispatch: true };
   const at58 = await setup(t, { ...base, candidates: 58 });
   await expectSuccess(at58, at58.input(), { guardDelta: 3 });
   assert.equal(at58.lastRefs, 90, "设计称 58/91，实测 58/90");
@@ -1399,7 +1405,7 @@ test("C4 D73/D74 隔离 CloudStore 合约：90 refs 可进入，91 refs 事务�
 });
 
 test("H2-d 同 operation key 并发：两请求返回同一结果且核心写集只提交一次", async (t) => {
-  const h = await setup(t);
+  const h = await setup(t, { syntheticDispatch: true });
   const before = await snapshot(h.store);
   const key = "idem-h2d-same-operation-0001";
   const results = await Promise.allSettled([
@@ -1410,6 +1416,8 @@ test("H2-d 同 operation key 并发：两请求返回同一结果且核心写集
   assert.deepEqual(results[0].value, results[1].value);
   const after = await snapshot(h.store);
   assertCoreCreated(before, after);
+  assert.equal(after.device_operation_jobs.length, 1);
+  assert.equal(after.device_operation_jobs[0].dispatchSnapshot.schemaVersion, 1);
   assertUnchanged(before, after, new Set([...CORE, "eligibility_guards", "admin_audit"]));
   assert.equal(after.admin_audit.length, before.admin_audit.length + 2, "两次事务各追加一条审计");
   assert.equal(after.eligibility_guards.length, before.eligibility_guards.length + 2,

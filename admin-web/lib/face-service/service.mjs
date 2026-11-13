@@ -1,12 +1,13 @@
 ﻿/**
  * HK-AI-04 服务层（H2-a）。
  *
- * 已实现：submit、review、reviewQueue、queryJob、createGrant（原子授权事务）。
- * 未实现：H2-b 设备 claim 模型、H3 租约派发、H4 撤权闭环；不调用 Provider。
+ * 已实现：H2 createGrant；H3-a 可为 LocalStore 合成任务内嵌派发快照。
+ * 未实现：H3-b Mock 派发与结果迁移、H4 撤权闭环；本服务不调用 Provider。
  */
 import { createHash } from "node:crypto";
 
 import { failCode } from "../model.mjs";
+import { LocalStore } from "../store.mjs";
 import {
   COLLECTIONS,
   deterministicLogId,
@@ -39,6 +40,7 @@ import {
 } from "./dto.mjs";
 import { snapshotEligibility, validateEligibility } from "./eligibility.mjs";
 import { prepareGrantEligibility } from "./qualification.mjs";
+import { createDispatchSnapshot } from "./h3a.mjs";
 
 const ref = (collection, id) => ({ collection, id });
 // 预读业务错配必须延迟到事务内权限/operation/credential 检查之后，保持 §6.3
@@ -51,7 +53,7 @@ const stable = (value) => (Array.isArray(value) ? value.map(stable) : value && t
 const digestOf = (value) => createHash("sha256").update(JSON.stringify(stable(value))).digest("hex");
 
 export class FaceCredentialService {
-  constructor({ store, orgId, actor, files, blacklist, provider, now = () => Date.now() }) {
+  constructor({ store, orgId, actor, files, blacklist, provider, now = () => Date.now(), syntheticDispatch = false }) {
     this.store = store;
     this.orgId = orgId;
     this.actor = actor;
@@ -59,6 +61,10 @@ export class FaceCredentialService {
     this.blacklist = blacklist;
     this.provider = provider;
     this.now = now;
+    if (syntheticDispatch === true && !(store instanceof LocalStore)) {
+      failCode("NOT_CONFIGURED", "H3 合成快照仅支持 LocalStore 测试模式", 503);
+    }
+    this.syntheticDispatch = syntheticDispatch === true;
   }
 
   async #membership() {
@@ -442,6 +448,24 @@ export class FaceCredentialService {
           evidenceScope: "simulated", attempts: 0,
           leaseOwner: null, leaseExpiresAt: null, createdAt: now,
         };
+        const slotRecord = {
+          orgId: this.orgId, personId, deviceId: parsed.deviceId,
+          cycleId: parsed.cycleId, activeClaimId: grantId, state: "active",
+          revision: 1, createdAt: now, updatedAt: now, activatedAt: now,
+        };
+        if (this.syntheticDispatch) {
+          Object.assign(job, {
+            dispatchSnapshot: createDispatchSnapshot({
+              now, actor: this.actor, request: pre.dispatchRequest, state,
+              refs: pre.dispatchRefs, credential: pre.credential,
+              fileId: pre.credential.sourceFileId, claimId, slotId,
+              domainHeadId: domainKeys.headId, domainVersionId: domainKeys.versionId,
+              grantRecord, grantId, slotRecord,
+            }),
+            leaseGeneration: 0, dispatchAuthorizedAt: null, nextAttemptAt: null,
+            result: null, updatedAt: now,
+          });
+        }
         validateRecord(COLLECTIONS.DEVICE_ACCESS_GRANTS, grantRecord);
         validateRecord(COLLECTIONS.DEVICE_OPERATION_JOBS, job);
         result = { grantId, jobId, evidenceScope: "simulated" };
@@ -453,11 +477,7 @@ export class FaceCredentialService {
             { collection: COLLECTIONS.DEVICE_OPERATION_JOBS, id: jobId, data: job },
             {
               collection: COLLECTIONS.GRANT_SLOT_CLAIMS, id: slotId,
-              data: {
-                orgId: this.orgId, personId, deviceId: parsed.deviceId,
-                cycleId: parsed.cycleId, activeClaimId: grantId, state: "active",
-                revision: 1, createdAt: now, updatedAt: now, activatedAt: now,
-              },
+              data: slotRecord,
             },
             {
               collection: COLLECTIONS.DEVICE_OPERATION_LOGS, id: logId,
@@ -518,6 +538,8 @@ export class FaceCredentialService {
               return {
                 ...scope,
                 qualification: this.#grantQualificationPre(state, planned.request),
+                dispatchRequest: planned.request,
+                dispatchRefs: planned.refs,
               };
             },
           };

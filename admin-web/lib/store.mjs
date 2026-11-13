@@ -276,6 +276,8 @@ export class LocalStore {
         ? state[`admin_audit/${prepared.config.auditId}`]
         : null;
       const writes = await build(state);
+      if (!Array.isArray(writes))
+        throw new HttpError(400, "事务写入必须是数组");
       if (existingDeterministicAudit) {
         if (writes.length)
           throw new HttpError(409, "确定性审计记录已存在");
@@ -411,6 +413,8 @@ export class CloudStore {
         ? state[`admin_audit/${prepared.config.auditId}`]
         : null;
       const writes = await build(state);
+      if (!Array.isArray(writes))
+        throw new HttpError(400, "事务写入必须是数组");
       if (existingDeterministicAudit) {
         if (writes.length)
           throw new HttpError(409, "确定性审计记录已存在");

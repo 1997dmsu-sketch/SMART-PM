@@ -185,6 +185,27 @@ test("H4-0A LocalStore 首次零写仍创建 audit，已有 audit 的 build 错�
   assert.equal((await store.list("admin_audit")).filter((row) => row._id === AUDIT_ID).length, 1);
 });
 
+test("H4-0A LocalStore 已有或缺失 audit 时均拒绝非数组 writes", async (t) => {
+  const invalid = [null, {}, ""];
+  for (let index = 0; index < invalid.length; index += 1) {
+    const store = await localHarness(t);
+    const auditId = `${AUDIT_ID}-invalid-${index}`;
+    const configured = { ...audit(), auditId };
+    const configuredRef = ref("admin_audit", auditId);
+    await assert.rejects(
+      () => store.transact([configuredRef], () => invalid[index], configured),
+      (error) => error.status === 400,
+    );
+    assert.equal(await store.get("admin_audit", auditId), null);
+    await store.transact([configuredRef], () => [], configured);
+    await assert.rejects(
+      () => store.transact([configuredRef], () => invalid[index], configured),
+      (error) => error.status === 400,
+    );
+    assert.ok(await store.get("admin_audit", auditId, "org-audit"));
+  }
+});
+
 test("H4-0A LocalStore 业务异常或持久化失败时审计与业务同回滚", async (t) => {
   const store = await localHarness(t);
   const write = roomWrite("room-rollback");
@@ -264,6 +285,26 @@ test("H4-0A CloudStore 首次零写创建 audit，已有 audit 的 build 错误�
     /replay invalid/,
   );
   assert.equal(cloud.calls.sets.filter((call) => call.key === `admin_audit/${AUDIT_ID}`).length, 1);
+});
+
+test("H4-0A CloudStore 已有或缺失 audit 时均拒绝非数组 writes", async () => {
+  for (const [index, value] of [null, {}, ""].entries()) {
+    const auditId = `${AUDIT_ID}-cloud-invalid-${index}`;
+    const configured = { ...audit(), auditId };
+    const configuredRef = ref("admin_audit", auditId);
+    const cloud = cloudHarness();
+    await assert.rejects(
+      () => cloud.store.transact([configuredRef], () => value, configured),
+      (error) => error.status === 400,
+    );
+    assert.equal(cloud.record("admin_audit", auditId), null);
+    await cloud.store.transact([configuredRef], () => [], configured);
+    await assert.rejects(
+      () => cloud.store.transact([configuredRef], () => value, configured),
+      (error) => error.status === 400,
+    );
+    assert.ok(cloud.record("admin_audit", auditId));
+  }
 });
 
 test("H4-0A CloudStore 业务写或审计写失败均由同一云事务回滚", async () => {

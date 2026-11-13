@@ -1,4 +1,4 @@
-﻿# HK-AI-04 H3 实现复审与验收补齐证据（2026-11-12）
+# HK-AI-04 H3 实现复审与验收补齐证据（2026-11-12）
 
 本文件把已批准设计 `ccd6d087527e46e674653ffdf22b22d7390b7e3f`
 （`docs/tasks/HK-AI-04-H3-LEASE-DISPATCH-DESIGN.md`）测试矩阵 D01–D66
@@ -92,7 +92,7 @@ Mock success 不产生 device_verified、等待结果不自动重排、H4 边界
 | D39 | `H3 D39 T1 后 grant 有效期终点到达：GRANT_INACTIVE，J` | `validUntil=now` 终态 `GRANT_INACTIVE`；Provider 0 | 无 |
 | D40 | `H3 D40 T1 后 grant suspended：GRANT_INACTIVE，J` | 终态 `GRANT_INACTIVE`；grant 内容级不变 | 无 |
 | D41 | `H3 D41/D42 explicitly pre-send Mock failures get three retries and exhaust from sending`（原有用例） | 30000ms 前 1ms 重排 `RETRY_NOT_DUE` 且整库不变；30000ms 整点排队；同法覆盖 120000/600000 | 依赖既有 H3 用例名，未另建重复用例 |
-| D42 | 同上（119999/120000ms） | 同上第 2 轮 | 同上 |
+| D42 | `H3 D41/D42 explicitly pre-send Mock failures get three retries and exhaust from sending`（同一用例第 2 轮） | 119999ms 前 1ms `RETRY_NOT_DUE` 且整库不变；120000ms 整点排队；下一轮 600000ms 边界同法断言 | 与 D41 共用同一用例的循环轮次，断言在循环内逐轮执行 |
 | D43 | `H3 D43 600s 退避边界：到期前人工与自动均拒，到期后并发仅一方排队` | 第 3 次失败 `nextAttemptAt=NOW+750000`；到期前 1ms 自动/人工均 `RETRY_NOT_DUE` 且整库不变；到期后并发仅一方 fulfilled；Provider 3；再领取 attempts=4 → `RETRY_EXHAUSTED`；之后人工重试 `INVALID_JOB` 零写 | 设计行 Provider=0 指重排阶段；本用例包含前置三次 pre-send 调用 |
 | D44 | `H3 D44 attempts=4 明确 pre-send RETRYABLE：RETRY_EXHAUSTED，之后重试零写` | 四次发送均为明确 pre-send RETRYABLE；第 4 次直接 `terminal_failed/RETRY_EXHAUSTED`，末条日志告警；Provider 4；之后 requeue `INVALID_JOB` 且整库不变 | 无 |
 | D45 | `H3 D45 源记录/返回对象注入敏感字段：Provider 入参、结果、日志、快照均不泄露` | 源记录/返回对象注入 marker 后：Provider input 恰六字段、context 恰六字段且权限最小集；snapshot 顶层 18 字段与每个 version 六字段严格等白名单；snapshot/job/result/日志序列化不含 marker、`objectKey/checksum/rawResponse/stack/identityDigest/privateNote`、原始用户幂等键、私密文件路径 | 只验证合成敏感值，不代替生产数据扫描 |

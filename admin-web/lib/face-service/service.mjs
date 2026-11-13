@@ -14,10 +14,12 @@ import {
   deviceClaimKey,
   deviceDigestDomainKey,
   deviceDigestDomainVersionKey,
+  deviceClaimReleaseGuardKey,
   digestDomainMatchesDevice,
   ownerClaimMatchesDevice,
   validateAccessDeviceRecord,
   validateOwnerClaimRecord,
+  validateDeviceClaimReleaseGuard,
   grantSlotKey,
   nextRevision,
   applyOperationKeyDomain,
@@ -315,6 +317,14 @@ export class FaceCredentialService {
     // 设备预读不再提前判定 H2-b；资格/黑名单错误必须先于设备错误。
     const device = await this.#find("access_devices", parsed.deviceId);
     const claimId = typeof device?.claimId === "string" && device.claimId ? device.claimId : null;
+    let releaseGuardId = null;
+    if (claimId) {
+      try {
+        releaseGuardId = deviceClaimReleaseGuardKey({ orgId: this.orgId, claimId });
+      } catch {
+        // 设备 schema 错误必须留在事务内、资格与黑名单之后按 H2-b 失败关闭。
+      }
+    }
     // provider/digestRealm/keyVersion 任一非法时不推导 K1 key，避免在资格/黑名单
     // 之前抛 schema 错误；设备记录自身的问题统一留给事务内 H2-b 复核。
     const domainKeys = device &&
@@ -343,6 +353,7 @@ export class FaceCredentialService {
       ref("org_memberships", this.actor.membershipId),
       ref("access_devices", parsed.deviceId),
       ...(claimId ? [ref(COLLECTIONS.DEVICE_CLAIMS, claimId)] : []),
+      ...(releaseGuardId ? [ref(COLLECTIONS.DEVICE_CLAIM_RELEASE_GUARDS, releaseGuardId)] : []),
       ...(domainKeys ? [
         ref(COLLECTIONS.DEVICE_DIGEST_DOMAINS, domainKeys.headId),
         ref(COLLECTIONS.DEVICE_DIGEST_DOMAINS, domainKeys.versionId),
@@ -369,6 +380,8 @@ export class FaceCredentialService {
         // 必须按契约返回 ADAPTER_UNAVAILABLE/503；正常上下文形状也在此收紧。
         if (!pre || typeof pre !== "object" || !pre.credential ||
             !Array.isArray(pre.domainWrites) ||
+            !Array.isArray(pre.guardHistoricIds) ||
+            typeof pre.guardWasPresent !== "boolean" ||
             !Object.hasOwn(pre, "replayResult") ||
             (pre.replayResult !== null && typeof pre.replayResult !== "object")) {
           failCode("ADAPTER_UNAVAILABLE", "资格准备上下文缺失或无效", 503);
@@ -403,7 +416,7 @@ export class FaceCredentialService {
         if (dev.status !== "active" || dev.capabilities?.face !== true) {
           failCode("INVALID_STATE", "设备不可用或未启用人脸能力", 409);
         }
-        if (!claimId || !domainKeys) {
+        if (!claimId || !domainKeys || !releaseGuardId) {
           failCode("DEVICE_CLAIM_INVALID", "设备缺少有效的 owner claim 绑定", 409);
         }
 
@@ -426,6 +439,49 @@ export class FaceCredentialService {
         if (!ownerClaimMatchesDevice(claim, dev, parsed.deviceId)) {
           failCode("DEVICE_CLAIM_INVALID", "设备与 owner claim 引用不一致", 409);
         }
+
+        const guardKey = `${COLLECTIONS.DEVICE_CLAIM_RELEASE_GUARDS}/${releaseGuardId}`;
+        const releaseGuard = state[guardKey];
+        let guardRecord;
+        if (releaseGuard) {
+          const normalizedGuard = Object.hasOwn(releaseGuard, "_id")
+            ? releaseGuard
+            : { ...releaseGuard, _id: releaseGuardId };
+          try {
+            validateDeviceClaimReleaseGuard(normalizedGuard);
+          } catch {
+            failCode("CLAIM_RELEASE_GUARD_REQUIRED", "设备 claim release guard 损坏", 409);
+          }
+          if (normalizedGuard.orgId !== this.orgId || normalizedGuard.claimId !== claimId ||
+              normalizedGuard.epoch === Number.MAX_SAFE_INTEGER ||
+              normalizedGuard.revision === Number.MAX_SAFE_INTEGER) {
+            failCode("CLAIM_RELEASE_GUARD_REQUIRED", "设备 claim release guard 不可用", 409);
+          }
+          guardRecord = {
+            ...normalizedGuard,
+            epoch: normalizedGuard.epoch + 1,
+            revision: normalizedGuard.revision + 1,
+            updatedAt: this.now(),
+          };
+        } else {
+          if (pre.guardWasPresent) {
+            failCode("CLAIM_RELEASE_GUARD_REQUIRED", "设备 claim release guard 已消失", 409);
+          }
+          const historic = pre.guardHistoricIds.map((id) =>
+            state[`${COLLECTIONS.DEVICE_ACCESS_GRANTS}/${id}`]);
+          if (historic.some((record) => !record || record.orgId !== this.orgId || record.claimId !== claimId)) {
+            failCode("CLAIM_RELEASE_GUARD_REQUIRED", "历史授权缺少 claim release guard", 409);
+          }
+          if (historic.length) {
+            failCode("CLAIM_RELEASE_GUARD_REQUIRED", "历史授权缺少 claim release guard", 409);
+          }
+          const guardNow = this.now();
+          guardRecord = {
+            _id: releaseGuardId, orgId: this.orgId, claimId,
+            epoch: 1, revision: 1, createdAt: guardNow, updatedAt: guardNow,
+          };
+        }
+        validateDeviceClaimReleaseGuard(guardRecord);
 
         const slot = state[`${COLLECTIONS.GRANT_SLOT_CLAIMS}/${slotId}`];
         if (slot) failCode("GRANT_SLOT_CONFLICT", "授权槽位冲突", 409);
@@ -474,6 +530,11 @@ export class FaceCredentialService {
         return {
           writes: [
             ...pre.domainWrites,
+            {
+              collection: COLLECTIONS.DEVICE_CLAIM_RELEASE_GUARDS,
+              id: releaseGuardId,
+              data: guardRecord,
+            },
             { collection: COLLECTIONS.DEVICE_ACCESS_GRANTS, id: grantId, data: grantRecord },
             { collection: COLLECTIONS.DEVICE_OPERATION_JOBS, id: jobId, data: job },
             {
@@ -512,6 +573,23 @@ export class FaceCredentialService {
           let planned = null;
           let deferredError = null;
           try {
+            let guardHistoricIds = [];
+            let guardWasPresent = false;
+            if (releaseGuardId) {
+              const guard = await this.store.get(
+                COLLECTIONS.DEVICE_CLAIM_RELEASE_GUARDS, releaseGuardId, this.orgId,
+              );
+              guardWasPresent = Boolean(guard);
+              if (!guardWasPresent) {
+                guardHistoricIds = (await this.store.list(
+                  COLLECTIONS.DEVICE_ACCESS_GRANTS, this.orgId,
+                )).filter((item) => item.claimId === claimId).map((item) => item._id).sort();
+              }
+            }
+            const attemptBaseRefs = [
+              ...baseRefs,
+              ...guardHistoricIds.map((id) => ref(COLLECTIONS.DEVICE_ACCESS_GRANTS, id)),
+            ];
             planned = await prepareGrantEligibility(this.store, {
               orgId: this.orgId,
               personId: credential.personId,
@@ -520,8 +598,10 @@ export class FaceCredentialService {
               identityApplicationId: parsed.identityApplicationId,
               validFrom: parsed.validFrom,
               validUntil: parsed.validUntil,
-              baseRefs,
+              baseRefs: attemptBaseRefs,
             });
+            planned.guardHistoricIds = guardHistoricIds;
+            planned.guardWasPresent = guardWasPresent;
           } catch (error) {
             if (!DEFERRED_PRE_READ_CODES.has(error?.code)) throw error;
             deferredError = error;
@@ -538,6 +618,8 @@ export class FaceCredentialService {
               if (deferredError) throw deferredError;
               return {
                 ...scope,
+                guardHistoricIds: planned.guardHistoricIds,
+                guardWasPresent: planned.guardWasPresent,
                 qualification: this.#grantQualificationPre(state, planned.request),
                 dispatchRequest: planned.request,
                 dispatchRefs: planned.refs,

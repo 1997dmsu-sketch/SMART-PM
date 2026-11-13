@@ -19,6 +19,7 @@ import {
   grantSlotKey,
   operationKeyConfig,
   operationKeyFingerprint,
+  deviceClaimReleaseGuardKey,
 } from "../lib/face-service/collections.mjs";
 import {
   makeAccessDeviceFixture,
@@ -65,6 +66,7 @@ const SCOPED = [
   "property_catalog", "unique_claims", "room_primary_slots", "lifecycle_guards",
   "access_devices", "device_claims", "blacklist_entries", "blacklist_decisions",
   "eligibility_guards",
+  "device_claim_release_guards",
 ];
 const GLOBAL = ["users", "device_digest_domains", "operation_key_domains", "admin_audit"];
 const ALL_COLLECTIONS = [...SCOPED, ...GLOBAL];
@@ -405,11 +407,18 @@ async function expectSuccess(h, input = h.input(), { baseline = "before", guardD
   assert.ok(before, "缺少成功基线");
   const after = await snapshot(h.store);
   assertCoreCreated(before, after);
-  assertUnchanged(before, after, new Set([...CORE, "eligibility_guards", "admin_audit"]));
+  assertUnchanged(before, after, new Set([
+    ...CORE, "eligibility_guards", "device_claim_release_guards", "admin_audit",
+  ]));
   assert.equal(after.admin_audit.length, before.admin_audit.length + 1, "成功只追加一条审计");
   assert.equal(
     after.eligibility_guards.length, before.eligibility_guards.length + guardDelta,
     "成功只追加 subject guard",
+  );
+  assert.equal(
+    after.device_claim_release_guards.length,
+    before.device_claim_release_guards.length + 1,
+    "首次授权必须原子创建 release guard",
   );
   assertProviderZero(h);
   return { result, before, after, key };
@@ -1139,9 +1148,13 @@ test("C4 D66 同资格不同 op key 并发同 slot：正反顺序各一成功一
     assert.equal(failed[0].reason.code, "GRANT_SLOT_CONFLICT", `${order}: 失败码`);
     const after = await snapshot(h.store);
     assertCoreCreated(before, after);
-    assertUnchanged(before, after, new Set([...CORE, "eligibility_guards", "admin_audit"]));
+    assertUnchanged(before, after, new Set([
+      ...CORE, "eligibility_guards", "device_claim_release_guards", "admin_audit",
+    ]));
     assert.equal(after.admin_audit.length, before.admin_audit.length + 1);
     assert.equal(after.eligibility_guards.length, before.eligibility_guards.length + 2);
+    assert.equal(after.device_claim_release_guards.length, 1);
+    assert.equal(after.device_claim_release_guards[0].epoch, 1);
     assertProviderZero(h);
   }
 });
@@ -1230,19 +1243,13 @@ test("C4 D72 非空 sponsor 非 active 或不等于 cycle.primaryOccupancyId：S
 });
 
 // D73
-// 设计 §4.1 的 33+N 把 primary 与 sponsor 计为两条 occupancies；Q02 要求
-// sponsorOccupancyId === cycle.primaryOccupancyId，同一 collection/id 必然去重，
-// 因此最大合法布局实测为 32+N：57/89、58/90、59/91。下列测试明确记录该差异。
-test("C4 D73 最大布局容量：去重后 58 candidates/90 refs 单事务成功（57/89 亦记录）", async (t) => {
+// H4-0B 增加 claim release guard 后最大布局为 33+N：57/90、58/91。
+test("H4-0B D73 最大布局容量：57 candidates/90 refs 单事务成功", async (t) => {
   const base = { role: "member", userId: USER1, sponsor: "primary", syntheticDispatch: true };
   const at57 = await setup(t, { ...base, candidates: 57 });
   await expectSuccess(at57, at57.input(), { guardDelta: 3 });
-  assert.equal(at57.lastRefs, 89, "57 candidates 实际 89 refs（设计写 90）");
-
-  const at58 = await setup(t, { ...base, candidates: 58 });
-  await expectSuccess(at58, at58.input(), { guardDelta: 3 });
-  assert.equal(at58.lastRefs, 90, "58 candidates 实际 90 refs");
-  const [job] = await at58.store.list("device_operation_jobs", ORG);
+  assert.equal(at57.lastRefs, 90, "57 candidates 必须恰好 90 refs");
+  const [job] = await at57.store.list("device_operation_jobs", ORG);
   assert.equal(job.dispatchSnapshot.schemaVersion, 1);
   assert.ok(Buffer.byteLength(JSON.stringify(job.dispatchSnapshot)) <= 16 * 1024);
   const witnesses = job.dispatchSnapshot.versions.map(({ collection, id }) => `${collection}/${id}`);
@@ -1253,16 +1260,152 @@ test("C4 D73 最大布局容量：去重后 58 candidates/90 refs 单事务成�
 });
 
 // D74
-test("C4 D74 最大布局容量：去重后 59 candidates/91 refs -> 400，58/90 可进入", async (t) => {
+test("H4-0B D74 最大布局容量：58 candidates/91 refs 在事务前 400", async (t) => {
   const base = { role: "member", userId: USER1, sponsor: "primary", syntheticDispatch: true };
   const at58 = await setup(t, { ...base, candidates: 58 });
-  await expectSuccess(at58, at58.input(), { guardDelta: 3 });
-  assert.equal(at58.lastRefs, 90, "设计称 58/91，实测 58/90");
+  await expectFailure(at58, at58.input(), { code: null, status: 400 });
+  assert.equal(at58.counts.transact, 0, "91 refs 事务前失败关闭");
+  assert.equal(at58.counts.prepare, 1);
+});
 
-  const at59 = await setup(t, { ...base, candidates: 59 });
-  await expectFailure(at59, at59.input(), { code: null, status: 400 });
-  assert.equal(at59.counts.transact, 0, "91 refs 事务前失败关闭");
-  assert.equal(at59.counts.prepare, 1);
+test("H4-0B 首次创建、合法重放与后续授权严格维护 release guard", async (t) => {
+  const h = await setup(t);
+  const key = "idem-h40b-replay-0001";
+  const result = await h.service.createGrant(h.input(), { idempotencyKey: key });
+  const guardId = deviceClaimReleaseGuardKey({ orgId: ORG, claimId: CLAIM });
+  const first = await h.store.get("device_claim_release_guards", guardId, ORG);
+  assert.deepEqual(
+    { epoch: first.epoch, revision: first.revision, claimId: first.claimId },
+    { epoch: 1, revision: 1, claimId: CLAIM },
+  );
+  const replay = await h.service.createGrant(h.input(), { idempotencyKey: key });
+  assert.deepEqual(replay, result);
+  assert.deepEqual(await h.store.get("device_claim_release_guards", guardId, ORG), first,
+    "合法重放不得递增 guard");
+  assertProviderZero(h);
+});
+
+test("H4-0B 缺 guard 但已有历史 grant、损坏 guard 均失败关闭", async (t) => {
+  const legacy = await setup(t);
+  await legacy.store.transact(
+    [ref("device_access_grants", "grant-legacy")],
+    () => [{
+      collection: "device_access_grants", id: "grant-legacy",
+      data: { orgId: ORG, claimId: CLAIM, revision: 1 },
+    }], audit,
+  );
+  await expectFailure(legacy, legacy.input(), {
+    code: "CLAIM_RELEASE_GUARD_REQUIRED", status: 409,
+  });
+
+  const corrupt = await setup(t);
+  const guardId = deviceClaimReleaseGuardKey({ orgId: ORG, claimId: CLAIM });
+  await corrupt.store.transact(
+    [ref("device_claim_release_guards", guardId)],
+    () => [{
+      collection: "device_claim_release_guards", id: guardId,
+      data: {
+        orgId: ORG, claimId: CLAIM, epoch: "1", revision: 1,
+        createdAt: NOW, updatedAt: NOW,
+      },
+    }], audit,
+  );
+  await expectFailure(corrupt, corrupt.input(), {
+    code: "CLAIM_RELEASE_GUARD_REQUIRED", status: 409,
+  });
+
+  const overflow = await setup(t);
+  await overflow.store.transact(
+    [ref("device_claim_release_guards", guardId)],
+    () => [{
+      collection: "device_claim_release_guards", id: guardId,
+      data: {
+        orgId: ORG, claimId: CLAIM, epoch: Number.MAX_SAFE_INTEGER,
+        revision: Number.MAX_SAFE_INTEGER, createdAt: NOW, updatedAt: NOW,
+      },
+    }], audit,
+  );
+  await expectFailure(overflow, overflow.input(), {
+    code: "CLAIM_RELEASE_GUARD_REQUIRED", status: 409,
+  });
+});
+
+test("H4-0B guard 预读后消失时禁止按首次授权重新创建", async (t) => {
+  const h = await setup(t);
+  await h.service.createGrant(h.input(), { idempotencyKey: "idem-h40b-existing-0001" });
+  const beforeCore = {};
+  for (const name of CORE) beforeCore[name] = structuredClone(await h.store.list(name, ORG));
+  h.hooks.beforeTransact = () => {
+    h.store.data.device_claim_release_guards = [];
+    h.hooks.beforeTransact = null;
+  };
+  await assert.rejects(
+    () => h.service.createGrant(h.input(), { idempotencyKey: "idem-h40b-missing-race" }),
+    (error) => error.code === "CLAIM_RELEASE_GUARD_REQUIRED" && error.status === 409,
+  );
+  for (const name of CORE) assert.deepEqual(await h.store.list(name, ORG), beforeCore[name]);
+  assertProviderZero(h);
+});
+
+test("H4-0B 同一 owner claim 的不同 person/slot 并发均成功并线性递增 guard", async (t) => {
+  const h = await setup(t);
+  const person2 = "person-c4-second";
+  const identity2 = "id-c4-second";
+  const credential2 = "fc-c4-second";
+  const occupancy2 = "occ-c4-second";
+  const cycle2 = "cycle-c4-second";
+  const room2 = "room-c4-second";
+  const writes = [
+    { collection: "persons", id: person2, data: { orgId: ORG, status: "active", userId: null, revision: 1 } },
+    { collection: "identity_applications", id: identity2, data: {
+      orgId: ORG, personId: person2, state: "approved", identityDigest: "digest-c4-second",
+      keyVersion: 1, revision: 1,
+    } },
+    { collection: "face_credentials", id: credential2, data: {
+      orgId: ORG, revision: 2, personId: person2, sourceFileId: FILE,
+      sourceFileRevision: 1, reviewState: "approved", imageState: "verified",
+      evidenceScope: "simulated", createdAt: 1, updatedAt: 1,
+    } },
+    { collection: "rooms", id: room2, data: {
+      orgId: ORG, status: "active", floorId: FLOOR, buildingId: BUILDING,
+      communityId: COMMUNITY, revision: 1,
+    } },
+    { collection: "occupancies", id: occupancy2, data: {
+      orgId: ORG, personId: person2, roomId: room2, cycleId: cycle2, role: "primary",
+      state: "active", startsAt: QUAL_START, endsAt: QUAL_END,
+      sponsorOccupancyId: null, revision: 1,
+    } },
+    { collection: "occupancy_cycles", id: cycle2, data: {
+      orgId: ORG, roomId: room2, state: "active", primaryOccupancyId: occupancy2,
+      startsAt: QUAL_START, endsAt: QUAL_END, endedAt: null, epoch: 1, revision: 1,
+    } },
+    { collection: "unique_claims", id: occupancyClaimId(ORG, room2, cycle2, person2), data: {
+      orgId: ORG, state: "bound", ownerId: occupancy2, revision: 1,
+    } },
+    { collection: "room_primary_slots", id: primarySlotId(ORG, room2), data: {
+      orgId: ORG, currentCycleId: cycle2, currentOccupancyId: occupancy2,
+      currentPersonId: person2, revision: 1,
+    } },
+  ];
+  await h.store.transact(
+    writes.map((item) => ref(item.collection, item.id)), () => writes, audit,
+  );
+  const secondInput = h.input({
+    credentialId: credential2, deviceId: DEVICE, occupancyId: occupancy2,
+    cycleId: cycle2, identityApplicationId: identity2,
+  });
+  const settled = await Promise.allSettled([
+    h.service.createGrant(h.input(), { idempotencyKey: "idem-h40b-concurrent-a" }),
+    h.service.createGrant(secondInput, { idempotencyKey: "idem-h40b-concurrent-b" }),
+  ]);
+  assert.equal(settled.filter((item) => item.status === "fulfilled").length, 2);
+  const guardId = deviceClaimReleaseGuardKey({ orgId: ORG, claimId: CLAIM });
+  const guard = await h.store.get("device_claim_release_guards", guardId, ORG);
+  assert.equal(guard.epoch, 2);
+  assert.equal(guard.revision, 2);
+  assert.equal((await h.store.list("device_access_grants", ORG)).length, 2);
+  assert.equal((await h.store.list("grant_slot_claims", ORG)).length, 2);
+  assertProviderZero(h);
 });
 
 // D75
@@ -1329,6 +1472,10 @@ test("C4 D75d createGrant 同 attempt 事务 callback 重跑：仅提交一次�
   await expectSuccess(h);
   assert.equal(callbackRuns, 2, "同一 attempt callback 重跑两次");
   assert.deepEqual(h.counts, { prepare: 1, evaluate: 2, transact: 1, build: 2 });
+  const guardId = deviceClaimReleaseGuardKey({ orgId: ORG, claimId: CLAIM });
+  const guard = await h.store.get("device_claim_release_guards", guardId, ORG);
+  assert.deepEqual({ epoch: guard.epoch, revision: guard.revision }, { epoch: 1, revision: 1 },
+    "callback 重跑只能提交一次 guard");
 });
 
 test("C4 D75c hook 伪造 eligible 不能绕过真实 evaluate（补充）", async (t) => {
@@ -1427,10 +1574,14 @@ test("H2-d 同 operation key 并发：两请求返回同一结果且核心写集
   assertCoreCreated(before, after);
   assert.equal(after.device_operation_jobs.length, 1);
   assert.equal(after.device_operation_jobs[0].dispatchSnapshot.schemaVersion, 1);
-  assertUnchanged(before, after, new Set([...CORE, "eligibility_guards", "admin_audit"]));
+  assertUnchanged(before, after, new Set([
+    ...CORE, "eligibility_guards", "device_claim_release_guards", "admin_audit",
+  ]));
   assert.equal(after.admin_audit.length, before.admin_audit.length + 2, "两次事务各追加一条审计");
   assert.equal(after.eligibility_guards.length, before.eligibility_guards.length + 2,
     "重放只覆盖同一组 subject guards");
+  assert.equal(after.device_claim_release_guards.length, 1);
+  assert.equal(after.device_claim_release_guards[0].epoch, 1, "并发重放不得重复递增 guard");
   assertProviderZero(h);
 });
 

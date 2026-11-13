@@ -21,12 +21,15 @@ import {
   validateRecord,
   validateDigestDomainRecord,
   applyDigestDomain,
+  deviceClaimReleaseGuardKey,
+  validateDeviceClaimReleaseGuard,
 } from "../lib/face-service/collections.mjs";
 
-test("集合名冻结为十张，且可识别", () => {
+test("集合名冻结为十一张，且可识别", () => {
   assert.deepEqual(Object.values(COLLECTIONS).sort(), [
     "access_devices",
     "device_access_grants",
+    "device_claim_release_guards",
     "device_claims",
     "device_digest_domains",
     "device_operation_jobs",
@@ -38,6 +41,24 @@ test("集合名冻结为十张，且可识别", () => {
   ]);
   assert.equal(isKnownCollection("face_credentials"), true);
   assert.equal(isKnownCollection("face_credentials_extra"), false);
+});
+
+test("H4-0B claim release guard key 分段无碰撞且 schema 严格", () => {
+  const a = deviceClaimReleaseGuardKey({ orgId: "a:b", claimId: "c" });
+  const b = deviceClaimReleaseGuardKey({ orgId: "a", claimId: "b:c" });
+  assert.notEqual(a, b);
+  const record = {
+    _id: a, orgId: "a:b", claimId: "c", epoch: 1, revision: 1,
+    createdAt: 0, updatedAt: 0,
+  };
+  assert.equal(validateDeviceClaimReleaseGuard(record), record);
+  for (const bad of [
+    { ...record, orgId: "other" },
+    { ...record, epoch: "1" },
+    { ...record, revision: Number.MAX_SAFE_INTEGER + 1 },
+    { ...record, createdAt: -1 },
+    { ...record, secret: "x" },
+  ]) assert.throws(() => validateDeviceClaimReleaseGuard(bad));
 });
 
 test("组织域记录必须带 orgId 与 revision", () => {

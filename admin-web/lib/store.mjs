@@ -43,6 +43,7 @@ const collections = [
   "grant_slot_claims",
   "access_devices",
   "operation_key_domains",
+  "device_claim_release_guards",
 ];
 const AUDIT_INPUT_FIELDS = new Set([
   "auditId",
@@ -203,6 +204,7 @@ export function seed() {
   grant_slot_claims: [],
   access_devices: [],
   operation_key_domains: [],
+  device_claim_release_guards: [],
   };
 }
 export class LocalStore {
@@ -236,6 +238,7 @@ export class LocalStore {
     this.data.grant_slot_claims ||= [];
     this.data.access_devices ||= [];
     this.data.operation_key_domains ||= [];
+    this.data.device_claim_release_guards ||= [];
     return this;
   }
   async persist(data) {

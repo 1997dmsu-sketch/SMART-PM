@@ -4,7 +4,8 @@
  * 冻结集合（复审 72a093a 认可）：
  *   access_devices / face_credentials / device_access_grants /
  *   device_operation_jobs / device_operation_logs /
- *   device_claims / grant_slot_claims / operation_keys
+ *   device_claims / grant_slot_claims / operation_keys /
+ *   device_claim_release_guards
  *
  * 组织域记录带 orgId；可变记录带 revision；设备唯一占用由 device_claims 保证。
  */
@@ -28,6 +29,7 @@ export const COLLECTIONS = Object.freeze({
   // 全局部署域记录：跨组织共享，不能按 orgId 隔离，否则换钥保护可被绕过。
   DEVICE_DIGEST_DOMAINS: "device_digest_domains",
   OPERATION_KEY_DOMAINS: "operation_key_domains",
+  DEVICE_CLAIM_RELEASE_GUARDS: "device_claim_release_guards",
 });
 
 const ORG_SCOPED = new Set([
@@ -36,6 +38,7 @@ const ORG_SCOPED = new Set([
   COLLECTIONS.DEVICE_ACCESS_GRANTS,
   COLLECTIONS.DEVICE_OPERATION_JOBS,
   COLLECTIONS.DEVICE_OPERATION_LOGS,
+  COLLECTIONS.DEVICE_CLAIM_RELEASE_GUARDS,
 ]);
 
 const ENUMS = {
@@ -72,6 +75,9 @@ export function validateRecord(collection, record, { partial = false } = {}) {
   }
   if (collection === COLLECTIONS.DEVICE_DIGEST_DOMAINS) {
     return validateDigestDomainRecord(record);
+  }
+  if (collection === COLLECTIONS.DEVICE_CLAIM_RELEASE_GUARDS) {
+    return validateDeviceClaimReleaseGuard(record);
   }
 
   if (ORG_SCOPED.has(collection) && !partial) {
@@ -130,6 +136,12 @@ export function deviceDigest(serial, { key, version }) {
 }
 
 const encodeSegment = (value) => Buffer.from(String(value), "utf8").toString("base64url");
+
+export function deviceClaimReleaseGuardKey({ orgId, claimId }) {
+  assertBoundedId(orgId, "orgId");
+  assertBoundedId(claimId, "claimId");
+  return `device-claim-release-guard:${encodeSegment(orgId)}:${encodeSegment(claimId)}`;
+}
 
 export function deviceClaimKey({ provider = "hikvision", digestRealm, serial, key, version }) {
   if (!digestRealm) throw schemaError("digestRealm 必填");
@@ -405,6 +417,28 @@ export function assertSafeInt(value, field, { min = 0 } = {}) {
     throw schemaError(field + " 必须是 ≥" + min + " 的安全整数");
   }
   return value;
+}
+
+const RELEASE_GUARD_FIELDS = new Set([
+  "_id", "orgId", "claimId", "epoch", "revision", "createdAt", "updatedAt",
+]);
+
+export function validateDeviceClaimReleaseGuard(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    throw schemaError("claim release guard 必须是对象");
+  }
+  rejectUnknownFields(record, RELEASE_GUARD_FIELDS, "claim release guard");
+  assertBoundedId(record._id, "_id");
+  assertBoundedId(record.orgId, "orgId");
+  assertBoundedId(record.claimId, "claimId");
+  if (record._id !== deviceClaimReleaseGuardKey(record)) {
+    throw schemaError("claim release guard ID 与组织/claim 不一致");
+  }
+  assertSafeInt(record.epoch, "epoch", { min: 1 });
+  assertSafeInt(record.revision, "revision", { min: 1 });
+  assertSafeInt(record.createdAt, "createdAt");
+  assertSafeInt(record.updatedAt, "updatedAt");
+  return record;
 }
 
 /** 墓碑释放：只改状态与审计字段，不删除历史。 */

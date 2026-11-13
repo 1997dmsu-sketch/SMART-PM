@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
-import { LocalStore } from "../lib/store.mjs";
+import { CloudStore, LocalStore } from "../lib/store.mjs";
 import { H4MockRevoker, MockFaceAccessProvider, validateRevokeJob } from "../lib/face-service/index.mjs";
 import { deviceClaimReleaseGuardKey, deterministicLogId } from "../lib/face-service/collections.mjs";
 
@@ -82,6 +82,16 @@ async function addBlockers(h, count, prefix = "bulk") {
     },
   }));
   await h.store.transact(writes.map((w) => ref(w.collection, w.id)), () => writes, audit);
+}
+
+function forceFinalizePending(h) {
+  const job = h.store.data.device_operation_jobs.find((row) => row._id === h.jobId);
+  Object.assign(job, { state: "retryable_failed", revision: 2, attempts: 1, leaseGeneration: 1,
+    leaseOwner: null, leaseExpiresAt: null, dispatchAuthorizedAt: null, nextAttemptAt: h.now.value,
+    cleanupPhase: "finalize", providerOutcome: "confirmed_removed", finalizeAttempts: 1,
+    result: { attempt: 1, outcome: "retryable_failed", errorKind: "LOCAL_FINALIZE",
+      reasonCode: "LOCAL_FINALIZE_PENDING", finishedAt: h.now.value }, updatedAt: h.now.value });
+  return job;
 }
 
 test("H4-b success: Provider once, slot/claim tombstones and cleanup closes", async () => {
@@ -434,4 +444,207 @@ test("H4-b manual retry requires current revision and device.operation.retry", a
     await assert.rejects(() => h.dispatcher.requeue(h.jobId, failed.revision + 1, actor), (e) => e.code === "INVALID_JOB");
     assert.equal((await h.dispatcher.requeue(h.jobId, failed.revision, actor)).state, "queued");
   } finally { await rm(h.dir, { recursive: true, force: true }); }
+});
+
+test("H4-b T2 rejects credential/person and slot/cycle corruption with Provider 0", async () => {
+  for (const kind of ["credential", "slot", "claim"]) {
+    const h = await harness();
+    try {
+      if (kind === "credential") h.store.data.face_credentials[0].personId = "person-other";
+      if (kind === "slot") h.store.data.grant_slot_claims[0].cycleId = "cycle-other";
+      if (kind === "claim") {
+        const claim = h.store.data.device_claims[0];
+        claim.state = "released"; claim.boundDeviceId = undefined; claim.activatedAt = undefined;
+        claim.activatedByAuditId = undefined; claim.releasedAt = 2;
+        claim.releasedByAuditId = "audit-other"; claim.releaseReason = "other-cleanup";
+      }
+      const stopped = await h.dispatcher.dispatch(h.jobId);
+      assert.equal(stopped.state, "terminal_failed", kind);
+      assert.equal(h.provider.calls.length, 0, kind);
+      assert.equal((await h.store.get(GRANTS, h.grantId, ORG)).cleanupPending, true);
+      assert.equal((await h.store.get("grant_slot_claims", h.slotId, ORG)).state,
+        kind === "slot" ? "active" : h.store.data.grant_slot_claims[0].state);
+    } finally { await rm(h.dir, { recursive: true, force: true }); }
+  }
+});
+
+test("H4-b T3 rechecks grant bindings after Provider success", async () => {
+  const h = await harness();
+  const original = h.provider.revokeFace.bind(h.provider);
+  h.provider.revokeFace = async (...args) => {
+    const out = await original(...args);
+    h.store.data.device_access_grants[0].deviceId = "device-rebound";
+    return out;
+  };
+  try {
+    const pending = await h.dispatcher.dispatch(h.jobId);
+    assert.equal(pending.cleanupPhase, "finalize");
+    assert.equal(pending.providerOutcome, "confirmed_removed");
+    assert.equal((await h.store.get("grant_slot_claims", h.slotId, ORG)).state, "active");
+    assert.equal((await h.store.get(GRANTS, h.grantId, ORG)).cleanupPending, true);
+    assert.equal(h.provider.calls.length, 1);
+  } finally { await rm(h.dir, { recursive: true, force: true }); }
+});
+
+test("H4-b corrupt candidate is conservative before and after Provider", async () => {
+  const pre = await harness();
+  try {
+    await addBlockers(pre, 1, "corrupt-pre");
+    pre.store.data.device_access_grants.at(-1).state = "mystery";
+    const stopped = await pre.dispatcher.dispatch(pre.jobId);
+    assert.equal(stopped.state, "retryable_failed");
+    assert.equal(pre.provider.calls.length, 0);
+    assert.equal((await pre.store.get("device_claims", pre.claimId)).state, "active");
+  } finally { await rm(pre.dir, { recursive: true, force: true }); }
+
+  const post = await harness();
+  const original = post.provider.revokeFace.bind(post.provider);
+  post.provider.revokeFace = async (...args) => {
+    const out = await original(...args);
+    await addBlockers(post, 1, "corrupt-post");
+    post.store.data.device_access_grants.at(-1).cleanupPending = "yes";
+    post.store.data.device_access_grants.at(-1).state = "revoked";
+    return out;
+  };
+  try {
+    const pending = await post.dispatcher.dispatch(post.jobId);
+    assert.equal(pending.cleanupPhase, "finalize");
+    assert.equal(post.provider.calls.length, 1);
+    assert.equal((await post.store.get("grant_slot_claims", post.slotId, ORG)).state, "active");
+  } finally { await rm(post.dir, { recursive: true, force: true }); }
+});
+
+test("H4-b T3 log/audit preoccupation rolls back cleanup and enters local finalize", async () => {
+  for (const kind of ["log", "audit"]) {
+    const h = await harness();
+    try {
+      const id = kind === "log"
+        ? deterministicLogId(h.jobId, "succeeded", 4)
+        : `audit-h4-v1:${createHash("sha256").update(JSON.stringify([ORG, h.jobId, "finalize", 4])).digest("hex")}`;
+      const collection = kind === "log" ? "device_operation_logs" : "admin_audit";
+      await h.store.transact([ref(collection, id)], () => [{ collection, id,
+        data: { orgId: ORG, actorId: "occupied", actorType: "system", action: "occupied" } }], audit);
+      const pending = await h.dispatcher.dispatch(h.jobId);
+      assert.equal(pending.cleanupPhase, "finalize", kind);
+      assert.equal(pending.providerOutcome, "confirmed_removed", kind);
+      assert.equal(h.provider.calls.length, 1, kind);
+      assert.equal((await h.store.get("grant_slot_claims", h.slotId, ORG)).state, "active", kind);
+    } finally { await rm(h.dir, { recursive: true, force: true }); }
+  }
+});
+
+test("H4-b local finalize accepts only this job/audit tombstones", async () => {
+  const good = await harness();
+  try {
+    forceFinalizePending(good);
+    const slot = good.store.data.grant_slot_claims[0];
+    Object.assign(slot, { state: "released", revision: 2, releasedAt: good.now.value,
+      releasedByJobId: good.jobId, activeClaimId: undefined, activatedAt: undefined });
+    const done = await good.dispatcher.finalize(good.jobId);
+    assert.equal(done.state, "succeeded");
+    assert.equal((await good.store.get("device_claims", good.claimId)).state, "released");
+    assert.equal(good.provider.calls.length, 0);
+  } finally { await rm(good.dir, { recursive: true, force: true }); }
+
+  for (const kind of ["other-job", "partial-claim"]) {
+    const bad = await harness();
+    try {
+      forceFinalizePending(bad);
+      if (kind === "other-job") {
+        const slot = bad.store.data.grant_slot_claims[0];
+        Object.assign(slot, { state: "released", revision: 2, releasedAt: bad.now.value,
+          releasedByJobId: "job-other", activeClaimId: undefined, activatedAt: undefined });
+      } else {
+        const targetRevision = 3;
+        const auditId = `audit-h4-v1:${createHash("sha256").update(JSON.stringify([
+          ORG, bad.jobId, "finalize", targetRevision])).digest("hex")}`;
+        const claim = bad.store.data.device_claims[0];
+        Object.assign(claim, { state: "released", revision: 2, releasedAt: bad.now.value,
+          releasedByAuditId: auditId, releaseReason: "no-active-grants", boundDeviceId: undefined,
+          activatedAt: undefined, activatedByAuditId: undefined });
+      }
+      const pending = await bad.dispatcher.finalize(bad.jobId);
+      assert.equal(pending.state, "retryable_failed", kind);
+      assert.equal((await bad.store.get(GRANTS, bad.grantId, ORG)).cleanupPending, true);
+      assert.equal(bad.provider.calls.length, 0);
+    } finally { await rm(bad.dir, { recursive: true, force: true }); }
+  }
+});
+
+test("H4-b T1/T2/T3 transaction callback replay still invokes Provider once", async () => {
+  const h = await harness();
+  const original = h.store.transact.bind(h.store);
+  h.store.transact = (refs, build, txAudit) => original(refs, async (state) => {
+    const first = await build(structuredClone(state));
+    const second = await build(state);
+    assert.deepEqual(second, first);
+    return second;
+  }, txAudit);
+  try {
+    assert.equal((await h.dispatcher.dispatch(h.jobId)).state, "succeeded");
+    assert.equal(h.provider.calls.length, 1);
+  } finally { await rm(h.dir, { recursive: true, force: true }); }
+});
+
+test("H4-b T1/T2 acknowledgement loss stops before Provider and expires safely", async () => {
+  for (const phase of ["claim", "authorize"]) {
+    const h = await harness();
+    const original = h.store.transact.bind(h.store);
+    let lost = false;
+    h.store.transact = async (refs, build, txAudit) => {
+      const result = await original(refs, build, txAudit);
+      if (!lost && txAudit?.action === `H4 ${phase}`) {
+        lost = true;
+        throw Object.assign(new Error("ack lost"), { code: "ADAPTER_UNAVAILABLE" });
+      }
+      return result;
+    };
+    try {
+      await assert.rejects(() => h.dispatcher.dispatch(h.jobId));
+      assert.equal(h.provider.calls.length, 0, phase);
+      await assert.rejects(() => h.dispatcher.dispatch(h.jobId));
+      assert.equal(h.provider.calls.length, 0, phase);
+      h.now.value += 60_000;
+      assert.equal((await h.dispatcher.expire(h.jobId)).state, "awaiting_result");
+    } finally { await rm(h.dir, { recursive: true, force: true }); }
+  }
+});
+
+test("H4-b T3 acknowledgement loss never resends Provider", async () => {
+  const h = await harness();
+  const original = h.store.transact.bind(h.store);
+  let lost = false;
+  h.store.transact = async (refs, build, txAudit) => {
+    const result = await original(refs, build, txAudit);
+    if (!lost && txAudit?.action === "H4 finalize") {
+      lost = true;
+      throw Object.assign(new Error("ack lost"), { code: "ADAPTER_UNAVAILABLE" });
+    }
+    return result;
+  };
+  try {
+    await assert.rejects(() => h.dispatcher.dispatch(h.jobId));
+    assert.equal((await h.store.get(JOBS, h.jobId, ORG)).state, "succeeded");
+    assert.equal(h.provider.calls.length, 1);
+    await assert.rejects(() => h.dispatcher.dispatch(h.jobId));
+    assert.equal(h.provider.calls.length, 1);
+  } finally { await rm(h.dir, { recursive: true, force: true }); }
+});
+
+test("H4-b Cloud/live/non-Mock configurations fail closed", async () => {
+  const fakeApp = { database: () => ({}) };
+  const cloud = new CloudStore(fakeApp);
+  assert.throws(() => new H4MockRevoker({ store: cloud, orgId: ORG,
+    provider: new MockFaceAccessProvider() }), (e) => e.code === "NOT_CONFIGURED");
+  const dir = await mkdtemp(join(tmpdir(), "smartpm-h4b-config-"));
+  const local = await new LocalStore(dir).init();
+  try {
+    assert.throws(() => new H4MockRevoker({ store: local, orgId: ORG, provider: {} }),
+      (e) => e.code === "NOT_CONFIGURED");
+    const h = await harness({ runtimeConfig: () => ({ executionMode: "live", provider: "mock" }) });
+    try {
+      assert.equal((await h.dispatcher.dispatch(h.jobId)).state, "terminal_failed");
+      assert.equal(h.provider.calls.length, 0);
+    } finally { await rm(h.dir, { recursive: true, force: true }); }
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

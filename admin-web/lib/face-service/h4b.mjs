@@ -173,10 +173,14 @@ function assertFence(job, fence, now, expired = false) {
       job.leaseExpiresAt !== fence.expiresAt || (expired ? now < job.leaseExpiresAt : now >= job.leaseExpiresAt))
     fail("LEASE_FENCE_REJECTED");
 }
-function relevantGrant(grant, targetId, deviceId, claimId) {
-  if (!grant || grant._id === targetId || grant.deviceId !== deviceId || grant.claimId !== claimId) return false;
-  return ["pending", "effective", "suspended", "expired"].includes(grant.state) ||
-    (grant.state === "revoked" && grant.cleanupPending === true);
+function candidateDisposition(grant, targetId, deviceId, claimId) {
+  if (!grant || grant._id === targetId || grant.deviceId !== deviceId || grant.claimId !== claimId) return "outside";
+  if (["pending", "effective", "suspended", "expired"].includes(grant.state)) return "block";
+  if (grant.state === "revoked") {
+    if (grant.cleanupPending === true) return "block";
+    if (grant.cleanupPending === false) return "clear";
+  }
+  return "invalid";
 }
 
 export class H4MockRevoker {
@@ -247,14 +251,16 @@ export class H4MockRevoker {
         grant.cleanupJobId !== job._id || grant.revision !== s.grantRevision + 1 ||
         grant.credentialId !== job.credentialId || grant.deviceId !== job.deviceId ||
         grant.claimId !== s.claimId || grant.slotId !== s.slotId) fail("CLEANUP_SNAPSHOT_REQUIRED");
-    if (!credential || credential.orgId !== job.orgId || credential.revision !== s.credentialRevision) fail("CREDENTIAL_CHANGED");
+    if (!credential || credential.orgId !== job.orgId || credential.revision !== s.credentialRevision ||
+        credential.personId !== grant.personId) fail("CREDENTIAL_CHANGED");
     try { validateAccessDeviceRecord(device); validateOwnerClaimRecord(claim); validateGrantSlotRecord(slot);
       validateDeviceClaimReleaseGuard(Object.hasOwn(guard || {}, "_id") ? guard : { ...guard, _id: s.releaseGuardId });
     } catch { fail("CLEANUP_SNAPSHOT_REQUIRED"); }
     if (device.revision !== s.deviceRevision || device.claimId !== s.claimId || device.orgId !== job.orgId ||
         claim.revision !== s.claimRevision || claim.state !== "active" || !ownerClaimMatchesDevice(claim, device, job.deviceId) ||
         slot.revision !== s.slotRevision || slot.state !== "active" || slot.activeClaimId !== job.grantId ||
-        slot.deviceId !== job.deviceId || guard.revision !== s.releaseGuardRevision || guard.epoch !== s.releaseGuardEpoch ||
+        slot.personId !== grant.personId || slot.cycleId !== grant.cycleId || slot.deviceId !== job.deviceId ||
+        guard.revision !== s.releaseGuardRevision || guard.epoch !== s.releaseGuardEpoch ||
         guard.orgId !== job.orgId || guard.claimId !== s.claimId) fail("DEVICE_CLAIM_INVALID");
     return { grant, credential, device, claim, slot, guard };
   }
@@ -266,8 +272,12 @@ export class H4MockRevoker {
     let capacityBlocked = false;
     try {
       const grants = await this.#store.list(GRANTS, this.orgId);
-      candidates = grants.filter((item) => relevantGrant(item, job.grantId, job.deviceId, job.cleanupSnapshot.claimId));
-      capacityBlocked = 8 + candidates.length > 90;
+      const scoped = grants.map((item) => ({ item,
+        disposition: candidateDisposition(item, job.grantId, job.deviceId, job.cleanupSnapshot.claimId) }))
+        .filter(({ disposition }) => disposition !== "outside" && disposition !== "clear");
+      candidates = scoped.map(({ item }) => item);
+      capacityBlocked = scoped.some(({ disposition }) => disposition === "invalid") ||
+        8 + candidates.length > 90;
     } catch { capacityBlocked = true; }
     return this.#tx([ref(JOBS, job._id), ...this.#bindingRefs(job), ref(LOGS, retryLog), ref(LOGS, terminalLog)],
       job, "authorize", job.revision + 1, (state) => {
@@ -341,7 +351,11 @@ export class H4MockRevoker {
       if (fence) return this.#markFinalizePending(fence, "ADAPTER_UNAVAILABLE");
       return this.#localFinalizeFailure(job, "ADAPTER_UNAVAILABLE");
     }
-    const candidates = all.filter((item) => relevantGrant(item, job.grantId, job.deviceId, job.cleanupSnapshot.claimId));
+    const scoped = all.map((item) => ({ item,
+      disposition: candidateDisposition(item, job.grantId, job.deviceId, job.cleanupSnapshot.claimId) }))
+      .filter(({ disposition }) => disposition !== "outside" && disposition !== "clear");
+    const candidates = scoped.map(({ item }) => item);
+    const invalidCandidate = scoped.some(({ disposition }) => disposition === "invalid");
     const targetRevision = job.revision + 1;
     const logId = deterministicLogId(job._id, "succeeded", targetRevision);
     const base = [ref(JOBS, job._id), ref(GRANTS, job.grantId), ref(SLOTS, job.cleanupSnapshot.slotId),
@@ -363,35 +377,55 @@ export class H4MockRevoker {
         const claim = state[`${CLAIMS}/${job.cleanupSnapshot.claimId}`];
         const device = state[`${DEVICES}/${job.deviceId}`];
         const guard = state[`${GUARDS}/${job.cleanupSnapshot.releaseGuardId}`];
-        if (!grant || grant.state !== "revoked" || grant.cleanupPending !== true || grant.cleanupJobId !== job._id)
+        if (!grant || grant.orgId !== job.orgId || grant.state !== "revoked" || grant.cleanupPending !== true ||
+            grant.cleanupJobId !== job._id || grant.credentialId !== job.credentialId ||
+            grant.deviceId !== job.deviceId || grant.claimId !== job.cleanupSnapshot.claimId ||
+            grant.slotId !== job.cleanupSnapshot.slotId)
           fail("CLEANUP_SNAPSHOT_REQUIRED");
         try { validateGrantSlotRecord(slot); validateOwnerClaimRecord(claim); validateAccessDeviceRecord(device);
           validateDeviceClaimReleaseGuard(Object.hasOwn(guard || {}, "_id") ? guard : { ...guard, _id: job.cleanupSnapshot.releaseGuardId });
         } catch { fail("DEVICE_CLAIM_INVALID"); }
         if (!guardWitness || guard.revision !== guardWitness.revision || guard.epoch !== guardWitness.epoch)
           fail("REVISION_CONFLICT");
-        if (slot.state !== "active" || slot.activeClaimId !== job.grantId || claim.state !== "active" ||
-            !ownerClaimMatchesDevice(claim, device, job.deviceId) || device.claimId !== claim._id)
+        const slotActive = slot.state === "active" && slot.activeClaimId === job.grantId;
+        const slotByThisJob = slot.state === "released" && slot.releasedByJobId === job._id;
+        const claimActive = claim.state === "active" && ownerClaimMatchesDevice(claim, device, job.deviceId);
+        const claimByThisAudit = claim.state === "released" && claim.releasedByAuditId === auditId;
+        if (invalidCandidate || (!slotActive && !slotByThisJob) ||
+            slot.orgId !== job.orgId || slot.personId !== grant.personId || slot.cycleId !== grant.cycleId ||
+            slot.deviceId !== job.deviceId || (!claimActive && !claimByThisAudit) ||
+            (claimByThisAudit && slotActive) || claim.ownerOrgId !== job.orgId || device.orgId !== job.orgId ||
+            claim.provider !== device.provider || claim.digestRealm !== device.digestRealm ||
+            claim.keyVersion !== device.keyVersion || device.ownerOrgId !== job.orgId ||
+            device.claimId !== claim._id || guard.orgId !== job.orgId ||
+            guard.claimId !== claim._id)
           fail("DEVICE_CLAIM_INVALID");
-        const blockers = candidates.map((item) => state[`${GRANTS}/${item._id}`]).filter((item) =>
-          relevantGrant(item, job.grantId, job.deviceId, job.cleanupSnapshot.claimId));
-        const releasedSlot = { ...slot, state: "released", revision: slot.revision + 1, updatedAt: now,
-          releasedAt: now, releasedByJobId: job._id, activeClaimId: undefined, activatedAt: undefined };
+        const currentCandidates = candidates.map((item) => state[`${GRANTS}/${item._id}`]);
+        if (currentCandidates.some((item) =>
+          candidateDisposition(item, job.grantId, job.deviceId, job.cleanupSnapshot.claimId) === "invalid"))
+          fail("INVALID_STATE");
+        const blockers = currentCandidates.filter((item) =>
+          candidateDisposition(item, job.grantId, job.deviceId, job.cleanupSnapshot.claimId) === "block");
+        const releasedSlot = slotByThisJob ? slot : { ...slot, state: "released",
+          revision: slot.revision + 1, updatedAt: now, releasedAt: now, releasedByJobId: job._id,
+          activeClaimId: undefined, activatedAt: undefined };
         const nextGrant = { ...grant, cleanupPending: false, revision: grant.revision + 1, updatedAt: now };
         const plan = transition(current, "succeeded", now, { jobPatch: { cleanupPhase: "finalize",
           providerOutcome: "confirmed_removed" } });
         const writes = [...plan.writes,
-          { collection: GRANTS, id: grant._id, data: patchRecord(nextGrant) },
-          { collection: SLOTS, id: slot._id, data: patchRecord(releasedSlot) }];
+          { collection: GRANTS, id: grant._id, data: patchRecord(nextGrant) }];
+        if (!slotByThisJob) writes.push({ collection: SLOTS, id: slot._id, data: patchRecord(releasedSlot) });
         if (!blockers.length) {
-          const releasedClaim = { ...claim, state: "released", revision: claim.revision + 1, updatedAt: now,
-            releasedAt: now, releasedByAuditId: auditId, releaseReason: "no-active-grants",
-            boundDeviceId: undefined, activatedAt: undefined, activatedByAuditId: undefined };
-          const nextGuard = { ...guard, epoch: guard.epoch + 1, revision: guard.revision + 1, updatedAt: now };
-          validateOwnerClaimRecord(releasedClaim); validateDeviceClaimReleaseGuard(nextGuard);
-          writes.push({ collection: CLAIMS, id: claim._id, data: patchRecord(releasedClaim) },
-            { collection: GUARDS, id: guard._id, data: patchRecord(nextGuard) });
-        }
+          if (!claimByThisAudit) {
+            const releasedClaim = { ...claim, state: "released", revision: claim.revision + 1, updatedAt: now,
+              releasedAt: now, releasedByAuditId: auditId, releaseReason: "no-active-grants",
+              boundDeviceId: undefined, activatedAt: undefined, activatedByAuditId: undefined };
+            const nextGuard = { ...guard, epoch: guard.epoch + 1, revision: guard.revision + 1, updatedAt: now };
+            validateOwnerClaimRecord(releasedClaim); validateDeviceClaimReleaseGuard(nextGuard);
+            writes.push({ collection: CLAIMS, id: claim._id, data: patchRecord(releasedClaim) },
+              { collection: GUARDS, id: guard._id, data: patchRecord(nextGuard) });
+          }
+        } else if (claimByThisAudit) fail("DEVICE_CLAIM_INVALID");
         validateGrantSlotRecord(releasedSlot);
         if (state[`${LOGS}/${plan.log.id}`]) fail("CONFLICT");
         return { value: plan.job, writes };

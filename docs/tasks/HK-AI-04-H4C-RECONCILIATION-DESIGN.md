@@ -5,7 +5,8 @@
 - 服务层基线：`feat/hk-face-h4b-mock-cleanup` @ `1155b7ba65991d324fb8b22bb8f7dd87f49428f9`
 - 任务卡：`547fee5`（`docs/tasks/HK-AI-04-H4C-RECONCILIATION-DESIGN-TASK-2026-11-13.md`）
 - 前次设计：`d6815749dd478e8027ee54c2d82c9fd9b3e1826e`
-- 复审记录：`0c281045f00035c52089bafc3a1042f94f41e5a3`（[HK-AI-04-H4C-DESIGN-REVIEW-D681574-2026-11-14.md](https://github.com/1997dmsu-sketch/SMART-PM/blob/0c281045f00035c52089bafc3a1042f94f41e5a3/docs/tasks/HK-AI-04-H4C-DESIGN-REVIEW-D681574-2026-11-14.md)）
+- 前次复审：`0c281045f00035c52089bafc3a1042f94f41e5a3`（[REVIEW-D681574](https://github.com/1997dmsu-sketch/SMART-PM/blob/0c281045f00035c52089bafc3a1042f94f41e5a3/docs/tasks/HK-AI-04-H4C-DESIGN-REVIEW-D681574-2026-11-14.md)）
+- 本轮复审：`93c529d`（[REVIEW-377666A](https://github.com/1997dmsu-sketch/SMART-PM/blob/93c529d/docs/tasks/HK-AI-04-H4C-DESIGN-REVIEW-377666A-2026-11-14.md)）
 - H4-b 终审：`HK-AI-04-H4B-APPROVAL-1155B7B-2026-11-13.md`（任务卡提交 `547fee5`）
 - 分支：`docs/hk-face-h4c-reconciliation-design`
 - 边界：H4-c 只冻结 `awaiting_result` 的人工对账入口；不实现 H4-d、HTTP 注册、真实 Provider、设备写或生产部署。
@@ -23,7 +24,17 @@
 | P1-2 schema/algorithm/key 版本混用 | 分离 `schemaVersion`、`digestAlgorithmVersion`、`keyVersion` | §5.2、§5.3 |
 | P1-3 confirmed_present/still 未验 job/grant/snapshot | 三种 decision 统一复核 job、grant、cleanupSnapshot、evidenceScope | §6.1、§6.3、§6.4 |
 | P1-4 200/202/终态失败投影 | 明确 complete/pending/terminal/ack-loss/不同键重复的响应矩阵 | §13 |
-| P1-5 RC 矩阵缺口 | 新增 K3/head/grant/provider 伪造/恢复/投影用例，RC01–RC64 连续编号 | §15 |
+| P1-5 RC 矩阵缺口 | 新增 K3/head/previous evidence/grant/provider 伪造/恢复/投影用例，RC01–RC73 连续编号 | §15 |
+
+### 0.1 本轮复审（`377666a`）返工
+
+| 复审项 | 本稿处理 | 位置 |
+|---|---|---|
+| P0-1 finalize-retry 重复恢复与 duplicate 冲突 | 冻结 generation=`(jobId, expectedRevision)`：不同键在当前未消费终态 revision 允许开新一轮，旧 revision `RECONCILE_GENERATION_CONSUMED`；只有同键同摘要重放返回指针投影，不使用 `duplicate:true`；`requestDigest` 精确 `{jobId,expectedRevision}`；补 200/202/terminal、并发、ack loss、再次耗尽用例 | §6.5、§7、§13、§15 |
+| P0-2 previous evidence 只核对引用 | 事务内对 previous evidence 运行正式 validator，核对 `_id/orgId/jobId/sequence/head`、K3 realm/version/fingerprint，并用 K3 重算 HMAC 后 `timingSafeEqual`；任一异常 `EVIDENCE_CHAIN_BROKEN/409`；第一条 evidence 必须 head=0/null 且 sequence=1 | §5.4、§10、§15 |
+| P1-1 文档重复 | 合并 §5.5 查询/敏感/不可变三行；§6 标题保持单一 | §5.5、§6 |
+| P1-2 恢复事务 snapshot/guard 矛盾 | 明确 finalize-retry refs 仅 job/grant/op key/log/audit，不含 slot/claim/device/guard；恢复事务只校验 job/grant 与 cleanupSnapshot schema，随后 H4-b finalize 完整复核这些记录 | §6.5、§8.1 |
+| P1-3 恢复 refs/K2 result/RC 映射 | 冻结 finalize-retry 9 refs、精确 K2 result 4 字段、200/202/terminal 投影，并补 RC65–RC73 | §6.5、§8.1、§13、§15 |
 
 ## 1. 结论与冻结边界
 
@@ -206,16 +217,24 @@ _id, orgId, jobId, revision, lastSequence, lastEvidenceId, lastObservedAt, creat
 | `lastObservedAt` | 0 或安全整数；最后一条 evidence 的 observedAt |
 | `createdAt/updatedAt` | 服务端安全时间戳；updatedAt 用于 60 秒间隔 |
 
-事务内算法：
+事务内算法（previous evidence 必须做**正式 validator + 内容/归属/sequence/K3 HMAC 复核**）：
 
 1. 事务外预读 head（可能 null）、按 `(orgId,jobId)` 检查是否已有 evidence（只用于识别“head 缺失但链存在”的损坏）。
-2. 事务 refs 必须包含 head（新建/更新）与新 evidence；若 head 已存在，还包含 `previousEvidenceId` 指向的旧 evidence。
-3. 事务内重新读取 head：
+2. 事务 refs 必须包含 head（新建/更新）、新 evidence；若 head 已存在，还包含 `head.lastEvidenceId` 指向的 previous evidence。
+3. 事务内先执行 K3 `applyEvidenceDomain`（§5.3），再重新读取 head：
    - 预读为 null：head 必须仍为 null，且该 job 无既有 evidence；否则 `EVIDENCE_CHAIN_BROKEN/409`；
    - 预读非 null：head 必须存在，`revision` 与 `lastEvidenceId` 完全匹配；否则 `EVIDENCE_HEAD_CONFLICT/409`（消失/被替换为 `EVIDENCE_CHAIN_BROKEN`）。
-4. `sequence = lastSequence + 1`；`previousEvidenceId = lastEvidenceId`；新 evidence ID 对 `(org,job,sequence)` 确定性；若已存在 → `CONFLICT/409`。
-5. 写入新 evidence，并更新/创建 head：`lastSequence=sequence`、`lastEvidenceId=newId`、`lastObservedAt=observedAt`、`revision+1`、`updatedAt=now`。
-6. 并发不同键：只有一个 head CAS 能提交；失败方 `EVIDENCE_HEAD_CONFLICT/409`，不得分叉。同键重放在 op key 层直接返回，不再 CAS。
+4. 若 head 非空，事务内读取 `previous = state[device_operation_evidence/head.lastEvidenceId]`，并逐项校验：
+   - `validateEvidenceRecord(previous)` 通过：精确字段集合、schemaVersion、未知字段、长度、类型、枚举、敏感字段拒绝；
+   - `previous._id === head.lastEvidenceId`；`previous.orgId === job.orgId`；`previous.jobId === job._id`；
+   - `previous.sequence === head.lastSequence`；`previous.observedAt === head.lastObservedAt`；
+   - `previous.keyRealm/keyVersion/keyFingerprint` 与已冻结 K3 domain head/version 及当前 K3 配置一致；H4-c 不接受历史 keyVersion（无旧密钥材料）→ 不一致直接 `EVIDENCE_CHAIN_BROKEN/409`；
+   - 用 K3 当前密钥按 §5.3 消息重算 `previous.digest`，并以 `crypto.timingSafeEqual` 常量时间比较；不一致 → `EVIDENCE_CHAIN_BROKEN/409`；
+   - 任一异常统一 `EVIDENCE_CHAIN_BROKEN/409`，整事务零写。
+5. 第一条 evidence：head 必须为 `lastSequence=0`、`lastEvidenceId=null`，且该 job 无既有 evidence；新 evidence 必须 `sequence=1`、`previousEvidenceId=null`。否则 `EVIDENCE_CHAIN_BROKEN/409`。
+6. 非第一条：`sequence = head.lastSequence + 1`；`previousEvidenceId = head.lastEvidenceId`；新 evidence ID 对 `(org,job,sequence)` 确定性；若已存在 → `CONFLICT/409`。
+7. 写入新 evidence，并更新/创建 head：`lastSequence=sequence`、`lastEvidenceId=newId`、`lastObservedAt=observedAt`、`revision+1`、`updatedAt=now`。
+8. 并发不同键：只有一个 head CAS 能提交；失败方 `EVIDENCE_HEAD_CONFLICT/409`，不得分叉。同键重放在 op key 层直接返回，不再 CAS。
 
 ### 5.5 Store/schema/索引与敏感字段
 
@@ -227,9 +246,7 @@ H4-c 编码时必须一并冻结，但本轮不实现：
 | `seed()`/`init()` | 三集合初始化为 `[]`；旧 LocalStore 数据文件按现有 `||= []` 模式补齐 |
 | validator | `validateEvidenceRecord`、`validateEvidenceHead`、`validateEvidenceDomainRecord`，精确字段 + `rejectUnknownFields`；错误统一 `EVIDENCE_INVALID`/`DOMAIN_INCOMPLETE`/`DOMAIN_MISMATCH` |
 | 索引（提案） | evidence `(orgId, jobId, sequence)`；head `(orgId, jobId)`；domain `(realm, kind, keyVersion)` |
-| 查询边界 | H4-c 只按确定性 ID 点查/事务读；不提供公开全量查询；未来审计分页另设计 |
-| 敏感拒绝 | validator 拒绝未知字段；禁止原始响应/序列号/IP/MAC/账号/图片/objectKey/checksum/证书指纹/原始幂等键 |
-| 不可变性 | evidence create-only；head 只允许 CAS 更新指定字段；domain 只按 K3 guard 写入 |
+| 边界/不可变/敏感 | 只按确定性 ID 点查/事务读，不提供公开全量查询；evidence create-only，head 仅 CAS 更新指定字段，domain 仅按 K3 guard 写入；validator 拒绝未知/敏感字段与原始响应/序列号/IP/MAC/账号/图片/objectKey/checksum/证书指纹/原始幂等键 |
 
 ## 6. 三种 decision 的状态机、grant 复核与写集
 
@@ -335,13 +352,28 @@ H4-b finalize 的 `8+N` 在 N=82 时正好 90；同一事务再加 evidence/head
 |---|---|
 | 入口 | `reconcileFinalize(jobId, {expectedRevision}, {idempotencyKey})` |
 | 权限 | `device.operation.reconcile`；事务内复核组织/成员/actor |
-| K2 method | `face.reconcile.finalize`（独立摘要与 op key） |
-| 允许前置 | job `terminal_failed`、`providerOutcome:"confirmed_removed"`、`cleanupPhase:"finalize"`、`result.errorKind==="LOCAL_FINALIZE"`、`result.reasonCode==="LOCAL_FINALIZE_EXHAUSTED"`；grant `revoked/cleanupPending=true/cleanupJobId===jobId`；snapshot/guard 通过 §6.1 |
+| K2 method | `face.reconcile.finalize`；`requestDigest=SHA-256(stable({jobId, expectedRevision}))`，精确包含且只包含这两个字段 |
+| generation | `(jobId, expectedRevision)` 为恢复 generation；每次恢复提交后 job revision 必然增加，下一轮必须使用新 revision |
+| 允许前置 | job `terminal_failed`、`providerOutcome:"confirmed_removed"`、`cleanupPhase:"finalize"`、`result.errorKind==="LOCAL_FINALIZE"`、`result.reasonCode==="LOCAL_FINALIZE_EXHAUSTED"`；grant `revoked/cleanupPending=true/cleanupJobId===jobId`；`cleanupSnapshot` 通过 H4-b snapshot validator |
 | CAS | `job.revision===expectedRevision`；grant 绑定复核；head 不参与（不新增证据） |
-| 写 | job 转 `retryable_failed`/finalize，`finalizeAttempts:1`，`nextAttemptAt=now`，`result` 为 `{attempt,outcome:"retryable_failed",errorKind:"LOCAL_FINALIZE",reasonCode:"RECONCILE_FINALIZE_RECOVERY",finishedAt}`；log/op key/op domain/audit |
-| 后续 | 同事务后调用 H4-b `finalize(jobId)`；Provider 0；成功则 `succeeded/cleanupPending=false`，失败进入 30/120/600 重试，再次耗尽可再次人工恢复 |
-| 重放 | 同 op key 同摘要返回原结果；同键异摘要 `CONFLICT`；不同键在终态同结论 `duplicate:true` |
+| refs | `organizations`、`org_memberships`、`device_operation_jobs`、`device_access_grants`、`operation_keys`、`operation_key_domains`×2、`device_operation_logs`、`admin_audit` = **9**；不含 slot/claim/device/guard |
+| writes | job 转 `retryable_failed`/finalize，`finalizeAttempts:1`，`nextAttemptAt=now`，`result` 为 `{attempt,outcome:"retryable_failed",errorKind:"LOCAL_FINALIZE",reasonCode:"RECONCILE_FINALIZE_RECOVERY",finishedAt}`；log/op key/op domain/audit；**0** grant/slot/claim/device |
+| 后续 | 同事务后调用 H4-b `finalize(jobId)`；该调用会读取并完整复核 slot/claim/device/guard 并做 guard CAS；Provider 0；成功则 `succeeded/cleanupPending=false`，失败进入 30/120/600 重试，再次耗尽可开启下一 generation |
+| K2 result | 精确 4 字段 `{kind:"finalize_retry", jobId, generationRevision, recoveryId}`；`recoveryId=h4c-finalize-retry-v1:<sha256(stable([orgId,jobId,generationRevision])).slice(0,32)>`；result 是不可变指针，不写响应快照 |
+| 响应 | 成功 200 complete；H4-b 返回 retryable_failed 则 202 pending；再次耗尽 200 terminal（`terminalReason=LOCAL_FINALIZE_EXHAUSTED`） |
+| 重放/重复 | 同 op key 同摘要 → 原 result 的当前投影，零写；同键异摘要 → `CONFLICT/409`；不同键且 `expectedRevision` 等于**当前未消费的终态 revision** → 允许开启新一轮（不是 duplicate）；不同键指向**已被前一轮消费的旧 revision** → `RECONCILE_GENERATION_CONSUMED/409`；job 已 succeeded/非 exhausted → `INVALID_STATE/409` |
+| 并发 | 两并发同 generation：一个 CAS 成功，另一个 `REVISION_CONFLICT/409`；成功后新 revision 才可下一轮；不得用旧 revision 重复恢复 |
 | 禁止 | 不调用 Provider、不重发 revokeFace、不自动轮询、不重置 grant/slot/claim 资源、不把终态改回业务有效 |
+
+`cleanupSnapshot` 的校验复用 H4-b `validateSnapshot` 语义（编码时导出为共享函数或等价调用），不得复制/放宽；恢复事务不读取 slot/claim/device/guard 记录，随后 H4-b finalize 在自身事务内完整复核这些记录并做 guard CAS。
+
+**生成语义（关闭 P0-1 的关键）**
+
+- `expectedRevision` 不是幂等键的一部分语义“版本号”而已，而是恢复 generation 的 CAS 基准；每次恢复写入都会把 job revision +1。
+- 不同键在**当前** `terminal_failed/LOCAL_FINALIZE_EXHAUSTED` revision 上允许开始新一轮恢复；这**不是** `duplicate:true`，会真实写 job 并再次尝试本地 finalize。
+- 只有以下情况返回重放/冲突：同 op key 同摘要（重放原 result）；同 op key 异摘要（`CONFLICT`）；不同键指向已被消费的旧 revision（`RECONCILE_GENERATION_CONSUMED`）。
+- 恢复成功后 job 为 `succeeded`，不再允许任何 recovery；恢复再次耗尽后 revision 已增加，必须用新 revision 开下一轮。
+- `duplicate:true` 只属于三种 decision 在已终态后的“不同键同结论”场景，不属于 finalize-retry。
 
 该入口使 H4-c 具备“耗尽后人工收敛”闭环；若 Codex 不接受该入口，则 H4-c 必须明确声明“cleanup 不闭环”，不得宣称完成。见 §14 Q8。
 
@@ -352,6 +384,7 @@ H4-b finalize 的 `8+N` 在 N=82 时正好 90；同一事务再加 evidence/head
 - method 固定 `face.reconcile`（恢复入口 `face.reconcile.finalize`）；沿用 [service.mjs](../../admin-web/lib/face-service/service.mjs) 第 117–151 行的 `#opContext`/`#replayValid`/`#opDomainWrites`。
 - `operationKey` 由 HMAC/K2 派生，记录保存 `orgId/realm/keyVersion/requestDigest/result/createdAt`；**不保存原始 Idempotency-Key**。
 - `requestDigest = SHA-256(stable({jobId, expectedRevision, decision, evidence:{sourceType,sourceCode,observedAt}, evidenceDigest, previousEvidenceId, sequence}))`；evidenceDigest 为 §5.3 服务端 K3 摘要。
+- **finalize-retry 的 requestDigest 独立且精确**：`SHA-256(stable({jobId, expectedRevision}))`，不包含 decision/evidence/digest；不得复用 reconcile 摘要。
 - K2 缺失/非法 → `NOT_CONFIGURED/503`；domain 单边缺失/损坏 → `DOMAIN_INCOMPLETE/409`；完整但与配置不一致 → `DOMAIN_MISMATCH/409`；均零写。
 - K3 与 K2 独立：K3 缺失/非法 → `NOT_CONFIGURED/503`；K3 domain 错误见 §5.3；任何一方错误都不得借用另一方配置。
 
@@ -368,6 +401,13 @@ H4-b finalize 的 `8+N` 在 N=82 时正好 90；同一事务再加 evidence/head
 | 不同 op key、已终态且 decision 相同 | `duplicate:true`，返回既有终态，零写 |
 | 不同 op key、已终态且 decision 不同 | `RECONCILE_CONFLICT/409`，保留原终态 |
 | job 已终态且非上述重复 | `INVALID_STATE/409`，零写 |
+| finalize-retry 同 op key 同摘要 | 返回 `{kind:"finalize_retry",jobId,generationRevision,recoveryId}` 指针的当前投影；零写；Provider 0 |
+| finalize-retry 同 op key 异摘要 | `CONFLICT/409`；不改 op key |
+| finalize-retry 不同键、`expectedRevision` 等于当前未消费终态 revision | 允许开启新一轮恢复（不是 duplicate）；CAS 后真实写 job/log/op key |
+| finalize-retry 不同键、`expectedRevision` 已被前一轮消费 | `RECONCILE_GENERATION_CONSUMED/409`，零写 |
+| finalize-retry 并发、同一 generation | 一胜；另一 `REVISION_CONFLICT/409`；失败方不得用旧 revision 重试 |
+| finalize-retry result 损坏/缺字段/错 generationRevision/recoveryId | `CONFLICT/409`，零写 |
+| finalize-retry 在 succeeded 或非 exhausted 状态 | `INVALID_STATE/409`，零写 |
 
 `confirmed_removed` 的 operation key 存**稳定指针**（decision/evidenceId/sequence），不是会随 finalize 变化的完整响应；这样既保持 K2 记录不可变，又允许 R2 完成后同键返回最终投影。该“指针 + 投影”是 H4-c 明确例外（§14 Q5）。
 
@@ -442,6 +482,7 @@ log 数据不新增 `evidenceId/sequence` 字段；证据通过 evidence/head �
 | 缺 release guard / guard ID/org/claim/revision/epoch 不符 | `CLEANUP_SNAPSHOT_REQUIRED`/`DEVICE_CLAIM_INVALID/409` | 0 |
 | slot/claim 损坏、released 字段不合法、activeClaimId 指向他人 | `DEVICE_CLAIM_INVALID/409` | 0 |
 | 旧 evidence 缺 digest/schemaVersion/sequence/previousEvidenceId | `EVIDENCE_INVALID/409` | 0 |
+| previous evidence schema/org/job/sequence/head/K3 HMAC 任一不符 | `EVIDENCE_CHAIN_BROKEN/409` | 0 |
 | evidence head 缺失但已有 evidence、head 消失、head 与 evidence 链不符 | `EVIDENCE_CHAIN_BROKEN/409` | 0 |
 | K3 domain 单边缺失/损坏/同版本换钥 | `DOMAIN_INCOMPLETE`/`DOMAIN_MISMATCH/409` | 0 |
 | job 已 `terminal_failed`/`succeeded` | `INVALID_STATE`/重复规则 | 0 |
@@ -467,6 +508,7 @@ log 数据不新增 `evidenceId/sequence` 字段；证据通过 evidence/head �
 | `RECONCILE_THROTTLED` | 409 | still_unknown 间隔 <60s | 0 |
 | `RECONCILE_LIMIT` | 409 | still_unknown 已达 8 次 | 0 |
 | `RECONCILE_CONFLICT` | 409 | 已终态但 decision 不同 | 0 |
+| `RECONCILE_GENERATION_CONSUMED` | 409 | finalize-retry 指向已被消费的旧 revision | 0 |
 | `CONFLICT` | 409 | op key 摘要/结果损坏、log/audit/evidence preoccupation | 0 |
 | `DOMAIN_INCOMPLETE` | 409 | K2/K3 domain 单边缺失/损坏 | 0 |
 | `DOMAIN_MISMATCH` | 409 | K2/K3 换钥/版本/fingerprint 不符 | 0 |
@@ -505,6 +547,9 @@ HTTP 状态只由统一错误信封输出；H4-c 不新增错误字段，不把�
 | confirmed_removed 第 4 次耗尽 | 200 | `terminal_failed` | true | `terminal` | `LOCAL_FINALIZE_EXHAUSTED` |
 | confirmed_present | 200 | `terminal_failed` | true | `terminal` | `RECONCILE_CONFIRMED_PRESENT` |
 | still_unknown | 200 | `awaiting_result` | true | null | null |
+| finalize-retry 成功 | 200 | `succeeded` | false | `complete` | null |
+| finalize-retry pending | 202 | `retryable_failed` | true | `finalize` | null |
+| finalize-retry 再次耗尽 | 200 | `terminal_failed` | true | `terminal` | `LOCAL_FINALIZE_EXHAUSTED` |
 | 不同键同结论的已终态 | 200 | 既有状态 | 依既有 | 依既有 | 依既有 + `duplicate:true` |
 | 未提交错误 | 4xx/5xx | — | — | — | 错误信封 |
 
@@ -527,6 +572,24 @@ HTTP 状态只由统一错误信封输出；H4-c 不新增错误字段，不把�
 ```
 
 `cleanupPhase` 是响应投影枚举（`finalize|complete|terminal`），不是 job 的 `cleanupPhase` 存储值（H4-b 存储值只有 `dispatch|finalize`）。
+
+**finalize-retry 的最小响应**（独立于三种 decision，避免混淆）：
+
+```json
+{
+  "jobId": "job-revoke-v1:...",
+  "operation": "finalize_retry",
+  "generationRevision": 9,
+  "recoveryId": "h4c-finalize-retry-v1:...",
+  "jobState": "succeeded",
+  "grantState": "revoked",
+  "cleanupPending": false,
+  "cleanupPhase": "complete",
+  "terminalReason": null
+}
+```
+
+finalize-retry 的成功 200、pending 202、再次耗尽 200 terminal 与上表一致；不同键当前终态 revision 开新 generation，旧 revision `RECONCILE_GENERATION_CONSUMED`，不使用 `duplicate:true`。
 
 不返回：evidence digest/原始证据、actorId、orgId、idempotency key、requestDigest、opId、设备/人员/文件字段、异常 message/stack。
 
@@ -582,13 +645,13 @@ H4-c 不修改 `server.mjs`、不注册路由、不新增权限点；路径仅�
 
 ### Q8 `LOCAL_FINALIZE_EXHAUSTED` 恢复入口
 
-**建议**：H4-c 内提供 `finalize-retry` 手工本地恢复（权限/CAS/幂等，Provider 0）；否则 H4-c 必须声明 cleanup 不闭环。**请裁定是否接受该入口。**
+**建议**：H4-c 内提供 `finalize-retry` 手工本地恢复（权限/CAS/幂等，Provider 0）；generation 以当前 `expectedRevision` 为界：不同键在当前未消费终态 revision 上允许开新一轮，旧 revision 返回 `RECONCILE_GENERATION_CONSUMED`；只有同键同摘要才重放。**请裁定是否接受该入口与 generation 语义。**
 
 ### Q9 K3 全局 vs 组织域
 
 **建议**：K3 domain 全局，evidence/head 组织域；全局防止按组织绕过同版本换钥。**请裁定集合属性。**
 
-## 15. 连续测试矩阵（RC01–RC64）
+## 15. 连续测试矩阵（RC01–RC73）
 
 记号：`Z`=全库内容级零变化（含 job/grant/slot/claim/device/guard/evidence/head/domain/log/op key/audit）；`P0`=Provider 0；`X`=允许的 H4-c 写集。所有用例先固化注入后基线，再比较。
 
@@ -658,8 +721,17 @@ H4-c 不修改 `server.mjs`、不注册路由、不新增权限点；路径仅�
 | RC62 | finalize-retry 权限/CAS/同键重放 | 403/409 或重放原结果；零重复释放 | 0 | Z |
 | RC63 | finalize-retry 再次耗尽 | terminal_failed/LOCAL_FINALIZE_EXHAUSTED 投影；资源不释放；可再次人工恢复 | 0 | X |
 | RC64 | 200/202/terminal/ack-loss/不同键重复投影 | 与 §13.1 一致；无重复核心写；Provider 0 | 0 | Z/X |
+| RC65 | finalize-retry 同 generation 两并发 | 一个 CAS 成功；另一个 REVISION_CONFLICT/409；无重复写 | 0 | X/Z |
+| RC66 | finalize-retry 提交后确认丢失，同键重放 | 返回同一 recovery result 指针投影；不重复 job/log/op key | 0 | Z |
+| RC67 | finalize-retry 再次耗尽后，新 revision + 新键 | 允许新 generation；旧 revision 不得重用 | 0 | X |
+| RC68 | finalize-retry 不同键指向已消费旧 revision | RECONCILE_GENERATION_CONSUMED/409；零写 | 0 | Z |
+| RC69 | previous evidence 跨 job/org/_id 不匹配 | EVIDENCE_CHAIN_BROKEN/409；零写 | 0 | Z |
+| RC70 | previous evidence 缺字段/未知字段/schema 非法 | 正式 validator 失败；EVIDENCE_CHAIN_BROKEN/409；零写 | 0 | Z |
+| RC71 | previous evidence sequence/lastObservedAt/head 不一致 | EVIDENCE_CHAIN_BROKEN/409；零写 | 0 | Z |
+| RC72 | previous evidence K3 realm/version/fingerprint 或 HMAC 重算不符 | EVIDENCE_CHAIN_BROKEN/409；零写；**不得**把损坏旧记录当父节点 | 0 | Z |
+| RC73 | 第一条 evidence：head=0/null、sequence=1；反向 head 非空/已有 evidence | 合法创建；反向 EVIDENCE_CHAIN_BROKEN/409；零写 | 0 | X/Z |
 
-矩阵共 **64** 条，连续编号，覆盖三种 decision、权限/跨组织/revision、K2/K3/domain、重放/异摘要/损坏、evidence head 分叉、grant 事务复核、candidate/82/83/guard/墓碑、并发 finalize/expire/createGrant/第二个 reconcile、callback/预占、Z/P0/敏感扫描/Cloud-live 失败关闭、local-finalize 耗尽人工恢复与老任务。
+矩阵共 **73** 条，连续编号，覆盖三种 decision、权限/跨组织/revision、K2/K3/domain、重放/异摘要/损坏、evidence head 分叉、previous evidence schema/HMAC、grant 事务复核、candidate/82/83/guard/墓碑、并发 finalize/expire/createGrant/第二个 reconcile、callback/预占、Z/P0/敏感扫描/Cloud-live 失败关闭、local-finalize 耗尽人工恢复与新 generation。
 
 ## 16. 验收与后续门禁
 

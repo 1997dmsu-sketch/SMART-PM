@@ -272,9 +272,15 @@ export class LocalStore {
           ),
         ]),
       );
-      if (prepared.config && state[`admin_audit/${prepared.config.auditId}`])
-        throw new HttpError(409, "确定性审计记录已存在");
+      const existingDeterministicAudit = prepared.config
+        ? state[`admin_audit/${prepared.config.auditId}`]
+        : null;
       const writes = await build(state);
+      if (existingDeterministicAudit) {
+        if (writes.length)
+          throw new HttpError(409, "确定性审计记录已存在");
+        return;
+      }
       const allowed = new Set(prepared.refs.map((r) => `${r.collection}/${r.id}`));
       for (const w of writes) {
         if (prepared.config && w.collection === "admin_audit")
@@ -401,9 +407,15 @@ export class CloudStore {
           ? result.data[0]
           : result.data;
       }
-      if (prepared.config && state[`admin_audit/${prepared.config.auditId}`])
-        throw new HttpError(409, "确定性审计记录已存在");
+      const existingDeterministicAudit = prepared.config
+        ? state[`admin_audit/${prepared.config.auditId}`]
+        : null;
       const writes = await build(state);
+      if (existingDeterministicAudit) {
+        if (writes.length)
+          throw new HttpError(409, "确定性审计记录已存在");
+        return;
+      }
       const allowed = new Set(unique.map((r) => `${r.collection}/${r.id}`));
       for (const w of writes) {
         if (prepared.config && w.collection === "admin_audit")

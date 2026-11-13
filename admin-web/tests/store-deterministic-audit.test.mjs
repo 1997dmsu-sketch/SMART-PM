@@ -144,7 +144,7 @@ test("H4-0A LocalStore 严格校验 audit 输入、引用、90 上限与 Store �
   assert.equal(builds, 1, "91 条必须在 build 前拒绝");
 });
 
-test("H4-0A LocalStore 预占与确认丢失重放均 create-only，业务不重复", async (t) => {
+test("H4-0A LocalStore 已有 audit 允许零写重放、拒绝重复业务写", async (t) => {
   const store = await localHarness(t);
   const write = roomWrite("room-ack");
   let builds = 0;
@@ -153,6 +153,13 @@ test("H4-0A LocalStore 预占与确认丢失重放均 create-only，业务不重
     return [write];
   }, audit());
 
+  await store.transact([ref("rooms", write.id), auditRef()], (state) => {
+    builds += 1;
+    assert.equal(state[`admin_audit/${AUDIT_ID}`]._id, AUDIT_ID);
+    return [];
+  }, audit());
+  assert.equal(builds, 2, "合法重放必须进入 callback 后零写返回");
+
   await assert.rejects(
     () => store.transact([ref("rooms", write.id), auditRef()], () => {
       builds += 1;
@@ -160,8 +167,21 @@ test("H4-0A LocalStore 预占与确认丢失重放均 create-only，业务不重
     }, audit()),
     (error) => error.status === 409,
   );
-  assert.equal(builds, 1, "预占 audit 必须在 callback 前拒绝");
+  assert.equal(builds, 3, "重复业务写在 callback 后由 Store 拒绝");
   assert.equal((await store.get("rooms", write.id, "org-audit")).name, "audit contract");
+  assert.equal((await store.list("admin_audit")).filter((row) => row._id === AUDIT_ID).length, 1);
+});
+
+test("H4-0A LocalStore 首次零写仍创建 audit，已有 audit 的 build 错误照常透传", async (t) => {
+  const store = await localHarness(t);
+  await store.transact([auditRef()], () => [], audit());
+  const saved = await store.get("admin_audit", AUDIT_ID, "org-audit");
+  assert.equal(saved.target, "");
+
+  await assert.rejects(
+    () => store.transact([auditRef()], () => { throw Error("replay validation failed"); }, audit()),
+    /replay validation failed/,
+  );
   assert.equal((await store.list("admin_audit")).filter((row) => row._id === AUDIT_ID).length, 1);
 });
 
@@ -208,12 +228,20 @@ test("H4-0A CloudStore callback 重放使用同一 transaction 与确定性 doc 
   assert.ok(cloud.calls.sets.every((call) => call.attempt === 1 || call.attempt === 2));
 });
 
-test("H4-0A CloudStore 预占 audit 在 build 前拒绝并保持业务不变", async () => {
-  const cloud = cloudHarness({ initial: [{
+test("H4-0A CloudStore 已有 audit 允许零写重放、拒绝重复业务写", async () => {
+  const cloud = cloudHarness({ replay: 2, initial: [{
     collection: "admin_audit", id: AUDIT_ID,
     data: { orgId: "org-audit", action: "existing" },
   }] });
   let builds = 0;
+  await cloud.store.transact([ref("rooms", "room-cloud"), auditRef()], (state) => {
+    builds += 1;
+    assert.equal(state[`admin_audit/${AUDIT_ID}`].action, "existing");
+    return [];
+  }, audit());
+  assert.equal(builds, 2, "SDK callback 重跑仍保持零写重放");
+  assert.equal(cloud.record("admin_audit", AUDIT_ID).action, "existing");
+
   await assert.rejects(
     () => cloud.store.transact([ref("rooms", "room-cloud"), auditRef()], () => {
       builds += 1;
@@ -221,9 +249,21 @@ test("H4-0A CloudStore 预占 audit 在 build 前拒绝并保持业务不变", a
     }, audit()),
     (error) => error.status === 409,
   );
-  assert.equal(builds, 0);
+  assert.equal(builds, 3);
   assert.equal(cloud.record("rooms", "room-cloud"), null);
   assert.equal(cloud.record("admin_audit", AUDIT_ID).action, "existing");
+});
+
+test("H4-0A CloudStore 首次零写创建 audit，已有 audit 的 build 错误照常透传", async () => {
+  const cloud = cloudHarness();
+  await cloud.store.transact([auditRef()], () => [], audit());
+  assert.equal(cloud.record("admin_audit", AUDIT_ID).target, "");
+
+  await assert.rejects(
+    () => cloud.store.transact([auditRef()], () => { throw Error("replay invalid"); }, audit()),
+    /replay invalid/,
+  );
+  assert.equal(cloud.calls.sets.filter((call) => call.key === `admin_audit/${AUDIT_ID}`).length, 1);
 });
 
 test("H4-0A CloudStore 业务写或审计写失败均由同一云事务回滚", async () => {

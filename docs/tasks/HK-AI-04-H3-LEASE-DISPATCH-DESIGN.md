@@ -76,13 +76,15 @@ T2 为独立短事务。顺序为 job/fence → grant/credential/file 与授权�
 
 ## Q05 结果与 grant 投影
 
-T3 独立短事务按 fence 点读 job、grant 与目标日志，接受当前执行栈归一化结果。调用超时、取消等待、格式异常或任意未能证明发送阶段的异常，保守归 UNKNOWN_RESULT；仅信任已知 Mock 的明确错误契约。结果写入 job 内嵌 result（许可标记在 T2 拒绝、T3 和扫描时清除，下一次 T1 领取清除上一 attempt 的 result，历史留在日志），日志同事务 create-only，全部清除活动租约和授权标记。Mock success 仅当 grant 仍是当前 job 对应、revision 与 T2 fence 一致、state=pending、有效期有效且绑定未变时，在同一事务原子写 job succeeded + grant effective + 结果日志；此时 `businessAllowed=true`，但不生成 `device_verified` 或受信 `device_ack`，所以 `deviceEffective=false`。credential、slot 与 operation key 均零写。
+T3 独立短事务按 fence 点读 job、grant 与目标日志，接受当前执行栈归一化结果。调用超时、取消等待、格式异常或任意未能证明发送阶段的异常，保守归 UNKNOWN_RESULT；仅信任已知 Mock 的明确错误契约。结果写入 job 内嵌 result（许可标记在 T2 拒绝、T3 和扫描时清除，下一次 T1 领取清除上一 attempt 的 result，历史留在日志），日志同事务 create-only，全部清除活动租约和授权标记。Mock success 仅当 grant 仍是当前 job 对应、revision 与 T2 fence 一致、state=pending、有效期有效且绑定未变时，在同一事务原子写 job succeeded + grant effective + 结果日志。T3 只复核 job/grant fence，不重跑完整资格，也不写资格记录。credential、slot 与 operation key 均零写。
+
+grant effective 只是业务投影的必要条件，不无条件等于 `businessAllowed=true`：读取投影时仍须实时 `eligibility.allowed===true`。若资格在 Provider 调用期间变化，T3 仍可按已确认的 Mock success 把未变化的 grant 置为 effective，但读取时 `businessAllowed=false`、`deviceEffective=false`；这不是授权复活，资格恢复前业务不可用，也不得为此再次调用 Provider 或改写资格记录。只有资格未变化且实时仍 allowed 的正例才断言 `businessAllowed=true`。H3 不生成 `device_verified` 或受信 `device_ack`，所以无论资格是否允许，`deviceEffective` 均为 false。
 
 若 Provider 返回 success 期间 grant 已 revoked/expired/suspended、不再 pending、revision 或绑定变化，T3 不得复活授权：job 转 terminal_failed，reasonCode=`GRANT_INACTIVE_AFTER_SEND`，alertCode=`SIMULATED_RESULT_DISCARDED`，grant 保持当前状态。该规则仅适用于 Mock/simulated；真实设备清理留给 H4。告警记录在同一迁移日志内。
 
 | 结果 | job 目标 | grant | 再发送 |
 | --- | --- | --- | --- |
-| success，grant 仍为同 revision 的有效 pending | succeeded | 原子 pending → effective | 否 |
+| success，grant 仍为同 revision 的有效 pending | succeeded | 原子 pending → effective；businessAllowed 由读取时实时资格决定 | 否 |
 | success，但 grant 已失效、改变或不再 pending | terminal_failed / GRANT_INACTIVE_AFTER_SEND | 当前状态保持，绝不复活 | 否 |
 | 明确 pre-send RETRYABLE，预算尚有 | retryable_failed | 保持 | 仅 Q07 |
 | RETRYABLE，预算耗尽 | terminal_failed，RETRY_EXHAUSTED 告警 | 保持 | 否 |
@@ -105,8 +107,8 @@ T3 独立短事务按 fence 点读 job、grant 与目标日志，接受当前执
 | job | 存储元数据 _id、orgId、revision、credentialId、grantId、deviceId、action、state、executionMode、provider、evidenceScope、dispatchSnapshot、attempts、leaseGeneration、leaseOwner、leaseExpiresAt、dispatchAuthorizedAt、nextAttemptAt、result、createdAt、updatedAt |
 | lease | job 内 leaseOwner、leaseExpiresAt、leaseGeneration；fence 另外包含 orgId/jobId/attempts/revision。仅 sending 有活动 owner 和 expiresAt，generation 保留 |
 | job.dispatchSnapshot | schemaVersion、createdAt 与 Q01 表逐项所列固定 ID/revision/epoch；restriction 固定；规范 JSON ≤16 KiB。无独立 _id、集合或 ref，禁止存整条源记录 |
-| result | attempt、outcome、errorKind、reasonCode、finishedAt；outcome 与目标状态严格绑定；成功错误字段 null，错误类仅 PRE_SEND_BLOCKED、RETRYABLE、UNKNOWN_RESULT、TERMINAL、NOT_CONFIGURED |
-| operation log | _id、orgId、jobId、action、fromState、state、actorType、actorId、at、revision、attempt、leaseGeneration、evidenceScope、errorKind、reasonCode、alertCode。actor 为内部服务或经授权人工操作主体。初始 H2 queued 日志继续兼容原形状 |
+| result | attempt、outcome、errorKind、reasonCode、finishedAt；outcome 与目标状态严格绑定；成功错误字段 null，错误类仅 PRE_SEND_BLOCKED、RETRYABLE、UNKNOWN_RESULT、TERMINAL、NOT_CONFIGURED。reasonCode 枚举新增 GRANT_INACTIVE_AFTER_SEND |
+| operation log | _id、orgId、jobId、action、fromState、state、actorType、actorId、at、revision、attempt、leaseGeneration、evidenceScope、errorKind、reasonCode、alertCode。alertCode 枚举新增 SIMULATED_RESULT_DISCARDED；actor 为内部服务或经授权人工操作主体。初始 H2 queued 日志继续兼容原形状 |
 
 新增写入严格拒绝未知字段、隐式类型转换和空白 ID。ID 使用有界不透明值。revision/schemaVersion/keyVersion 为正安全整数，时间、generation、epoch、attempts 为非负安全整数，必需递增或相加的值在运算前检查上界。reasonCode/alertCode 为枚举短码（最多 64 字符），禁止异常 message/stack、原始错误、Provider payload、私密文件位置、凭据和个人材料。每条迁移以 deterministicLogId(jobId, targetState, 新 job revision) create-only，首次 queued 仍用 occurrence=1；同 ID 已存在即回滚，不覆盖。T2 授权标记只改 revision，不属于状态迁移。任务（含内嵌 snapshot）、结果、operation key 和日志按同一保留组处理，operation key 不得早于任务历史删除，合成数据清理期限留待批准。
 
@@ -171,7 +173,7 @@ sequenceDiagram
 | D18 | sending | T2 通过，Mock post_send_unknown | awaiting_result，告警 | 1 | A+J |
 | D19 | sending | T1 确认后进程退出，过期双扫描 | awaiting_result，仅一次提交 | 0 | J |
 | D20 | sending 已授权 | 调用一次后崩溃，T3 缺失，随后过期 | awaiting_result | 1 | J |
-| D21 | sending | T2 通过后 Mock success；分别保持 grant pending、并发 revoked/expired/suspended/改绑 | 前者 succeeded + grant effective + businessAllowed=true + deviceEffective=false；后者 terminal_failed / GRANT_INACTIVE_AFTER_SEND，绝不复活 | 1 | A+S/J |
+| D21 | sending | T2 通过后 Mock success；分别为资格未变化、资格在调用期间变为不允许、grant 并发 revoked/expired/suspended/改绑 | 前者 succeeded + grant effective + businessAllowed=true；资格变化子例仍 succeeded/effective，但 businessAllowed=false，资格记录零写且 Provider 仍仅 1 次；grant 变化子例 terminal_failed / GRANT_INACTIVE_AFTER_SEND，绝不复活；三者 deviceEffective=false | 1 | A+S/J |
 | D22 | sending | T2 通过，Mock terminal_fail | terminal_failed | 1 | A+J |
 | D23 | sending | Mock 契约返回 NOT_CONFIGURED | terminal_failed，配置告警 | 1 | A+J |
 | D24 | sending | 已合法领取后运行配置切换为 live 或非 Mock | terminal_failed / NOT_CONFIGURED，配置告警 | 0 | J |

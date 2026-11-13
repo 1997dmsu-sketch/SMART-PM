@@ -233,7 +233,7 @@ H4-c 编码时必须一并冻结，但本轮不实现：
 
 ## 6. 三种 decision 的状态机、grant 复核与写集
 
-状态迁移只发生在 `awaiting_result`。**三种 decision 的事务都必须读取 grant，并校验 job/grant/cleanupSnapshot 绑定**；事务外预读只用于 refs/快速失败。
+三种 decision 的状态迁移只发生在 `awaiting_result`；`finalize-retry` 是独立的本地恢复入口（§6.5），不改变这一前置。**三种 decision 的事务都必须读取 grant，并校验 job/grant/cleanupSnapshot 绑定**；事务外预读只用于 refs/快速失败。
 
 ### 6.1 grant/job 事务内统一复核（P0-3）
 

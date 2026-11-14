@@ -40,7 +40,6 @@ import {
   REVIEW_STATE,
   assertCreateGrantInput,
   assertSubmitInput,
-  publicJobResult,
   publicReviewItem,
 } from "./dto.mjs";
 import { snapshotEligibility, validateEligibility } from "./eligibility.mjs";
@@ -67,6 +66,53 @@ function validateCleanupSnapshot(value) {
   } catch { failCode("CLEANUP_SNAPSHOT_REQUIRED", "清理快照字段非法", 409); }
   if (![GRANT_STATE.PENDING,GRANT_STATE.EFFECTIVE,GRANT_STATE.SUSPENDED,GRANT_STATE.EXPIRED].includes(value.originalGrantState) || Buffer.byteLength(JSON.stringify(value)) > 4096) failCode("CLEANUP_SNAPSHOT_REQUIRED", "清理快照非法或超限", 409);
   return value;
+}
+
+const QUERY_JOB_STATES = new Set(Object.values(JOB_STATE));
+// 现有批准的安全短码形状：字母开头、无空白/控制字符/路径，最长 120；不截断、不改写。
+const QUERY_JOB_FAILURE_REASON = /^[A-Za-z][A-Za-z0-9_.:-]{0,119}$/;
+
+/**
+ * HK-AI-07B：queryJob 的唯一权威 revision 读模型。
+ * 精确六字段；记录任一字段非法即 INVALID_JOB/409 失败关闭，不部分返回、不默认、不转换。
+ */
+function queryJobDto(job, jobId) {
+  let recordId;
+  try {
+    recordId = assertBoundedId(job._id, "_id");
+    if (job.jobId !== undefined) assertBoundedId(job.jobId, "jobId");
+  } catch {
+    failCode("INVALID_JOB", "任务记录 ID 非法", 409);
+  }
+  if (recordId !== jobId || (job.jobId !== undefined && job.jobId !== recordId)) {
+    failCode("INVALID_JOB", "任务记录 ID 与查询目标不一致", 409);
+  }
+  if (!QUERY_JOB_STATES.has(job.state)) failCode("INVALID_JOB", "任务状态非法", 409);
+  if (!Number.isSafeInteger(job.revision) || job.revision < 1) {
+    failCode("INVALID_JOB", "任务 revision 非法", 409);
+  }
+  // attempts/lastSuccessAt 保留冻结契约的缺省（?? 0 / ?? null）；存在值必须严格合法。
+  const attempts = job.attempts ?? 0;
+  if (!Number.isSafeInteger(attempts) || attempts < 0) {
+    failCode("INVALID_JOB", "任务 attempts 非法", 409);
+  }
+  const lastSuccessAt = job.lastSuccessAt ?? null;
+  if (lastSuccessAt !== null && (!Number.isSafeInteger(lastSuccessAt) || lastSuccessAt < 0)) {
+    failCode("INVALID_JOB", "任务 lastSuccessAt 非法", 409);
+  }
+  const failureReason = job.failureReason ?? null;
+  if (failureReason !== null &&
+      (typeof failureReason !== "string" || !QUERY_JOB_FAILURE_REASON.test(failureReason))) {
+    failCode("INVALID_JOB", "任务 failureReason 非法", 409);
+  }
+  return {
+    jobId: recordId,
+    state: job.state,
+    revision: job.revision,
+    attempts,
+    lastSuccessAt,
+    failureReason,
+  };
 }
 
 export class FaceCredentialService {
@@ -727,12 +773,12 @@ export class FaceCredentialService {
     return result;
   }
 
-  // 5. 查询任务：org 内最小 DTO。
+  // 5. 查询任务：org 内最小 DTO；revision 为唯一权威读模型（HK-AI-07B）。
   async queryJob(jobId) {
     await this.#require("device.audit.read");
     const job = await this.#find(COLLECTIONS.DEVICE_OPERATION_JOBS, jobId);
     if (!job) failCode("NOT_FOUND", "任务不存在或不可见", 404);
-    return publicJobResult(job);
+    return queryJobDto(job, jobId);
   }
 
 

@@ -233,6 +233,7 @@ test("H1-05 queryJob 返回组织内最小 DTO，跨组织保持同态 404", asy
   assert.deepEqual(result, {
     jobId: "job-h1-visible",
     state: "queued",
+    revision: 1,
     attempts: 0,
     lastSuccessAt: null,
     failureReason: null,

@@ -10,7 +10,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { LocalStore } from "../lib/store.mjs";
-import { FaceCredentialService } from "../lib/face-service/service.mjs";
+import {
+  FaceCredentialService,
+  PUBLIC_JOB_FAILURE_REASONS,
+} from "../lib/face-service/service.mjs";
 
 const orgId = "org-queryjob-revision";
 const otherOrgId = "org-queryjob-other";
@@ -129,7 +132,7 @@ before(async () => {
   ];
   const jobs = [
     ["job-qjr-queued", { orgId, action: "enroll", state: "queued", revision: 1, attempts: 0 }],
-    ["job-qjr-rev7", { orgId, action: "revoke", state: "retryable_failed", revision: 7, attempts: 2, lastSuccessAt: 1_699_999_999_000, failureReason: "PROVIDER_TIMEOUT" }],
+    ["job-qjr-rev7", { orgId, action: "revoke", state: "retryable_failed", revision: 7, attempts: 2, lastSuccessAt: 1_699_999_999_000, failureReason: null }],
     ["job-qjr-rev2", { orgId, action: "enroll", state: "succeeded", revision: 2, attempts: 1, lastSuccessAt: 1_700_000_000_000 }],
     ["job-qjr-mutate", { orgId, action: "enroll", state: "queued", revision: 3, attempts: 0 }],
     ["job-qjr-other-org", { orgId: otherOrgId, action: "enroll", state: "queued", revision: 4, attempts: 0 }],
@@ -148,6 +151,13 @@ before(async () => {
     ["job-qjr-last-negative", { orgId, action: "enroll", state: "queued", revision: 1, attempts: 0, lastSuccessAt: -1 }],
     ["job-qjr-last-fraction", { orgId, action: "enroll", state: "queued", revision: 1, attempts: 0, lastSuccessAt: 1.5 }],
     ["job-qjr-last-over", { orgId, action: "enroll", state: "queued", revision: 1, attempts: 0, lastSuccessAt: Number.MAX_SAFE_INTEGER + 1 }],
+    ["job-qjr-fr-null", { orgId, action: "enroll", state: "queued", revision: 1, attempts: 0, failureReason: null }],
+    ["job-qjr-fr-internal", { orgId, action: "enroll", state: "terminal_failed", revision: 1, attempts: 1, failureReason: "INTERNAL_ONLY_REASON" }],
+    ["job-qjr-fr-provider", { orgId, action: "enroll", state: "terminal_failed", revision: 1, attempts: 1, failureReason: "PROVIDER_TIMEOUT" }],
+    ["job-qjr-fr-lower", { orgId, action: "enroll", state: "terminal_failed", revision: 1, attempts: 1, failureReason: "result_unknown" }],
+    ["job-qjr-fr-long", { orgId, action: "enroll", state: "terminal_failed", revision: 1, attempts: 1, failureReason: "A".repeat(121) }],
+    ["job-qjr-fr-control", { orgId, action: "enroll", state: "terminal_failed", revision: 1, attempts: 1, failureReason: "BAD\u0000CODE" }],
+    ["job-qjr-fr-array", { orgId, action: "enroll", state: "terminal_failed", revision: 1, attempts: 1, failureReason: ["PROVIDER_TIMEOUT"] }],
     ["job-qjr-fr-object", { orgId, action: "enroll", state: "queued", revision: 1, attempts: 0, failureReason: { message: "secret" } }],
     ["job-qjr-fr-stack", { orgId, action: "enroll", state: "queued", revision: 1, attempts: 0, failureReason: new Error("boom").stack }],
     ["job-qjr-fr-message", { orgId, action: "enroll", state: "queued", revision: 1, attempts: 0, failureReason: "/private/face/secret.jpg: permission denied" }],
@@ -268,14 +278,34 @@ test("07B-05 内部 _id 有界且等于查询目标；ID 不一致失败关闭",
   await expectInvalidJob(longJobId);
 });
 
-test("07B-06 failureReason 仅安全短码；对象/stack/message 失败关闭", async () => {
-  const dto = await service("mem-audit").queryJob("job-qjr-rev7");
-  assert.equal(dto.failureReason, "PROVIDER_TIMEOUT");
+test("07B-06 无批准公开 failureReason 值：null 原样，任何非 null 值失败关闭", async () => {
+  // 冻结契约只定义 string|null，未批准任何公开 failureReason 值；
+  // 服务层唯一权威 Set 为空，测试直接复用，不维护并行列表。
+  assert.equal(PUBLIC_JOB_FAILURE_REASONS.size, 0, "冻结契约未批准任何公开 failureReason 值");
+  for (const approved of PUBLIC_JOB_FAILURE_REASONS) {
+    assert.fail(`未预期的公开 failureReason：${approved}`);
+  }
+
+  // null、缺失、成功/无失败状态：固定投影 null，不凭空生成原因。
+  for (const id of ["job-qjr-fr-null", "job-qjr-queued", "job-qjr-rev2"]) {
+    const dto = await service("mem-audit").queryJob(id);
+    assert.equal(dto.failureReason, null, id);
+    assert.deepEqual(Object.keys(dto).sort(), [
+      "attempts", "failureReason", "jobId", "lastSuccessAt", "revision", "state",
+    ], id);
+  }
+
   for (const id of [
-    "job-qjr-fr-object",
-    "job-qjr-fr-stack",
-    "job-qjr-fr-message",
-    "job-qjr-fr-empty",
+    "job-qjr-fr-internal",   // 内部 reasonCode
+    "job-qjr-fr-provider",   // 格式合法的 Provider 原始短码
+    "job-qjr-fr-lower",      // 小写
+    "job-qjr-fr-empty",      // 空串
+    "job-qjr-fr-long",       // 超长
+    "job-qjr-fr-control",    // 控制字符
+    "job-qjr-fr-object",     // 对象
+    "job-qjr-fr-stack",      // 原始 stack
+    "job-qjr-fr-message",    // message/路径
+    "job-qjr-fr-array",      // 数组
   ]) {
     await expectInvalidJob(id);
   }

@@ -69,8 +69,15 @@ function validateCleanupSnapshot(value) {
 }
 
 const QUERY_JOB_STATES = new Set(Object.values(JOB_STATE));
-// 现有批准的安全短码形状：字母开头、无空白/控制字符/路径，最长 120；不截断、不改写。
-const QUERY_JOB_FAILURE_REASON = /^[A-Za-z][A-Za-z0-9_.:-]{0,119}$/;
+
+/**
+ * HK-AI-07B 公开 failureReason 的唯一权威值集。
+ * 冻结契约只定义 `string | null`（截断 120），且明确 H3/H4 job 恒为 null；
+ * 没有完整、明确批准的公开枚举，内部 reasonCode、Provider 原始错误、
+ * message/stack 均禁止提升为公开值，因此当前为空集，公开投影固定 null。
+ * 未来若冻结公开枚举，只在此 Set 增加，测试直接复用，不维护并行列表。
+ */
+export const PUBLIC_JOB_FAILURE_REASONS = new Set();
 
 /**
  * HK-AI-07B：queryJob 的唯一权威 revision 读模型。
@@ -101,8 +108,7 @@ function queryJobDto(job, jobId) {
     failCode("INVALID_JOB", "任务 lastSuccessAt 非法", 409);
   }
   const failureReason = job.failureReason ?? null;
-  if (failureReason !== null &&
-      (typeof failureReason !== "string" || !QUERY_JOB_FAILURE_REASON.test(failureReason))) {
+  if (failureReason !== null && !PUBLIC_JOB_FAILURE_REASONS.has(failureReason)) {
     failCode("INVALID_JOB", "任务 failureReason 非法", 409);
   }
   return {

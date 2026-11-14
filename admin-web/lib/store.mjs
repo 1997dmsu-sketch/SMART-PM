@@ -43,6 +43,9 @@ const collections = [
   "grant_slot_claims",
   "access_devices",
   "operation_key_domains",
+  "device_operation_evidence",
+  "device_operation_evidence_heads",
+  "evidence_digest_domains",
   "device_claim_release_guards",
 ];
 const AUDIT_INPUT_FIELDS = new Set([
@@ -95,6 +98,21 @@ function prepareDeterministicAudit(refs, audit) {
     throw new HttpError(400, "确定性审计引用缺失");
   return { config, refs: normalized };
 }
+// H4-c C1: evidence/head/K3-domain writes keep the caller's exact fields.
+// LocalStore must not merge old rows or inject `updatedAt`: the evidence record
+// is immutable and the head's updatedAt is the reconcile clock value.
+const exactWriteCollections = new Set([
+  "device_operation_evidence",
+  "device_operation_evidence_heads",
+  "evidence_digest_domains",
+]);
+// Evidence and both K3 domain records are create-only. The per-job head is the
+// only mutable record and is still CAS-checked by the H4-c append helper.
+const createOnlyCollections = new Set([
+  "device_operation_evidence",
+  "evidence_digest_domains",
+]);
+
 function auditRecord(config, writes, createdAt) {
   return {
     _id: config.auditId,
@@ -204,6 +222,9 @@ export function seed() {
   grant_slot_claims: [],
   access_devices: [],
   operation_key_domains: [],
+  device_operation_evidence: [],
+  device_operation_evidence_heads: [],
+  evidence_digest_domains: [],
   device_claim_release_guards: [],
   };
 }
@@ -238,6 +259,9 @@ export class LocalStore {
     this.data.grant_slot_claims ||= [];
     this.data.access_devices ||= [];
     this.data.operation_key_domains ||= [];
+    this.data.device_operation_evidence ||= [];
+    this.data.device_operation_evidence_heads ||= [];
+    this.data.evidence_digest_domains ||= [];
     this.data.device_claim_release_guards ||= [];
     return this;
   }
@@ -291,12 +315,15 @@ export class LocalStore {
           throw Error("Undeclared transaction write");
         const rows = (next[w.collection] ||= []);
         const index = rows.findIndex((r) => r._id === w.id);
-        const record = {
-          ...(index < 0 ? {} : rows[index]),
-          ...w.data,
-          _id: w.id,
-          updatedAt: Date.now(),
-        };
+        if (createOnlyCollections.has(w.collection) && index >= 0)
+          throw new HttpError(409, "记录已存在");
+        const exact = exactWriteCollections.has(w.collection);
+        if (exact && (!w.data || typeof w.data !== "object" || Array.isArray(w.data) ||
+            w.data._id !== w.id))
+          throw new HttpError(400, "事务写入数据非法");
+        const record = exact
+          ? { ...w.data, _id: w.id }
+          : { ...(index < 0 ? {} : rows[index]), ...w.data, _id: w.id, updatedAt: Date.now() };
         if (index < 0) rows.push(record);
         else rows[index] = record;
       }
@@ -421,15 +448,25 @@ export class CloudStore {
         return;
       }
       const allowed = new Set(unique.map((r) => `${r.collection}/${r.id}`));
+      const written = new Set();
       for (const w of writes) {
         if (prepared.config && w.collection === "admin_audit")
           throw new HttpError(400, "确定性审计记录只能由 Store 写入");
         const k = `${w.collection}/${w.id}`;
         if (!allowed.has(k)) throw Error("Undeclared transaction write");
-        const data = { ...state[k], ...w.data, updatedAt: Date.now() };
+        if (createOnlyCollections.has(w.collection) && (state[k] || written.has(k)))
+          throw new HttpError(409, "记录已存在");
+        const exact = exactWriteCollections.has(w.collection);
+        if (exact && (!w.data || typeof w.data !== "object" || Array.isArray(w.data) ||
+            w.data._id !== w.id))
+          throw new HttpError(400, "事务写入数据非法");
+        const data = exact
+          ? { ...w.data }
+          : { ...state[k], ...w.data, updatedAt: Date.now() };
         delete data._id;
         const result = await tx.collection(w.collection).doc(w.id).set(data);
         if (result.code) throw new HttpError(503, "批量写入失败，整批回滚");
+        written.add(k);
       }
       if (prepared.config) {
         const record = auditRecord(prepared.config, writes, Date.now());

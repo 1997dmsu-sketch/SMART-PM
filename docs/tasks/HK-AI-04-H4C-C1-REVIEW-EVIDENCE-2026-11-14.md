@@ -1,102 +1,146 @@
-# HK-AI-04 H4-c C1 两项 P0 返工证据包
+# HK-AI-04 H4-c C1 最终关闭及远端交付证据包
 
-> 状态：**C1 运行时只读校验与独立显式受控初始化 helper 已分离；固定全局 head 已固化；等待 Codex 独立复审。**
-> 本文只证明 C1 helper 与离线测试；不构成 C2/C3、HTTP 接线、真实 Provider、真实设备、Cloud/live 或生产发布批准。
+> 状态：**已确认 `90e4189` 未关闭 P0；本轮彻底删除 K3 生产初始化能力（含 `90e4189` 的显式 helper、空集合证明与 domain 写入），生产模块与公共 index 均无初始化入口；C1 runtime 仅保留严格只读验证并失败关闭；等待 Codex 独立复审。**
+> 本文只证明 C1 helper 与离线测试；不构成 C2/C3、HTTP 接线、真实 Provider、真实设备、Cloud/live、K3 迁移/轮换或生产发布批准。
 
 - 分支：`feat/hk-face-h4c-reconciliation`
 - 代码基线：`1155b7ba65991d324fb8b22bb8f7dd87f49428f9`
 - 原始 C1 提交（复审对象）：`3fce9b027b720943bb049bd5220e117e9d91217e`
 - 第一轮 P0 返工（历史，保留）：`6dbc9e07616ccd2d33734f53f8c71ba18f6d6ac1`
 - 第二轮返工（历史，保留）：`aa0db293c7744580e4e0aaa07159bc42b6ac73a6`
-- 本轮最终返工提交：**本提交**（直接父提交 `aa0db29`；未 rebase/squash/amend/force-push）
+- 第三轮返工（被本轮复审判定未关闭 P0）：`90e4189717e21a5d458b09da34677ef29795c767`
+- 本轮最终返工提交：**本提交**（直接父提交 `90e4189`；未 amend/rebase/squash/reset/force-push）
 - 返工日期：2026-11-14（+08:00）
 - 本轮变更文件：`admin-web/lib/face-service/h4c-evidence.mjs`、`admin-web/lib/face-service/index.mjs`、`admin-web/tests/face-h4c-evidence.test.mjs`、本证据文档
 - 未改文件：`admin-web/lib/store.mjs`、`admin-web/server.mjs`、`admin-web/lib/face-service/routes.mjs`
 
-> 说明：任务给出的“现有提交 `3fce9b0`”是原始 C1 复审对象；当时分支 tip 已前进到 `aa0db29`（含 `6dbc9e0`、`aa0db29` 两次历史返工）。本轮遵守“保留历史、仅追加提交”，直接追加在 `aa0db29` 之上，不重写、不 force-push。
+提交链（只追加，不重写）：
+
+```text
+1155b7ba (origin/feat/hk-face-h4b-mock-cleanup)
+  → 3fce9b0 (原始 C1)
+  → 6dbc9e0 (第一轮返工)
+  → aa0db29 (第二轮返工，origin/feat/hk-face-h4c-reconciliation)
+  → 90e4189 (第三轮返工：显式初始化 helper；本轮判定 P0 未关闭)
+  → 本提交 (最终关闭：删除全部生产初始化能力)
+```
 
 ## 0. 结论摘要
 
 | 检查项 | 结果 |
 |---|---|
-| 运行时缺 head / 缺 version / 双缺 | `DOMAIN_INCOMPLETE`/409，零写 |
-| 运行时 realm / keyVersion / fingerprint 任一变化 | `DOMAIN_MISMATCH`/409，零写 |
-| append 是否隐式初始化或补写 domain | 否：只调用只读 `applyEvidenceDomain`，只写 evidence + head |
-| 显式初始化 helper | 独立 `initializeEvidenceDomain`，仅 2 条 create-only domain 写 |
-| 初始化全局空证明 | 由受控迁移记录 `scope=global` + 三集合空列表 + checkedAt/checkedBy；helper 不扫描 Store |
-| 初始化缺前置条件 | `DOMAIN_INCOMPLETE`/409，零写 |
-| 初始化发现已存在记录 | `DOMAIN_INIT_CONFLICT`/409，零写、不覆盖 |
-| 固定部署级 head ID | `evidence-digest-domain:v1:global`，不含 realm/org；单 head 约束 version |
-| 第二 realm / 换版本 / 同版本换密钥 | 初始化与运行时均拒绝；不写第二 head/version |
-| 多组织 | 共享同一固定 head；evidence/head 仍为组织域 |
-| previous evidence 复核 / timingSafeEqual | 保留完整复核；digest 先做 64 位小写 hex 校验，再进入等长 32 字节 Buffer 的 `timingSafeEqual` |
-| 测试 | C1 35/35；Admin 全量 585/585（41 文件）；根测试 51/51（7 文件） |
+| `90e4189` 的 P0 | **未关闭**：Store 无法原子证明 evidence/evidence head/domain 三个全局集合为空；信任锚丢失后仍可用“空集合证明”重建 domain |
+| 本轮处置 | 删除全部 K3 生产初始化能力，包括 `initializeEvidenceDomain`、precondition/proof、空集合检查、init refs/writes、`DOMAIN_INIT_CONFLICT`、任何 domain head/version 写入与 catch 后补写 |
+| 生产入口 | 模块与公共 index 均无 initialize/bootstrap/create-domain API；生产目录 43 文件 token 扫描 0 命中 |
+| C1 runtime | 严格只读：只读固定 head+version，完整匹配返回 `[]`，否则 `DOMAIN_INCOMPLETE`/`DOMAIN_MISMATCH`（409）且在返回任何写之前抛错 |
+| 固定全局 head | `evidence-digest-domain:v1:global`（字面常量），不含 realm/orgId；多组织共享同一 head |
+| 第二 realm / 换版本 / 同版本换钥 | 一律 `DOMAIN_MISMATCH`/409、零写；预置第二 realm 记录不能改变结果或绕过 |
+| 缺 head/version、schema/kind/内部绑定损坏 | 一律 `DOMAIN_INCOMPLETE`/409、零写 |
+| 零写验证 | `structuredClone(store.data)` 基线 + 全库 `deepEqual` + 三集合分别断言 |
+| previous evidence / timingSafeEqual | 保留 schema、org、job、sequence、observedAt、K3 realm/version/fingerprint、HMAC 完整复核；`timingSafeEqual` 前先做 64 位小写 hex 格式校验（同时保证等长 32 字节） |
+| 测试 | C1 31/31；Admin 全量 581/581（41 文件）；根测试 51/51（7 文件） |
 | `git diff --check` | exit 0 |
-| 敏感扫描 | 4 个变更文件 0 命中 |
-| Provider / 网络 / HTTP 注册 / 真实设备 | C1 定向 guard：网络 0、Provider 方法 0、HTTP server 0；`server.mjs` 零修改 |
-| C2 / C3 | 继续关闭，未实现 |
+| 敏感值扫描 | 4 个变更文件，`total_findings: 0` |
+| Provider / 业务网络 / HTTP 注册 / 真实设备 | 均为 0（定向 guard：`network_attempts=0`、`provider_calls=0`、`http_servers=0`） |
+| `server.mjs` / `store.mjs` 本轮差异 | 0 |
+| C2 / C3 | 继续关闭，未开始、未实现 |
+| K3 迁移 / 轮换 / realm 变更 | 未实现；首次初始化移交未来受控部署迁移 |
 
-## 1. 旧 P0 复现与本轮修正
+## 1. 复审结论：`90e4189` 为何未关闭 P0
 
-### 1.1 P0-1：初始化与运行时是否分离
+### 1.1 `90e4189` 的实际形态
 
-**原始 C1 `3fce9b0` 的复现事实：**
+`90e4189` 在 `h4c-evidence.mjs` 中新增并导出了完整的生产初始化能力：
 
-- `applyEvidenceDomain(state, config)` 在 head/version 双缺时直接返回两条 create 写（head + version）。
-- `appendEvidenceWrites` 先调用 `applyEvidenceDomain`，并把返回的 domain 写拼进 append 写集。
-- 因此空库第一次 append 会“顺手”创建 K3 domain；删除 domain 后 append 也会回填。这是隐式初始化/自动补写，不是受控初始化。
-
-**历史返工：**
-
-- `6dbc9e0` 把 `applyEvidenceDomain` 改为只读，新增显式初始化；但其全局空证明通过 `store.list()` 扫描三集合，并在事务外/内重复 `verifyEmpty`。Store 无法原子证明全局空，扫描也不构成原子证明，因此不满足本轮“不猜测、不扫描”的约束。
-- `aa0db29` 又把初始化能力整体删除，运行时只读；但本轮要求保留“独立显式受控初始化 helper”，因此需要第三种形态：**运行时只读 + 独立 helper + 记录式全局空前置条件**。
-
-**本轮修正：**
-
-| 项 | 修正 |
+| 符号 | 作用 |
 |---|---|
-| `applyEvidenceDomain` | 严格只读：只读 fixed head/version、校验、比较；成功返回 `[]`，失败抛错；无 create/repair/backfill 分支 |
-| `appendEvidenceWrites` | 只调用 `applyEvidenceDomain` 做只读校验；返回值只有 evidence + head 两条写，不再拼接任何 domain 写 |
-| 初始化 | 新增独立 `initializeEvidenceDomain`；不被 append/reconcile 调用；只写 fixed head + frozen version 两条 create-only 记录 |
-| 全局空 | 由 `evidenceDomainInitPrecondition` 记录受控迁移观测到的三集合空列表；helper 不读取/不扫描 Store；缺证明或证明非空一律失败关闭 |
-| 已存在记录 | 事务状态中任一可见 domain/evidence/evidence-head 记录均 `DOMAIN_INIT_CONFLICT`；Store 对 domain 仍为 create-only |
-| 修复/补写 | 无任何 catch 后静默修复、无自动迁移、无回填 |
+| `initializeEvidenceDomain(store, config, { now, precondition, audit })` | 在 Store 事务中创建固定 head + version |
+| `evidenceDomainInitPrecondition({ scope, domains, evidence, evidenceHeads, checkedAt, checkedBy })` | 由调用者记录“三集合为空”的 proof |
+| `evidenceDomainInitRefs(config)` | 初始化固定的两个 domain 点引用 |
+| `evidenceDomainInitWrites(state, { config, now, precondition })` | 纯 create-only domain head/version 写构建器 |
+| `assertInitPrecondition` / `INIT_PRECONDITIONS` | proof 令牌校验 |
+| `EVIDENCE_DOMAIN_INIT_SCOPE` / `DOMAIN_INIT_CONFLICT` | 初始化作用域与冲突错误码 |
 
-### 1.2 P0-2：head ID 是否与 realm/org 解耦
+虽然 `index.mjs` 没有 re-export 这些符号，但它们仍是生产模块中可被任意服务端代码 `import` 并调用的写入口。这已经违反“生产不得初始化 K3 domain”的 P0 约束。
 
-**原始 C1 `3fce9b0` 的复现事实：**
+### 1.2 为什么“空集合证明”不能关闭 P0
 
-- `evidenceDomainIds(realm, version)` 返回的 head ID 为 `evidence-digest-domain:<base64url(realm)>`。
-- realm 变化会产生新的 head ID，从而允许第二套并存域；这正是 P0-2。
+1. **Store 无法原子证明全局为空。** `Store.transact` 只能按声明好的点引用读取；`evidence_digest_domains`、`device_operation_evidence`、`device_operation_evidence_heads` 三个集合的“全局为空”没有原子原语。helper 又刻意不扫描 Store，因此“空”这一事实只能由事务外的调用者观测并记录。
+2. **proof 是调用者提供的元数据，不是 Store 派生的事实。** proof 只包含 `scope/domains/evidence/evidenceHeads/checkedAt/checkedBy`；helper 不读取、不回查、不扫描。只要调用者传入三个空数组（伪造或在窗口期之前观测），helper 就无法发现未声明的存量记录。`90e4189` 证据包 §3.2 自述的“已知边界”实际上就是 P0 本身。
+3. **信任锚丢失后仍可重建。** 若固定 head/version 因误删、迁移或环境重建而丢失，持有空 proof 的调用者仍可重新创建同一 head/version，运行时随后会把它当作可信锚接受。也就是说，“信任锚一旦丢失即可重建”这一 P0 场景没有被关闭，只是把重建入口从 append 移到了显式 helper。
+4. **C1 不需要“首次初始化”这一生产能力。** C1 的合同是运行时只读、缺失即失败关闭；首次初始化属于部署迁移动作，不能作为库代码暴露给运行时。
 
-**本轮固定规则：**
+### 1.3 本轮决定
 
-- head ID 由用途常量 + 版本常量 + 固定 `global` 段派生：
-  - purpose：`evidence-digest-domain`
-  - version：`v1`
-  - head ID：`evidence-digest-domain:v1:global`
-- head ID 不含 realm、不含 orgId、不随 keyVersion/fingerprint 变化。
-- head 记录固定 7 字段：`_id, kind, realm, keyVersion, keyFingerprint, revision, createdAt`；无 `orgId`。
-- version ID 仍可含冻结的 `realm` 与 `keyVersion`：
-  `evidence-digest-domain-version:<base64url(realm)>:<keyVersion>`；
-  但它只能作为固定 head 的版本历史记录被读取，不能自行构成第二命名空间。
-- 当前配置的 `realm/keyVersion/keyFingerprint` 必须与**同一个 fixed head** 完全一致；任一不同即 `DOMAIN_MISMATCH`，不写新 head/version。
-- 正式轮换、realm 迁移、历史密钥回退均留给未来独立受控任务；C1 不实现。
+- **不保留任何初始化 helper、proof、空集合检查或 domain 写构建器。** 生产代码不再存在“写入 domain”的函数，也不存在初始化错误码或模式开关。
+- **首次初始化移交未来受控部署迁移。** 该迁移必须在维护窗口、停写/全局锁、以 CloudStore 为权威确认三集合为空、create-only、回读、审计与回滚约束下执行；C1 不实现、也不调用。
+- **C1 runtime 只读失败关闭。** 缺 head、缺 version、双缺、schema/kind/内部绑定损坏、配置变化全部失败关闭；成功也只返回空写集。
+- **K3 迁移/轮换/realm 变更未实现。** 当前固定 head 绑定单一 realm/keyVersion/fingerprint；正式轮换与历史密钥回退留给未来独立任务。
 
-### 1.3 自动化复现与回归
+## 2. 删除清单与静态证明
 
-- 旧隐式初始化行为由本轮测试的“空库 append 不初始化”“缺两/仅 head/仅 version 零写”“append 只写 evidence+head”覆盖。
-- 旧 realm 作用域 head 行为由“head ID 不含 realm/org”“realm 变化不写新 head/version”“预置第二 realm 不能绕过”覆盖。
-- 本轮不修改历史提交，也不删除历史测试场景；原 23 项场景的保留/改名映射见 §6.1。
+### 2.1 模块删除清单
 
-## 2. 运行时只读契约
+`h4c-evidence.mjs` 中以下能力全部删除：
 
-### 2.1 `applyEvidenceDomain(state, config)` 判定顺序
+| 删除项 | 说明 |
+|---|---|
+| `initializeEvidenceDomain` | 生产 Store 事务初始化入口 |
+| `evidenceDomainInitPrecondition` | 空集合 proof 生成器 |
+| `evidenceDomainInitRefs` | 初始化点引用 |
+| `evidenceDomainInitWrites` | domain head/version 写构建器 |
+| `assertInitPrecondition` / `INIT_PRECONDITIONS` | proof 令牌与内部校验 |
+| `EVIDENCE_DOMAIN_INIT_SCOPE` | 初始化作用域常量 |
+| `DOMAIN_INIT_CONFLICT` | 初始化冲突错误码 |
+| 三集合空列表检查 | 随 proof 一并删除 |
+| 任何 `write(EVIDENCE_DOMAINS_COLLECTION, ...)` | 模块内 0 处 |
+| 任何 `store.transact(...)` | 模块内 0 处；模块不再持有 Store 句柄 |
+| `catch (DOMAIN_INCOMPLETE) { ...写入... }` / catch 后补写 | 0 处；guard 抛错后 append 不会返回写 |
+
+删除后模块仍保留：
+
+- 精确 schema validator（evidence 20 字段、head 9 字段、domain head 7/version 6 字段）；
+- 独立 K3 配置、fingerprint、canonical HMAC；
+- 确定性 evidence/head ID 与固定全局 domain head ID；
+- `applyEvidenceDomain` 严格只读校验；
+- `evidenceAppendRefs`、`appendEvidenceWrites`（只写 evidence + head）；
+- `validateEvidenceDomainRecord` 作为运行时 domain verify。
+
+### 2.2 公共 index
+
+`index.mjs` 使用显式白名单导出 26 个运行时符号：
+
+- 常量：集合名、digest domain/algorithm/version、schema version、scope、sequence 上限、固定 head ID、fingerprint domain；
+- 函数/助手：`applyEvidenceDomain`、`appendEvidenceWrites`、`evidenceAppendRefs`、`evidenceDigest`、`evidenceDomainIds`、`evidenceHeadId`、`evidenceId`、`evidenceKeyConfig`、`evidenceKeyFingerprint`、`stableStringify`、`stableValue`、`validateEvidenceDomainRecord`、`validateEvidenceHead`、`validateEvidenceRecord`。
+
+初始化、bootstrap、create-domain、domain record builder 均不在导出列表中；模块本身也不再导出这些名称。
+
+### 2.3 自动化静态证明
+
+测试 `production module, public index and production tree expose no K3 initialization capability` 做四层断言：
+
+1. **公共 index 命名空间**：`initializeEvidenceDomain`、`evidenceDomainInitPrecondition`、`evidenceDomainInitRefs`、`evidenceDomainInitWrites`、`bootstrapEvidenceDomain`、`createEvidenceDomain`、`ensureEvidenceDomain` 均 `hasOwn === false` 且值为 `undefined`；index 导出名不得匹配 `/init|bootstrap|create.*domain/i`。
+2. **模块导出面**：模块导出名同样不得匹配该正则，证明“连模块内部也没有可导入的初始化 API”。
+3. **源码 token**：模块与 index 源码中 `initialize`、`bootstrapEvidence`、`evidenceDomainInit`、`INIT_PRECONDITION`、`DOMAIN_INIT_CONFLICT`、`allowInitialize`、`allowInitEvidence`、`mode: "initialize"`、`mode === "initialize"`、`createEvidenceDomain`、`ensureEvidenceDomain`、`emptyProof`、`emptyBootstrap` 均 0 命中。
+4. **生产目录全量扫描**：递归扫描 `admin-web` 下 43 个生产 JS 文件（排除 `tests`、`node_modules`），断言 `initializeEvidenceDomain`、`bootstrapEvidenceDomain`、`bootstrapEvidence`、`evidenceDomainInit`、`INIT_PRECONDITION`、`DOMAIN_INIT_CONFLICT`、`allowInitialize`、`allowInitEvidence`、`mode: "initialize"`、`mode === "initialize"`、`createEvidenceDomain`、`ensureEvidenceDomain` 全部 0 命中；并断言 `applyEvidenceDomain` 函数体无 `write(`/`transact(`、`appendEvidenceWrites` 无 domain 写、模块无 `transact(` 与 `export async function`。
+
+`face-service index exports only the non-init C1 evidence surface` 另行断言 14 个运行时函数与固定 head 常量存在，4 个初始化名称不存在。
+
+### 2.4 测试 fixture 改为测试内直接构造 domain
+
+- `makeDomainRecords()` 在测试文件内直接构造完整 head/version 纯数据；
+- `seedDomain()` 通过普通 create-only Store 事务写入这两条记录；
+- 测试文件不存在对生产初始化 helper 的 import 或调用（初始化名称只作为“禁止 token”出现在静态断言字符串中）；
+- 所有调用 `initializeEvidenceDomain` / `evidenceDomainInitWrites` / `evidenceDomainInitPrecondition` 的测试已删除或改写为上述 fixture 路径。
+
+## 3. 严格只读契约
+
+### 3.1 `applyEvidenceDomain(state, config)` 判定顺序
 
 | 顺序 | 条件 | 错误码 | 写 |
 |---:|---|---|---:|
 | 1 | state/config 形状非法（realm/keyVersion/fingerprint 非规范） | `DOMAIN_INCOMPLETE`/409 | 0 |
-| 2 | fixed head 缺失（双缺或仅 version） | `DOMAIN_INCOMPLETE`/409 | 0 |
+| 2 | 固定 head 缺失（双缺或仅 version） | `DOMAIN_INCOMPLETE`/409 | 0 |
 | 3 | head schema/ID/kind/字段损坏 | `DOMAIN_INCOMPLETE`/409 | 0 |
 | 4 | head 的 realm/keyVersion/keyFingerprint 与当前 config 任一不同 | `DOMAIN_MISMATCH`/409 | 0 |
 | 5 | head 匹配但 version 记录缺失 | `DOMAIN_INCOMPLETE`/409 | 0 |
@@ -106,247 +150,156 @@
 
 说明：
 
-- 第 4 步发生在读取 version 记录之前：realm 切换、keyVersion 变化、同版本换密钥会被稳定识别为配置变化 `DOMAIN_MISMATCH`，不会误判成“存储损坏”，也不会触发创建/修复。
-- head 匹配后 version 缺失属于存储损坏，`DOMAIN_INCOMPLETE`；这与“缺一/缺两”的失败关闭语义一致。
-- 仅 version 存在、head 缺失：head 缺失先返回 `DOMAIN_INCOMPLETE`，不会因为是“新 realm”而创建 head。
+- 第 4 步发生在读取 version 记录之前：realm 切换、keyVersion 变化、同版本换钥稳定识别为配置变化 `DOMAIN_MISMATCH`，不会误判成“存储损坏”，也不会触发创建/修复。
+- head 匹配后 version 缺失属于存储损坏，`DOMAIN_INCOMPLETE`；与“缺一/缺两”的失败关闭语义一致。
+- 仅 version 存在、head 缺失：先返回 `DOMAIN_INCOMPLETE`，不会因为是“新 realm”而创建 head。
+- 不存在初始化分支、隐藏开关、`mode` 参数或 catch 后补写。
 
-### 2.2 append 写集
+### 3.2 append 写集
 
 `appendEvidenceWrites` 的顺序：
 
 1. 校验 job/config/now/decision/source/observedAt；
-2. 调用 `applyEvidenceDomain(state, cfg)` 只读校验；失败立即抛错；
+2. 调用 `applyEvidenceDomain(state, cfg)` 只读校验；失败立即抛错，成功也忽略其空返回；
 3. 事务内重读 per-job evidence head，做 CAS/首条/链尾判断；
 4. 完整复核 previous evidence（schema、`_id`、org、job、sequence、observedAt、K3 realm/version/fingerprint、HMAC）；
 5. 只返回新 evidence + 新 head 两条写。
 
 因此 append 不可能产生 domain 写；未来 reconcile 复用同一 guard 时也不会隐式初始化。
 
-### 2.3 失败零写
+### 3.3 失败零写
 
-所有运行时失败路径在返回任何写之前抛错。测试对每个失败用例对 `store.data` 做内容级 `deepEqual`，并对 `evidence_digest_domains`、`device_operation_evidence`、`device_operation_evidence_heads` 分别断言未变化。
+所有运行时失败路径在返回任何写之前抛错。测试对每个失败用例：
 
-## 3. 独立显式受控初始化 helper
+1. 先 `structuredClone(store.data)` 作为基线；
+2. 断言抛出的错误码；
+3. 对全库 `assert.deepEqual(store.data, before)`；
+4. 再分别断言 `evidence_digest_domains`、`device_operation_evidence`、`device_operation_evidence_heads` 内容级不变。
 
-### 3.1 接口
+纯函数 guard 用例则对输入 state 做 `structuredClone` 后 `deepEqual`，证明 guard 不修改 state。
 
-```js
-evidenceDomainInitPrecondition({ scope, domains, evidence, evidenceHeads, checkedAt, checkedBy })
-evidenceDomainInitRefs(config)
-evidenceDomainInitWrites(state, { config, now, precondition })
-initializeEvidenceDomain(store, config, { now, precondition, audit })
-```
+### 3.4 固定全局 head 与多组织
 
-- 这些符号只从 `h4c-evidence.mjs` 导出；公共运行时入口 `index.mjs` **不 re-export**，避免服务层误用。
-- `initializeEvidenceDomain` 不被 `appendEvidenceWrites`、`applyEvidenceDomain` 或任何 reconcile helper 调用；由源码级测试断言。
-- 只写固定 head/version 两条记录，不写 evidence/evidence head，不写第二 realm，不改 job/grant/device/log。
+- `EVIDENCE_DOMAIN_HEAD_ID = "evidence-digest-domain:v1:global"`；测试直接断言字面值。
+- ID 不含 realm、不含 orgId；`realm-a`、`realm-b`、任意组织看到的 head ID 完全相同。
+- head 记录固定 7 字段：`_id, kind, realm, keyVersion, keyFingerprint, revision, createdAt`；无 `orgId`。
+- version ID 仍含冻结的 `base64url(realm)` 与 `keyVersion`：
+  `evidence-digest-domain-version:<base64url(realm)>:<keyVersion>`；它只能与同一固定 head 配对，不能构成第二命名空间。
+- 多组织追加时共享同一固定 head；per-job evidence head 仍按 org/job 分域。
+- 预置第二 realm 的 version 记录不会绕过固定 head：realm-a 配置仍通过只读校验并可正常 append；realm-b 配置仍 `DOMAIN_MISMATCH`，且 head 数始终为 1。
 
-### 3.2 全局空前置条件
+## 4. 测试覆盖（31 项）
 
-`evidenceDomainInitPrecondition` 的精确字段：
-
-| 字段 | 约束 |
-|---|---|
-| `scope` | 固定 `"global"`，表示部署全局域，不是组织域 |
-| `domains` | 受控迁移观测到的 `evidence_digest_domains` 记录 ID 列表；必须为空 |
-| `evidence` | 受控迁移观测到的 `device_operation_evidence` 记录 ID 列表；必须为空 |
-| `evidenceHeads` | 受控迁移观测到的 `device_operation_evidence_heads` 记录 ID 列表；必须为空 |
-| `checkedAt` | 安全非负整数，记录检查时间 |
-| `checkedBy` | 受控操作者/任务标识，`[A-Za-z0-9][A-Za-z0-9._:-]{0,127}` |
-
-规则：
-
-1. **不扫描**：`evidenceDomainInitPrecondition` 不接收 Store，也不调用 `store.list()`/`store.get()`；`initializeEvidenceDomain` 只在事务内读取固定两个 ref。
-2. **不猜测**：缺前置条件、普通对象伪造 proof、字段缺失/未知、非空观测列表、非法时间/操作者，全部失败关闭。
-3. **记录全局空**：只有三集合观测列表均为空时才返回 frozen proof（模块私有 `WeakSet` 令牌）；proof 记录 `scope=global`、`checkedAt`、`checkedBy`。
-4. **业务失败关闭**：无 proof 或 proof 不可验证 → `DOMAIN_INCOMPLETE`/409；proof 观测到记录 → `DOMAIN_INIT_CONFLICT`/409。
-5. **已知边界**：Store 无法原子证明全局空；helper 也不扫描。若受控迁移伪造空列表，helper 无法从两个固定 ref 发现未声明记录。这是部署流程/审计责任，不是 helper 的自动修复路径；因此本文不声称“可检测任意伪造的空证明”。
-
-### 3.3 create-only 与拒绝覆盖
-
-- `evidenceDomainInitRefs` 只声明 fixed head ID 与当前配置的 version ID。
-- `evidenceDomainInitWrites` 先检查：
-  - fixed head 已存在 → `DOMAIN_INIT_CONFLICT`；
-  - fixed version 已存在 → `DOMAIN_INIT_CONFLICT`；
-  - 事务状态中任一非空 `evidence_digest_domains/*`、`device_operation_evidence/*`、`device_operation_evidence_heads/*` → `DOMAIN_INIT_CONFLICT`。
-- Store 的 `createOnlyCollections` 包含 `evidence_digest_domains` 与 `device_operation_evidence`；并发/重复写入 fixed ID 仍由 Store 返回 409。
-- helper 不 merge 旧记录、不覆盖字段、不补 `updatedAt`、不删除任何记录。
-
-### 3.4 初始化成功后的 head/version
-
-| 记录 | 精确字段 | 值 |
-|---|---|---|
-| head | `_id, kind, realm, keyVersion, keyFingerprint, revision, createdAt` | `kind="head"`，`revision=1`，`createdAt=now`，无 orgId |
-| version | `_id, kind, realm, keyVersion, keyFingerprint, enabledAt` | `kind="version"`，`enabledAt=now` |
-
-成功只产生 2 条写；evidence/evidence head 集合保持空。之后同配置的运行时只读校验通过，第二次初始化因 fixed head 已存在而 `DOMAIN_INIT_CONFLICT`。
-
-## 4. 初始化与运行时区别
-
-| 维度 | 运行时 `applyEvidenceDomain` | 显式初始化 `initializeEvidenceDomain` |
-|---|---|---|
-| 调用者 | append / 未来 reconcile | 仅受控部署迁移 |
-| 是否读 Store | 只读事务内声明的 fixed head/version 两个 ref | 只读同两个 ref |
-| 是否写 Store | 永不写（返回 `[]`） | 写 fixed head+version 两条 create-only |
-| 缺 head/version | `DOMAIN_INCOMPLETE` | fixed 记录已存在则 `DOMAIN_INIT_CONFLICT`；不存在则要求空前置条件 |
-| 配置不匹配 | `DOMAIN_MISMATCH` | 已存在 fixed record 时 `DOMAIN_INIT_CONFLICT`；不创建第二 realm |
-| 全局空证明 | 不需要 | 必须有 `scope=global` 的三集合空列表 proof |
-| 扫描集合 | 否 | 否 |
-| 自动修复/回填 | 否 | 否 |
-| 删除/覆盖 | 否 | 否 |
-
-## 5. 固定全局 head 与 ID 规则
-
-- `EVIDENCE_DOMAIN_HEAD_ID` 由 `evidence-digest-domain` + `v1` + `global` 派生，字面值为 `evidence-digest-domain:v1:global`。
-- 不含 realm、不含 orgId；`realm-a`、`realm-b`、任意组织看到的 head ID 完全相同。
-- head 的 `realm/keyVersion/keyFingerprint` 是当前部署的绑定字段；`revision` 从 1 起；`createdAt` 为初始化时刻。
-- version ID 可含 `base64url(realm)` 与 `keyVersion`，但：
-  - 只能与同一个 fixed head 配对；
-  - 运行时先比对固定 head，再读取当前配置的 version；
-  - 不允许出现第二个 head；
-  - realm 变化、版本变化、同版本换密钥都不会写新 head/version。
-- 预置第二 realm 的 version 记录不会绕过 fixed head；运行时仍 `DOMAIN_MISMATCH`，初始化若如实记录该记录则 `DOMAIN_INIT_CONFLICT`。
-- 正式轮换/realm 迁移/历史密钥回退留给未来任务；C1 不实现，也不做自动迁移。
-
-## 6. 测试覆盖与保留
-
-### 6.1 原 23 项场景保留
-
-- 当前测试 **35 项**；原始 `3fce9b0` 的 23 项场景全部保留或由更强契约替换，没有删除场景。
-- 其中 14 项名称未变；9 项因行为契约变化而改名/拆分/加强：
-
-| 原始 23 项中的名称 | 当前对应 |
-|---|---|
-| `evidence/head/domain IDs are deterministic and scoped` | `evidence/head/domain IDs are deterministic and the head is realm/org independent` |
-| `domain validator is exact for head and version records` | `domain validator is exact for the stable head and frozen version records` |
-| `domain guard creates head and version once and never mutates input` | `explicit controlled initialization creates the single global pair; same config passes` + 3 项初始化失败/拒绝测试 |
-| `domain guard rejects one-sided and corrupt domains without backfill` | `runtime domain guard rejects one-sided and corrupt domains without backfill` |
-| `domain guard fails closed on version changes and same-version rekey` | `runtime domain guard fails closed on realm switch, version change and same-version rekey` |
-| `append fails closed on K3 rekey, version change and one-sided domain` | `append fails closed on K3 rekey, realm/version change and one-sided domain` |
-| `first evidence creates the K3 domain, immutable evidence and head` | `first evidence appends only evidence+head after explicit initialization` + 初始化正例 |
-| `damaged previous evidence is chain-broken across schema, identity, time, K3 and HMAC` | `damaged previous evidence is chain-broken across schema, identity, org/job, time, K3 and HMAC` |
-| `face-service index exports the C1 evidence surface` | `face-service index exports only the non-init C1 evidence surface` + `production module separates the explicit controlled init helper from the read-only runtime` |
-
-### 6.2 本轮新增/强化的初始化测试
-
-1. `explicit controlled initialization creates the single global pair; same config passes`
-   - 空库 + 合法 proof 成功；只 2 条 domain 写；head/version 精确字段；无 orgId；同配置运行时通过；重复初始化冲突；随后 append 正常。
-   - 以 `store.list` 抛错 stub 证明初始化不扫描；`listCalls === 0`。
-2. `initialization fails closed without a recorded global-empty precondition and never scans`
-   - 缺 proof/null/plain object/非法 now 均 `DOMAIN_INCOMPLETE`；
-   - 非空 domains/evidence/evidenceHeads 均 `DOMAIN_INIT_CONFLICT`；
-   - 非法 scope/checkedAt/checkedBy/未知字段/symbol 字段均失败关闭；
-   - 全程 `store.list` 未被调用，store 内容不变。
-3. `init write builder rejects any visible domain/evidence/evidence-head record`
-   - fixed head、fixed version、其他 domain、evidence、evidence head 任一可见记录均 `DOMAIN_INIT_CONFLICT`；
-   - 输入 state 不被修改；缺 proof 为 `DOMAIN_INCOMPLETE`。
-4. `initialization is create-only against existing or corrupt fixed domain records`
-   - 已存在 head/version/损坏 head 均冲突；成功初始化后再次初始化冲突；内容级零写。
-5. `constant-time digest comparison validates canonical hex before timingSafeEqual`
-   - 源码级断言先做 64 位小写 hex 校验，再调用 `timingSafeEqual`；两侧 Buffer 等长 32 字节。
-
-### 6.3 指定覆盖映射
+### 4.1 指定覆盖映射
 
 | 要求 | 测试 |
 |---|---|
-| 全新初始化成功 | `explicit controlled initialization creates the single global pair; same config passes` |
-| 重复初始化拒绝 | 同上；`initialization is create-only against existing or corrupt fixed domain records` |
-| 损坏 domain 拒绝 | `initialization is create-only against existing or corrupt fixed domain records`；`runtime domain guard rejects one-sided and corrupt domains without backfill` |
-| 缺两（空） | `append on an empty store never initializes the domain implicitly`；`runtime rejects both-missing...` 的 `empty` |
-| 缺两（有 evidence） | `both-missing after existing evidence or evidence head fails closed with every collection unchanged` |
-| 缺两（有 evidence head） | 同上 |
-| 仅 head | `runtime rejects both-missing, head-only, version-only and evidence-only states with zero writes` |
-| 仅 version | 同上 |
-| 所有失败路径 domain/evidence/head deepEqual + 零写 | 上述测试均以 `structuredClone(store.data)` 为基线，`assert.deepEqual` 全库，再分别断言三集合 |
-| append 不隐式初始化 | `append on an empty store never initializes the domain implicitly`；`first evidence appends only evidence+head after explicit initialization` |
-| realm-a 初始化 + 同配置通过 | `explicit controlled initialization creates the single global pair; same config passes` |
-| realm-b / 换版本 / 同版本换密钥拒绝 | `runtime domain guard fails closed on realm switch, version change and same-version rekey`；`realm switch/version change/rekey are DOMAIN_MISMATCH and never add a head/version` |
-| 预置第二 realm 不能绕过 | `realm switch/version change/rekey are DOMAIN_MISMATCH and never add a head/version` |
+| 固定 head ID 字面冻结 | `evidence/head/domain IDs are deterministic and the head is realm/org independent`、`test fixture seeds the fixed global pair and runtime verification is read-only` |
 | 多组织命中同一 head | `one stable global head is shared by multiple organizations and cannot fork` |
-| realm 变化不写新 head/version | 同上 realm 测试；每次失败后内容级 `deepEqual` |
+| 第二 realm 记录不能改变结果或绕过 | `realm switch/version change/rekey are DOMAIN_MISMATCH and never add a head/version`（预置 realm-b version 后 realm-a 仍通过并可 append） |
+| head/version 完整匹配通过且零写 | `test fixture seeds the fixed global pair and runtime verification is read-only`（连续两次返回 `[]`，全库 deepEqual） |
+| 双缺 / head-only / version-only / 仅有 evidence 或 evidence head | `runtime rejects both-missing, head-only, version-only and evidence-only states with zero writes` |
+| schema/kind/内部绑定损坏 | `runtime domain guard rejects one-sided and corrupt domains without backfill`（含缺字段、未知字段、kind 交换、fingerprint/revision/ID/realm 损坏） |
+| 已有 evidence 后双缺 | `both-missing after existing evidence or evidence head fails closed with every collection unchanged` |
+| 已有 evidence head 后双缺 | 同上 |
+| realm 变化 / keyVersion 变化 / 同版本换钥 | `runtime domain guard fails closed on realm switch, version change and same-version rekey`、`append fails closed on K3 rekey, realm/version change and one-sided domain`、`realm switch/version change/rekey are DOMAIN_MISMATCH and never add a head/version` |
+| 空库 append 不初始化 | `append on an empty store never initializes the domain implicitly` |
+| append 只写 evidence + head | `first evidence appends only evidence+head after a fixed fixture seed` |
 | previous evidence 完整复核 | `damaged previous evidence is chain-broken across schema, identity, org/job, time, K3 and HMAC` |
-| timingSafeEqual 前格式/等长 | `constant-time digest comparison validates canonical hex before timingSafeEqual` + 上述 damaged 测试的长度/大小写用例 |
+| timingSafeEqual 前格式/长度 | `constant-time digest comparison validates canonical hex before timingSafeEqual` + damaged 用例中的 63 位与全大写 digest |
+| head CAS 与并发分叉 | `second evidence validates its parent and CAS-increments the head`、`stale head CAS and missing/orphan head fail closed with zero writes`、`concurrent appends on the same head have one winner and no fork` |
+| 公共 index 无初始化 API | `face-service index exports only the non-init C1 evidence surface`、`production module, public index and production tree expose no K3 initialization capability` |
+| 生产目录无初始化旁路 | `production module, public index and production tree expose no K3 initialization capability` |
+| fixture 直接构造 domain | `test fixture seeds the fixed global pair and runtime verification is read-only` |
 | Store 白名单/seed/init | `LocalStore registers the three collections and upgrades old local data` |
-| 精确字段/未知字段 | evidence/head/domain validator 测试；初始化 head/version 字段断言 |
-| Store create-only/exact | `LocalStore keeps evidence/domain create-only and exact, head updates exact`；`CloudStore keeps exact fields and create-only semantics` |
+| Store create-only/exact | `LocalStore keeps evidence/domain create-only and exact, head updates exact`、`CloudStore keeps exact fields and create-only semantics` |
 | K1/K2/K3 独立 | `K3 config is independent, canonical and fingerprint-bound`（K1、K2 环境均不能替代 K3） |
+| 持久化无秘密/禁止字段 | `persisted evidence, logs and audits contain no secrets or forbidden payloads` |
 
-## 7. 命令、exit code 与计数
+### 4.2 数量说明
 
-环境：Windows 10.0.19042、Node v24.19.0、PowerShell 7.x；当前分支 worktree `SMART-PM`。
+- 测试总数 **31**（较 `aa0db29` 的 30 项增加 1 项源码级 `constantTimeHexEqual` 断言）。
+- `90e4189` 新增的 4 项初始化正例/反例测试已全部删除，相关场景改由测试内 domain fixture + 只读失败关闭测试覆盖。
+- 原 23 项 C1 场景全部保留或由更强契约替换；未删除既有安全边界测试。
 
-### 7.1 C1 定向
+## 5. 命令、exit code 与计数
+
+环境：Windows 10.0.19042、Node v24.19.0、git 2.55.0.windows.3、PowerShell 7.x；独立 worktree `.tmp/hk-h4c-c1-final-90e4189`（detached at `90e4189`），未使用主工作区提交。
+
+### 5.1 C1 定向
 
 | 工作目录 | 命令 | Exit | 计数 |
 |---|---|---:|---:|
-| `admin-web` | `node --test --test-isolation=none tests/face-h4c-evidence.test.mjs` | 0 | tests 35 / pass 35 / fail 0 |
-| `admin-web` | 同上 + `--import file:///.../.tmp/h4c-c1-rework/guards.mjs` | 0 | tests 35 / pass 35 / fail 0；`network=0 provider=0 httpServer=0` |
+| `admin-web` | `node --test --test-isolation=none tests/face-h4c-evidence.test.mjs` | 0 | tests 31 / pass 31 / fail 0 |
+| `admin-web` | 同上 + `--import ../../h4c-final-90e4189/guards.mjs` | 0 | tests 31 / pass 31 / fail 0；`network_attempts=0 provider_calls=0 http_servers=0` |
 
-### 7.2 Admin 全量
+### 5.2 Admin 全量
 
 | 工作目录 | 命令 | Exit | 计数 |
 |---|---|---:|---:|
-| `admin-web` | `node --test --test-isolation=none "tests/*.test.mjs"` | 0 | 41 files；tests 585 / pass 585 / fail 0 |
+| `admin-web` | `node --test --test-isolation=none "tests/*.test.mjs"` | 0 | 41 files；tests 581 / pass 581 / fail 0 |
 
-### 7.3 根测试
+### 5.3 根测试
 
 | 工作目录 | 命令 | Exit | 计数 |
 |---|---|---:|---:|
 | 仓库根 | `node --test --test-isolation=none "tests/*.test.cjs"` | 0 | 7 files；tests 51 / pass 51 / fail 0 |
 
-### 7.4 静态与敏感检查
+### 5.4 静态与敏感检查
 
 | 命令 | Exit | 结果 |
 |---|---:|---|
 | `node --check admin-web/lib/face-service/h4c-evidence.mjs` | 0 | 语法通过 |
 | `node --check admin-web/lib/face-service/index.mjs` | 0 | 语法通过 |
 | `node --check admin-web/tests/face-h4c-evidence.test.mjs` | 0 | 语法通过 |
-| `git diff --check` | 0 | 无空白错误 |
-| `git diff --quiet 3fce9b0 -- admin-web/server.mjs` | 0 | `server.mjs` 未变 |
-| `git diff --quiet aa0db29 -- admin-web/server.mjs` | 0 | 本轮 `server.mjs` 未变 |
+| `git diff --check`（提交前工作树） | 0 | 无空白错误 |
+| `git diff --check 90e4189..HEAD`（提交后） | 0 | 无空白错误 |
+| `git diff --quiet 90e4189 -- admin-web/server.mjs admin-web/lib/store.mjs` | 0 | `server.mjs`、`store.mjs` 均未变 |
+| 生产目录初始化 token 扫描（43 文件） | 0 | 0 命中 |
 | 敏感扫描（4 个变更文件） | 0 | `total_findings: 0` |
 
 敏感扫描类别：私钥块、AWS access key、GitHub token、Google API key、Slack token、Bearer token、通用 secret 字面量、32 字节 Base64 字面量、IPv4、MAC、中国大陆手机号、18 位身份证号。只输出计数，不输出匹配文本。该扫描是模式级检查，不是“绝对无秘密”的证明。
 
-## 8. Provider / 网络 / 设备 / HTTP 状态
+## 6. Provider / 网络 / 设备 / HTTP 副作用
 
 | 项 | C1 定向 | 说明 |
 |---|---:|---|
 | 真实 Provider 调用 | 0 | 仓库只有 Mock；C1 测试未实例化/调用 Mock Provider |
 | Mock Provider 方法调用 | 0 | guard 包裹 `health/enrollFace/updateFace/revokeFace/queryOperation/verifyEvent`，计数 0 |
 | 测试业务网络尝试 | 0 | guard 包裹 `fetch`、`http/https.request/get`、`net.connect/createConnection`、`tls.connect`、`dns.lookup/resolve`，计数 0 |
-| HTTP server/client 注册 | 0 | guard 包裹 `http/https/net.createServer`，计数 0；未新增路由；`server.mjs` 零修改 |
+| HTTP server 注册 | 0 | guard 包裹 `http/https/net.createServer`，计数 0；未新增路由；`server.mjs` 零修改 |
 | 真实设备连接/写入 | 0 | 变更代码无 serial/device SDK/蓝牙/USB/网络设备通道；测试只写 LocalStore/fake CloudStore |
 | Cloud/live 调用 | 0 | `CloudStore` 测试使用 fake `database()` harness，无真实 CloudBase |
 | K3 provisioning/轮换 | 0 | 未配置或调用真实 K3；未生成/保存密钥 |
 
 Admin 全量包含既有 loopback 测试（`listen(0, <loopback>)` + `fetch`），不是本次新增路由，也不是外部网络；本次未对全量注入 guard，因此不把既有 loopback 计为 0。真实 Provider/设备/Cloud/live 始终为 0。
 
-Git 远端操作单列：本轮 `git ls-remote` 在当前离线环境因缺少 HTTPS 凭证失败（`schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`），未执行 push；这不属于上述运行时网络证据。详见 §10 交付回报。
+Git 远端操作（普通 push 与 `git ls-remote` 比对）单列在交付回报中，不属于上述运行面计数。
 
-## 9. 未实现项（明确不在本包）
+## 7. 未实现项（明确不在本包）
 
+- **首次初始化/迁移**：不实现初始化 API、迁移脚本、维护窗口编排、全局锁、CloudStore 权威空集合检查、回读/审计/回滚工具；只在 §1.3 移交约束。
+- **K3 迁移/轮换/realm 变更**：未实现；固定 head 仍绑定单一 realm/keyVersion/fingerprint。
 - **C2**：HTTP/DTO/权限/组织/成员/actorType；job/grant/cleanupSnapshot 绑定；R1/R2 两段式；log/op key/op domain/audit；60 秒/8 次/24 小时；错误映射；finalize-retry；并发/重放/ack loss；reconcile decision。
 - **C3**：真实 CloudBase 事务/索引/集合部署；真实 K3 密钥 provisioning/轮换；生产告警/监控；真实 Provider/设备；`server.mjs` 路由注册。
-- **初始化/迁移工具**：本轮只有 helper 与离线测试；未提供维护窗口编排、全局锁、CloudStore 权威空集合检查 CLI、回读/审计/回滚工具、密钥 provisioning。
-- **正式轮换/realm 迁移**：未实现，留给未来独立任务。
-- 未修改 `store.mjs`；未修改 `server.mjs`；未新增路由；未合并 `main`；未 force-push/rebase/squash/amend。
+- 未修改 `store.mjs`；未修改 `server.mjs`；未新增路由；未合并 `main`；未 force-push/rebase/squash/amend/reset。
 
-## 10. 交付与复审交接
+## 8. 交付与复审交接
 
 - 分支：`feat/hk-face-h4c-reconciliation`
-- 本提交父 SHA：`aa0db293c7744580e4e0aaa07159bc42b6ac73a6`
+- 本提交父 SHA：`90e4189717e21a5d458b09da34677ef29795c767`
 - 本提交 SHA：**由交付回报给出**（本文件随该提交一起提交，无法在提交前写入自身 SHA）
-- 变更文件：3 个代码/测试文件 + 本证据文档；未包含任何未跟踪的 HK-AI-06A/07A 文档或 `.tmp` 临时文件。
-- 工作区：提交后仅保留任务开始前已存在的未跟踪文件（HK-AI-06A/07A 文档、电动车充电桩方案等），不纳入本提交。
-- 远端核验：`git ls-remote --heads origin feat/hk-face-h4c-reconciliation` 因 HTTPS 凭证不可用失败；未 push。若复审环境可达，请以远端分支 SHA 与本文父 SHA/本提交 SHA 对比。
+- 完整链：`1155b7ba → 3fce9b0 → 6dbc9e0 → aa0db29 → 90e4189 → 本提交`
+- 变更文件：3 个代码/测试文件 + 本证据文档；不含 REL-AI-02 两份文档、HK-AI-06A/07A 文档或 `.tmp` 临时文件。
+- 工作区：提交后仅保留任务开始前已存在的未跟踪文件，不纳入本提交。
+- 远端核验：普通 push 目标 `feat/hk-face-h4c-reconciliation`；以远端分支 SHA 与本提交 SHA 对比，结果见交付回报。
 
 请 Codex 重点复核：
 
-1. `applyEvidenceDomain`/`appendEvidenceWrites` 是否已完全只读，是否还存在任何隐式初始化、回填、catch 静默修复或 domain 写。
-2. `initializeEvidenceDomain` 是否独立、create-only、缺 proof/非空 proof/已存在记录是否全部失败关闭且零写；是否确实不扫描 Store。
-3. 固定 head `evidence-digest-domain:v1:global` 是否彻底阻止第二 realm；预置第二 realm version、换版本、同版本换密钥、多组织是否覆盖充分。
-4. 原 23 项测试场景是否全部保留；新增 5 项初始化/静态测试是否足以证明本轮契约。
-5. §3.2 对“Store 无法原子证明全局空”的边界说明是否可作为未来受控迁移任务的交接基线。
+1. 生产模块、公共 index 与整个生产目录是否已无任何可调用/可导入的 K3 初始化能力、bootstrap、空集合检查、domain 写构建器或 `mode: "initialize"` 旁路。
+2. `applyEvidenceDomain` 在双缺/单缺/损坏/配置变化上的判定顺序、错误码与零写是否符合 §3。
+3. 固定 head `evidence-digest-domain:v1:global` 是否彻底阻止第二 realm；预置第二 realm version、跨组织、同版本换密钥测试是否充分。
+4. 31 项测试是否覆盖全部指定场景；fixture 是否完全脱离生产初始化 helper。
+5. §1.2 对“Store 无法原子证明全局为空、信任锚丢失可重建”的结论，以及 §1.3 的迁移移交边界，是否足以支撑 C1 关闭。
 
 本文不声称 C1 已生产就绪；复审前不开始 C2/C3。完成后停手，交 Codex 独立复审。

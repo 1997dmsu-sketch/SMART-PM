@@ -11,11 +11,12 @@ export * from "./mock-provider.mjs";
 export * from "./h4b.mjs";
 
 /*
- * H4-c C1 evidence surface is intentionally explicit and runtime-only. The
- * evidence module also contains a separate explicit controlled-init helper
- * (with its global-empty precondition) for a future deployment migration, but
- * this public runtime index deliberately does not re-export it. C1 runtime is
- * strictly read-only and never initializes the K3 domain.
+ * H4-c C1 evidence surface is an explicit runtime-only whitelist. Production
+ * C1 has no K3 domain initialization capability at all: neither the module nor
+ * this index exposes a bootstrap, create-domain or empty-check helper. The
+ * runtime only reads and verifies the fixed head+version pair and fails
+ * closed; first deployment setup belongs to a separate controlled migration
+ * task outside C1.
  */
 export {
   EVIDENCE_COLLECTION,

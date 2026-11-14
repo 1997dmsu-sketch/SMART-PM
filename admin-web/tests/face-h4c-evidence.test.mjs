@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createHash, createHmac } from "node:crypto";
 
 import { CloudStore, LocalStore, seed } from "../lib/store.mjs";
@@ -12,7 +13,6 @@ import {
   EVIDENCE_DIGEST_ALGORITHM_VERSION,
   EVIDENCE_DIGEST_DOMAIN,
   EVIDENCE_DOMAIN_HEAD_ID,
-  EVIDENCE_DOMAIN_INIT_SCOPE,
   EVIDENCE_DOMAINS_COLLECTION,
   EVIDENCE_HEADS_COLLECTION,
   EVIDENCE_SCHEMA_VERSION,
@@ -21,14 +21,10 @@ import {
   evidenceAppendRefs,
   evidenceDigest,
   evidenceDomainIds,
-  evidenceDomainInitPrecondition,
-  evidenceDomainInitRefs,
-  evidenceDomainInitWrites,
   evidenceHeadId,
   evidenceId,
   evidenceKeyConfig,
   evidenceKeyFingerprint,
-  initializeEvidenceDomain,
   stableStringify,
   validateEvidenceDomainRecord,
   validateEvidenceHead,
@@ -158,55 +154,16 @@ async function insert(store, collection, record) {
 }
 
 /**
- * Test-only helper for the explicit controlled initialization precondition.
- * The production helper does not scan the Store: the deployment migration
- * records the observed empty lists (or any observed record IDs) itself.
- */
-function initPrecondition(overrides = {}) {
-  return evidenceDomainInitPrecondition({
-    scope: EVIDENCE_DOMAIN_INIT_SCOPE,
-    domains: [],
-    evidence: [],
-    evidenceHeads: [],
-    checkedAt: NOW,
-    checkedBy: ACTOR,
-    ...overrides,
-  });
-}
-
-async function initStore(store, config = CONFIG, {
-  now = NOW, precondition = initPrecondition({ checkedAt: now }), audit = AUDIT,
-} = {}) {
-  return initializeEvidenceDomain(store, config, { now, precondition, audit });
-}
-
-async function expectInitFailure(store, config, code, options = {}) {
-  const before = structuredClone(store.data);
-  const args = { now: NOW, audit: AUDIT, ...options };
-  if (!Object.hasOwn(args, "precondition")) {
-    args.precondition = initPrecondition({ checkedAt: args.now });
-  }
-  await assert.rejects(() => initializeEvidenceDomain(store, config, args),
-    rejectCode(code));
-  assert.deepEqual(store.data, before);
-  assert.deepEqual(store.data[EVIDENCE_DOMAINS_COLLECTION],
-    before[EVIDENCE_DOMAINS_COLLECTION]);
-  assert.deepEqual(store.data[EVIDENCE_COLLECTION], before[EVIDENCE_COLLECTION]);
-  assert.deepEqual(store.data[EVIDENCE_HEADS_COLLECTION],
-    before[EVIDENCE_HEADS_COLLECTION]);
-}
-
-/**
- * Test fixture: use the explicit controlled initialization helper (never a
- * hidden append path) to create the fixed global head+version pair.
+ * Test-only fixture: build the fixed global head+version pair as plain data
+ * (no Store access) and then seed it through the normal create-only Store
+ * transaction. This is the ONLY setup path; production C1 has no
+ * initialization capability.
  */
 async function seedDomain(store, config = CONFIG, now = NOW) {
-  await initStore(store, config, { now });
-  const { headId, versionId } = evidenceDomainIds(config.realm, config.version);
-  return {
-    head: await store.get(EVIDENCE_DOMAINS_COLLECTION, headId),
-    version: await store.get(EVIDENCE_DOMAINS_COLLECTION, versionId),
-  };
+  const { head, version } = makeDomainRecords(config, now);
+  await insert(store, EVIDENCE_DOMAINS_COLLECTION, head);
+  await insert(store, EVIDENCE_DOMAINS_COLLECTION, version);
+  return { head, version };
 }
 
 async function domainStateFor(store, config = CONFIG) {
@@ -529,210 +486,6 @@ test("domain validator is exact for the stable head and frozen version records",
   for (const failure of failures) assert.throws(failure, rejectCode("DOMAIN_INCOMPLETE"));
 });
 
-test("explicit controlled initialization creates the single global pair; same config passes", async (t) => {
-  const store = await localStore(t);
-  const proof = initPrecondition();
-  assert.equal(Object.isFrozen(proof), true);
-  assert.deepEqual(Object.keys(proof).sort(), [
-    "checkedAt", "checkedBy", "domains", "evidence", "evidenceHeads", "scope",
-  ]);
-  assert.equal(proof.scope, "global");
-  assert.deepEqual(proof.domains, []);
-  assert.deepEqual(proof.evidence, []);
-  assert.deepEqual(proof.evidenceHeads, []);
-
-  // Initialization must not list/scan the Store. Replacing list with a throwing
-  // stub proves the helper uses only the two fixed point refs + precondition.
-  const originalList = store.list;
-  let listCalls = 0;
-  store.list = async () => {
-    listCalls += 1;
-    throw new Error("initialization must not scan the Store");
-  };
-  let writes;
-  try {
-    writes = await initializeEvidenceDomain(store, CONFIG, {
-      now: NOW, precondition: proof, audit: AUDIT,
-    });
-  } finally {
-    store.list = originalList;
-  }
-  assert.equal(listCalls, 0);
-  assert.equal(writes.length, 2);
-  assert.deepEqual(writes.map((write) => write.collection),
-    [EVIDENCE_DOMAINS_COLLECTION, EVIDENCE_DOMAINS_COLLECTION]);
-  assert.deepEqual(writes.map((write) => write.id), [
-    EVIDENCE_DOMAIN_HEAD_ID,
-    evidenceDomainIds(CONFIG.realm, CONFIG.version).versionId,
-  ]);
-
-  assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 2);
-  assert.deepEqual(store.data[EVIDENCE_COLLECTION], []);
-  assert.deepEqual(store.data[EVIDENCE_HEADS_COLLECTION], []);
-  const head = store.data[EVIDENCE_DOMAINS_COLLECTION].find((row) => row.kind === "head");
-  const version = store.data[EVIDENCE_DOMAINS_COLLECTION].find((row) => row.kind === "version");
-  assert.equal(head._id, EVIDENCE_DOMAIN_HEAD_ID);
-  assert.equal(head.realm, CONFIG.realm);
-  assert.equal(head.keyVersion, CONFIG.version);
-  assert.equal(head.keyFingerprint, CONFIG.fingerprint);
-  assert.equal(head.revision, 1);
-  assert.equal(head.createdAt, NOW);
-  assert.equal(Object.hasOwn(head, "orgId"), false);
-  assert.deepEqual(Object.keys(head).sort(), [
-    "_id", "createdAt", "keyFingerprint", "keyVersion", "kind", "realm", "revision",
-  ]);
-  assert.equal(version.enabledAt, NOW);
-  assert.equal(Object.hasOwn(version, "orgId"), false);
-  assert.deepEqual(Object.keys(version).sort(), [
-    "_id", "enabledAt", "keyFingerprint", "keyVersion", "kind", "realm",
-  ]);
-  const initRefs = evidenceDomainInitRefs(CONFIG);
-  assert.deepEqual(initRefs.map((item) => `${item.collection}/${item.id}`), [
-    `${EVIDENCE_DOMAINS_COLLECTION}/${EVIDENCE_DOMAIN_HEAD_ID}`,
-    `${EVIDENCE_DOMAINS_COLLECTION}/${evidenceDomainIds(CONFIG.realm, CONFIG.version).versionId}`,
-  ]);
-  assert.equal(evidenceDomainInitRefs(evidenceKeyConfig({
-    ...ENV_A, H4_EVIDENCE_REALM: "h4c-realm-b",
-  })).find((item) => item.id === EVIDENCE_DOMAIN_HEAD_ID).id, EVIDENCE_DOMAIN_HEAD_ID);
-
-  // The same config now passes the read-only runtime verification, and the
-  // explicit init helper can never run a second time.
-  assert.deepEqual(applyEvidenceDomain(await domainStateFor(store), CONFIG), []);
-  await expectInitFailure(store, CONFIG, "DOMAIN_INIT_CONFLICT", { now: NOW + 1 });
-  assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 2);
-
-  await runAppend(store, { decision: "confirmed_removed" });
-  assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 2);
-  assert.equal(store.data[EVIDENCE_COLLECTION].length, 1);
-  assert.equal(store.data[EVIDENCE_HEADS_COLLECTION].length, 1);
-});
-
-test("initialization fails closed without a recorded global-empty precondition and never scans", async (t) => {
-  const store = await localStore(t);
-  const originalList = store.list;
-  let listCalls = 0;
-  store.list = async () => {
-    listCalls += 1;
-    throw new Error("initialization must not scan the Store");
-  };
-  try {
-    await expectInitFailure(store, CONFIG, "DOMAIN_INCOMPLETE", {
-      precondition: undefined,
-    });
-    await expectInitFailure(store, CONFIG, "DOMAIN_INCOMPLETE", {
-      precondition: null,
-    });
-    // A plain object cannot mint the module-private precondition token.
-    await expectInitFailure(store, CONFIG, "DOMAIN_INCOMPLETE", {
-      precondition: {
-        scope: "global", domains: [], evidence: [], evidenceHeads: [],
-        checkedAt: NOW, checkedBy: ACTOR,
-      },
-    });
-    await expectInitFailure(store, CONFIG, "DOMAIN_INCOMPLETE", {
-      now: 1.5, precondition: initPrecondition(),
-    });
-  } finally {
-    store.list = originalList;
-  }
-  assert.equal(listCalls, 0);
-
-  const before = structuredClone(store.data);
-  for (const field of ["domains", "evidence", "evidenceHeads"]) {
-    assert.throws(() => initPrecondition({ [field]: ["observed-record-id"] }),
-      rejectCode("DOMAIN_INIT_CONFLICT"), field);
-  }
-  for (const invalid of [
-    () => initPrecondition({ scope: "org" }),
-    () => initPrecondition({ checkedAt: 1.5 }),
-    () => initPrecondition({ checkedBy: "bad actor" }),
-    () => initPrecondition({ domains: "[]" }),
-    () => initPrecondition({ extra: true }),
-    () => initPrecondition({ checkedBy: undefined }),
-    () => evidenceDomainInitPrecondition({
-      scope: "global", domains: [], evidence: [], evidenceHeads: [],
-      checkedAt: NOW, checkedBy: ACTOR, [Symbol("extra")]: true,
-    }),
-  ]) {
-    assert.throws(invalid, rejectCode("DOMAIN_INCOMPLETE"));
-  }
-  assert.deepEqual(store.data, before);
-  assert.deepEqual(store.data[EVIDENCE_DOMAINS_COLLECTION], []);
-});
-
-test("init write builder rejects any visible domain/evidence/evidence-head record", () => {
-  const proof = initPrecondition();
-  const ids = evidenceDomainIds(CONFIG.realm, CONFIG.version);
-  const base = {
-    [`${EVIDENCE_DOMAINS_COLLECTION}/${ids.headId}`]: null,
-    [`${EVIDENCE_DOMAINS_COLLECTION}/${ids.versionId}`]: null,
-  };
-  const before = structuredClone(base);
-  assert.equal(evidenceDomainInitWrites(base, {
-    config: CONFIG, now: NOW, precondition: proof,
-  }).length, 2);
-  assert.deepEqual(base, before);
-
-  assert.throws(() => evidenceDomainInitWrites(base, { config: CONFIG, now: NOW }),
-    rejectCode("DOMAIN_INCOMPLETE"));
-
-  const domain = makeDomainRecords();
-  const evidence = makeEvidenceRecord();
-  const evidenceHead = makeHead();
-  const cases = [
-    ["domain head", {
-      ...base, [`${EVIDENCE_DOMAINS_COLLECTION}/${ids.headId}`]: domain.head,
-    }],
-    ["domain version", {
-      ...base, [`${EVIDENCE_DOMAINS_COLLECTION}/${ids.versionId}`]: domain.version,
-    }],
-    ["other domain record", {
-      ...base, [`${EVIDENCE_DOMAINS_COLLECTION}/other-domain`]: domain.head,
-    }],
-    ["evidence", {
-      ...base, [`${EVIDENCE_COLLECTION}/${evidence._id}`]: evidence,
-    }],
-    ["evidence head", {
-      ...base, [`${EVIDENCE_HEADS_COLLECTION}/${evidenceHead._id}`]: evidenceHead,
-    }],
-  ];
-  for (const [name, state] of cases) {
-    const snapshot = structuredClone(state);
-    assert.throws(() => evidenceDomainInitWrites(state, {
-      config: CONFIG, now: NOW, precondition: proof,
-    }), rejectCode("DOMAIN_INIT_CONFLICT"), name);
-    assert.deepEqual(state, snapshot, name);
-  }
-});
-
-test("initialization is create-only against existing or corrupt fixed domain records", async (t) => {
-  const domain = makeDomainRecords();
-  const realmB = evidenceKeyConfig({ ...ENV_A, H4_EVIDENCE_REALM: "h4c-realm-b" });
-  const cases = [
-    ["head", domain.head],
-    ["version", domain.version],
-    ["corrupt head", { ...domain.head, extra: 1 }],
-    ["second realm head", makeDomainRecords(realmB).head],
-  ];
-  for (const [name, record] of cases) {
-    const store = await localStore(t);
-    await insert(store, EVIDENCE_DOMAINS_COLLECTION, record);
-    const before = structuredClone(store.data);
-    await expectInitFailure(store, CONFIG, "DOMAIN_INIT_CONFLICT");
-    assert.deepEqual(store.data, before, name);
-    assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 1, name);
-  }
-
-  // Duplicate initialization after a successful explicit init is also refused
-  // and must not overwrite the fixed pair.
-  const store = await localStore(t);
-  await initStore(store);
-  const before = structuredClone(store.data);
-  await expectInitFailure(store, CONFIG, "DOMAIN_INIT_CONFLICT", { now: NOW + 1 });
-  assert.deepEqual(store.data, before);
-  assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 2);
-});
-
 test("runtime domain guard never creates the K3 domain on empty state", () => {
   const state = domainState(CONFIG, null, null);
   const before = structuredClone(state);
@@ -831,7 +584,7 @@ test("append fails closed on K3 rekey, realm/version change and one-sided domain
   assert.equal(orphanStore.data[EVIDENCE_DOMAINS_COLLECTION][0].kind, "head");
 });
 
-test("explicit initialization seeds the fixed global pair and runtime verification is read-only", async (t) => {
+test("test fixture seeds the fixed global pair and runtime verification is read-only", async (t) => {
   const store = await localStore(t);
   const { head, version } = await seedDomain(store);
   assert.equal(head._id, EVIDENCE_DOMAIN_HEAD_ID);
@@ -860,6 +613,88 @@ test("explicit initialization seeds the fixed global pair and runtime verificati
   assert.deepEqual(store.data, before);
 });
 
+test("production module, public index and production tree expose no K3 initialization capability", async () => {
+  const service = await import("../lib/face-service/index.mjs");
+  const module = await import("../lib/face-service/h4c-evidence.mjs");
+
+  // 1. Public runtime index: no initialize/bootstrap/create-domain export, by
+  //    exact name and by name family.
+  for (const name of ["initializeEvidenceDomain", "evidenceDomainInitPrecondition",
+    "evidenceDomainInitRefs", "evidenceDomainInitWrites", "bootstrapEvidenceDomain",
+    "createEvidenceDomain", "ensureEvidenceDomain"]) {
+    assert.equal(Object.hasOwn(service, name), false, name);
+    assert.equal(service[name], undefined, name);
+  }
+  for (const name of Object.keys(service)) {
+    assert.doesNotMatch(name, /init|bootstrap|create.*domain/i, `index export ${name}`);
+  }
+  // The module itself also has no such export: C1 cannot initialize at all.
+  for (const name of Object.keys(module)) {
+    assert.doesNotMatch(name, /init|bootstrap|create.*domain/i, `module export ${name}`);
+  }
+
+  // 2. The two C1 sources contain no init token, mode switch or bypass proof.
+  const moduleSource = await readFile(
+    new URL("../lib/face-service/h4c-evidence.mjs", import.meta.url), "utf8");
+  const indexSource = await readFile(
+    new URL("../lib/face-service/index.mjs", import.meta.url), "utf8");
+  const forbidden = [
+    "initialize", "bootstrapEvidence", "evidenceDomainInit", "INIT_PRECONDITION",
+    "DOMAIN_INIT_CONFLICT", "allowInitialize", "allowInitEvidence",
+    'mode: "initialize"', 'mode === "initialize"', "createEvidenceDomain",
+    "ensureEvidenceDomain", "emptyProof", "emptyBootstrap",
+  ];
+  for (const source of [moduleSource, indexSource]) {
+    for (const token of forbidden) assert.equal(source.includes(token), false, token);
+  }
+
+  // 3. The runtime functions cannot emit a domain write: the guard only reads
+  //    and returns [], append only writes evidence/head, and the module holds no
+  //    Store handle / async transaction helper that could bootstrap a domain.
+  const functionBody = (name) => {
+    const start = moduleSource.indexOf(`export function ${name}(`);
+    assert.ok(start >= 0, name);
+    const end = moduleSource.indexOf("\nexport function ", start + 1);
+    return moduleSource.slice(start, end < 0 ? moduleSource.length : end);
+  };
+  const guard = functionBody("applyEvidenceDomain");
+  assert.equal(guard.includes("write("), false);
+  assert.equal(guard.includes("transact("), false);
+  assert.match(guard, /return \[\];/);
+  const append = functionBody("appendEvidenceWrites");
+  assert.equal(append.includes("write(EVIDENCE_DOMAINS_COLLECTION"), false);
+  assert.equal(append.includes("applyEvidenceDomain(state, cfg)"), true);
+  assert.equal(moduleSource.includes("transact("), false);
+  assert.equal(/export\s+async\s+function/.test(moduleSource), false);
+
+  // 4. Search the whole production tree (admin-web minus tests/node_modules),
+  //    not just the two files above: no caller can reach an init/bootstrap/
+  //    create-domain helper or a mode: "initialize" branch.
+  const adminRoot = fileURLToPath(new URL("..", import.meta.url));
+  const entries = await readdir(adminRoot, { recursive: true });
+  const files = entries
+    .filter((name) => typeof name === "string" && /\.(?:mjs|cjs|js)$/.test(name))
+    .filter((name) => !/(^|[\\/])(?:tests|node_modules)([\\/]|$)/.test(name));
+  assert.ok(files.length >= 30, `production tree unexpectedly small: ${files.length}`);
+  assert.ok(files.some((name) => /face-service[\\/]h4c-evidence\.mjs$/.test(name)),
+    "C1 evidence module must be inside the scanned production tree");
+  const treeTokens = [
+    "initializeEvidenceDomain", "bootstrapEvidenceDomain", "bootstrapEvidence",
+    "evidenceDomainInit", "INIT_PRECONDITION", "DOMAIN_INIT_CONFLICT",
+    "allowInitialize", "allowInitEvidence", 'mode: "initialize"',
+    'mode === "initialize"', "createEvidenceDomain", "ensureEvidenceDomain",
+  ];
+  let scanned = 0;
+  for (const name of files) {
+    const text = await readFile(join(adminRoot, name), "utf8");
+    scanned += 1;
+    for (const token of treeTokens) {
+      assert.equal(text.includes(token), false, `${name}: ${token}`);
+    }
+  }
+  assert.equal(scanned, files.length);
+});
+
 test("constant-time digest comparison validates canonical hex before timingSafeEqual", async () => {
   const source = await readFile(
     new URL("../lib/face-service/h4c-evidence.mjs", import.meta.url), "utf8");
@@ -877,41 +712,6 @@ test("constant-time digest comparison validates canonical hex before timingSafeE
   // Both canonical 64-hex inputs decode to exactly 32 bytes, so the
   // timingSafeEqual operands are guaranteed equal-length.
   assert.equal(Buffer.from("0".repeat(64), "hex").length, 32);
-});
-
-test("production module separates the explicit controlled init helper from the read-only runtime", async () => {
-  const service = await import("../lib/face-service/index.mjs");
-  const evidenceModule = await import("../lib/face-service/h4c-evidence.mjs");
-  for (const name of ["initializeEvidenceDomain", "evidenceDomainInitPrecondition",
-    "evidenceDomainInitRefs", "evidenceDomainInitWrites"]) {
-    assert.equal(typeof evidenceModule[name], "function", name);
-    // The public runtime index deliberately does not re-export init.
-    assert.equal(Object.hasOwn(service, name), false, name);
-    assert.equal(service[name], undefined, name);
-  }
-
-  const moduleSource = await readFile(
-    new URL("../lib/face-service/h4c-evidence.mjs", import.meta.url), "utf8");
-  const indexSource = await readFile(
-    new URL("../lib/face-service/index.mjs", import.meta.url), "utf8");
-  assert.equal(moduleSource.includes("export async function initializeEvidenceDomain"), true);
-  assert.equal(indexSource.includes("initializeEvidenceDomain"), false);
-
-  const functionBody = (name) => {
-    const start = moduleSource.indexOf(`export function ${name}(`);
-    assert.ok(start >= 0, name);
-    const end = moduleSource.indexOf("\nexport function ", start + 1);
-    return moduleSource.slice(start, end < 0 ? moduleSource.length : end);
-  };
-  const guard = functionBody("applyEvidenceDomain");
-  assert.equal(guard.includes("initializeEvidenceDomain("), false);
-  assert.equal(guard.includes("evidenceDomainInit("), false);
-  assert.equal(guard.includes("write("), false);
-  const append = functionBody("appendEvidenceWrites");
-  assert.equal(append.includes("initializeEvidenceDomain("), false);
-  assert.equal(append.includes("evidenceDomainInit("), false);
-  assert.equal(append.includes("write(EVIDENCE_DOMAINS_COLLECTION"), false);
-  assert.equal(append.includes("applyEvidenceDomain"), true);
 });
 
 test("both-missing after existing evidence or evidence head fails closed with every collection unchanged", async (t) => {
@@ -965,7 +765,7 @@ test("runtime rejects both-missing, head-only, version-only and evidence-only st
   }
 });
 
-test("first evidence appends only evidence+head after explicit initialization", async (t) => {
+test("first evidence appends only evidence+head after a fixed fixture seed", async (t) => {
   const store = await localStore(t);
   await seedDomain(store);
   let built = null;
@@ -1024,8 +824,8 @@ test("first evidence appends only evidence+head after explicit initialization", 
   ]));
 
   const audit = store.data.admin_audit;
-  // One audit from the explicit init transaction plus one from the append.
-  assert.equal(audit.length, 2);
+  // Two audits from the test fixture seed plus one from the append.
+  assert.equal(audit.length, 3);
   for (const entry of audit) {
     assert.deepEqual(Object.keys(entry).sort(), [
       "_id", "action", "actorId", "actorType", "createdAt", "orgId", "target",
@@ -1510,12 +1310,6 @@ test("realm switch/version change/rekey are DOMAIN_MISMATCH and never add a head
   const rekeyed = evidenceKeyConfig({ ...ENV_A, H4_EVIDENCE_HMAC_KEY_B64: KEY_B });
   const versioned = evidenceKeyConfig({ ...ENV_A, H4_EVIDENCE_KEY_VERSION: "2" });
   const realmB = evidenceKeyConfig({ ...ENV_A, H4_EVIDENCE_REALM: "h4c-realm-b" });
-  // Explicit init is create-only too: a realm/version/rekey change can never
-  // write a second head or version pair.
-  for (const config of [rekeyed, versioned, realmB]) {
-    await expectInitFailure(store, config, "DOMAIN_INIT_CONFLICT");
-    assert.deepEqual(store.data, before);
-  }
   for (const config of [rekeyed, versioned, realmB]) {
     await expectFailure(store, { config }, "DOMAIN_MISMATCH");
     assert.deepEqual(store.data, before);

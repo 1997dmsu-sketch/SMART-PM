@@ -1,0 +1,1102 @@
+{
+  "schemaVersion": "hk-ai-06b-device-evidence/v1",
+  "artifact": "HK-AI-06B",
+  "template": true,
+  "description": "DS-K1T671BM 现场联调空白证据模板。所有值均为 null、占位符或空数组；不得填入真实 IP/MAC/序列号/账号/密码/人脸。现场填写时复制为独立证据文件并存加密离线介质，不直接提交仓库。",
+  "generatedAt": null,
+  "timezone": "Asia/Shanghai",
+  "baseline": {
+    "repository": "SMART-PM",
+    "branch": "docs/hk-hikvision-device-lab-preflight",
+    "commit": "08491fe8656fc6cc9bc2867c2e23a1ab677ac066",
+    "designReference": "docs/tasks/HK-AI-06A-HIKVISION-PROVIDER-EVIDENCE-2026-11-14.md",
+    "evidenceIndexReference": "docs/tasks/HK-AI-06A-EVIDENCE-INDEX.json"
+  },
+  "boundary": {
+    "realDeviceConnected": false,
+    "lanScanned": false,
+    "deviceApiCalled": false,
+    "personCreated": false,
+    "faceUploaded": false,
+    "doorPermissionGranted": false,
+    "eventSubscribed": false,
+    "realPersonUsed": false,
+    "realFaceUsed": false,
+    "realIpUsed": false,
+    "realMacUsed": false,
+    "realSerialUsed": false,
+    "realAccountUsed": false,
+    "realCredentialUsed": false,
+    "productionNetworkUsed": false,
+    "productionCodeModified": false,
+    "candidateEndpointTreatedAsVerified": false
+  },
+  "redactionPolicy": {
+    "default": "redact-by-default",
+    "allFieldsRedactable": true,
+    "rawSensitiveValuesAllowed": false,
+    "cannotRedactAction": "do-not-collect-do-not-submit",
+    "scanBeforeSubmit": true,
+    "rules": [
+      {
+        "id": "R-ID-01",
+        "target": "MAC/serial/QR",
+        "method": "remove; keep last 2 characters or masked token only",
+        "allowedOutput": "<MASKED-MAC>|<MASKED-SERIAL>|last2-only"
+      },
+      {
+        "id": "R-ID-02",
+        "target": "IP/gateway/DNS/port",
+        "method": "replace with approved placeholder",
+        "allowedOutput": "<TEST-PC-IP>|<DEVICE-IP>|<GATEWAY>|<DNS-SERVER>"
+      },
+      {
+        "id": "R-ID-03",
+        "target": "account/password/token/cookie/key",
+        "method": "remove; never record or hash",
+        "allowedOutput": "none"
+      },
+      {
+        "id": "R-ID-04",
+        "target": "face/fingerprint/biometric",
+        "method": "do not collect; synthetic category plus hash only",
+        "allowedOutput": "synthetic-image-hash-only"
+      },
+      {
+        "id": "R-ID-05",
+        "target": "raw device config",
+        "method": "field inventory and diff summary only",
+        "allowedOutput": "redacted-summary"
+      },
+      {
+        "id": "R-ID-06",
+        "target": "screenshot",
+        "method": "crop/mask/strip EXIF/disable notifications",
+        "allowedOutput": "redacted-image-plus-sha256"
+      },
+      {
+        "id": "R-ID-07",
+        "target": "packet capture",
+        "method": "filter/truncate/encrypt; remove authorization headers",
+        "allowedOutput": "redacted-pcap-or-hash"
+      },
+      {
+        "id": "R-ID-08",
+        "target": "log",
+        "method": "remove PII/identifiers/query parameters",
+        "allowedOutput": "redacted-summary"
+      },
+      {
+        "id": "R-ID-09",
+        "target": "vendor document",
+        "method": "remove serial/contact/price",
+        "allowedOutput": "redacted-excerpt"
+      },
+      {
+        "id": "R-ID-10",
+        "target": "free text",
+        "method": "manual review plus sensitive scan",
+        "allowedOutput": "reviewed-text"
+      }
+    ]
+  },
+  "deviceIdentity": {
+    "projectRegisteredModel": "DS-K1T671BM",
+    "fullNameplateModel": null,
+    "modelSuffixes": [],
+    "hardwareVersion": null,
+    "firmwareVersion": null,
+    "firmwareBuild": null,
+    "firmwareReleasedDate": null,
+    "region": null,
+    "macMasked": null,
+    "serialMasked": null,
+    "identifierStorage": "masked-only",
+    "rawIdentifierStored": false,
+    "threeSourceMatched": false,
+    "sourceRefs": [],
+    "evidenceRefs": [],
+    "conclusion": "unknown"
+  },
+  "capabilityGates": [
+    {
+      "id": "CG-01",
+      "name": "device-identity",
+      "endpoint": "/ISAPI/System/deviceInfo",
+      "candidateOnly": true,
+      "allowedNow": false,
+      "fields": [
+        "model",
+        "firmwareVersion",
+        "firmwareReleasedDate",
+        "hardwareVersion"
+      ],
+      "observed": null,
+      "conclusion": "unknown",
+      "evidenceRefs": []
+    },
+    {
+      "id": "CG-02",
+      "name": "person-total",
+      "endpoint": "/ISAPI/AccessControl/capabilities",
+      "candidateOnly": true,
+      "allowedNow": false,
+      "fields": [
+        "isSupportUserInfo",
+        "isSupportFDLib",
+        "isSupportUserInfoDetailDelete",
+        "EmployeeNoInfo"
+      ],
+      "observed": null,
+      "conclusion": "unknown",
+      "evidenceRefs": []
+    },
+    {
+      "id": "CG-03",
+      "name": "person-operation",
+      "endpoint": "/ISAPI/AccessControl/UserInfo/capabilities?format=json",
+      "candidateOnly": true,
+      "allowedNow": false,
+      "fields": [
+        "supportFunction",
+        "maxRecordNum",
+        "UserInfoSearchCond.maxResults",
+        "EmployeeNoList.maxSize"
+      ],
+      "observed": null,
+      "conclusion": "unknown",
+      "evidenceRefs": []
+    },
+    {
+      "id": "CG-04",
+      "name": "face",
+      "endpoint": "/ISAPI/Intelligent/FDLib/capabilities?format=json",
+      "candidateOnly": true,
+      "allowedNow": false,
+      "fields": [
+        "supportFunction",
+        "FDRecordDataMaxNum"
+      ],
+      "observed": null,
+      "conclusion": "unknown",
+      "evidenceRefs": []
+    },
+    {
+      "id": "CG-05",
+      "name": "face-library",
+      "endpoint": "/ISAPI/Intelligent/FDLib?format=json",
+      "candidateOnly": true,
+      "allowedNow": false,
+      "fields": [
+        "FDID",
+        "faceLibType"
+      ],
+      "observed": null,
+      "conclusion": "unknown",
+      "evidenceRefs": []
+    },
+    {
+      "id": "CG-06",
+      "name": "system-event",
+      "endpoint": "/ISAPI/System/capabilities",
+      "candidateOnly": true,
+      "allowedNow": false,
+      "fields": [
+        "isSupportSubscribeEvent"
+      ],
+      "observed": null,
+      "conclusion": "unknown",
+      "evidenceRefs": []
+    }
+  ],
+  "networkPlan": {
+    "mode": "isolated-vlan-or-switch",
+    "productionUplinkAllowed": false,
+    "internetAccessAllowed": false,
+    "productionTrafficAllowed": false,
+    "wifiEnabled": false,
+    "testPc": {
+      "addressRef": "<TEST-PC-IP>",
+      "prefixRef": "<PREFIX-LENGTH>",
+      "assignment": "static",
+      "assignmentRecord": "sealed-annex-only"
+    },
+    "device": {
+      "addressRef": "<DEVICE-IP>"
+    },
+    "gatewayRef": "<GATEWAY>",
+    "dnsRef": "<DNS-SERVER>",
+    "ntpRef": "<NTP-SERVER>",
+    "capturePoint": "<CAPTURE-POINT>",
+    "callbackPortRef": "<CALLBACK-PORT>",
+    "firewallDefault": "deny",
+    "allowedFlows": [
+      {
+        "direction": "test-pc-to-device",
+        "port": "TCP/443",
+        "purpose": "HTTPS read-only management",
+        "default": "allow-after-G1"
+      },
+      {
+        "direction": "test-pc-to-device",
+        "port": "TCP/80",
+        "purpose": "HTTP only if 443 unavailable and separately approved",
+        "default": "deny"
+      },
+      {
+        "direction": "test-pc-to-ntp",
+        "port": "UDP/123",
+        "purpose": "time sync to <NTP-SERVER>",
+        "default": "allow-after-G1"
+      },
+      {
+        "direction": "device-to-test-pc",
+        "port": "TCP/<CALLBACK-PORT>",
+        "purpose": "event callback only for approved W6",
+        "default": "deny"
+      },
+      {
+        "direction": "any-to-any",
+        "port": "any",
+        "purpose": "everything else",
+        "default": "deny"
+      }
+    ],
+    "prohibitedServices": [
+      "SMB/445",
+      "RDP/3389",
+      "UPnP/SSDP",
+      "mDNS/LLMNR",
+      "Telnet/23",
+      "FTP/20-21",
+      "device-to-internet",
+      "test-pc-to-production"
+    ]
+  },
+  "powerPlan": {
+    "nameplateConfirmed": false,
+    "deviceInputVoltage": null,
+    "deviceInputCurrent": null,
+    "polarity": null,
+    "adapterModel": null,
+    "dc12vGndCheckAfterNameplateOnly": true,
+    "lockConnected": false,
+    "fireDoorSensorConnected": false,
+    "productionDoorConnected": false,
+    "estopInstalled": false,
+    "estopTested": false,
+    "powerLossRecoveryRehearsed": false,
+    "beforePhotoRef": null,
+    "afterPhotoRef": null,
+    "conclusion": "unknown"
+  },
+  "configExportPlan": {
+    "defaultAction": "do-not-export",
+    "exportAllowed": false,
+    "rawConfigInRepo": false,
+    "scanBeforeStorage": true,
+    "storageRef": "<ENCRYPTED-OFFLINE-MEDIA>",
+    "preExportChecks": [
+      "remove-or-blank-local-accounts-and-password-hashes",
+      "remove-platform-keys-certificates-private-keys",
+      "clear-persons-cards-faces-fingerprints",
+      "clear-door-rights-and-special-templates",
+      "replace-network-addresses-with-placeholders",
+      "remove-location-contacts-email-sms",
+      "redact-logs-events-and-captures",
+      "confirm-four-sensitive-classes-are-zero"
+    ],
+    "sensitiveClasses": [
+      "credentials",
+      "keys-and-certificates",
+      "persons-and-biometrics",
+      "door-rights",
+      "network-identifiers",
+      "location-and-contacts",
+      "logs-and-events",
+      "license-files"
+    ]
+  },
+  "phase1ReadOnly": [
+    {
+      "id": "R1",
+      "name": "web-admin-page",
+      "allowedAction": "browse-login-or-landing-page",
+      "targetRef": "<WEB-ADMIN-URL>",
+      "candidateOnly": false,
+      "approvalStatus": "not_requested",
+      "executed": false,
+      "conclusion": "unknown",
+      "evidenceRefs": []
+    },
+    {
+      "id": "R2",
+      "name": "system-info",
+      "allowedAction": "read-model-firmware-hardware-masked-serial",
+      "targetRef": "<SYSTEM-INFO-PAGE-OR-DEVICEINFO>",
+      "candidateOnly": true,
+      "approvalStatus": "not_requested",
+      "executed": false,
+      "conclusion": "unknown",
+      "evidenceRefs": []
+    },
+    {
+      "id": "R3",
+      "name": "capability",
+      "allowedAction": "read-capability-page-and-candidate-endpoints",
+      "targetRef": "CG-01..CG-06",
+      "candidateOnly": true,
+      "approvalStatus": "not_requested",
+      "executed": false,
+      "conclusion": "unknown",
+      "evidenceRefs": []
+    },
+    {
+      "id": "R4",
+      "name": "network-status",
+      "allowedAction": "read-address-gateway-dns-ntp-ports",
+      "targetRef": "<NETWORK-STATUS-PAGE>",
+      "candidateOnly": false,
+      "approvalStatus": "not_requested",
+      "executed": false,
+      "conclusion": "unknown",
+      "evidenceRefs": []
+    },
+    {
+      "id": "R5",
+      "name": "time",
+      "allowedAction": "read-device-time-timezone-ntp-offset",
+      "targetRef": "<TIME-PAGE>",
+      "candidateOnly": false,
+      "approvalStatus": "not_requested",
+      "executed": false,
+      "conclusion": "unknown",
+      "evidenceRefs": []
+    },
+    {
+      "id": "R6",
+      "name": "api-isapi-version",
+      "allowedAction": "read-api-isapi-version-field-only",
+      "targetRef": "<SYSTEM-INFO-PAGE-OR-DEVICEINFO>",
+      "candidateOnly": true,
+      "approvalStatus": "not_requested",
+      "executed": false,
+      "conclusion": "unknown",
+      "evidenceRefs": []
+    }
+  ],
+  "phase2WriteTests": [
+    {
+      "id": "W1",
+      "name": "test-person-create",
+      "approvalId": null,
+      "approvalStatus": "not_requested",
+      "defaultState": "disabled",
+      "executed": false,
+      "dataClass": "synthetic-only",
+      "requiresSeparateApproval": true,
+      "evidenceRefs": [],
+      "rollbackRef": "RB-01",
+      "notes": "no real name/dob/id/phone/employee data"
+    },
+    {
+      "id": "W2",
+      "name": "test-face-upload",
+      "approvalId": null,
+      "approvalStatus": "not_requested",
+      "defaultState": "disabled",
+      "executed": false,
+      "dataClass": "synthetic-image-only",
+      "requiresSeparateApproval": true,
+      "evidenceRefs": [],
+      "rollbackRef": "RB-02",
+      "notes": "no real person or real face"
+    },
+    {
+      "id": "W3",
+      "name": "door-permission-grant",
+      "approvalId": null,
+      "approvalStatus": "not_requested",
+      "defaultState": "disabled",
+      "executed": false,
+      "dataClass": "logical-door-only",
+      "requiresSeparateApproval": true,
+      "evidenceRefs": [],
+      "rollbackRef": "RB-03",
+      "notes": "no lock/fire-door-sensor/production-door/relay-load"
+    },
+    {
+      "id": "W4",
+      "name": "query",
+      "approvalId": null,
+      "approvalStatus": "not_requested",
+      "defaultState": "disabled",
+      "executed": false,
+      "dataClass": "test-object-only",
+      "requiresSeparateApproval": true,
+      "evidenceRefs": [],
+      "rollbackRef": "none-read-only",
+      "notes": "paging/consistency/timeout evidence"
+    },
+    {
+      "id": "W5",
+      "name": "delete",
+      "approvalId": null,
+      "approvalStatus": "not_requested",
+      "defaultState": "disabled",
+      "executed": false,
+      "dataClass": "test-object-only",
+      "requiresSeparateApproval": true,
+      "evidenceRefs": [],
+      "rollbackRef": "RB-01|RB-02|RB-03",
+      "notes": "cascade/progress/idempotency evidence"
+    },
+    {
+      "id": "W6",
+      "name": "event-subscribe",
+      "approvalId": null,
+      "approvalStatus": "not_requested",
+      "defaultState": "disabled",
+      "executed": false,
+      "dataClass": "test-event-only",
+      "requiresSeparateApproval": true,
+      "evidenceRefs": [],
+      "rollbackRef": "RB-04",
+      "notes": "callback to <TEST-PC-IP>:<CALLBACK-PORT> only"
+    },
+    {
+      "id": "W7",
+      "name": "anti-replay-validation",
+      "approvalId": null,
+      "approvalStatus": "not_requested",
+      "defaultState": "disabled",
+      "executed": false,
+      "dataClass": "evidence-only",
+      "requiresSeparateApproval": true,
+      "evidenceRefs": [],
+      "rollbackRef": "RB-04",
+      "notes": "approval-gate-and-evidence-only; no attack steps, tools, commands, or reproduction"
+    }
+  ],
+  "antiReplayPolicy": {
+    "mode": "approval-gate-and-evidence-only",
+    "attackStepsIncluded": false,
+    "toolsIncluded": false,
+    "reproductionStepsIncluded": false,
+    "requiredApprovers": [
+      "<SECURITY-REF>",
+      "<VENDOR-REF>",
+      "<PM-REF>"
+    ],
+    "requiredEvidence": [
+      "vendor-written-signature-nonce-time-window-statement",
+      "event-schema-fields-and-required-optional-semantics",
+      "multiple-redacted-event-samples",
+      "duplicate-retransmission-id-behavior",
+      "device-time-and-ntp-trust"
+    ],
+    "ifNoEvidence": "conclusion=unsupported-or-unknown; event-audit-only; trigger-S08"
+  },
+  "evidenceRecordTemplate": {
+    "evidenceId": "EV-000",
+    "sourceType": "<SOURCE-TYPE>",
+    "sourceRef": "<SOURCE-REF>",
+    "collectedAt": null,
+    "operatorRef": "<OPERATOR-REF>",
+    "deviceRef": "<DEVICE-REF>",
+    "firmware": "<FIRMWARE-VERSION+BUILD>",
+    "endpoint": "<CANDIDATE-ENDPOINT>",
+    "requestSummary": "<REDACTED-REQUEST-SUMMARY-500-CHARS-MAX>",
+    "responseSummary": "<REDACTED-RESPONSE-SUMMARY-1000-CHARS-MAX>",
+    "redactionRuleId": "<R-ID>",
+    "redactionApplied": false,
+    "conclusion": "unknown",
+    "rollbackResult": "not_started",
+    "attachments": [],
+    "sha256": null,
+    "reviewerRef": "<REVIEWER-REF>",
+    "notes": "all string fields are redactable; never store raw sensitive values"
+  },
+  "evidenceRecords": [],
+  "stopConditions": [
+    {
+      "id": "S01",
+      "condition": "model-or-firmware-mismatch",
+      "detection": "nameplate/packaging/web/deviceInfo/approval differ or suffix unclear",
+      "immediateAction": "no-write; record-masked-evidence; notify; no-power-on-if-not-energized",
+      "resumeCondition": "written-vendor-project-confirmation + new-baseline + reviewer-approval",
+      "triggered": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "S02",
+      "condition": "voltage-current-polarity-uncertain",
+      "detection": "nameplate missing/worn; adapter mismatch; meter reading abnormal",
+      "immediateAction": "power-off; unplug; LOTO; do-not-energize",
+      "resumeCondition": "electrical-lead-written-confirmation + compliant-adapter-nameplate-evidence",
+      "triggered": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "S03",
+      "condition": "production-network-detected",
+      "detection": "uplink/production-vlan/default-route/production-dhcp-dns/production-device/cloud",
+      "immediateAction": "disconnect-immediately; do-not-capture-production-traffic; security-incident",
+      "resumeCondition": "network-owner-isolation-certificate + new-topology + re-approval",
+      "triggered": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "S04",
+      "condition": "real-person-or-real-face-detected",
+      "detection": "employee/visitor/real-photo/video-frame/id-photo/biometric",
+      "immediateAction": "stop; do-not-upload; do-not-store; isolate; privacy-incident",
+      "resumeCondition": "privacy-approval + synthetic-data-only + re-approval",
+      "triggered": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "S05",
+      "condition": "real-admin-credential-required",
+      "detection": "only-production-admin/shared-account/default-password-can-login",
+      "immediateAction": "do-not-login; do-not-guess; do-not-borrow-account",
+      "resumeCondition": "dedicated-lab-device + least-privilege-lab-account + written-approval",
+      "triggered": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "S06",
+      "condition": "capability-conflict",
+      "detection": "web/api/06A-doc/observation contradictory; supportFunction inconsistent",
+      "immediateAction": "stop-writes; mark-unknown; preserve-evidence; do-not-try-anyway",
+      "resumeCondition": "vendor-written-answer + re-review",
+      "triggered": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "S07",
+      "condition": "delete-or-permission-semantics-unclear",
+      "detection": "delete-not-cascading/progress-unknown/template-unclear/special-template",
+      "immediateAction": "stop-further-writes; quarantine-test-object; no-production",
+      "resumeCondition": "vendor-contract-clarification + separate-approval",
+      "triggered": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "S08",
+      "condition": "event-no-signature-or-no-anti-replay-evidence",
+      "detection": "no-signature/nonce/time-window/retransmission/stable-id-after-W6-W7",
+      "immediateAction": "event-audit-only; no-business-state-change; stop-event-trust; notify-security",
+      "resumeCondition": "vendor-evidence + G3-independent-security-review; or audit-only-design",
+      "triggered": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "S09",
+      "condition": "abnormal-reboot-or-overheat",
+      "detection": "unexpected-reboot/hang/smell/discoloration/abnormal-heat/alarm",
+      "immediateAction": "estop-power-off; unplug; isolate; no-retry; no-upgrade; no-factory-reset",
+      "resumeCondition": "vendor-diagnosis + hardware-check + new-approval",
+      "triggered": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "S10",
+      "condition": "redaction-failure-or-sensitive-leak",
+      "detection": "raw-ip-mac-serial-account-password-face-in-file-log-screenshot-pcap",
+      "immediateAction": "stop; quarantine-delete-unsafe-copy; incident; re-redact",
+      "resumeCondition": "security-review + zero-hit-scan + re-approval",
+      "triggered": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "S11",
+      "condition": "unapproved-parallel-or-out-of-scope",
+      "detection": "no-approval/expired/different-device-firmware/parallel-test/scope-creep",
+      "immediateAction": "stop; revoke-approval; disconnect",
+      "resumeCondition": "new-approval + new-baseline",
+      "triggered": null,
+      "evidenceRefs": []
+    },
+    {
+      "id": "S12",
+      "condition": "time-skew-beyond-threshold",
+      "detection": "abs-offset-greater-than-5s or ntp-unsynchronized",
+      "immediateAction": "stop-event-write-tests; correct-time; record",
+      "resumeCondition": "stable-ntp + offset-within-threshold + new-baseline",
+      "triggered": null,
+      "evidenceRefs": []
+    }
+  ],
+  "rollback": {
+    "requiredOnAbort": true,
+    "preApprovedWithTest": true,
+    "steps": [
+      {
+        "id": "RB-01",
+        "action": "delete-test-persons",
+        "verification": "test-person-query-count-zero",
+        "status": "not_started",
+        "evidenceRefs": []
+      },
+      {
+        "id": "RB-02",
+        "action": "delete-test-faces",
+        "verification": "test-face-query-count-zero",
+        "status": "not_started",
+        "evidenceRefs": []
+      },
+      {
+        "id": "RB-03",
+        "action": "clear-test-door-permissions",
+        "verification": "test-door-right-count-zero",
+        "status": "not_started",
+        "evidenceRefs": []
+      },
+      {
+        "id": "RB-04",
+        "action": "stop-event-subscription",
+        "verification": "subscription-list-empty-callback-closed",
+        "status": "not_started",
+        "evidenceRefs": []
+      },
+      {
+        "id": "RB-05",
+        "action": "restore-network",
+        "verification": "vlan-firewall-mirror-removed-network-owner-signed",
+        "status": "not_started",
+        "evidenceRefs": []
+      },
+      {
+        "id": "RB-06",
+        "action": "export-redacted-logs",
+        "verification": "zero-sensitive-scan-hits-hash-recorded",
+        "status": "not_started",
+        "evidenceRefs": []
+      },
+      {
+        "id": "RB-07",
+        "action": "power-off-disconnect",
+        "verification": "all-leds-off-plug-separated-loto-tag",
+        "status": "not_started",
+        "evidenceRefs": []
+      },
+      {
+        "id": "RB-08",
+        "action": "verify-no-residue",
+        "verification": "all-nine-residue-checks-pass",
+        "status": "not_started",
+        "evidenceRefs": []
+      },
+      {
+        "id": "RB-09",
+        "action": "sign-off-and-seal-evidence",
+        "verification": "operator-witness-privacy-security-signatures",
+        "status": "not_started",
+        "evidenceRefs": []
+      }
+    ],
+    "residueChecks": [
+      {
+        "check": "test-persons-zero",
+        "passCriteria": "query-by-employeeNo-returns-zero",
+        "status": "not_started"
+      },
+      {
+        "check": "test-faces-zero",
+        "passCriteria": "test-face-library-query-returns-zero",
+        "status": "not_started"
+      },
+      {
+        "check": "test-door-rights-zero",
+        "passCriteria": "test-doorNo-and-plan-return-zero",
+        "status": "not_started"
+      },
+      {
+        "check": "event-subscription-empty",
+        "passCriteria": "subscription-list-empty-callback-closed",
+        "status": "not_started"
+      },
+      {
+        "check": "temporary-account-removed",
+        "passCriteria": "lab-account-disabled-or-deleted",
+        "status": "not_started"
+      },
+      {
+        "check": "config-diff-clean",
+        "passCriteria": "matches-pre-test-baseline",
+        "status": "not_started"
+      },
+      {
+        "check": "logs-evidence-redacted",
+        "passCriteria": "only-redacted-copies-and-hashes",
+        "status": "not_started"
+      },
+      {
+        "check": "network-restored",
+        "passCriteria": "test-vlan-firewall-mirror-removed",
+        "status": "not_started"
+      },
+      {
+        "check": "power-off",
+        "passCriteria": "device-off-plug-separated-tagged",
+        "status": "not_started"
+      },
+      {
+        "check": "device-status-quarantined",
+        "passCriteria": "not-returned-to-production-not-online",
+        "status": "not_started"
+      }
+    ],
+    "unableToRollback": "quarantine-device; do-not-return-to-production; vendor-reset-only-with-written-approval; keep-Q-open"
+  },
+  "qMapping": [
+    {
+      "id": "Q01",
+      "section": "2.1",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q02",
+      "section": "2.2",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q03",
+      "section": "2.2/5",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q04",
+      "section": "1/5",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q05",
+      "section": "3.4",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q06",
+      "section": "3.4",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q07",
+      "section": "3.5",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q08",
+      "section": "2.3/5",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q09",
+      "section": "2.3/5",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q10",
+      "section": "6.3-W1-W4",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q11",
+      "section": "2.3/5",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q12",
+      "section": "2.3/6.3-W2",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q13",
+      "section": "6.3-W2",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q14",
+      "section": "6.3-W1",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q15",
+      "section": "6.3-W3",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q16",
+      "section": "6.3-W1-W3",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q17",
+      "section": "6.3-W5",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q18",
+      "section": "6.3-W5",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q19",
+      "section": "6.3-W5",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q20",
+      "section": "6.3-W4",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q21",
+      "section": "6.3/7",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q22",
+      "section": "3/6",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q23",
+      "section": "6.3/8",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q24",
+      "section": "6.3",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q25",
+      "section": "6.3-W6",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q26",
+      "section": "6.3-W6",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q27",
+      "section": "6.3-W7",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q28",
+      "section": "3.5/6.3-W6",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q29",
+      "section": "6.3-W6-W7",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q30",
+      "section": "6.3-W6",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q31",
+      "section": "1/10",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q32",
+      "section": "3/4",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q33",
+      "section": "6.4/9",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q34",
+      "section": "1/5",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    },
+    {
+      "id": "Q35",
+      "section": "1/11",
+      "status": "open",
+      "evidenceRefs": [],
+      "closedAt": null
+    }
+  ],
+  "approvals": {
+    "required": true,
+    "defaultState": "closed",
+    "gates": [
+      {
+        "id": "G0",
+        "name": "documentation-review",
+        "state": "in_progress",
+        "approvalId": null
+      },
+      {
+        "id": "G1",
+        "name": "phase1-read-only",
+        "state": "not_requested",
+        "approvalId": null
+      },
+      {
+        "id": "G2",
+        "name": "phase2-single-write",
+        "state": "not_requested",
+        "approvalId": null
+      },
+      {
+        "id": "G3",
+        "name": "event-trust",
+        "state": "not_requested",
+        "approvalId": null
+      },
+      {
+        "id": "G4",
+        "name": "provider-release",
+        "state": "out-of-scope",
+        "approvalId": null
+      }
+    ],
+    "approvalTemplate": {
+      "approvalId": "<APPROVAL-ID>",
+      "gate": "<G1|G2|G3>",
+      "testId": "<R1-R6|W1-W7>",
+      "deviceRef": "<DEVICE-REF>",
+      "fullModel": null,
+      "firmware": null,
+      "networkRef": "<NETWORK-REF>",
+      "dataClass": "<SYNTHETIC-ONLY|READ-ONLY>",
+      "windowStart": null,
+      "windowEnd": null,
+      "rollbackPlanRef": null,
+      "stopConditionsRef": "S01-S12",
+      "approverRef": "<APPROVER-REF>",
+      "witnessRef": "<WITNESS-REF>",
+      "securityRef": "<SECURITY-REF>",
+      "privacyRef": "<PRIVACY-REF>",
+      "signatureRef": null,
+      "killSwitchOwner": "<KILL-SWITCH-OWNER-REF>",
+      "revokedAt": null
+    },
+    "roles": [
+      {
+        "role": "project-owner",
+        "ref": "<PM-REF>"
+      },
+      {
+        "role": "operator",
+        "ref": "<OPERATOR-REF>"
+      },
+      {
+        "role": "witness",
+        "ref": "<WITNESS-REF>"
+      },
+      {
+        "role": "electrical",
+        "ref": "<ELECTRICAL-REF>"
+      },
+      {
+        "role": "network-security",
+        "ref": "<NETSEC-REF>"
+      },
+      {
+        "role": "privacy",
+        "ref": "<PRIVACY-REF>"
+      },
+      {
+        "role": "vendor-support",
+        "ref": "<VENDOR-REF>"
+      },
+      {
+        "role": "reviewer",
+        "ref": "<REVIEWER-REF>"
+      }
+    ]
+  },
+  "retention": {
+    "policyStatus": "proposed-not-approved",
+    "pcapDays": 30,
+    "evidenceDays": 180,
+    "testFaceHours": 24,
+    "credentials": "destroy-after-test",
+    "destructionRecordRequired": true,
+    "repositoryStoresRawEvidence": false,
+    "encryptedOfflineMediaRequired": true,
+    "twoPersonAccess": true
+  }
+}

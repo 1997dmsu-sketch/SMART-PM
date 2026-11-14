@@ -4,7 +4,7 @@
 - 日期：2026-11-14
 - 分支：`docs/hk-face-release-runbook`
 - 基线：`1155b7ba65991d324fb8b22bb8f7dd87f49428f9`
-- 状态：**草案已提交，待 Codex 复审；未批准发布**
+- 状态：**草案已在本地提交；推送因本机凭据环境失败，未完成；待 Codex 复审；未批准发布**
 - 变更性质：纯文档；不包含代码、测试、配置、密钥、数据库、部署或设备变更
 
 ---
@@ -83,10 +83,11 @@
 
 ### 3.1 提交
 
-- 提交 SHA：`<提交后记录>`
+- 提交 SHA：`d282a3d038e0b7ab14df5122d16d1950c020a013`
 - 提交信息：`docs(face): add REL-AI-02 release and rollback runbook`
 - 变更：仅两份文档。
 - 不包含：`admin-web/lib/face-service/h4c-evidence.mjs`、`admin-web/lib/store.mjs`、`admin-web/lib/face-service/index.mjs`、`admin-web/tests/face-h4c-evidence.test.mjs` 等本地未提交变更。
+- 分支校正：执行期间检测到工作区被并发切换分支；已将该文档提交重建到目标分支 `docs/hk-face-release-runbook`，并将误用的 `docs/hk-hikvision-provider-evidence` 恢复到其原提交 `b15aceb`。未推送任何分支。
 
 ### 3.2 推送前确认
 
@@ -103,9 +104,11 @@
 
 ### 3.3 推送
 
-- 结果：`<推送后记录>`
+- 结果：`FAIL`（本机 TLS/凭据环境不可用；未获取到远端凭据）。
 - 推送命令：`git push -u origin docs/hk-face-release-runbook`
-- 失败处理：若认证/网络失败，保留本地提交，不重试其他远端、不改用凭据、不绕过审批；在报告中记录失败原因。
+- 退出码：128；失败发生在 TLS 凭据句柄/凭据读取阶段，未到达远端写入。
+- 处理：保留本地提交；未更换远端、未使用其他凭据、未关闭 TLS 校验、未使用强制推送。
+- 后续：由具备远端权限的发布指挥在确认同一提交 SHA 后重试推送；本任务到此停止。
 
 ---
 
@@ -182,6 +185,6 @@
 | 密钥变更 | 无 |
 | 迁移/部署/回滚/设备调用 | 无 |
 | 验证 | diff-check / link-check / sensitive-scan 全部 PASS（见 §2） |
-| 提交 | `<提交后记录>` |
-| 推送 | `<推送后记录>` |
-| 下一步 | Codex 复审；通过后再讨论 G1 |
+| 提交 | `d282a3d`（文档内容）；本报告更新提交见分支 HEAD |
+| 推送 | FAIL（本机凭据环境；未写入远端） |
+| 下一步 | 具备远端权限者重试推送；Codex 复审；通过后再讨论 G1 |

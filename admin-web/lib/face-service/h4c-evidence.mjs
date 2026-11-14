@@ -2,19 +2,21 @@
  * HK-AI-04 H4-c C1: immutable reconcile evidence foundation.
  *
  * This module deliberately does not implement the reconcile state machine,
- * operation keys, HTTP routes, Provider calls or K3 domain initialization.
- * It provides:
+ * operation keys, HTTP routes or Provider calls. It provides:
  *   - exact schema validators for evidence/head/global K3 domain records;
  *   - independent K3 config, fingerprint and a strictly READ-ONLY global
  *     domain guard (append/reconcile can never create or repair the domain);
+ *   - a separate, explicit, controlled first-deployment initialization helper
+ *     that is NOT called by any runtime append/reconcile path and requires a
+ *     recorded global-empty precondition (the Store cannot prove it atomically);
  *   - deterministic evidence/head IDs and one stable global domain head ID;
  *   - canonical (sorted-key) structured HMAC digests;
  *   - append helpers that re-validate the previous evidence, the head CAS and
  *     the K3 domain inside one Store transaction.
  *
- * First deployment initialization (the fixed head + version pair) is NOT a
- * runtime capability here. It belongs to a separate, controlled deployment
- * migration task; C1 only ever reads the pair and fails closed.
+ * Runtime only ever reads the fixed head+version pair and fails closed. The
+ * initialization helper exists for a future controlled deployment migration;
+ * it performs no scan, guesses no emptiness and never repairs existing records.
  */
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
@@ -39,7 +41,10 @@ export const EVIDENCE_KEY_FINGERPRINT_DOMAIN = "KEYED_DIGEST/h4-evidence-fingerp
  * against the SAME head (and fail DOMAIN_MISMATCH), never create a parallel
  * domain namespace. Rotation/migration requires a separate controlled task.
  */
-export const EVIDENCE_DOMAIN_HEAD_ID = "evidence-digest-domain:v1:global";
+const EVIDENCE_DOMAIN_HEAD_PURPOSE = "evidence-digest-domain";
+const EVIDENCE_DOMAIN_HEAD_VERSION = "v1";
+export const EVIDENCE_DOMAIN_HEAD_ID =
+  `${EVIDENCE_DOMAIN_HEAD_PURPOSE}:${EVIDENCE_DOMAIN_HEAD_VERSION}:global`;
 
 const SOURCE_CODES = new Map([
   ["confirmed_removed", "OPERATOR_CONFIRMED_REMOVED"],
@@ -260,8 +265,9 @@ function constantTimeHexEqual(left, right) {
  *     both land here even when the version record for the new config is
  *     absent).
  * Only an exact match returns an empty write set. There is no initialization
- * branch, hidden switch or catch-based auto-write: first deployment setup is
- * a separate controlled migration, outside C1.
+ * branch, hidden switch or catch-based auto-write here: first deployment setup
+ * is only available through the separate initializeEvidenceDomain helper,
+ * which this guard never calls. Missing/damaged pairs fail closed.
  */
 export function applyEvidenceDomain(state, { realm, version, fingerprint } = {}) {
   if (!isPlainObject(state) || !realmValid(realm) || !integer(version, 1) ||
@@ -271,8 +277,8 @@ export function applyEvidenceDomain(state, { realm, version, fingerprint } = {})
   const versionRecord = read(state, EVIDENCE_DOMAINS_COLLECTION, versionId);
 
   // Missing both sides, or a missing stable head, is storage incompleteness,
-  // never an initialization signal. C1 has no initialization path at all;
-  // first deployment setup is a separate controlled migration.
+  // never an initialization signal. Initialization is only available through
+  // the separate initializeEvidenceDomain helper, never from this guard.
   if (head === null) fail("DOMAIN_INCOMPLETE");
   try {
     validateEvidenceDomainRecord(head);
@@ -343,11 +349,169 @@ export function evidenceAppendRefs(job, head, domainHead, config) {
 }
 
 /**
+ * Global scope marker for the controlled first-deployment precondition. It is
+ * deliberately not derived from realm/org: one deployment has one global K3
+ * domain, matching the single stable head.
+ */
+export const EVIDENCE_DOMAIN_INIT_SCOPE = "global";
+
+const INIT_PRECONDITIONS = new WeakSet();
+
+/**
+ * Record the explicit global-empty precondition for controlled initialization.
+ *
+ * Store.transact can only read declared point refs; neither LocalStore nor
+ * CloudStore can atomically prove that three collections are globally empty.
+ * This function therefore NEVER scans the Store. The controlled deployment
+ * migration performs the authoritative empty check under its maintenance
+ * window and records the observed (empty) record-ID lists plus operator/time
+ * here. Any observed record, missing metadata, unknown field or malformed
+ * input fails closed. A plain object cannot mint this proof.
+ */
+export function evidenceDomainInitPrecondition(options = {}) {
+  if (!isPlainObject(options)) fail("DOMAIN_INCOMPLETE");
+  const fields = [
+    "scope", "domains", "evidence", "evidenceHeads", "checkedAt", "checkedBy",
+  ];
+  const keys = Reflect.ownKeys(options);
+  if (keys.length !== fields.length ||
+      keys.some((key) => typeof key !== "string" || !fields.includes(key))) {
+    fail("DOMAIN_INCOMPLETE");
+  }
+  for (const key of fields) {
+    if (!Object.hasOwn(options, key)) fail("DOMAIN_INCOMPLETE");
+  }
+  const { scope, domains, evidence, evidenceHeads, checkedAt, checkedBy } = options;
+  if (scope !== EVIDENCE_DOMAIN_INIT_SCOPE ||
+      !Array.isArray(domains) || !Array.isArray(evidence) ||
+      !Array.isArray(evidenceHeads) || !integer(checkedAt) ||
+      !opaque(checkedBy)) {
+    fail("DOMAIN_INCOMPLETE");
+  }
+  if (domains.length !== 0 || evidence.length !== 0 || evidenceHeads.length !== 0) {
+    fail("DOMAIN_INIT_CONFLICT");
+  }
+  const proof = Object.freeze({
+    scope,
+    domains: Object.freeze([...domains]),
+    evidence: Object.freeze([...evidence]),
+    evidenceHeads: Object.freeze([...evidenceHeads]),
+    checkedAt,
+    checkedBy,
+  });
+  INIT_PRECONDITIONS.add(proof);
+  return proof;
+}
+
+function assertInitPrecondition(precondition) {
+  // A missing/unverifiable proof means the deployment cannot prove global
+  // emptiness: fail closed instead of guessing or scanning. A valid proof can
+  // only have been minted with all three observed lists empty, but re-check the
+  // recorded counts defensively.
+  if (!precondition || !INIT_PRECONDITIONS.has(precondition)) {
+    fail("DOMAIN_INCOMPLETE");
+  }
+  if (precondition.scope !== EVIDENCE_DOMAIN_INIT_SCOPE ||
+      precondition.domains.length !== 0 || precondition.evidence.length !== 0 ||
+      precondition.evidenceHeads.length !== 0) {
+    fail("DOMAIN_INIT_CONFLICT");
+  }
+}
+
+/** Refs for the fixed head+version pair; no collection listing is involved. */
+export function evidenceDomainInitRefs(config) {
+  const cfg = normalizedConfig(config);
+  const { headId, versionId } = evidenceDomainIds(cfg.realm, cfg.version);
+  return [
+    ref(EVIDENCE_DOMAINS_COLLECTION, headId),
+    ref(EVIDENCE_DOMAINS_COLLECTION, versionId),
+  ];
+}
+
+/**
+ * Pure create-only write builder for the single global domain pair.
+ *
+ * It refuses to write when any record visible in the transaction state already
+ * exists in any of the three H4-c collections, and it requires the recorded
+ * global-empty precondition. It never merges, overwrites, repairs or backfills
+ * an existing domain record.
+ */
+export function evidenceDomainInitWrites(state, { config, now, precondition } = {}) {
+  const cfg = normalizedConfig(config);
+  if (!isPlainObject(state) || !integer(now)) fail("DOMAIN_INCOMPLETE");
+  assertInitPrecondition(precondition);
+  const { headId, versionId } = evidenceDomainIds(cfg.realm, cfg.version);
+  if (read(state, EVIDENCE_DOMAINS_COLLECTION, headId) !== null ||
+      read(state, EVIDENCE_DOMAINS_COLLECTION, versionId) !== null) {
+    fail("DOMAIN_INIT_CONFLICT");
+  }
+  const prefixes = [EVIDENCE_DOMAINS_COLLECTION, EVIDENCE_COLLECTION,
+    EVIDENCE_HEADS_COLLECTION].map((collection) => `${collection}/`);
+  for (const [key, value] of Object.entries(state)) {
+    if (value != null && prefixes.some((prefix) => key.startsWith(prefix))) {
+      fail("DOMAIN_INIT_CONFLICT");
+    }
+  }
+  const headRecord = {
+    _id: headId,
+    kind: "head",
+    realm: cfg.realm,
+    keyVersion: cfg.version,
+    keyFingerprint: cfg.fingerprint,
+    revision: 1,
+    createdAt: now,
+  };
+  const versionRecord = {
+    _id: versionId,
+    kind: "version",
+    realm: cfg.realm,
+    keyVersion: cfg.version,
+    keyFingerprint: cfg.fingerprint,
+    enabledAt: now,
+  };
+  validateEvidenceDomainRecord(headRecord);
+  validateEvidenceDomainRecord(versionRecord);
+  return [
+    write(EVIDENCE_DOMAINS_COLLECTION, headRecord),
+    write(EVIDENCE_DOMAINS_COLLECTION, versionRecord),
+  ];
+}
+
+/**
+ * Explicit controlled first-deployment initialization.
+ *
+ * This is NOT called by appendEvidenceWrites or by any future reconcile
+ * helper. It creates the global head + frozen version pair exactly once and
+ * only with a recorded global-empty precondition. It does not list/scan the
+ * Store, does not create a second realm namespace and does not overwrite any
+ * existing domain/evidence/evidence-head record. Store create-only semantics
+ * are the final duplicate/concurrency guard for the fixed IDs.
+ */
+export async function initializeEvidenceDomain(store, config, {
+  now, precondition, audit,
+} = {}) {
+  const cfg = normalizedConfig(config);
+  if (!store || typeof store.transact !== "function" || !integer(now)) {
+    fail("DOMAIN_INCOMPLETE");
+  }
+  assertInitPrecondition(precondition);
+  const refs = evidenceDomainInitRefs(cfg);
+  let writes = null;
+  await store.transact(refs, (state) => {
+    writes = evidenceDomainInitWrites(state, { config: cfg, now, precondition });
+    return writes;
+  }, audit);
+  return writes;
+}
+
+/**
  * Pure transaction builder for one evidence append. The global K3 domain is
- * only READ here; append never creates it. It re-reads the head for CAS, fully
- * re-validates the previous evidence (schema, org/job/sequence, observedAt,
- * K3 realm/version/fingerprint and timing-safe HMAC), then returns the new
- * evidence and head writes. Any failure throws before returning writes.
+ * only READ here; append never creates or repairs it. Initialization is a
+ * separate controlled helper and is not called on this runtime path. It
+ * re-reads the head for CAS, fully re-validates the previous evidence (schema,
+ * org/job/sequence, observedAt, K3 realm/version/fingerprint and timing-safe
+ * HMAC), then returns the new evidence and head writes. Any failure throws
+ * before returning writes.
  */
 export function appendEvidenceWrites(state, {
   job, expectedHead = null, hasExistingEvidence, config, now,
@@ -369,8 +533,9 @@ export function appendEvidenceWrites(state, {
 
   // Read-only domain validation must run before any evidence/head decision.
   // A missing/damaged/mismatched domain fails closed with zero writes; it is
-  // never an implicit initialization signal.
-  const domainWrites = applyEvidenceDomain(state, cfg);
+  // never an implicit initialization signal. The guard always returns an empty
+  // write set, so append contributes no domain writes at all.
+  applyEvidenceDomain(state, cfg);
 
   const headId = evidenceHeadId(job.orgId, job._id);
   const head = read(state, EVIDENCE_HEADS_COLLECTION, headId);
@@ -463,7 +628,6 @@ export function appendEvidenceWrites(state, {
   validateEvidenceHead(nextHead);
 
   return [
-    ...domainWrites,
     write(EVIDENCE_COLLECTION, record),
     write(EVIDENCE_HEADS_COLLECTION, nextHead),
   ];

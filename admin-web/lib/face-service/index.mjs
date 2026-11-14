@@ -9,7 +9,40 @@ export * from "./state.mjs";
 export * from "./routes.mjs";
 export * from "./mock-provider.mjs";
 export * from "./h4b.mjs";
-export * from "./h4c-evidence.mjs";
+
+/*
+ * H4-c C1 evidence surface is intentionally explicit: K3 domain
+ * initialization is NOT exported. C1 runtime is strictly read-only; first
+ * deployment initialization belongs to a separate controlled migration task.
+ */
+export {
+  EVIDENCE_COLLECTION,
+  EVIDENCE_DIGEST_ALGORITHM,
+  EVIDENCE_DIGEST_ALGORITHM_VERSION,
+  EVIDENCE_DIGEST_DOMAIN,
+  EVIDENCE_DOMAIN_HEAD_ID,
+  EVIDENCE_DOMAINS_COLLECTION,
+  EVIDENCE_HEADS_COLLECTION,
+  EVIDENCE_KEY_FINGERPRINT_DOMAIN,
+  EVIDENCE_MAX_SEQUENCE,
+  EVIDENCE_SCHEMA_VERSION,
+  H4C_EVIDENCE_SCOPE,
+  STILL_UNKNOWN_MAX_SEQUENCE,
+  appendEvidenceWrites,
+  applyEvidenceDomain,
+  evidenceAppendRefs,
+  evidenceDigest,
+  evidenceDomainIds,
+  evidenceHeadId,
+  evidenceId,
+  evidenceKeyConfig,
+  evidenceKeyFingerprint,
+  stableStringify,
+  stableValue,
+  validateEvidenceDomainRecord,
+  validateEvidenceHead,
+  validateEvidenceRecord,
+} from "./h4c-evidence.mjs";
 
 import { MockFaceAccessProvider } from "./mock-provider.mjs";
 

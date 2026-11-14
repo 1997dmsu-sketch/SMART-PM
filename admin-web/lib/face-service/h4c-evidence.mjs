@@ -2,15 +2,19 @@
  * HK-AI-04 H4-c C1: immutable reconcile evidence foundation.
  *
  * This module deliberately does not implement the reconcile state machine,
- * operation keys, HTTP routes or Provider calls. It provides:
+ * operation keys, HTTP routes, Provider calls or K3 domain initialization.
+ * It provides:
  *   - exact schema validators for evidence/head/global K3 domain records;
- *   - independent K3 config, fingerprint and a READ-ONLY global domain guard;
- *   - an explicit first-time initialization helper guarded by a global-empty
- *     precondition (append/reconcile can never initialize implicitly);
+ *   - independent K3 config, fingerprint and a strictly READ-ONLY global
+ *     domain guard (append/reconcile can never create or repair the domain);
  *   - deterministic evidence/head IDs and one stable global domain head ID;
  *   - canonical (sorted-key) structured HMAC digests;
  *   - append helpers that re-validate the previous evidence, the head CAS and
  *     the K3 domain inside one Store transaction.
+ *
+ * First deployment initialization (the fixed head + version pair) is NOT a
+ * runtime capability here. It belongs to a separate, controlled deployment
+ * migration task; C1 only ever reads the pair and fails closed.
  */
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
@@ -255,7 +259,9 @@ function constantTimeHexEqual(left, right) {
  *     current config -> DOMAIN_MISMATCH (a version bump and a realm switch
  *     both land here even when the version record for the new config is
  *     absent).
- * Only an exact match returns an empty write set.
+ * Only an exact match returns an empty write set. There is no initialization
+ * branch, hidden switch or catch-based auto-write: first deployment setup is
+ * a separate controlled migration, outside C1.
  */
 export function applyEvidenceDomain(state, { realm, version, fingerprint } = {}) {
   if (!isPlainObject(state) || !realmValid(realm) || !integer(version, 1) ||
@@ -265,8 +271,8 @@ export function applyEvidenceDomain(state, { realm, version, fingerprint } = {})
   const versionRecord = read(state, EVIDENCE_DOMAINS_COLLECTION, versionId);
 
   // Missing both sides, or a missing stable head, is storage incompleteness,
-  // never an initialization signal. Initialization is only available through
-  // initializeEvidenceDomain.
+  // never an initialization signal. C1 has no initialization path at all;
+  // first deployment setup is a separate controlled migration.
   if (head === null) fail("DOMAIN_INCOMPLETE");
   try {
     validateEvidenceDomainRecord(head);
@@ -334,139 +340,6 @@ export function evidenceAppendRefs(job, head, domainHead, config) {
   ];
   if (head?.lastEvidenceId) refs.push(ref(EVIDENCE_COLLECTION, head.lastEvidenceId));
   return unique(refs);
-}
-
-const INIT_PRECONDITION = Symbol("h4c-evidence-domain-init-precondition");
-
-function assertInitPrecondition(precondition, store) {
-  // The symbol cannot be forged by a plain object; a caller must have called
-  // evidenceDomainInitPrecondition on this store. An absent/unverifiable
-  // precondition fails closed (cannot prove emptiness); a valid precondition
-  // that already observed records is a hard init conflict.
-  if (!precondition || precondition[INIT_PRECONDITION] !== true ||
-      typeof precondition.verifyEmpty !== "function" ||
-      (store !== undefined && precondition.store !== store)) {
-    fail("DOMAIN_INCOMPLETE");
-  }
-  if (precondition.empty !== true || precondition.domainRecords !== 0 ||
-      precondition.evidenceRecords !== 0 || precondition.evidenceHeadRecords !== 0) {
-    fail("DOMAIN_INIT_CONFLICT");
-  }
-}
-
-/**
- * Explicit global-empty probe for first-time initialization. It lists the
- * three collections once and returns a frozen precondition; it does not
- * repair, backfill or mutate anything. If the listing fails, the probe fails
- * closed instead of guessing.
- */
-export async function evidenceDomainInitPrecondition(store) {
-  if (!store || typeof store.list !== "function") fail("DOMAIN_INCOMPLETE");
-  const listAll = async () => {
-    let rows;
-    try {
-      rows = await Promise.all([
-        store.list(EVIDENCE_DOMAINS_COLLECTION),
-        store.list(EVIDENCE_COLLECTION),
-        store.list(EVIDENCE_HEADS_COLLECTION),
-      ]);
-    } catch {
-      fail("DOMAIN_INCOMPLETE");
-    }
-    if (rows.some((items) => !Array.isArray(items))) fail("DOMAIN_INCOMPLETE");
-    return rows;
-  };
-  const [domains, evidence, evidenceHeads] = await listAll();
-  const verifyEmpty = async () => {
-    // Re-check immediately before and inside the transaction. LocalStore's
-    // transaction queue makes the inner check serialized; CloudStore can only
-    // provide a best-effort re-read, so the create-only fixed-ID write below
-    // remains the atomic conflict guard.
-    const [currentDomains, currentEvidence, currentHeads] = await listAll();
-    if (currentDomains.length || currentEvidence.length || currentHeads.length) {
-      fail("DOMAIN_INIT_CONFLICT");
-    }
-  };
-  return Object.freeze({
-    [INIT_PRECONDITION]: true,
-    store,
-    empty: domains.length === 0 && evidence.length === 0 && evidenceHeads.length === 0,
-    domainRecords: domains.length,
-    evidenceRecords: evidence.length,
-    evidenceHeadRecords: evidenceHeads.length,
-    verifyEmpty,
-  });
-}
-
-export function evidenceDomainInitRefs(config) {
-  const cfg = normalizedConfig(config);
-  const { headId, versionId } = evidenceDomainIds(cfg.realm, cfg.version);
-  return [
-    ref(EVIDENCE_DOMAINS_COLLECTION, headId),
-    ref(EVIDENCE_DOMAINS_COLLECTION, versionId),
-  ];
-}
-
-/**
- * Pure create-only write builder for the single global domain pair. It
- * refuses any state that already contains a domain/evidence/evidence-head
- * record and requires the explicit empty-store precondition.
- */
-export function evidenceDomainInitWrites(state, { config, now, precondition } = {}) {
-  const cfg = normalizedConfig(config);
-  if (!isPlainObject(state) || !integer(now)) fail("DOMAIN_INCOMPLETE");
-  assertInitPrecondition(precondition);
-  const { headId, versionId } = evidenceDomainIds(cfg.realm, cfg.version);
-  if (read(state, EVIDENCE_DOMAINS_COLLECTION, headId) !== null ||
-      read(state, EVIDENCE_DOMAINS_COLLECTION, versionId) !== null) {
-    fail("DOMAIN_INIT_CONFLICT");
-  }
-  const prefixes = [EVIDENCE_DOMAINS_COLLECTION, EVIDENCE_COLLECTION,
-    EVIDENCE_HEADS_COLLECTION].map((name) => `${name}/`);
-  for (const key of Object.keys(state)) {
-    if (prefixes.some((prefix) => key.startsWith(prefix)) && state[key] != null) {
-      fail("DOMAIN_INIT_CONFLICT");
-    }
-  }
-  const headRecord = {
-    _id: headId, kind: "head", realm: cfg.realm, keyVersion: cfg.version,
-    keyFingerprint: cfg.fingerprint, revision: 1, createdAt: now,
-  };
-  const versionData = {
-    _id: versionId, kind: "version", realm: cfg.realm, keyVersion: cfg.version,
-    keyFingerprint: cfg.fingerprint, enabledAt: now,
-  };
-  validateEvidenceDomainRecord(headRecord);
-  validateEvidenceDomainRecord(versionData);
-  return [
-    write(EVIDENCE_DOMAINS_COLLECTION, headRecord),
-    write(EVIDENCE_DOMAINS_COLLECTION, versionData),
-  ];
-}
-
-/**
- * Explicit first-time initialization. It is NOT called by appendEvidenceWrites
- * or by any reconcile helper. It creates the global head + frozen version pair
- * exactly once, only after proving the three H4-c collections are globally
- * empty; Store create-only semantics reject a concurrent/duplicate init.
- */
-export async function initializeEvidenceDomain(store, config, {
-  now, precondition, audit,
-} = {}) {
-  const cfg = normalizedConfig(config);
-  if (!store || typeof store.transact !== "function" || !integer(now)) {
-    fail("DOMAIN_INCOMPLETE");
-  }
-  assertInitPrecondition(precondition, store);
-  await precondition.verifyEmpty();
-  const refs = evidenceDomainInitRefs(cfg);
-  let writes = null;
-  await store.transact(refs, async (state) => {
-    await precondition.verifyEmpty();
-    writes = evidenceDomainInitWrites(state, { config: cfg, now, precondition });
-    return writes;
-  }, audit);
-  return writes;
 }
 
 /**

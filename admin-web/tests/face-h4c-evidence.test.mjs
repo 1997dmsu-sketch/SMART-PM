@@ -11,6 +11,7 @@ import {
   EVIDENCE_DIGEST_ALGORITHM,
   EVIDENCE_DIGEST_ALGORITHM_VERSION,
   EVIDENCE_DIGEST_DOMAIN,
+  EVIDENCE_DOMAIN_HEAD_ID,
   EVIDENCE_DOMAINS_COLLECTION,
   EVIDENCE_HEADS_COLLECTION,
   EVIDENCE_SCHEMA_VERSION,
@@ -19,10 +20,14 @@ import {
   evidenceAppendRefs,
   evidenceDigest,
   evidenceDomainIds,
+  evidenceDomainInitPrecondition,
+  evidenceDomainInitRefs,
+  evidenceDomainInitWrites,
   evidenceHeadId,
   evidenceId,
   evidenceKeyConfig,
   evidenceKeyFingerprint,
+  initializeEvidenceDomain,
   stableStringify,
   validateEvidenceDomainRecord,
   validateEvidenceHead,
@@ -145,6 +150,25 @@ function domainState(config, head, version) {
   return state;
 }
 
+async function insert(store, collection, record) {
+  await store.transact([ref(collection, record._id)], () => [{
+    collection, id: record._id, data: structuredClone(record),
+  }], AUDIT);
+}
+
+async function initStore(store, config = CONFIG, { now = NOW, audit = AUDIT } = {}) {
+  const precondition = await evidenceDomainInitPrecondition(store);
+  return initializeEvidenceDomain(store, config, { now, precondition, audit });
+}
+
+async function domainStateFor(store, config = CONFIG) {
+  const state = {};
+  for (const item of evidenceDomainInitRefs(config)) {
+    state[`${item.collection}/${item.id}`] = await store.get(item.collection, item.id);
+  }
+  return state;
+}
+
 async function runAppend(store, {
   job = JOB,
   config = CONFIG,
@@ -203,10 +227,22 @@ async function expectFailure(store, options, code) {
   assert.deepEqual(store.data, before);
 }
 
-function assertNoEvidenceWrites(store) {
+async function expectInitFailure(store, config, code, {
+  now = NOW, precondition, audit = AUDIT,
+} = {}) {
+  const before = structuredClone(store.data);
+  const proof = precondition !== undefined
+    ? precondition
+    : await evidenceDomainInitPrecondition(store);
+  await assert.rejects(() => initializeEvidenceDomain(store, config, {
+    now, precondition: proof, audit,
+  }), rejectCode(code));
+  assert.deepEqual(store.data, before);
+}
+
+function assertNoBusinessWrites(store) {
   assert.deepEqual(store.data[EVIDENCE_COLLECTION], []);
   assert.deepEqual(store.data[EVIDENCE_HEADS_COLLECTION], []);
-  assert.deepEqual(store.data[EVIDENCE_DOMAINS_COLLECTION], []);
 }
 
 function cloudHarness(initial = []) {
@@ -301,7 +337,7 @@ test("K3 config is independent, canonical and fingerprint-bound", () => {
   assert.notEqual(otherVersion.fingerprint, CONFIG.fingerprint);
 });
 
-test("evidence/head/domain IDs are deterministic and scoped", () => {
+test("evidence/head/domain IDs are deterministic and the head is realm/org independent", () => {
   const expected = "h4c-evidence-v1:" + createHash("sha256")
     .update(stableStringify([ORG, JOB_ID, 1])).digest("hex").slice(0, 32);
   assert.equal(evidenceId(ORG, JOB_ID, 1), expected);
@@ -316,8 +352,14 @@ test("evidence/head/domain IDs are deterministic and scoped", () => {
   assert.match(evidenceHeadId(ORG, JOB_ID), /^h4c-evidence-head-v1:[0-9a-f]{32}$/);
 
   const ids = evidenceDomainIds("h4c-realm", 1);
-  assert.equal(ids.headId, "evidence-digest-domain:" + Buffer.from("h4c-realm").toString("base64url"));
-  assert.equal(ids.versionId, ids.headId.replace("evidence-digest-domain:", "evidence-digest-domain-version:") + ":1");
+  assert.equal(ids.headId, EVIDENCE_DOMAIN_HEAD_ID);
+  assert.equal(ids.headId, "evidence-digest-domain:v1:global");
+  assert.equal(ids.headId, evidenceDomainIds("another-realm", 7).headId);
+  assert.equal(ids.headId, evidenceDomainIds("h4c-realm", 99).headId);
+  assert.equal(ids.versionId, "evidence-digest-domain-version:" +
+    Buffer.from("h4c-realm").toString("base64url") + ":1");
+  assert.notEqual(ids.versionId, evidenceDomainIds("h4c-realm", 2).versionId);
+  assert.notEqual(ids.versionId, evidenceDomainIds("another-realm", 1).versionId);
 });
 
 test("structured HMAC is canonical, sorted and binds every message field", () => {
@@ -418,10 +460,12 @@ test("head validator is exact and enforces CAS fields", () => {
   for (const failure of failures) assert.throws(failure, rejectCode("EVIDENCE_INVALID"));
 });
 
-test("domain validator is exact for head and version records", () => {
+test("domain validator is exact for the stable head and frozen version records", () => {
   const { head, version } = makeDomainRecords();
   assert.equal(validateEvidenceDomainRecord(head), undefined);
   assert.equal(validateEvidenceDomainRecord(version), undefined);
+  assert.equal(validateEvidenceDomainRecord({ ...head, realm: "another-realm" }), undefined,
+    "the stable head ID does not encode the realm");
   const failures = [
     () => validateEvidenceDomainRecord({ ...head, extra: true }),
     () => validateEvidenceDomainRecord((({ _id, ...rest }) => rest)(head)),
@@ -433,6 +477,7 @@ test("domain validator is exact for head and version records", () => {
     () => validateEvidenceDomainRecord({ ...head, keyVersion: 0 }),
     () => validateEvidenceDomainRecord({ ...head, keyFingerprint: "A".repeat(64) }),
     () => validateEvidenceDomainRecord({ ...head, revision: 0 }),
+    () => validateEvidenceDomainRecord({ ...version, _id: evidenceDomainIds("another-realm", 1).versionId }),
     () => validateEvidenceDomainRecord({ ...version, enabledAt: -1 }),
     () => validateEvidenceDomainRecord(null),
     () => validateEvidenceDomainRecord([]),
@@ -440,100 +485,230 @@ test("domain validator is exact for head and version records", () => {
   for (const failure of failures) assert.throws(failure, rejectCode("DOMAIN_INCOMPLETE"));
 });
 
-test("domain guard creates head and version once and never mutates input", () => {
+test("runtime domain guard never creates the K3 domain on empty state", () => {
   const state = domainState(CONFIG, null, null);
   const before = structuredClone(state);
-  const writes = applyEvidenceDomain(state, { ...CONFIG, now: NOW });
-  assert.equal(writes.length, 2);
+  assert.throws(() => applyEvidenceDomain(state, CONFIG), rejectCode("DOMAIN_INCOMPLETE"));
   assert.deepEqual(state, before);
-  assert.equal(writes[0].collection, EVIDENCE_DOMAINS_COLLECTION);
-  assert.equal(writes[0].data.kind, "head");
-  assert.equal(writes[1].data.kind, "version");
-  for (const write of writes) assert.equal(validateEvidenceDomainRecord(write.data), undefined);
-
-  const next = { ...state };
-  for (const write of writes) next[`${write.collection}/${write.id}`] = write.data;
-  assert.deepEqual(applyEvidenceDomain(next, { ...CONFIG, now: NOW }), []);
-  assert.deepEqual(next, { ...state, ...Object.fromEntries(writes.map((w) => [
-    `${w.collection}/${w.id}`, w.data,
-  ])) });
 });
 
-test("domain guard rejects one-sided and corrupt domains without backfill", () => {
+test("runtime domain guard rejects one-sided and corrupt domains without backfill", () => {
   const { head, version } = makeDomainRecords();
   const cases = [
+    ["both missing", domainState(CONFIG, null, null)],
     ["head only", domainState(CONFIG, head, null)],
     ["version only", domainState(CONFIG, null, version)],
     ["head kind swapped", domainState(CONFIG, version, version)],
     ["version kind swapped", domainState(CONFIG, head, head)],
     ["head unknown field", domainState(CONFIG, { ...head, extra: 1 }, version)],
     ["version unknown field", domainState(CONFIG, head, { ...version, extra: 1 })],
-    ["internal version mismatch", domainState(CONFIG, head, { ...version, keyVersion: 2 })],
-    ["internal fingerprint mismatch", domainState(CONFIG, head, {
+    ["head revision corrupt", domainState(CONFIG, { ...head, revision: 0 }, version)],
+    ["version fingerprint corrupt", domainState(CONFIG, head, {
       ...version, keyFingerprint: "0".repeat(64),
     })],
-    ["head realm mismatch", domainState(CONFIG, { ...head, realm: "other-realm" }, version)],
+    ["version realm/id corrupt", domainState(CONFIG, head, {
+      ...version, realm: "another-realm",
+    })],
   ];
   for (const [name, state] of cases) {
     const before = structuredClone(state);
-    assert.throws(() => applyEvidenceDomain(state, { ...CONFIG, now: NOW }),
+    assert.throws(() => applyEvidenceDomain(state, CONFIG),
       rejectCode("DOMAIN_INCOMPLETE"), name);
     assert.deepEqual(state, before, name);
   }
 });
 
-test("domain guard fails closed on version changes and same-version rekey", () => {
+test("runtime domain guard fails closed on realm switch, version change and same-version rekey", () => {
   const records = makeDomainRecords(CONFIG);
   const complete = domainState(CONFIG, records.head, records.version);
   const before = structuredClone(complete);
-  assert.deepEqual(applyEvidenceDomain(complete, { ...CONFIG, now: NOW }), []);
+  assert.deepEqual(applyEvidenceDomain(complete, CONFIG), []);
   assert.deepEqual(complete, before);
 
   const rekeyed = evidenceKeyConfig({ ...ENV_A, H4_EVIDENCE_HMAC_KEY_B64: KEY_B });
-  assert.throws(() => applyEvidenceDomain(complete, { ...rekeyed, now: NOW }),
+  assert.throws(() => applyEvidenceDomain(complete, rekeyed),
     rejectCode("DOMAIN_MISMATCH"));
 
   const versioned = evidenceKeyConfig({ ...ENV_A, H4_EVIDENCE_KEY_VERSION: "2" });
-  assert.throws(() => applyEvidenceDomain(complete, { ...versioned, now: NOW }),
+  assert.throws(() => applyEvidenceDomain(complete, versioned),
+    rejectCode("DOMAIN_MISMATCH"));
+
+  const otherRealm = evidenceKeyConfig({ ...ENV_A, H4_EVIDENCE_REALM: "h4c-realm-b" });
+  assert.throws(() => applyEvidenceDomain(complete, otherRealm),
     rejectCode("DOMAIN_MISMATCH"));
 
   const stateV2 = domainState(versioned, records.head, null);
-  assert.throws(() => applyEvidenceDomain(stateV2, { ...versioned, now: NOW }),
-    rejectCode("DOMAIN_MISMATCH"), "stable head detects version change even without v2 record");
-  assert.throws(() => applyEvidenceDomain(domainState(CONFIG, records.head, null),
-    { ...CONFIG, now: NOW }), rejectCode("DOMAIN_INCOMPLETE"), "same version missing record");
+  assert.throws(() => applyEvidenceDomain(stateV2, versioned),
+    rejectCode("DOMAIN_MISMATCH"), "stable head detects version change even without a v2 record");
+  assert.throws(() => applyEvidenceDomain(domainState(CONFIG, records.head, null), CONFIG),
+    rejectCode("DOMAIN_INCOMPLETE"), "same version missing record is damage");
+  assert.throws(() => applyEvidenceDomain(domainState(CONFIG, {
+    ...records.head, realm: "another-realm",
+  }, records.version), CONFIG), rejectCode("DOMAIN_MISMATCH"),
+  "a stable head bound to another realm is a config mismatch");
 });
 
-test("append fails closed on K3 rekey, version change and one-sided domain", async (t) => {
+test("append fails closed on K3 rekey, realm/version change and one-sided domain", async (t) => {
   const store = await localStore(t);
-  await runAppend(store);
+  await initStore(store);
 
   const rekeyed = evidenceKeyConfig({ ...ENV_A, H4_EVIDENCE_HMAC_KEY_B64: KEY_B });
   await expectFailure(store, { config: rekeyed }, "DOMAIN_MISMATCH");
   const versioned = evidenceKeyConfig({ ...ENV_A, H4_EVIDENCE_KEY_VERSION: "2" });
   await expectFailure(store, { config: versioned }, "DOMAIN_MISMATCH");
+  const otherRealm = evidenceKeyConfig({ ...ENV_A, H4_EVIDENCE_REALM: "h4c-realm-b" });
+  await expectFailure(store, { config: otherRealm }, "DOMAIN_MISMATCH");
 
   const headOnly = makeDomainRecords().head;
   const orphanStore = await localStore(t);
-  await orphanStore.transact(
-    [ref(EVIDENCE_DOMAINS_COLLECTION, headOnly._id)],
-    () => [{
-      collection: EVIDENCE_DOMAINS_COLLECTION, id: headOnly._id, data: { ...headOnly },
-    }],
-    AUDIT,
-  );
+  await insert(orphanStore, EVIDENCE_DOMAINS_COLLECTION, headOnly);
   await expectFailure(orphanStore, {}, "DOMAIN_INCOMPLETE");
   assert.equal(orphanStore.data[EVIDENCE_DOMAINS_COLLECTION].length, 1);
   assert.equal(orphanStore.data[EVIDENCE_DOMAINS_COLLECTION][0].kind, "head");
 });
 
-test("first evidence creates the K3 domain, immutable evidence and head", async (t) => {
+test("explicit initialization creates the single global pair; same config then passes", async (t) => {
   const store = await localStore(t);
+  const precondition = await evidenceDomainInitPrecondition(store);
+  assert.equal(precondition.empty, true);
+  assert.equal(precondition.domainRecords, 0);
+  assert.equal(precondition.evidenceRecords, 0);
+  assert.equal(precondition.evidenceHeadRecords, 0);
+  assert.ok(Object.isFrozen(precondition));
+
+  const writes = await initializeEvidenceDomain(store, CONFIG, {
+    now: NOW, precondition, audit: AUDIT,
+  });
+  assert.equal(writes.length, 2);
+  const [headWrite, versionWrite] = writes;
+  assert.equal(headWrite.collection, EVIDENCE_DOMAINS_COLLECTION);
+  assert.equal(headWrite.id, EVIDENCE_DOMAIN_HEAD_ID);
+  assert.equal(versionWrite.collection, EVIDENCE_DOMAINS_COLLECTION);
+  assert.deepEqual(Object.keys(headWrite.data).sort(), [
+    "_id", "createdAt", "keyFingerprint", "keyVersion", "kind", "realm", "revision",
+  ]);
+  assert.deepEqual(Object.keys(versionWrite.data).sort(), [
+    "_id", "enabledAt", "keyFingerprint", "keyVersion", "kind", "realm",
+  ]);
+  assert.equal(headWrite.data.realm, CONFIG.realm);
+  assert.equal(headWrite.data.keyVersion, CONFIG.version);
+  assert.equal(headWrite.data.keyFingerprint, CONFIG.fingerprint);
+  assert.equal(versionWrite.data._id, evidenceDomainIds(CONFIG.realm, CONFIG.version).versionId);
+
+  assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 2);
+  assert.equal(store.data[EVIDENCE_COLLECTION].length, 0);
+  assert.equal(store.data[EVIDENCE_HEADS_COLLECTION].length, 0);
+  const state = await domainStateFor(store);
+  assert.deepEqual(applyEvidenceDomain(state, CONFIG), []);
+
+  await expectInitFailure(store, CONFIG, "DOMAIN_INIT_CONFLICT");
+});
+
+test("initialization rejects any pre-existing domain/evidence/evidence-head record", async (t) => {
+  const domain = makeDomainRecords();
+  const cases = [
+    ["domain head", EVIDENCE_DOMAINS_COLLECTION, domain.head],
+    ["domain version", EVIDENCE_DOMAINS_COLLECTION, domain.version],
+    ["evidence", EVIDENCE_COLLECTION, makeEvidenceRecord()],
+    ["evidence head", EVIDENCE_HEADS_COLLECTION, makeHead()],
+  ];
+  for (const [name, collection, record] of cases) {
+    const store = await localStore(t);
+    await insert(store, collection, record);
+    const before = structuredClone(store.data);
+    assert.equal(store.data[collection].length, 1, name);
+    await expectInitFailure(store, CONFIG, "DOMAIN_INIT_CONFLICT");
+    assert.deepEqual(store.data, before, name);
+    assert.equal(store.data[collection].length, 1, name);
+    assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length,
+      collection === EVIDENCE_DOMAINS_COLLECTION ? 1 : 0, name);
+    assert.equal(store.data[EVIDENCE_HEADS_COLLECTION].length,
+      collection === EVIDENCE_HEADS_COLLECTION ? 1 : 0, name);
+    assert.equal(store.data[EVIDENCE_COLLECTION].length,
+      collection === EVIDENCE_COLLECTION ? 1 : 0, name);
+  }
+});
+
+test("initialization requires a verifiable global-empty precondition and re-checks it", async (t) => {
+  const store = await localStore(t);
+  await assert.rejects(() => initializeEvidenceDomain(store, CONFIG, { now: NOW }),
+    rejectCode("DOMAIN_INCOMPLETE"));
+  await assert.rejects(() => initializeEvidenceDomain(store, CONFIG, {
+    now: NOW,
+    precondition: {
+      empty: true, domainRecords: 0, evidenceRecords: 0, evidenceHeadRecords: 0,
+      verifyEmpty: async () => {},
+    },
+  }), rejectCode("DOMAIN_INCOMPLETE"));
+
+  const other = await localStore(t);
+  const foreignProof = await evidenceDomainInitPrecondition(other);
+  await assert.rejects(() => initializeEvidenceDomain(store, CONFIG, {
+    now: NOW, precondition: foreignProof,
+  }), rejectCode("DOMAIN_INCOMPLETE"));
+
+  await assert.rejects(() => evidenceDomainInitPrecondition({
+    list: async () => { throw new Error("store unavailable"); },
+  }), rejectCode("DOMAIN_INCOMPLETE"));
+
+  const racing = await localStore(t);
+  const staleProof = await evidenceDomainInitPrecondition(racing);
+  await insert(racing, EVIDENCE_COLLECTION, makeEvidenceRecord());
+  const beforeRace = structuredClone(racing.data);
+  await assert.rejects(() => initializeEvidenceDomain(racing, CONFIG, {
+    now: NOW, precondition: staleProof, audit: AUDIT,
+  }), rejectCode("DOMAIN_INIT_CONFLICT"));
+  assert.deepEqual(racing.data, beforeRace);
+
+  const reused = await localStore(t);
+  const proof = await evidenceDomainInitPrecondition(reused);
+  await initializeEvidenceDomain(reused, CONFIG, { now: NOW, precondition: proof, audit: AUDIT });
+  const afterInit = structuredClone(reused.data);
+  await assert.rejects(() => initializeEvidenceDomain(reused, CONFIG, {
+    now: NOW + 1, precondition: proof, audit: AUDIT,
+  }), rejectCode("DOMAIN_INIT_CONFLICT"));
+  assert.deepEqual(reused.data, afterInit);
+});
+
+test("append on an empty store never initializes the domain implicitly", async (t) => {
+  const store = await localStore(t);
+  await expectFailure(store, {}, "DOMAIN_INCOMPLETE");
+  assert.deepEqual(store.data[EVIDENCE_DOMAINS_COLLECTION], []);
+  assert.deepEqual(store.data[EVIDENCE_COLLECTION], []);
+  assert.deepEqual(store.data[EVIDENCE_HEADS_COLLECTION], []);
+});
+
+test("runtime rejects both-missing, head-only, version-only and evidence-only states with zero writes", async (t) => {
+  const domain = makeDomainRecords();
+  const cases = [
+    ["empty", null, null, null],
+    ["evidence only", EVIDENCE_COLLECTION, makeEvidenceRecord(), null],
+    ["evidence head only", EVIDENCE_HEADS_COLLECTION, makeHead(), null],
+    ["domain head only", EVIDENCE_DOMAINS_COLLECTION, domain.head, null],
+    ["domain version only", EVIDENCE_DOMAINS_COLLECTION, domain.version, null],
+  ];
+  for (const [name, collection, record] of cases) {
+    const store = await localStore(t);
+    if (collection !== null) await insert(store, collection, record);
+    const before = structuredClone(store.data);
+    await expectFailure(store, {}, "DOMAIN_INCOMPLETE");
+    assert.deepEqual(store.data, before, name);
+    assert.equal(store.data[EVIDENCE_COLLECTION].length,
+      collection === EVIDENCE_COLLECTION ? 1 : 0, name);
+    assert.equal(store.data[EVIDENCE_HEADS_COLLECTION].length,
+      collection === EVIDENCE_HEADS_COLLECTION ? 1 : 0, name);
+  }
+});
+
+test("first evidence appends only evidence+head after explicit initialization", async (t) => {
+  const store = await localStore(t);
+  await initStore(store);
   let built = null;
   await runAppend(store, {
     onBuild: (writes, refs) => { built = { writes, refs }; },
   });
-  assert.equal(built.writes.length, 4);
+  assert.equal(built.writes.length, 2);
+  assert.ok(built.writes.every((write) => write.collection !== EVIDENCE_DOMAINS_COLLECTION));
   for (const write of built.writes) {
     assert.ok(built.refs.some((item) => item.collection === write.collection && item.id === write.id),
       `undeclared write ${write.collection}/${write.id}`);
@@ -577,14 +752,14 @@ test("first evidence creates the K3 domain, immutable evidence and head", async 
   const refs = evidenceAppendRefs(JOB, null, null, CONFIG);
   assert.equal(refs.length, 4);
   assert.deepEqual(new Set(refs.map((item) => `${item.collection}/${item.id}`)), new Set([
-    `${EVIDENCE_DOMAINS_COLLECTION}/${evidenceDomainIds(CONFIG.realm, CONFIG.version).headId}`,
+    `${EVIDENCE_DOMAINS_COLLECTION}/${EVIDENCE_DOMAIN_HEAD_ID}`,
     `${EVIDENCE_DOMAINS_COLLECTION}/${evidenceDomainIds(CONFIG.realm, CONFIG.version).versionId}`,
     `${EVIDENCE_HEADS_COLLECTION}/${evidenceHeadId(ORG, JOB_ID)}`,
     `${EVIDENCE_COLLECTION}/${evidenceId(ORG, JOB_ID, 1)}`,
   ]));
 
   const audit = store.data.admin_audit;
-  assert.equal(audit.length, 1);
+  assert.equal(audit.length, 2);
   assert.deepEqual(Object.keys(audit[0]).sort(), [
     "_id", "action", "actorId", "actorType", "createdAt", "orgId", "target",
   ]);
@@ -592,6 +767,7 @@ test("first evidence creates the K3 domain, immutable evidence and head", async 
 
 test("second evidence validates its parent and CAS-increments the head", async (t) => {
   const store = await localStore(t);
+  await initStore(store);
   await runAppend(store, { decision: "still_unknown" });
   const firstHead = structuredClone(store.data[EVIDENCE_HEADS_COLLECTION][0]);
   const firstEvidence = structuredClone(store.data[EVIDENCE_COLLECTION][0]);
@@ -633,6 +809,7 @@ test("second evidence validates its parent and CAS-increments the head", async (
 
 test("stale head CAS and missing/orphan head fail closed with zero writes", async (t) => {
   const store = await localStore(t);
+  await initStore(store);
   await runAppend(store);
   const firstHead = structuredClone(store.data[EVIDENCE_HEADS_COLLECTION][0]);
   await runAppend(store, { observedAt: OBSERVED + 100, now: NOW + 1_000 });
@@ -660,6 +837,7 @@ test("stale head CAS and missing/orphan head fail closed with zero writes", asyn
 
 test("concurrent appends on the same head have one winner and no fork", async (t) => {
   const store = await localStore(t);
+  await initStore(store);
   await runAppend(store);
   const head = structuredClone(store.data[EVIDENCE_HEADS_COLLECTION][0]);
   const options = {
@@ -685,8 +863,9 @@ test("concurrent appends on the same head have one winner and no fork", async (t
   assert.equal(store.data[EVIDENCE_HEADS_COLLECTION][0].lastSequence, 2);
 });
 
-test("damaged previous evidence is chain-broken across schema, identity, time, K3 and HMAC", async (t) => {
+test("damaged previous evidence is chain-broken across schema, identity, org/job, time, K3 and HMAC", async (t) => {
   const store = await localStore(t);
+  await initStore(store);
   await runAppend(store, { decision: "confirmed_removed" });
   const baseline = structuredClone(store.data);
   const evidenceKey = `${EVIDENCE_COLLECTION}/${baseline[EVIDENCE_COLLECTION][0]._id}`;
@@ -696,6 +875,8 @@ test("damaged previous evidence is chain-broken across schema, identity, time, K
     ["unknown field", (record) => { record.rawResponse = "forbidden"; }],
     ["schemaVersion", (record) => { record.schemaVersion = 2; }],
     ["_id", (record) => { record._id = evidenceId(ORG, JOB_ID, 9); }],
+    ["org", (record) => { record.orgId = "org-other"; }],
+    ["job", (record) => { record.jobId = "job-other"; }],
     ["sequence", (record) => {
       record.sequence = 2;
       record._id = evidenceId(ORG, JOB_ID, 2);
@@ -744,6 +925,7 @@ test("damaged previous evidence is chain-broken across schema, identity, time, K
 
 test("damaged head variants are chain-broken without repair", async (t) => {
   const store = await localStore(t);
+  await initStore(store);
   await runAppend(store, { decision: "confirmed_removed" });
   const baseline = structuredClone(store.data);
 
@@ -769,11 +951,13 @@ test("damaged head variants are chain-broken without repair", async (t) => {
 
 test("observedAt bounds, monotonicity and invalid clock fail closed", async (t) => {
   const store = await localStore(t);
+  await initStore(store);
   await expectFailure(store, { observedAt: JOB.createdAt - 1 }, "EVIDENCE_STALE");
   await expectFailure(store, { observedAt: NOW + 1 }, "EVIDENCE_STALE");
   await expectFailure(store, { observedAt: "3000" }, "EVIDENCE_STALE");
   await expectFailure(store, { now: 1.5, observedAt: OBSERVED }, "EVIDENCE_INVALID");
-  assertNoEvidenceWrites(store);
+  assertNoBusinessWrites(store);
+  assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 2);
 
   await runAppend(store);
   await expectFailure(store, { observedAt: OBSERVED - 1, now: NOW + 1_000 }, "EVIDENCE_STALE");
@@ -784,6 +968,7 @@ test("observedAt bounds, monotonicity and invalid clock fail closed", async (t) 
 
 test("decision/source binding and job invariants reject before writing", async (t) => {
   const store = await localStore(t);
+  await initStore(store);
   for (const options of [
     { decision: "approved" },
     { decision: "still_unknown", sourceType: "mock_provider" },
@@ -797,7 +982,8 @@ test("decision/source binding and job invariants reject before writing", async (
     await expectFailure(store, options, "EVIDENCE_INVALID");
   }
   await expectFailure(store, { hasExistingEvidence: true }, "EVIDENCE_CHAIN_BROKEN");
-  assertNoEvidenceWrites(store);
+  assertNoBusinessWrites(store);
+  assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 2);
 });
 
 test("LocalStore registers the three collections and upgrades old local data", async (t) => {
@@ -821,6 +1007,7 @@ test("LocalStore registers the three collections and upgrades old local data", a
 
 test("LocalStore keeps evidence/domain create-only and exact, head updates exact", async (t) => {
   const store = await localStore(t);
+  await initStore(store);
   await runAppend(store);
   const evidence = structuredClone(store.data[EVIDENCE_COLLECTION][0]);
   const domain = structuredClone(store.data[EVIDENCE_DOMAINS_COLLECTION][0]);
@@ -884,6 +1071,7 @@ test("LocalStore keeps evidence/domain create-only and exact, head updates exact
 test("CloudStore keeps exact fields and create-only semantics", async (t) => {
   const harness = cloudHarness();
   const store = harness.store;
+  await initStore(store);
   await runAppend(store);
 
   const evidenceId1 = evidenceId(ORG, JOB_ID, 1);
@@ -911,7 +1099,7 @@ test("CloudStore keeps exact fields and create-only semantics", async (t) => {
   assert.deepEqual(harness.record(EVIDENCE_COLLECTION, evidenceId1), before);
   assert.deepEqual(harness.snapshot(), snapshot);
 
-  const domainId = evidenceDomainIds(CONFIG.realm, CONFIG.version).headId;
+  const domainId = EVIDENCE_DOMAIN_HEAD_ID;
   const domain = harness.record(EVIDENCE_DOMAINS_COLLECTION, domainId);
   before = harness.record(EVIDENCE_DOMAINS_COLLECTION, domainId);
   snapshot = harness.snapshot();
@@ -945,6 +1133,7 @@ test("CloudStore keeps exact fields and create-only semantics", async (t) => {
 
 test("persisted evidence, logs and audits contain no secrets or forbidden payloads", async (t) => {
   const store = await localStore(t);
+  await initStore(store);
   await runAppend(store, { decision: "still_unknown" });
   await runAppend(store, {
     decision: "confirmed_present", observedAt: OBSERVED + 100, now: NOW + 1_000,
@@ -999,9 +1188,71 @@ test("face-service index exports the C1 evidence surface", async () => {
   const service = await import("../lib/face-service/index.mjs");
   for (const name of [
     "appendEvidenceWrites", "applyEvidenceDomain", "evidenceAppendRefs",
-    "evidenceDigest", "evidenceHeadId", "evidenceId", "evidenceKeyConfig",
-    "validateEvidenceDomainRecord", "validateEvidenceHead", "validateEvidenceRecord",
+    "evidenceDigest", "evidenceDomainInitPrecondition", "evidenceDomainInitRefs",
+    "evidenceDomainInitWrites", "evidenceDomainIds", "evidenceHeadId", "evidenceId",
+    "evidenceKeyConfig", "initializeEvidenceDomain", "validateEvidenceDomainRecord",
+    "validateEvidenceHead", "validateEvidenceRecord",
   ]) {
     assert.equal(typeof service[name], "function", name);
   }
+  assert.equal(service.EVIDENCE_DOMAIN_HEAD_ID, EVIDENCE_DOMAIN_HEAD_ID);
+});
+
+test("one stable global head is shared by multiple organizations and cannot fork", async (t) => {
+  const store = await localStore(t);
+  await initStore(store);
+  const jobB = {
+    _id: "job-h4c-2", orgId: "org-h4c-b",
+    createdAt: NOW - 10_000, result: { finishedAt: NOW - 5_000 },
+  };
+  await runAppend(store, { decision: "confirmed_removed" });
+  await runAppend(store, { job: jobB, decision: "confirmed_present" });
+
+  assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 2);
+  const heads = store.data[EVIDENCE_DOMAINS_COLLECTION].filter((row) => row.kind === "head");
+  assert.equal(heads.length, 1);
+  assert.equal(heads[0]._id, EVIDENCE_DOMAIN_HEAD_ID);
+  assert.equal(heads[0].realm, CONFIG.realm);
+  assert.equal(Object.hasOwn(heads[0], "orgId"), false);
+  assert.equal(store.data[EVIDENCE_HEADS_COLLECTION].length, 2);
+  assert.deepEqual(store.data[EVIDENCE_HEADS_COLLECTION]
+    .map((row) => `${row.orgId}/${row.jobId}`).sort(), [
+    "org-h4c-b/job-h4c-2", `${ORG}/${JOB_ID}`,
+  ]);
+  assert.equal(store.data[EVIDENCE_COLLECTION].length, 2);
+  const state = await domainStateFor(store);
+  assert.deepEqual(applyEvidenceDomain(state, CONFIG), []);
+
+  await runAppend(store, {
+    decision: "still_unknown", observedAt: OBSERVED + 100, now: NOW + 1_000,
+  });
+  assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 2);
+});
+
+test("realm switch/version change/rekey are DOMAIN_MISMATCH and never add a head/version", async (t) => {
+  const store = await localStore(t);
+  await initStore(store);
+  const before = structuredClone(store.data);
+
+  const rekeyed = evidenceKeyConfig({ ...ENV_A, H4_EVIDENCE_HMAC_KEY_B64: KEY_B });
+  const versioned = evidenceKeyConfig({ ...ENV_A, H4_EVIDENCE_KEY_VERSION: "2" });
+  const realmB = evidenceKeyConfig({ ...ENV_A, H4_EVIDENCE_REALM: "h4c-realm-b" });
+  for (const config of [rekeyed, versioned, realmB]) {
+    await expectFailure(store, { config }, "DOMAIN_MISMATCH");
+    assert.deepEqual(store.data, before);
+  }
+  assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 2);
+
+  // A pre-seeded version record for a second realm cannot create a parallel
+  // namespace: the stable head still binds realm-a and yields DOMAIN_MISMATCH.
+  const realmBVersion = makeDomainRecords(realmB).version;
+  await insert(store, EVIDENCE_DOMAINS_COLLECTION, realmBVersion);
+  const preseeded = structuredClone(store.data);
+  await expectFailure(store, { config: realmB }, "DOMAIN_MISMATCH");
+  assert.deepEqual(store.data, preseeded);
+  assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION]
+    .filter((row) => row.kind === "head").length, 1);
+  assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION]
+    .find((row) => row.kind === "head").realm, CONFIG.realm);
+  assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 3);
 });

@@ -1,70 +1,237 @@
-# HK-AI-07A 门禁 HTTP 接线契约与测试矩阵
+# HK-AI-07A 门禁 HTTP 接线契约缺口返工
 
-设计提案，待 Codex 复审。**本卡只写文档：不注册路由、不调用业务 HTTP、不修改 `server.mjs`、不接 Provider、不连接设备、不修改服务层生产代码、不新增权限名或状态名。**
+> 文档返工稿，待 Codex 复审。**本卡只写这一份 Markdown：不注册路由、不调用应用 HTTP、不修改 `server.mjs`、不接 Provider、不连接设备、不实现 retry、不开始 H4-c C2/C3、不修改服务层生产代码或测试、不新增权限名或状态名。**
+>
+> 本轮为“缺口返工”，不是新契约扩张：把上一稿中**无实现依据、无权威读取、未完成前置**的部分降级为候选并继续关闭，只保留有代码事实或有终审依据的冻结项。
 
 - 服务基线：`feat/hk-face-h4b-mock-cleanup` @ `1155b7ba65991d324fb8b22bb8f7dd87f49428f9`
 - H4-c 设计基线：`docs/hk-face-h4c-reconciliation-design` @ `b15acebe0a8049f316797bbbd2692c55de25d111`
-- 本轮分支：`docs/hk-face-http-wiring-design`
-- 现有路由提案：[routes.mjs](../../admin-web/lib/face-service/routes.mjs#L6-L60)
-- 现有 HTTP 信封：[server.mjs](../../admin-web/server.mjs#L431-L438)
-- H4-c 对账/恢复契约：[H4-c 设计](HK-AI-04-H4C-RECONCILIATION-DESIGN.md)
-- 边界：本卡只冻结“未来接线必须满足的 HTTP 契约”。所有端点在本卡合并后仍然关闭；注册与调用必须另发编码卡。
+- H4-c 设计批准：[H4-c 设计终审批准 ed7b66f](https://github.com/1997dmsu-sketch/SMART-PM/blob/ed7b66f84c79339246a81ea76762cc388d7f4778/docs/tasks/HK-AI-04-H4C-DESIGN-APPROVAL-B15ACEB-2026-11-14.md)；只批准设计并授权分阶段编码，**不授权 HTTP**
+- H4-c C1 代码：`feat/hk-face-h4c-reconciliation` @ `5dff386fe5c9648b04d1623d3e1898c59332639e`，[C1 证据包](https://github.com/1997dmsu-sketch/SMART-PM/blob/5dff386fe5c9648b04d1623d3e1898c59332639e/docs/tasks/HK-AI-04-H4C-C1-REVIEW-EVIDENCE-2026-11-14.md) 自述“等待 Codex 独立复审”
+- H4-c C2 前置检查：[C2 preflight 42f8970](https://github.com/1997dmsu-sketch/SMART-PM/blob/42f8970f065097f5163dfcbfc723932a72c51faf/docs/tasks/HK-AI-04-H4C-C2-PREFLIGHT-2026-11-14.md)，仅文档，明确“C1 未正式通过、C2 未开始”
+- H4-c C2（三种 decision）与 C3（finalize-retry）：**未开始、未实现**
+- 本轮分支：`docs/hk-face-http-wiring-design`，直接父提交 `befc2d3a2cb11e1215ac5925eeb334f1b746a7f3`
+- 本轮唯一变更文件：本文件；服务、路由、server、测试、Provider 全部零差异
+- 现有路由描述表：[routes.mjs](../../admin-web/lib/face-service/routes.mjs#L6-L62)
+- 现有 HTTP 信封：[server.mjs](../../admin-web/server.mjs#L434-L438)
+- H4-c 对账/恢复设计：[H4-c 设计](HK-AI-04-H4C-RECONCILIATION-DESIGN.md#L80-L118)
+- 边界：本卡只处理“未来接线必须满足的 HTTP 契约”。九个端点在本卡合并后**全部继续关闭**；注册与调用必须另发编码卡。
 
-## 0. 结论与冻结摘要
+## 0. 复盘结论
 
-### 0.1 冻结的九个端点
+### 0.1 三项缺口逐条处理
 
-| ID | Method | Path | Permission | 幂等 | 本卡结论 |
+上一稿被指出的三个缺口，按“只读核对事实 → 降级或冻结 → 关闭 → 验收行”逐条处理。**三项缺口都以“关闭”收尾，不以“改成可以接线”收尾。**
+
+| 编号 | 复审缺口 | 只读核对事实（2026-11-14） | 本轮处理 | 结论 | 验收行 |
 |---|---|---|---|---|---|
-| E01 | POST | `/api/v2/face-credentials` | `device.face.submit` | 必须 | 路径、DTO、状态冻结；继续关闭 |
-| E02 | GET | `/api/v2/face-credentials/review-queue` | `device.face.review` | 不适用 | 路径、DTO 冻结；继续关闭 |
-| E03 | POST | `/api/v2/face-credentials/:credentialId/review` | `device.face.review` | 必须 | 路径、DTO、状态冻结；继续关闭 |
-| E04 | GET | `/api/v2/face-credentials/:credentialId/image` | `device.face.readPrivate` | 不适用 | 私密读取契约冻结；继续关闭 |
-| E05 | POST | `/api/v2/device-access-grants/:grantId/revoke` | `device.access.manage` | 必须 | 路径、DTO 冻结；仅 Mock/Local 可接线，继续关闭 |
-| E06 | GET | `/api/v2/device-operation-jobs` | `device.audit.read` | 不适用 | 路径/权限冻结；读模型 P0 缺口，继续关闭 |
-| E07 | POST | `/api/v2/device-operation-jobs/:jobId/retry` | `device.operation.retry` | 必须 | DTO 冻结；K2 缺口，继续关闭 |
-| E08 | POST | `/api/v2/device-operation-jobs/:jobId/reconcile` | `device.operation.reconcile` | 必须 | H4-c b15aceb 提案固定；等待终审与实现，继续关闭 |
-| E09 | POST | `/api/v2/device-operation-jobs/:jobId/finalize-retry` | `device.operation.reconcile` | 必须 | H4-c b15aceb 提案固定；等待终审与实现，继续关闭 |
+| G-01 | `publicJobResult` 没有 `revision`，却在上一稿冻结了 E07/E08/E09 的 `expectedRevision`，等于凭空冻结 CAS 基准 | `publicJobResult` 精确只有 `jobId/state/attempts/lastSuccessAt/failureReason` 五个字段（[dto.mjs](../../admin-web/lib/face-service/dto.mjs#L254-L263)）；`queryJob(jobId)` 只回这个投影（[service.mjs](../../admin-web/lib/face-service/service.mjs#L731-L736)）；没有 `listJobs()`，也没有 job 详情路由 | 撤回 E07/E08/E09 的 `expectedRevision` 冻结；三条路径降级为候选并关闭；读模型扩展只作为附录 A 提案；明确 UI 无权威 revision 时无按钮、不发请求 | **关闭**：无权威 revision 的 mutation 不开放 | D17–D22、V15–V16、S13–S14、S17 |
+| G-02 | 上一稿把 `h3b.requeue`/`h4b.requeue` 当成可接线的 retry，宣称 K2 method `face.operation.retry` 名称冻结 | 两个 requeue 都**没有** operation key、`requestDigest`、K2 domain guard、严格重放或 audit 关联：`h3b.requeue(jobId, expectedRevision, actor)` 只写 job+log（[h3b.mjs](../../admin-web/lib/face-service/h3b.mjs#L444-L487)）；`h4b.requeue(jobId, expectedRevision = null, actor = null)` 只在传入 `actor` 时校验 revision，也只写 job+log（[h4b.mjs](../../admin-web/lib/face-service/h4b.mjs#L482-L519)）；`face.operation.retry` 不在已实现 K2 method 集合内 | E07 关闭并标注“未实现、不得注册”；`face.operation.retry` 降级为**候选名**；新增“未来 `retryable_failed` 独立设计待办”；`UNKNOWN_RESULT`/`awaiting_result` 禁止 retry 与普通 requeue | **关闭**：不宣称 retry 已实现 | F13、F17、U10–U14、S03–S05、S17 |
+| G-03 | 上一稿把 H4 草案的 `revoke {expectedRevision, reasonCode}` 与 H4-c 的 `reconcile`/`finalize-retry` 当成契约事实；而实际 revoke 无请求体，H4-c 只有 C1 代码在等终审、C2/C3 未开始 | 实际入口是 `revoke(grantId, { idempotencyKey })`，`requestDigest` 只含 `{grantId}`（[service.mjs](../../admin-web/lib/face-service/service.mjs#L652-L728)）；H4-a/H4-b 没有任何 `reasonCode` 入参、枚举、持久化或审计字段；`reconcile`/`finalize-retry` 在服务层**不存在**；C1 `5dff386` 只交付 `h4c-evidence.mjs` 只读 helper，无 reconcile 入口；`routes.mjs` 只有 E08 描述行且 server 未注册，E09 连描述行都没有 | revoke 按**已实现的 bodyless** 冻结；`expectedRevision`/`reasonCode` 扩展只作候选并区分“H4 草案 / H4-c 设计 / Codex 裁定”；`reasonCode` 在枚举、持久化、审计三者有据前关闭；E08/E09 只作候选，依赖 C1 独立终审 + C2 三种 decision + C3 + RC01–RC73 | **关闭**：两端点不注册、不冻结 | D06、D19、D21、F14–F15、S06、S10–S12 |
 
-**没有 `POST /api/v2/device-access-grants`（createGrant）路径。** 现有路由表没有该路径，本卡也不新增；`createGrant` 仍只作为服务层入口存在。
+补充说明：
 
-### 0.2 五个必须先解决的 P0 缺口
+- 三项缺口的共同根因是“把提案写成事实”。因此本卡引入四层结构（§0.3），并把状态词收敛为 `implemented/proposed/blocked/not-applicable` 四值（§0.2）。
+- 本卡不把任何缺口“修好”，只把契约的**可断言范围**收窄到实现事实以内；修复必须另发服务层/编码卡。
 
-| 编号 | 缺口 | 影响 | 本卡处理 |
+### 0.2 九个端点状态摘要
+
+状态值只允许四个，逐列含义固定：
+
+| 状态值 | 列内含义 |
+|---|---|
+| `implemented` | 以当前提交的代码或已终审文档为依据，该维度事实成立 |
+| `proposed` | 只有提案/设计稿依据，未冻结，不可接线、不可验收 |
+| `blocked` | 缺权威依据或前置未完成，本卡明确关闭 |
+| `not-applicable` | 该维度对该端点不适用 |
+
+| ID | 端点 | implemented-service | contract-frozen | http-ready | blocked-by | permission | idempotency | revision-source | provider/device | 说明（blocked-by 内容与细节） |
+|---|---|---|---|---|---|---|---|---|---|---|
+| E01 | `POST /api/v2/face-credentials` | implemented | implemented | blocked | blocked | implemented | implemented | not-applicable | not-applicable | blocked-by：编码卡门禁。服务层 `submit` 已实现（[service.mjs](../../admin-web/lib/face-service/service.mjs#L199-L255)）；权限 `device.face.submit`；K2 `face.submit`；Provider 0 |
+| E02 | `GET /api/v2/face-credentials/review-queue` | implemented | implemented | blocked | blocked | implemented | not-applicable | not-applicable | not-applicable | blocked-by：编码卡门禁。`reviewQueue` 已实现（[service.mjs](../../admin-web/lib/face-service/service.mjs#L315-L319)）；只回 `publicReviewItem`；credential `revision` 仅展示，不是 job CAS 基准 |
+| E03 | `POST /api/v2/face-credentials/:credentialId/review` | implemented | implemented | blocked | blocked | implemented | implemented | implemented | not-applicable | blocked-by：编码卡门禁。服务层 `expectedRevision` 可选（[service.mjs](../../admin-web/lib/face-service/service.mjs#L258-L313)），HTTP 必须收紧为必填；K2 `face.review` |
+| E04 | `GET /api/v2/face-credentials/:credentialId/image` | implemented | implemented | blocked | blocked | implemented | not-applicable | not-applicable | not-applicable | blocked-by：缺 `credentialId → sourceFileId` 的 HTTP 解析层。`FileService` 私密读取已实现（[files.mjs](../../admin-web/lib/files.mjs#L1049-L1094)）；权限 `device.face.readPrivate` |
+| E05 | `POST /api/v2/device-access-grants/:grantId/revoke` | implemented | implemented | blocked | blocked | implemented | implemented | implemented | not-applicable | blocked-by：编码卡门禁 + live/Cloud 永久关闭。真实入口 `revoke(grantId, {idempotencyKey})`，bodyless；K2 `face.revoke`，digest 仅 `{grantId}`；Provider 0 |
+| E06 | `GET /api/v2/device-operation-jobs` | blocked | implemented | blocked | blocked | implemented | not-applicable | blocked | not-applicable | blocked-by：无 `listJobs()`，且 `publicJobResult` 无 `revision`（G-01）。路径/权限/`device.audit.read` 与 v0 五字段投影可冻结，但不能驱动任何 mutation |
+| E07 | `POST /api/v2/device-operation-jobs/:jobId/retry` | blocked | proposed | blocked | blocked | implemented | proposed | blocked | not-applicable | blocked-by：requeue 无 K2/`requestDigest`/domain guard/严格重放（G-02），且无 revision 权威读取。**未注册**；不得宣称 `face.operation.retry` 已实现；“未来 retryable_failed 独立设计待办”见 §3.2 |
+| E08 | `POST /api/v2/device-operation-jobs/:jobId/reconcile` | blocked | proposed | blocked | blocked | implemented | proposed | blocked | proposed | blocked-by：H4-c C1 `5dff386` 待 Codex 独立终审；C2 三种 decision 未开始；`routes.mjs` 仅描述行（[routes.mjs](../../admin-web/lib/face-service/routes.mjs#L54-L59)），server 未注册。Provider 0，未来只复用 H4-b 本地 finalize |
+| E09 | `POST /api/v2/device-operation-jobs/:jobId/finalize-retry` | blocked | proposed | blocked | blocked | implemented | proposed | blocked | proposed | blocked-by：C3 未开始；HTTP 路径仅存在于 H4-c §13.2 提案（[H4-c 设计](HK-AI-04-H4C-RECONCILIATION-DESIGN.md#L598-L614)）；不在 `routes.mjs`，**不得注册** |
+
+摘要计数：`implemented-service` implemented 5 / blocked 4；`contract-frozen` implemented 6 / proposed 3；`http-ready` **blocked 9**（0 个可接线、0 个已注册）；`permission` implemented 9（权限名都在目录内，端点仍关闭）；`idempotency` implemented 3 / proposed 3 / not-applicable 3；`revision-source` implemented 2 / blocked 3 / not-applicable 4；`provider/device` not-applicable 7 / proposed 2。
+
+### 0.3 文档四层结构
+
+| 层 | 内容 | 章节 | 可引用强度 |
 |---|---|---|---|
-| P0-1 | `publicJobResult` 不返回 `revision`，E06 也没有详情路由 | E07/E08/E09 的 `expectedRevision` 无权威来源，端点不可操作 | E06-E09 继续关闭；附录 A 给出读模型修正提案，需另行批准 |
-| P0-2 | `H4MockRevoker.requeue` 与 `H3B.requeue` 没有 K2 operation key | 同键重放会变成 `INVALID_JOB`，无法满足 Idempotency-Key | E07 继续关闭；K2 method 名先冻结，编码卡补服务层 K2 |
-| P0-3 | H4-a 的 `revoke(grantId)` 不接受 `expectedRevision`/`reasonCode` | 与 H4 设计文档的 Q01 草案不一致 | E05 按已实现的 bodyless 契约冻结；若要求 `expectedRevision`，须另开服务层卡 |
-| P0-4 | H4-c 尚未实现 | E08/E09 没有任何生产代码 | 只冻结 H4-c 设计稿契约；等待 H4-c 实现卡 |
-| P0-5 | 人脸图片端点没有 `credentialId -> sourceFileId` 的 HTTP 解析层 | E04 不能直接复用文件下载路由 | 冻结解析顺序与 404 同态；编码卡实现，不改 `FileService` |
+| 第一层 | **实现事实**：只读核对到的服务方法、DTO 字段、K2 method、路由表、权限目录、H4-c 阶段 | §1 | 可作为“现状”引用；不得外推为契约 |
+| 第二层 | **已冻结契约**：有实现或有终审依据的传输、权限、错误码、E01/E02/E03/E05/E06 与 E04 私密读取 | §2、§5 | 编码卡必须逐条满足 |
+| 第三层 | **未冻结提案**：E07/E08/E09、读模型扩展、revoke 扩展、UI 禁令、UNKNOWN_RESULT 收敛 | §3、附录 A | 只能作为输入；不得据此注册或实现 |
+| 第四层 | **继续关闭端点**：九端点全关闭、不存在的路径、注册门禁 | §4、§6 | 合并后仍全部关闭 |
 
-### 0.3 三条不可协商的安全结论
+### 0.4 三条不可协商的安全结论
 
 1. 跨组织、资源不存在、私密文件无权限，统一同态 `404`；不得返回 `403` 泄露资源存在性。
 2. 权限点只从当前组织成员记录的 `permissions` 读取；`admin` 角色不隐含 `device.face.review`、`device.face.readPrivate` 或任何 `device.*` 权限。
-3. `awaiting_result` 只能被只读查询和人工对账观察/收敛；`retry`、调度器、定时器、回调、客户端轮询都不得把它推回 `queued` 或 `sending`。
+3. `awaiting_result` 只能被只读查询和人工对账观察/收敛；`retry`、普通 `requeue`、调度器、定时器、回调、客户端轮询都不得把它推回 `queued` 或 `sending`。
 
-## 1. 输入与追溯
+### 0.5 本卡明确不宣称
 
-| 输入 | 固定版本/位置 | 冻结内容 |
+- 不宣称 `face.operation.retry` 已实现或已冻结；它只是候选 method 名。
+- 不宣称 E07/E08/E09 可接线；九端点中 `http-ready` 为 blocked 9/9。
+- 不宣称 `expectedRevision` 已有权威读取；job revision 读取仍是缺口。
+- 不宣称 `reasonCode` 已冻结；无枚举、无持久化、无审计字段。
+- 不宣称 H4-c 已完成：C1 待独立终审，C2/C3 未开始。
+
+## 1. 第一层：实现事实（只读核对，2026-11-14）
+
+本节只记录“代码现在是什么样”，不据此推断契约。所有结论均可在所列文件的对应行复核。
+
+### 1.1 服务入口与权限
+
+| 入口 | 位置 | 权限（`#require`） | 幂等 | 返回值 |
+|---|---|---|---|---|
+| `submit(input, {idempotencyKey})` | [service.mjs](../../admin-web/lib/face-service/service.mjs#L199-L255) | `device.face.submit` | K2 `face.submit` | `{credentialId, reviewState}` |
+| `review(credentialId, {decision, expectedRevision}, {idempotencyKey})` | [service.mjs](../../admin-web/lib/face-service/service.mjs#L258-L313) | `device.face.review` | K2 `face.review` | `{credentialId, reviewState}` |
+| `reviewQueue()` | [service.mjs](../../admin-web/lib/face-service/service.mjs#L315-L319) | `device.face.review` | 不适用 | `publicReviewItem[]` |
+| `createGrant(input, {idempotencyKey})` | [service.mjs](../../admin-web/lib/face-service/service.mjs#L322) | `device.access.manage` | K2 `face.grant` | `{grantId, jobId, evidenceScope}`；**无 HTTP 路径** |
+| `revoke(grantId, {idempotencyKey})` | [service.mjs](../../admin-web/lib/face-service/service.mjs#L652-L728) | `device.access.manage` | K2 `face.revoke` | `{grantId, jobId, grantState, cleanupPending, evidenceScope}` |
+| `queryJob(jobId)` | [service.mjs](../../admin-web/lib/face-service/service.mjs#L731-L736) | `device.audit.read` | 不适用 | `publicJobResult` |
+
+事实补充：
+
+- `review` 的 `expectedRevision` 在服务层是**可选**的：只有 `Number.isInteger(expectedRevision)` 为真才做 CAS（[service.mjs](../../admin-web/lib/face-service/service.mjs#L291-L293)）。HTTP 契约必须比服务层更严（E03 必填）。
+- `queryJob(jobId)` 只有单个 job 入参；**没有 `listJobs()`**，也没有按状态/action 过滤的列表方法。
+- `createGrant` 仍是服务层入口，没有对应的 HTTP 路径，也不在本卡九端点内。
+
+### 1.2 `queryJob` 与 `publicJobResult` 精确字段
+
+`publicJobResult(job)` 的完整实现（[dto.mjs](../../admin-web/lib/face-service/dto.mjs#L254-L263)）只输出五个字段：
+
+| 字段 | 类型 | 取值来源 | 事实说明 |
+|---|---|---|---|
+| `jobId` | string | `job.jobId \|\| job._id` | 不透明 ID |
+| `state` | string | `job.state` | 既有 job 状态机值 |
+| `attempts` | number | `job.attempts ?? 0` | 缺省 0 |
+| `lastSuccessAt` | number \| null | `job.lastSuccessAt ?? null` | 缺省 null |
+| `failureReason` | string \| null | `job.failureReason` 截断 120 字符 | H3/H4 job 写 `result.reasonCode`，不写 `failureReason`，因此对这两类 job 恒为 `null` |
+
+**不在该投影中的字段**（逐项核对，禁止在文档或 UI 中假定存在）：
+
+| 字段 | 是否存在 | 影响 |
 |---|---|---|
-| H1 终审 | [`6bfe1ba`](https://github.com/1997dmsu-sketch/SMART-PM/blob/de07fc48ecc3e355cd04c0d3f1d544aba5ddaa8b/docs/tasks/HK-AI-04-H1-FINAL-APPROVAL-6BFE1BA-2026-11-07.md) | submit/review/queue/query 的权限、组织隔离、`expectedRevision` 与 409 语义 |
-| H2-b 终审 | [`2bc10e3`](https://github.com/1997dmsu-sketch/SMART-PM/blob/e9e8544d641e93b0d4164280477b00664f465e76/docs/tasks/HK-AI-04-H2B-FINAL-APPROVAL-2BC10E3-2026-11-08.md) | owner claim、设备归属与 `DEVICE_CLAIM_INVALID` 语义 |
-| H2-c C4 终审 | [`feaa1e0`](https://github.com/1997dmsu-sketch/SMART-PM/blob/86e5c9f86576e0a502c1f0aa7e8ffd5dffb06627/docs/tasks/HK-AI-04-H2C-C4-FINAL-APPROVAL-FEAA1E0-2026-11-11.md) | createGrant 资格、黑名单、90 refs 与 `CAPACITY_EXCEEDED` |
-| H2-d 终审 | [`90cc848`](https://github.com/1997dmsu-sketch/SMART-PM/blob/f97489fb00ad605edf893653614a5707722a89da/docs/tasks/HK-AI-04-H2D-FINAL-APPROVAL-90CC848-2026-11-12.md) | 全链验收、内容级零写与敏感扫描口径 |
-| H3 契约 | [H3 设计](HK-AI-04-H3-LEASE-DISPATCH-DESIGN.md#L77-L125) | 租约、fence、`UNKNOWN_RESULT`、人工重试与退避 |
-| H4 契约 | [`9fd088d`](https://github.com/1997dmsu-sketch/SMART-PM/blob/9fd088da57a1400e4e5fcaaf367b787b2e371dac/docs/tasks/HK-AI-04-H4-REVOKE-RECONCILE-DESIGN.md) | 撤权、清理、证据引用与终态对账边界；其 Q04 的 `evidenceRefs` 已被 H4-c 取代 |
-| H4-b 终审 | [H4-b 证据](HK-AI-04-H4B-EVIDENCE-2026-11-13.md) | LocalStore+Mock 清理、finalize、82/83 与 90 refs |
-| H4-c 设计 | [H4-c 设计](HK-AI-04-H4C-RECONCILIATION-DESIGN.md#L80-L118) | 三种 decision、K3、evidence head、`finalize-retry`、错误映射与测试矩阵；b15aceb 仍标注“待 Codex 批准”，本卡按其作为提案输入，不视为已终审 |
-| 路由表 | [routes.mjs](../../admin-web/lib/face-service/routes.mjs#L6-L60) | 路径与权限的唯一冻结来源 |
-| 权限目录 | [org.mjs](../../admin-web/lib/org.mjs#L95-L104) | 七个 `device.*` 权限点，无新增 |
-| DTO/状态 | [dto.mjs](../../admin-web/lib/face-service/dto.mjs#L59-L91)、[state.mjs](../../admin-web/lib/face-service/state.mjs#L27-L40) | 不透明 ID、幂等键、job 状态机 |
-| 服务实现 | [service.mjs](../../admin-web/lib/face-service/service.mjs#L199-L319)、[service.mjs](../../admin-web/lib/face-service/service.mjs#L652-L736) | submit/review/queue/revoke/query 的写集与错误 |
-| H4-b 实现 | [h4b.mjs](../../admin-web/lib/face-service/h4b.mjs#L35-L45)、[h4b.mjs](../../admin-web/lib/face-service/h4b.mjs#L475-L517) | revoke job 字段、finalize/requeue |
-| 文件契约 | [files.mjs](../../admin-web/lib/files.mjs#L1045-L1094)、[files.mjs](../../admin-web/lib/files.mjs#L767-L835) | 私密下载、`device.face.readPrivate`、404 同态 |
-| v2 信封 | [server.mjs](../../admin-web/server.mjs#L431-L438)、[API-CONTRACT.md](../database/API-CONTRACT.md#L7-L13) | `{data,requestId}` / `{error:{code,message},requestId}` |
+| `revision` | 否 | E07/E08/E09 的 CAS 基准没有权威读取 |
+| `action` | 否 | 无法区分 enroll/update/revoke 路径 |
+| `cleanupPhase` | 否 | 无法判断 `retryable_failed` 是否处于 dispatch 可重试阶段 |
+| `nextAttemptAt` | 否 | 无法展示退避到期时间 |
+| `orgId`/`deviceId`/`grantId`/`credentialId` | 否 | 列表不能作为跨组织或资源归属证据 |
+| `result`/`errorKind`/`reasonCode` | 否 | 失败原因不能通过 `failureReason` 反推 |
 
-## 2. 全局接线规则
+### 1.3 `requeue`／retry 现状
+
+| 方法 | 签名 | 权限复核 | revision 校验 | K2 operation key | `requestDigest` | K2 domain guard | 严格重放 |
+|---|---|---|---|---|---|---|---|
+| `h3b.requeue` | `(jobId, expectedRevision, actor = null)` | 仅当 `actor` 非空时，事务内复核 `device.operation.retry` | `expectedRevision` 必须安全整数，且等于 `current.revision` | **无** | **无** | **无** | **无**；第二次同键按状态/CAS 失败 |
+| `h4b.requeue` | `(jobId, expectedRevision = null, actor = null)` | 同上 | 仅当 `actor` 非空时要求 `expectedRevision`；未传时只比对 `job.revision` | **无** | **无** | **无** | **无**；第二次同键按状态/CAS 失败 |
+
+缺失清单（每项都是重试端点可接线的硬前提）：
+
+1. 没有 `#opContext`/operation key 写入，同键重放第二次会退化为 `INVALID_JOB`，不是首结果。
+2. 没有 `requestDigest`，无法区分“同键同请求”与“同键异请求”。
+3. 没有 K2 domain head/version 写入与 `DOMAIN_INCOMPLETE`/`DOMAIN_MISMATCH` 失败关闭。
+4. 没有把成功写集与 operation key 放进同一事务的严格重放。
+5. 没有把 audit 与 operation key 关联的审计幂等。
+6. 没有 `lease` 状态、`attempts` 预算、`nextAttemptAt` 的对外只读投影。
+
+因此：**`face.operation.retry` 不是已实现的 K2 method，E07 不可接线。**
+
+### 1.4 K2 实际实现
+
+已实现的 K2 method 只有四个（[service.mjs](../../admin-web/lib/face-service/service.mjs#L204-L727)）：
+
+| K2 method | 服务入口 | `requestDigest` 输入 | result 指针 | 状态 |
+|---|---|---|---|---|
+| `face.submit` | `submit` | `{personId, sourceFileId}` | `{credentialId, reviewState}` | implemented |
+| `face.review` | `review` | `{credentialId, decision, expectedRevision}`（缺省为 null） | `{credentialId, reviewState}` | implemented |
+| `face.grant` | `createGrant` | `assertCreateGrantInput` 八字段 | `{grantId, jobId, evidenceScope}` | implemented（无 HTTP） |
+| `face.revoke` | `revoke` | `{grantId}` | `{grantId, jobId, grantState, cleanupPending, evidenceScope}` | implemented |
+| `face.operation.retry` | 无 | 无 | 无 | proposed |
+| `face.reconcile` | 无 | 无 | 无 | proposed |
+| `face.reconcile.finalize` | 无 | 无 | 无 | proposed |
+
+机制事实：
+
+- operation key = `HMAC` 派生，作用域 `orgId + method + actorType + actorId + 原始 key`，记录只存 `orgId/realm/keyVersion/requestDigest/result/createdAt`（[collections.mjs](../../admin-web/lib/face-service/collections.mjs#L244-L254)）。
+- 重放校验是严格摘要相等：`existing.requestDigest === requestDigest` 且 `result` 与 `expected` 深比较一致，否则 `CONFLICT/409`（[service.mjs](../../admin-web/lib/face-service/service.mjs#L132-L145)）。
+- domain 失败关闭：配置缺失/非法 `NOT_CONFIGURED/503`，单边缺失/损坏 `DOMAIN_INCOMPLETE/409`，换钥/版本不符 `DOMAIN_MISMATCH/409`（[collections.mjs](../../admin-web/lib/face-service/collections.mjs#L199-L300)）。
+- 原始 Idempotency-Key 不落库；记录中只有派生后的 op key。
+
+### 1.5 路由与注册事实
+
+`FACE_ROUTES` 是**描述表**，不是注册表（[routes.mjs](../../admin-web/lib/face-service/routes.mjs#L6-L62)）：
+
+| # | route id | Method | Path | permission | idempotent |
+|---:|---|---|---|---|---|
+| 1 | `face-credential-submit` | POST | `/api/v2/face-credentials` | `device.face.submit` | 是 |
+| 2 | `face-review-queue` | GET | `/api/v2/face-credentials/review-queue` | `device.face.review` | 无 |
+| 3 | `face-credential-review` | POST | `/api/v2/face-credentials/:credentialId/review` | `device.face.review` | 是 |
+| 4 | `face-credential-image` | GET | `/api/v2/face-credentials/:credentialId/image` | `device.face.readPrivate` | 无 |
+| 5 | `device-grant-revoke` | POST | `/api/v2/device-access-grants/:grantId/revoke` | `device.access.manage` | 是 |
+| 6 | `device-operation-job-list` | GET | `/api/v2/device-operation-jobs` | `device.audit.read` | 无 |
+| 7 | `device-operation-job-retry` | POST | `/api/v2/device-operation-jobs/:jobId/retry` | `device.operation.retry` | 是 |
+| 8 | `device-operation-job-reconcile` | POST | `/api/v2/device-operation-jobs/:jobId/reconcile` | `device.operation.reconcile` | 是 |
+
+注册事实：
+
+- `matchFaceRoute` 已存在但**没有任何 server 调用方**；`server.mjs` 没有 import `routes.mjs`，也没有 `/api/v2/face-credentials`、`/api/v2/device-access-grants`、`/api/v2/device-operation-jobs` 分支。
+- `server.mjs` 现存的唯一人脸相关路由是 `POST /api/v2/files/:id/face-review`（[server.mjs](../../admin-web/server.mjs#L665-L684)），与九端点无关。
+- **E08 在 `routes.mjs` 有描述行（第 8 条），但 server 未注册；E09 不在 `routes.mjs`。** 这两点都是“候选路径不得在 routes/server 出现”的验收对象（Q8）。
+
+### 1.6 权限目录事实
+
+`org.mjs` 的可授予权限点包含七个 `device.*`（[org.mjs](../../admin-web/lib/org.mjs#L89-L105)）：
+
+```text
+device.face.submit
+device.face.review
+device.face.readPrivate
+device.access.manage
+device.audit.read
+device.operation.retry
+device.operation.reconcile
+```
+
+- 角色（`admin/editor/viewer/resident`）不隐含任何 `device.*` 权限。
+- 本卡不新增权限点；`device.operation.retry` 存在不等于 E07 可用（端点未注册）。
+
+### 1.7 H4-c 实施阶段事实
+
+| 阶段 | 提交/产物 | 内容 | 状态 |
+|---|---|---|---|
+| 设计 | `b15aceb` | 三种 decision、K3、evidence head、`finalize-retry`、RC01–RC73 | 已批准（`ed7b66f`） |
+| C1 | `5dff386` `h4c-evidence.mjs` | 只读 evidence/domain 校验 helper；已删除全部 K3 初始化能力 | **待 Codex 独立终审**；不在本分支 |
+| C2 前置 | `42f8970` 文档 | 检查表；自述 G1 未通过、C2 未开始 | proposed（仅文档） |
+| C2 | 无 | `confirmed_removed`/`confirmed_present`/`still_unknown` 服务入口 | **未开始** |
+| C3 | 无 | `finalize-retry` 服务入口 | **未开始** |
+| HTTP | 无 | 九端点注册 | **0 注册** |
+
+C1 的代码事实：`h4c-evidence.mjs` 只导出 evidence/head/domain 的校验、追加写构建、K3 摘要与配置读取；**没有 `reconcile`、没有 `reconcileFinalize`、没有服务层入口**；K3 初始化入口已全部删除，固定 head 为字面常量 `evidence-digest-domain:v1:global`，运行时只读失败关闭。
+
+### 1.8 文件私密读取事实
+
+- 人脸文件 purpose `face-biometric`：写入需 `device.face.submit`，读取需 `device.face.readPrivate`（[files.mjs](../../admin-web/lib/files.mjs#L138-L150)）。
+- `authorizeDownload(fileId, actor)` 对 private 文件逐次复核成员权限；无权限与不存在同态 `404`（[files.mjs](../../admin-web/lib/files.mjs#L1049-L1094)）。
+- 审核权限 `device.face.review` 与读图权限 `device.face.readPrivate` 正交。
+
+### 1.9 事实使用规则
+
+1. 本节任何一行都不能单独当作 HTTP 契约；契约只在 §2 冻结。
+2. 代码没有的字段（尤其 job `revision`）不得用“应该会有”“读缓存即可”补齐。
+3. C1 `5dff386` 未终审前，不得把 H4-c 设计里的方法名、DTO、错误码当作可用事实；只能引用为提案。
+4. 本卡不修改上述任何文件；事实仅用于收窄契约。
+
+## 2. 第二层：已冻结契约
+
+只冻结：传输/认证/CSRF、组织与权限、信封与错误码、E01/E02/E03/E05/E06 的路径与 DTO、E04 的私密读取（§5），以及已实现 K2 method 的幂等规则。**不冻结任何候选端点的 DTO、状态迁移或 K2 method。**
 
 ### 2.1 传输、认证与 CSRF
 
@@ -91,7 +258,7 @@
 4. 权限只取 `membership.permissions` 数组；角色 `admin/editor/viewer/resident` 不蕴含任何 `device.*` 权限。
 5. 组织不存在、成员不存在、跨组织资源：`NOT_FOUND/404`，消息统一“不存在或不可见”。
 6. 组织存在但 `status !== "active"`：`FORBIDDEN/403`。
-7. 成员存在但缺权限：`FORBIDDEN/403`。
+7. 成员存在但缺权限：`FORBIDDEN/403`。**权限撤销后下一个请求立即失败，不得使用缓存权限或旧结果。**
 8. 路径参数只接受 `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`；先做百分号解码校验，解码失败 `PARAM_ERROR/400`，不得冒泡成 500/503。
 
 ### 2.3 成功信封与状态
@@ -108,13 +275,13 @@
 |---|---:|---|
 | 普通读取/动作成功 | 200 | `data` 为对象或数组 |
 | 新建凭证 | 201 | 首提交与同键重放都用 201，见 §2.6 |
-| 对账/恢复已受理但未完成 | 202 | 只用于 E08/E09 的 pending 投影 |
+| 对账/恢复已受理但未完成 | 202 | **仅候选 E08/E09 的未来投影**；当前不产生 202 |
 | 图片成功 | 200 | 二进制，不用 JSON 信封 |
 | 列表分页 | 200 | 仅 E06 可带 `nextCursor` |
 
 - `data` 必须是端点节冻结的对象/数组；不得把内部 job、evidence、grant 记录原样返回。
 - 201 只用于 E01；E05 是动作，返回 200。
-- 202 不表示“稍后自动重试”；不得附加 `Retry-After`，见 §5。
+- 202 不表示“稍后自动重试”；不得附加 `Retry-After`，见 §6。
 
 ### 2.4 错误信封
 
@@ -138,13 +305,13 @@
 
 | code | HTTP | 语义 | 写 |
 |---|---:|---|---:|
-| `PARAM_ERROR` | 400 | DTO/枚举/未知字段/ID/时间/分页参数非法 | 0 |
+| `PARAM_ERROR` | 400 | DTO/枚举/未知字段/ID/时间/分页参数/`expectedRevision` 非安全整数 | 0 |
 | `CAPACITY_EXCEEDED` | 400 | 撤权前预扫 candidate ≥83 | 0 |
 | `UNAUTHORIZED` | 401 | 仅用于 v2 内部统一说明；实际 401 由 server 登录门返回 | 0 |
 | `FORBIDDEN` | 403 | 权限、成员、组织失效 | 0 |
 | `NOT_FOUND` | 404 | 组织内不可见/不存在/跨组织同态 | 0 |
 | `FILE_NOT_FOUND` | 404 | 私密文件不存在、跨组织、非 ready、无读权限 | 0 |
-| `REVISION_CONFLICT` | 409 | credential/grant/job/head CAS 失败 | 0 |
+| `REVISION_CONFLICT` | 409 | credential/grant/job/head CAS 失败；stale revision | 0 |
 | `INVALID_STATE` | 409 | 当前状态不允许该动作 | 0 |
 | `INVALID_JOB` | 409 | revoke/enroll job 字段或阶段非法，含 retry 的 revision/状态不符 | 0 |
 | `CONFLICT` | 409 | K2 摘要/结果损坏、确定性 ID 预占 | 0 |
@@ -154,30 +321,30 @@
 | `DEVICE_CLAIM_CONFLICT` | 409 | 设备归属冲突 | 0 |
 | `CLAIM_RELEASE_GUARD_REQUIRED` | 409 | 设备释放 guard 缺失/损坏 | 0 |
 | `GRANT_SLOT_CONFLICT` | 409 | 授权槽位冲突 | 0 |
-| `EVIDENCE_REQUIRED` | 409 | evidence 缺失 | 0 |
-| `EVIDENCE_INVALID` | 409 | evidence 结构/短码/sourceType 不匹配 | 0 |
-| `EVIDENCE_STALE` | 409 | observedAt 过期、未来或非递增 | 0 |
-| `EVIDENCE_HEAD_CONFLICT` | 409 | evidence head CAS 失败 | 0 |
-| `EVIDENCE_CHAIN_BROKEN` | 409 | previous evidence/链/域不一致 | 0 |
-| `RECONCILE_THROTTLED` | 409 | `still_unknown` 间隔小于 60 秒 | 0 |
-| `RECONCILE_LIMIT` | 409 | `still_unknown` 已达 8 次 | 0 |
-| `RECONCILE_CONFLICT` | 409 | 已终态但 decision 不同 | 0 |
-| `RECONCILE_GENERATION_CONSUMED` | 409 | finalize-retry 指向已消费旧 revision | 0 |
+| `EVIDENCE_REQUIRED` | 409 | evidence 缺失（**仅候选 E08**） | 0 |
+| `EVIDENCE_INVALID` | 409 | evidence 结构/短码/sourceType 不匹配（**仅候选 E08**） | 0 |
+| `EVIDENCE_STALE` | 409 | observedAt 过期、未来或非递增（**仅候选 E08**） | 0 |
+| `EVIDENCE_HEAD_CONFLICT` | 409 | evidence head CAS 失败（**仅候选 E08**） | 0 |
+| `EVIDENCE_CHAIN_BROKEN` | 409 | previous evidence/链/域不一致（**仅候选 E08**） | 0 |
+| `RECONCILE_THROTTLED` | 409 | `still_unknown` 间隔小于 60 秒（**仅候选 E08**） | 0 |
+| `RECONCILE_LIMIT` | 409 | `still_unknown` 已达 8 次（**仅候选 E08**） | 0 |
+| `RECONCILE_CONFLICT` | 409 | 已终态但 decision 不同（**仅候选 E08**） | 0 |
+| `RECONCILE_GENERATION_CONSUMED` | 409 | finalize-retry 指向已消费旧 revision（**仅候选 E09**） | 0 |
 | `DOMAIN_INCOMPLETE` | 409 | K2/K3 domain 单边缺失/损坏 | 0 |
 | `DOMAIN_MISMATCH` | 409 | K2/K3 换钥、版本或 fingerprint 不符 | 0 |
-| `RETRY_NOT_DUE` | 409 | 未到 `nextAttemptAt` | 0 |
-| `LOCAL_FINALIZE_EXHAUSTED` | 200/409 | 终态投影或错误入口 | 0 |
+| `RETRY_NOT_DUE` | 409 | 未到 `nextAttemptAt`（**仅候选 E07**） | 0 |
+| `LOCAL_FINALIZE_EXHAUSTED` | 200/409 | 终态投影或错误入口（**仅候选 E08/E09**） | 0 |
 | `NOT_CONFIGURED` | 503 | K2/K3/Provider/运行模式缺失或非法 | 0 |
 | `STORAGE_UNAVAILABLE` | 503 | 文件后端与配置不一致 | 0 |
 | `ADAPTER_UNAVAILABLE` | 503 | Store/clock/未预期异常 | 0 |
 
-`LOCAL_FINALIZE_EXHAUSTED` 的 200 与 409 区分：作为 E08/E09 的终态投影时 200；作为非法入口/状态判断的一部分时按对应 409。端点节逐项限定。
+标注“仅候选”的 code 属于 H4-c/H3 设计清单，**当前没有任何已注册端点会产生它们**；它们不因写进本表而变为已实现。`LOCAL_FINALIZE_EXHAUSTED` 的 200 与 409 区分只在候选端点投影时成立。
 
 ### 2.6 Idempotency-Key 与 K2
 
 | 规则 | 冻结值 |
 |---|---|
-| 适用 | E01、E03、E05、E07、E08、E09；所有 POST 必须携带 |
+| 适用 | 已冻结：E01、E03、E05；候选（未冻结）：E07、E08、E09 |
 | 位置 | 仅 `Idempotency-Key` 请求头；不得放在 body/query/cookie |
 | 格式 | `^[A-Za-z0-9._:-]{16,128}$`，区分大小写，不去空格，不接受数组/重复头 |
 | 缺失/非法 | `PARAM_ERROR/400`，零写，不创建 operation key |
@@ -195,19 +362,19 @@
 
 ### 2.7 K2 method 映射
 
-| 端点 | K2 method | requestDigest 输入 | result 指针 | 状态 |
+| 端点 | K2 method | `requestDigest` 输入 | result 指针 | 状态 |
 |---|---|---|---|---|
-| E01 submit | `face.submit` | `{personId, sourceFileId}` | `{credentialId, reviewState}` | 已实现 |
-| E03 review | `face.review` | `{credentialId, decision, expectedRevision}` | `{credentialId, reviewState}` | 已实现 |
-| E05 revoke | `face.revoke` | `{grantId}` | `{grantId, jobId, grantState, cleanupPending, evidenceScope}` | 已实现 |
-| E07 retry | `face.operation.retry` | `{jobId, expectedRevision}` | `{jobId, state, revision}` | **名称冻结，服务层未实现** |
-| E08 reconcile | `face.reconcile` | H4-c §7.1 精确字段集，含 `decision/evidence/sourceType/sourceCode/observedAt/evidenceDigest/previousEvidenceId/sequence` | H4-c 稳定指针 | H4-c b15aceb 提案固定，待终审，未实现 |
-| E09 finalize-retry | `face.reconcile.finalize` | 精确 `{jobId, expectedRevision}` | `{kind:"finalize_retry",jobId,generationRevision,recoveryId}` | H4-c b15aceb 提案固定，待终审，未实现 |
-| 非 HTTP createGrant | `face.grant` | `assertCreateGrantInput` 八字段 | `{grantId,jobId,evidenceScope}` | 仅服务层，不暴露 |
+| E01 submit | `face.submit` | `{personId, sourceFileId}` | `{credentialId, reviewState}` | implemented |
+| E03 review | `face.review` | `{credentialId, decision, expectedRevision}` | `{credentialId, reviewState}` | implemented |
+| E05 revoke | `face.revoke` | `{grantId}` | `{grantId, jobId, grantState, cleanupPending, evidenceScope}` | implemented |
+| 非 HTTP createGrant | `face.grant` | `assertCreateGrantInput` 八字段 | `{grantId, jobId, evidenceScope}` | implemented，仅服务层 |
+| E07 retry | `face.operation.retry`（候选名） | 未定义 | 未定义 | **proposed，未实现** |
+| E08 reconcile | `face.reconcile`（H4-c 提案） | H4-c §7.1 精确字段集 | H4-c 稳定指针 | **proposed，未实现** |
+| E09 finalize-retry | `face.reconcile.finalize`（H4-c 提案） | `{jobId, expectedRevision}` | `{kind:"finalize_retry",jobId,generationRevision,recoveryId}` | **proposed，未实现** |
 
-- `face.operation.retry` 是本卡新增的 K2 方法名，不是权限名也不是状态名；它需要与 E07 服务层 K2 改造一起由编码卡批准。
-- E08 使用 `face.reconcile` 摘要，E09 使用 `face.reconcile.finalize` 摘要；二者不得互换，也不得把 `face.revoke`/`face.operation.retry` 的摘要复用到对账路径。
-- E05 的 digest 只含 `grantId`，与 H4 设计草案的 `{grantId,expectedRevision,reasonCode}` 不同；本卡以已实现的 H4-a/H4-b 为准，见 P0-3。
+- `face.operation.retry` **不是**已冻结名称；它只是本卡给未来独立设计留的候选，必须与 E07 服务层 K2 改造一起批准。
+- E08 用 `face.reconcile` 摘要，E09 用 `face.reconcile.finalize` 摘要；二者不得互换，也不得把 `face.revoke`/`face.operation.retry` 的摘要复用到对账路径。
+- E05 的 digest 只含 `grantId`，与 H4 设计草案的 `{grantId,expectedRevision,reasonCode}` 不同；本卡以已实现的 H4-a/H4-b 为准，见 §3.6。
 
 ### 2.8 错误优先级与信息边界
 
@@ -228,11 +395,14 @@
 - 禁止自动重试、自动轮询、定时器、回调重放来推动 job。
 - 禁止把 `orgId`、`actorId`、`role`、`permissions` 从 body 提升为权限依据。
 - 禁止新增权限点、状态名、decision 枚举或 `evidenceScope` 值。
-- 禁止把原始 Idempotency-Key、K1/K2/K3 密钥、图片字节、objectKey、Provider 原始响应写入任何记录或响应。
+- 禁止把原始 Idempotency-Key、K1/K2/K3 密钥、图片字节、objectKey、Provider 原始响应、`requestDigest`、evidence digest/head 写入任何记录或响应。
+- 禁止从缓存、列表行号、数组下标、本地自增或时间戳推导 `expectedRevision`。
 
-## 3. 端点契约
+### 2.10 已冻结端点：E01 / E02 / E03 / E05 / E06
 
-### E01 `POST /api/v2/face-credentials`
+E04 见 §5。
+
+#### E01 `POST /api/v2/face-credentials`
 
 | 项目 | 值 |
 |---|---|
@@ -286,7 +456,7 @@ Body 精确只允许这两个字段；任何 `deviceId/grantId/validFrom/validUn
 - `credentialId` 由 operation key 派生；不同 actor 使用同一原始 key 会得到不同 credentialId，这是 K2 actor 作用域的既有结果。
 - 同键重放固定 201，理由见 §2.6。
 
-### E02 `GET /api/v2/face-credentials/review-queue`
+#### E02 `GET /api/v2/face-credentials/review-queue`
 
 | 项目 | 值 |
 |---|---|
@@ -321,7 +491,9 @@ Body 精确只允许这两个字段；任何 `deviceId/grantId/validFrom/validUn
 }
 ```
 
-字段严格来自 `publicReviewItem`。`submittedAt` 只在记录存在该字段时出现；当前 `submit` 写 `createdAt`，不写 `submittedAt`，因此可能缺省。客户端必须把缺省视为 `null`，不得依赖该字段排序。顺序不属于契约。
+字段严格来自 `publicReviewItem`（[dto.mjs](../../admin-web/lib/face-service/dto.mjs#L235-L251)）。`submittedAt` 只在记录存在该字段时出现；当前 `submit` 写 `createdAt`，不写 `submittedAt`，因此可能缺省。客户端必须把缺省视为 `null`，不得依赖该字段排序。顺序不属于契约。
+
+**这里的 `revision` 是 credential revision**，只能用于 E03 的 `expectedRevision`；它不是 job revision，不能驱动 E07/E08/E09。
 
 **Errors**
 
@@ -335,7 +507,7 @@ Body 精确只允许这两个字段；任何 `deviceId/grantId/validFrom/validUn
 
 队列**不得**返回图片字节、图片 URL、objectKey、checksum、digest、文件名、人脸质量原始值或任何 Provider 数据；只返回审核元数据。
 
-### E03 `POST /api/v2/face-credentials/:credentialId/review`
+#### E03 `POST /api/v2/face-credentials/:credentialId/review`
 
 | 项目 | 值 |
 |---|---|
@@ -385,63 +557,7 @@ Body 精确两个字段。服务层当前实现允许省略 `expectedRevision`�
 
 审核只改 `reviewState`，不读取、不返回图片字节；`device.face.review` 不隐含 `device.face.readPrivate`。审核人即使没有读图权限也能通过/驳回。
 
-### E04 `GET /api/v2/face-credentials/:credentialId/image`
-
-| 项目 | 值 |
-|---|---|
-| 用途 | 按凭证读取唯一人脸原图 |
-| Permission | `device.face.readPrivate` |
-| 幂等 | 不适用 |
-| 成功 | `200` 二进制 |
-| Provider | 0 |
-
-**Request**
-
-| 位置 | 字段 | 类型/约束 |
-|---|---|---|
-| Path | `credentialId` | 不透明 ID |
-| Query | 无 | 不接受 `fileId`、`url`、`purpose`、`download` 等参数 |
-
-无 body、无 Idempotency-Key。
-
-**解析顺序**
-
-1. 用当前 `orgId` 读取 `face_credentials/<credentialId>`；不存在/跨组织：`FILE_NOT_FOUND/404`。
-2. 取 `credential.sourceFileId`，调用 `FileService.authorizeDownload(fileId, actor)`；该函数按当前成员权限、purpose `face-biometric`、`visibility=private`、`status=ready`、组织归属复核。
-3. 仅鉴权通过后读取字节；private 一律代理下载，不签发临时 URL。
-4. 写 `file_access` denied/download 留痕；不把文件名、objectKey、摘要写入响应。
-
-**Response 200**
-
-| Header | 值 |
-|---|---|
-| `Content-Type` | `image/jpeg` 或 `image/png` |
-| `Content-Length` | 实际字节数 |
-| `Content-Disposition` | `inline; filename*=UTF-8''<encoded>` |
-| `Cache-Control` | `no-store` |
-| `Pragma` | `no-cache` |
-| `X-Content-Type-Options` | `nosniff` |
-| `Content-Security-Policy` | `sandbox; default-src 'none'` |
-| `Referrer-Policy` | `no-referrer` |
-| `Cross-Origin-Resource-Policy` | `same-origin` |
-
-不返回 `ETag`、不处理 `Range`、不返回缩略图、不重定向、不返回 JSON 信封。
-
-**Errors**
-
-| HTTP | code | 条件 | 写 |
-|---:|---|---|---:|
-| 401 | 现有登录门 | 无会话 | 0 |
-| 404 | `FILE_NOT_FOUND` | 凭证不存在/跨组织（尚未解析到 fileId） | 0 |
-| 404 | `FILE_NOT_FOUND` | 文件不存在、非 face-biometric、非 private、非 ready、缺 `device.face.readPrivate` | `L`（file_access denied） |
-| 503 | `STORAGE_UNAVAILABLE` | 文件存储后端与配置不一致 | 0 |
-| 503 | `ADAPTER_UNAVAILABLE` | 读文件/Store 异常 | 0 |
-
-`L` 表示只新增一条 `file_access_log`（denied 或 download）；它不改变凭证、文件、grant、job 等业务集合，也不是“全库零写”。
-
-**关键结论**：缺 `device.face.readPrivate` 返回 **404**，不是 403。原因是文件契约（[files.mjs](../../admin-web/lib/files.mjs#L1045-L1072)）已冻结“无权限与不存在同态”，防止通过 403/404 差异枚举凭证或文件。审核人只有 `device.face.review` 时，调用本端点得到 404。
-
-### E05 `POST /api/v2/device-access-grants/:grantId/revoke`
+#### E05 `POST /api/v2/device-access-grants/:grantId/revoke`
 
 | 项目 | 值 |
 |---|---|
@@ -459,7 +575,7 @@ Body 精确两个字段。服务层当前实现允许省略 `expectedRevision`�
 | Header | `Idempotency-Key` | §2.6 |
 | Body | `{}` | 精确空对象；不允许任何字段 |
 
-Body 不接受 `expectedRevision`、`reasonCode`、`reason`、`credentialId`、`deviceId`。H4-a 的已实现入口是 `revoke(grantId,{idempotencyKey})`；它用事务内读到的 grant revision 做 CAS，而不是客户端 expectedRevision。H4 设计 Q01 草案中的 `{expectedRevision,reasonCode}` 未进入 H4-a/H4-b，见 P0-3。
+Body 不接受 `expectedRevision`、`reasonCode`、`reason`、`credentialId`、`deviceId`。这是对已实现入口 `revoke(grantId, {idempotencyKey})` 的**事实冻结**：服务层用事务内读到的 grant revision 做 CAS，而不是客户端 expectedRevision。H4 草案的 `{expectedRevision,reasonCode}` 未进入 H4-a/H4-b，见 §3.6。
 
 **Response 200**
 
@@ -499,7 +615,7 @@ Body 不接受 `expectedRevision`、`reasonCode`、`reason`、`credentialId`、`
 - revoke job 进入 `queued`；本端点不调用 Provider、不连接设备。
 - H4-b 的 dispatcher/finalize 是 LocalStore+Mock only；live/Cloud/真实 Provider 下本端点必须 `NOT_CONFIGURED/503`。
 
-### E06 `GET /api/v2/device-operation-jobs`
+#### E06 `GET /api/v2/device-operation-jobs`
 
 | 项目 | 值 |
 |---|---|
@@ -539,7 +655,7 @@ Body 不接受 `expectedRevision`、`reasonCode`、`reason`、`credentialId`、`
 }
 ```
 
-字段严格来自 `publicJobResult`。**该 DTO 不包含 `revision`、`action`、`cleanupPhase`、`nextAttemptAt`**，因此不能驱动 E07/E08/E09；这是 P0-1。`failureReason` 当前对 H3/H4 job 恒为 `null`（job 写 `result.reasonCode`，不写 `failureReason`），客户端不得据此判断失败原因。
+字段严格来自 `publicJobResult`。**该 DTO 不包含 `revision`、`action`、`cleanupPhase`、`nextAttemptAt`**，因此不能驱动 E07/E08/E09；这是 G-01。`failureReason` 当前对 H3/H4 job 恒为 `null`（job 写 `result.reasonCode`，不写 `failureReason`），客户端不得据此判断失败原因。
 
 **Errors**
 
@@ -552,240 +668,201 @@ Body 不接受 `expectedRevision`、`reasonCode`、`reason`、`credentialId`、`
 
 **实现缺口**：服务层当前只有 `queryJob(jobId)`，没有 `listJobs()`；E06 的路径/权限已冻结，但编码卡必须先补只读列表方法，且不得改变 `publicJobResult` 的既有调用方。
 
-### E07 `POST /api/v2/device-operation-jobs/:jobId/retry`
+## 3. 第三层：未冻结提案
 
-| 项目 | 值 |
-|---|---|
-| 用途 | 人工把 `retryable_failed` 且已到期的 job 重排为 `queued` |
-| Permission | `device.operation.retry` |
-| 幂等 | 必须，K2 `face.operation.retry`（服务层未实现） |
-| 成功 | `200` |
-| Provider | 0 |
+本节所有内容都**不可接线**。候选端点自身状态只使用 `proposed` 或 `blocked`；引用已冻结端点（E01–E06）的事实状态时另行标注。
 
-**Request**
+### 3.1 E07 `retry`：候选，关闭
 
-| 位置 | 字段 | 类型/约束 |
+| 维度 | 现状 | 结论 |
 |---|---|---|
-| Path | `jobId` | 不透明 ID |
-| Header | `Idempotency-Key` | §2.6 |
-| Body | `expectedRevision` | 安全整数，≥1，必填 |
+| 服务入口 | 只有 `h3b.requeue`/`h4b.requeue`，无 `retry` 方法、无 K2 | blocked |
+| 权限 | `device.operation.retry` 已在目录 | blocked（权限名已存在、端点未注册） |
+| revision 权威 | 无 job revision 读取 | blocked |
+| K2 | 无 op key、无 `requestDigest`、无 domain guard、无严格重放 | blocked |
+| 审计 | 每次成功一条 audit，但与 op key 无关联、无幂等 | blocked |
+| HTTP | `routes.mjs` 有描述行，server 未注册 | blocked |
 
-Body 精确一个字段；不接受 `reasonCode`、`force`、`state`、`decision`。
+上一稿冻结的 `{expectedRevision} → {jobId,state,revision,nextAttemptAt}` 线形状**作废**，不再作为契约。本卡不定义 E07 的响应 DTO、不定义其 K2 method、不定义其错误映射；这些必须由 §3.2 的独立设计补齐。
 
-**Response 200**
+当前行为（本卡合并后仍然成立）：`POST /api/v2/device-operation-jobs/:jobId/retry` **未注册**，返回 `404/405`，不进入业务，零写，Provider 0。
 
-```json
-{
-  "data": {
-    "jobId": "job-...",
-    "state": "queued",
-    "revision": 4,
-    "nextAttemptAt": null
-  },
-  "requestId": "uuid"
-}
-```
+### 3.2 未来 `retryable_failed` 独立设计待办
 
-**Errors**
+这是本卡明确留给后续任务的最小范围；**本卡不实现、不冻结、不验收**。
 
-| HTTP | code | 条件 | 写 |
-|---:|---|---|---:|
-| 400 | `PARAM_ERROR` | expectedRevision 缺失/非法、未知字段、key 非法 | 0 |
-| 403 | 现有 Origin/CSRF | 来源或令牌不符 | 0 |
-| 403 | `FORBIDDEN` | 缺 `device.operation.retry`、成员/组织失效 | 0 |
-| 404 | `NOT_FOUND` | job 不存在或跨组织 | 0 |
-| 409 | `INVALID_JOB` | 非 `retryable_failed`、`cleanupPhase!=="dispatch"`、attempts≥4、revision 不符、**state=`awaiting_result`** | 0 |
-| 409 | `RETRY_NOT_DUE` | `now < nextAttemptAt` | 0 |
-| 409 | `CONFLICT` | 确定性 queued log 已存在、同键异摘要 | 0 |
-| 503 | `NOT_CONFIGURED` | K2 缺失/非法 | 0 |
-
-**状态边界**
-
-- E07 只接受 `retryable_failed && cleanupPhase==="dispatch"` 的 revoke/enroll job；`awaiting_result` 一律 `INVALID_JOB/409`，对应 H3 D53。
-- 人工重试与自动调度共享同一 job revision/log CAS；只能一方提交。
-- 重排不调用 Provider，不重置 grant/credential/slot/claim。
-- E07 **当前不可接线**：H4-b/H3-b 的 requeue 没有 K2。没有 K2 时，同键重放第二次会变成 `INVALID_JOB`，违反 §2.6。编码卡必须先补 operation key/domain 写入，再注册 E07。
-
-### E08 `POST /api/v2/device-operation-jobs/:jobId/reconcile`
-
-| 项目 | 值 |
-|---|---|
-| 用途 | H4-c 人工对账：`confirmed_removed`/`confirmed_present`/`still_unknown` |
-| Permission | `device.operation.reconcile` |
-| 幂等 | 必须，K2 `face.reconcile` |
-| 成功 | `200` 或 `202` |
-| Provider | 0 |
-
-**Request**
-
-| 位置 | 字段 | 类型/约束 |
+| 待办项 | 必须冻结的内容 | 当前状态 |
 |---|---|---|
-| Path | `jobId` | 不透明 ID |
-| Header | `Idempotency-Key` | §2.6 |
-| Body | `jobId` | 必须与 path 完全相同，否则 `PARAM_ERROR/400` |
-| Body | `expectedRevision` | 安全整数，1..`Number.MAX_SAFE_INTEGER` |
-| Body | `decision` | `confirmed_removed`/`confirmed_present`/`still_unknown` |
-| Body | `evidence.sourceType` | 仅 `operator` |
-| Body | `evidence.sourceCode` | 与 decision 绑定，见下表 |
-| Body | `evidence.observedAt` | 安全整数毫秒；不得晚于服务端 now，不得早于 job 进入 `awaiting_result` 的时间 |
+| 权限 | `device.operation.retry`，只从成员 `permissions` 读取 | 权限已存在；端点关闭 |
+| K2 method | 候选名 `face.operation.retry`；不得与 `face.reconcile` 混用 | proposed |
+| Idempotency-Key | 格式、作用域、原始键不落库、同键同摘要重放、异摘要 `CONFLICT` | proposed |
+| `expectedRevision` | 权威读取端点 + 安全整数规则 + stale 409 | blocked（依赖读模型） |
+| lease 状态 | `sending` 的 `leaseGeneration/leaseExpiresAt` 不得被普通 retry 绕过 | proposed |
+| `attempts` | `attempts>=4` 拒绝；重排不重置预算 | proposed |
+| `nextAttemptAt` | 未到期 `RETRY_NOT_DUE`；到期边界 `now >= nextAttemptAt` | proposed |
+| 同键重放 | 必须返回首次成功 receipt，而不是第二次 `INVALID_JOB` | blocked（服务层无 K2） |
+| 异摘要冲突 | 同键不同请求必须 `CONFLICT/409`，不覆盖 op key | blocked（服务层无摘要） |
+| 审计 | audit 与 op key 同事务、可重放、可追溯 | proposed |
+| 测试 | 服务层 K2 单测 + HTTP 契约测试 + 并发/重放/损坏矩阵 | 未开始 |
 
-Body 只允许 `jobId`、`expectedRevision`、`decision`、`evidence` 四个顶层字段；`evidence` 只允许三个字段。禁止 `digest`、`raw`、`response`、`payload`、`file`、`evidenceRefs`。
+约束：该设计必须**另立 H3/H4 独立任务**（见 Q3），不得把 E07 直接塞进本卡或 H4-c 的 C2/C3。
 
-| decision | sourceCode |
-|---|---|
-| `confirmed_removed` | `OPERATOR_CONFIRMED_REMOVED` |
-| `confirmed_present` | `OPERATOR_CONFIRMED_PRESENT` |
-| `still_unknown` | `OPERATOR_UNCERTAIN` |
+### 3.3 E08 `reconcile`：候选，关闭
 
-**Response**
+依赖链（全部满足才可讨论接线）：
 
-| 场景 | HTTP | body 关键字段 |
-|---|---:|---|
-| `confirmed_removed` R1+R2 成功 | 200 | `jobState=succeeded`、`cleanupPending=false`、`cleanupPhase=complete`、`terminalReason=null` |
-| `confirmed_removed` R1 成功、R2 pending | 202 | `jobState=retryable_failed`、`cleanupPending=true`、`cleanupPhase=finalize` |
-| `confirmed_removed` 第 4 次耗尽 | 200 | `jobState=terminal_failed`、`cleanupPending=true`、`terminalReason=LOCAL_FINALIZE_EXHAUSTED` |
-| `confirmed_present` | 200 | `jobState=terminal_failed`、`cleanupPending=true`、`terminalReason=RECONCILE_CONFIRMED_PRESENT` |
-| `still_unknown` | 200 | `jobState=awaiting_result`、`cleanupPending=true`、`cleanupPhase=null`、`terminalReason=null` |
-| 不同键同结论的已终态 | 200 | 既有状态 + `duplicate:true` |
+1. **C1 `5dff386` 通过 Codex 独立终审**（当前只自述“等待复审”）。
+2. **C2 三种 decision 实现**：`confirmed_removed`、`confirmed_present`、`still_unknown` 的服务层入口、DTO、K2/K3、evidence/head、错误码；当前未开始。
+3. **RC01–RC73** 的 H4-c 矩阵可执行并通过。
+4. **最小响应投影**冻结：只含 `jobId/decision/jobState/grantState/cleanupPending/evidenceId/evidenceSequence/decidedAt/cleanupPhase/terminalReason/duplicate`；不得含 digest、actorId、orgId、idempotency key、requestDigest、opId、设备/人员/文件字段。
+5. **Provider 调用为 0**：R2 只复用 H4-b 本地 finalize，不重发 `revokeFace`。
+6. 另发 HTTP 编码卡，并在 `routes.mjs` 与 `server.mjs` 同步登记（Q6/Q8）。
 
-```json
-{
-  "data": {
-    "jobId": "job-...",
-    "decision": "confirmed_removed",
-    "jobState": "succeeded",
-    "grantState": "revoked",
-    "cleanupPending": false,
-    "evidenceId": "h4c-evidence-v1:...",
-    "evidenceSequence": 1,
-    "decidedAt": 1763000000000,
-    "cleanupPhase": "complete",
-    "terminalReason": null,
-    "duplicate": false
-  },
-  "requestId": "uuid"
-}
-```
+本卡只保留 H4-c 设计已批准的语义（decision 三值、`still_unknown` 60 秒/8 次、`confirmed_present` 终态、R1/R2 两段式），**不冻结 HTTP DTO、不定义 E08 的 `expectedRevision`、不注册路径**。当前行为：未注册，`404/405`，零写。
 
-`cleanupPhase` 是响应投影枚举 `finalize|complete|terminal`，不是 job 存储值。不得返回 evidence digest、actorId、orgId、idempotency key、requestDigest、opId、设备/人员/文件字段、异常 message/stack。
+### 3.4 E09 `finalize-retry`：候选，关闭
 
-**Errors**
+- 依赖 C3（`finalize-retry` 服务入口）完成并通过复审；C3 未开始。
+- generation 语义来自 H4-c 设计：`(jobId, expectedRevision)`；同键同摘要只重放四字段指针，不同键在当前未消费终态 revision 可开新一轮，旧 revision `RECONCILE_GENERATION_CONSUMED/409`。
+- 只做本地 finalize；不调用 Provider、不重发 `revokeFace`、不自动轮询、不重置 grant/slot/claim。
+- E09 不在 `routes.mjs`，**不得注册**；当前行为 `404/405`，零写。
 
-| HTTP | code | 条件 |
-|---:|---|---|
-| 400 | `PARAM_ERROR` | DTO/枚举/未知字段/时间/ID 非法，path 与 body `jobId` 不符 |
-| 400 | `CAPACITY_EXCEEDED` | `confirmed_removed` 预扫 candidate ≥83 |
-| 403 | `FORBIDDEN` | 缺 `device.operation.reconcile`、成员/组织失效 |
-| 404 | `NOT_FOUND` | job 不存在或跨组织 |
-| 409 | `REVISION_CONFLICT` | `expectedRevision` 不符、grant/head CAS 失败 |
-| 409 | `INVALID_STATE` | job 非 `awaiting_result`/已终态且不属重复规则 |
-| 409 | `EVIDENCE_REQUIRED` | evidence 缺失/null |
-| 409 | `EVIDENCE_INVALID` | 结构/短码/decision/sourceType 不匹配/旧 schema/摘要非法 |
-| 409 | `EVIDENCE_STALE` | 时间早于 unknown、未来、超 24h、非递增 |
-| 409 | `EVIDENCE_HEAD_CONFLICT` | head revision/lastEvidenceId CAS 失败 |
-| 409 | `EVIDENCE_CHAIN_BROKEN` | head 缺失但链存在、previous 不符或 HMAC 不符 |
-| 409 | `RECONCILE_THROTTLED` | `still_unknown` 间隔小于 60 秒 |
-| 409 | `RECONCILE_LIMIT` | `still_unknown` 已达 8 次 |
-| 409 | `RECONCILE_CONFLICT` | 已终态但 decision 不同 |
-| 409 | `CONFLICT` | op key 摘要/结果损坏、log/audit/evidence 预占 |
-| 409 | `DOMAIN_INCOMPLETE` | K2 或 K3 domain 单边缺失/损坏 |
-| 409 | `DOMAIN_MISMATCH` | K2/K3 换钥、版本或 fingerprint 不符 |
-| 409 | `CLEANUP_SNAPSHOT_REQUIRED` | 老 job/缺 snapshot/绑定不符 |
-| 409 | `DEVICE_CLAIM_INVALID` | slot/claim/guard 损坏 |
-| 503 | `NOT_CONFIGURED` | K2/K3 缺失/非法、live/真实 Provider |
-| 503 | `ADAPTER_UNAVAILABLE` | Store/clock 不可用 |
+### 3.5 读模型最小 DTO 扩展提案（未冻结）
 
-**K2/Provider 边界**
+目的：给 E07/E08/E09 一个**权威 revision 来源**。这是候选提案，需服务层独立复审、H1/H3/H4 契约修订批准后才能进入编码卡。
 
-- `requestDigest` 严格按 H4-c §7.1；`evidenceDigest` 由服务端 K3 计算，客户端不提交。
-- Provider 恒 0；`confirmed_removed` 的 R2 只调用 H4-b 本地 finalize，不重发 `revokeFace`。
-- 202 不表示后台自动推进；客户端必须使用同键重放或人工再次操作，见 §5。
+| 字段 | 类型 | 权威来源 | 字段权限 | 跨组织/不可见 | 禁止来源 |
+|---|---|---|---|---|---|
+| `revision` | 安全整数 1..`Number.MAX_SAFE_INTEGER` | `job.revision` | 仅 `device.audit.read`（与 E06 同权） | `404` 同态，不返回 `403` | 缓存、列表行号、数组下标、本地自增、时间戳、digest |
+| `action` | `enroll`/`update`/`revoke` | `job.action` | 仅 `device.audit.read` | 同上 | 由 state 猜测 |
+| `cleanupPhase` | `dispatch`/`finalize`/`null` | `job.cleanupPhase`（enroll job 无此字段） | 仅 `device.audit.read` | 同上 | 由 `retryable_failed` 推断 |
+| `nextAttemptAt` | 安全整数毫秒或 `null` | `job.nextAttemptAt` | 仅 `device.audit.read` | 同上 | 客户端本地推算 |
 
-### E09 `POST /api/v2/device-operation-jobs/:jobId/finalize-retry`
+规则：
 
-| 项目 | 值 |
-|---|---|
-| 用途 | `LOCAL_FINALIZE_EXHAUSTED` 后的人工本地恢复；只重做本地 finalize |
-| Permission | `device.operation.reconcile` |
-| 幂等 | 必须，K2 `face.reconcile.finalize` |
-| 成功 | `200` 或 `202` |
-| Provider | 0 |
+1. **不新增路由**：字段只加在 E06 列表投影，不新增 `GET /:jobId` 详情路由；若 Codex 要求详情路由，另立编码卡。
+2. **不新增集合、不新增状态/权限、不改变 `publicJobResult` 既有调用方**；只读投影。
+3. **类型与安全整数**：`Number.isSafeInteger` 且 `>=1`；`0`、负数、小数、字符串、`NaN`、`Infinity`、`2^53` 及以上一律 `400 PARAM_ERROR`；`MAX_SAFE_INTEGER` 可读但不可再 +1（写入侧 `INVALID_STATE`/`REVISION_CONFLICT`）。
+4. **字段权限不可绕过**：`device.operation.retry` 或 `device.operation.reconcile` **不**授予读取；无 `device.audit.read` 即 `403`；成员被撤权后下一请求立即失败，不读缓存。
+5. **跨组织同态**：请求其他组织的 job 与不存在同态 `404`；响应不得出现其他组织行、计数或游标差异。
+6. **禁止从缓存推测**：任何 `expectedRevision` 必须来自权威读取的最近一次响应；列表行号、数组 index、客户端本地自增、时间戳、digest 前缀都不是 revision。
+7. **提案未批准前**：E06 只回 v0 五字段；UI 无权威 revision → 无按钮、不发请求（§3.7）。
 
-**Request**
+字段扩展的示例与验收约束见附录 A。
 
-| 位置 | 字段 | 类型/约束 |
+### 3.6 revoke 扩展提案（未冻结）与 `reasonCode` 关闭
+
+| 来源 | 提案内容 | 实现状态 | 本卡结论 |
+|---|---|---|---|
+| H4 原设计 Q01 草案（`9fd088d`） | `revoke {expectedRevision, reasonCode}` | H4-a/H4-b 均未实现，入口为 bodyless | **不采用**；只作历史输入 |
+| H4-c 设计（`b15aceb`） | revoke 输入不变；对账读取 grant 状态，不新增 revoke 字段 | 设计已批准；实现未开始 | **不扩展**；E05 维持 bodyless |
+| 本卡 E05 | `revoke(grantId, {idempotencyKey})`，digest `{grantId}`，事务内用 `grant.revision` CAS | 已实现（事实） | **冻结** |
+| Codex 裁定（Q4） | 是否要 `expectedRevision`/`reasonCode` | 未裁定 | 若批准，必须另开服务层卡 |
+
+`expectedRevision` 扩展的关闭理由：
+
+- 当前 `revoke` 用事务内读到的 grant revision 做 CAS；客户端没有权威 grant revision 读取端点（E06 是 job，不是 grant）。
+- 在无权威读取的情况下加上 `expectedRevision`，只会制造“客户端自己编版本号”的伪契约。
+- 因此：**带 `expectedRevision` 的 revoke mutation 不开放**；无权威读取的 mutation 一律不开放。
+
+`reasonCode` 扩展的关闭理由：
+
+- 代码中 `revoke` 路径没有任何 `reasonCode` 入参、枚举、持久化字段或审计字段；`reasonCode` 只出现在 job `result` 的服务端生成值（H3/H4-c）。
+- 无正式枚举、无持久化、无审计依据 → **`reasonCode` 关闭**，不得在 E05 body 中出现；出现即 `400 PARAM_ERROR`。
+- 未来若需要，必须在服务层卡中同时冻结：枚举清单、写集位置、audit 字段、读取/展示权限、错误码映射、回滚策略。
+
+### 3.7 UI 禁令：无权威 revision 即无按钮、无请求
+
+1. 页面只能从权威读取端点取得 revision；当前**没有** job revision 的权威读取端点（E06 无 revision，无详情路由）。
+2. 因此在本卡与读模型提案批准前，任何“重试/对账/恢复”按钮必须**不存在或禁用**；禁用态不得发请求，也不得在点击时兜底猜测 revision。
+3. 禁止用列表序号、数组下标、`attempts`、`lastSuccessAt`、`createdAt`、`cleanupPending` 推导 revision。
+4. 禁止客户端本地 `revision + 1` 后提交；禁止把上一次成功响应的 revision 用于下一次 mutation 之外的资源。
+5. 禁止为 `awaiting_result` 渲染“重试”按钮；只能渲染只读状态与（未来）对账入口。
+6. 禁止在无 revision 时发“探测请求”判断是否可用；页面对未注册端点必须零请求。
+7. 未来 UI 编码卡必须先落地读模型提案，再按端点逐项启用按钮；本卡不提供 UI 代码。
+
+### 3.8 `UNKNOWN_RESULT` 收敛提案（未冻结）
+
+`awaiting_result` 的合法操作只有两类（其余一律禁止）：
+
+| 操作 | 是否允许 | 说明 |
 |---|---|---|
-| Path | `jobId` | 不透明 ID |
-| Header | `Idempotency-Key` | §2.6 |
-| Body | `jobId` | 必须与 path 相同，否则 `PARAM_ERROR/400` |
-| Body | `expectedRevision` | 安全整数，≥1；恢复 generation 的 CAS 基准 |
+| 只读查询（E06/`queryJob`） | 允许 | 零写、Provider 0 |
+| 人工对账 `device.operation.reconcile`（候选 E08） | 允许（HTTP 仍有门禁） | 唯一人工收敛入口；decision 三选一；当前未注册 |
+| `retry`（E07） | 禁止 | `409 INVALID_JOB`（H3 D53）；当前未注册 |
+| 普通 `requeue` | 禁止 | 服务层只接受 `retryable_failed`；`awaiting_result` 直接 `INVALID_JOB` |
+| 自动调度/定时器 | 禁止 | 不进入 HTTP，也不得直接改 job |
+| Provider `queryOperation` | 禁止 | 无 HTTP 入口；调用计数必须为 0 |
+| 新键轮询 | 禁止 | 只能同键重放（已实现端点）或人工对账 |
 
-Body 精确两个字段；不接受 `decision`、`evidence`、`reasonCode`。
+- `awaiting_result` 的合法出边只有 `succeeded`/`terminal_failed`（人工对账）与显式失败关闭；H3 状态表虽列 `retryable_failed`，H4/H4-c 明确禁止把它用于自动重发。
+- 普通 `requeue` 不能替代 reconcile：它没有证据、没有 K3、没有 decision，且会绕过“结果不明”的审计链。
 
-**Response**
+### 3.9 候选状态词表
 
-| 场景 | HTTP | body 关键字段 |
-|---|---:|---|
-| 恢复后本地 finalize 成功 | 200 | `jobState=succeeded`、`cleanupPending=false`、`cleanupPhase=complete` |
-| 恢复后进入 30/120/600 重试 | 202 | `jobState=retryable_failed`、`cleanupPending=true`、`cleanupPhase=finalize` |
-| 再次耗尽 | 200 | `jobState=terminal_failed`、`terminalReason=LOCAL_FINALIZE_EXHAUSTED` |
+| 词 | 用途 | 禁止 |
+|---|---|---|
+| `proposed` | 设计已提出、未实现、未冻结 | 不得写成可接线 |
+| `blocked` | 缺前置或本卡关闭 | 不得写成 `ready`/`partial`/`已就绪` |
 
-```json
-{
-  "data": {
-    "jobId": "job-...",
-    "operation": "finalize_retry",
-    "generationRevision": 9,
-    "recoveryId": "h4c-finalize-retry-v1:...",
-    "jobState": "succeeded",
-    "grantState": "revoked",
-    "cleanupPending": false,
-    "cleanupPhase": "complete",
-    "terminalReason": null
-  },
-  "requestId": "uuid"
-}
-```
+## 4. 第四层：继续关闭端点
 
-不使用 `duplicate:true`；不同键在当前未消费终态 revision 上允许开新一轮，旧 revision 返回 `RECONCILE_GENERATION_CONSUMED/409`。
+### 4.1 九个端点全部关闭
 
-**Errors**
+| 端点 | 登记状态 | 关闭依据 | 允许下一步 |
+|---|---|---|---|
+| E01 submit | blocked | 本卡只冻结契约；server 未注册 | 编码卡：注册 + DTO 校验 + K2 + 测试 |
+| E02 queue | blocked | 同上 | 编码卡 |
+| E03 review | blocked | 同上；HTTP 必须补必填 `expectedRevision` | 编码卡 + 补齐校验 |
+| E04 image | blocked | 缺 `credentialId → sourceFileId` 解析层 | 编码卡 + 解析层 |
+| E05 revoke | blocked | 本卡只冻结 bodyless 契约；live/Cloud 永久关闭 | 编码卡（Local+Mock only） |
+| E06 list | blocked | 无 `listJobs()`；v0 DTO 无 revision（G-01） | 读模型提案批准 + 编码卡 |
+| E07 retry | blocked | 无 K2/摘要/domain guard/严格重放；无 revision 权威（G-01/G-02） | 独立设计任务（§3.2） |
+| E08 reconcile | blocked | C1 待终审、C2 未开始（G-03） | H4-c C2 + 复审 + 编码卡 |
+| E09 finalize-retry | blocked | C3 未开始（G-03） | H4-c C3 + 复审 + 编码卡 |
 
-| HTTP | code | 条件 |
-|---:|---|---|
-| 400 | `PARAM_ERROR` | DTO/ID/revision/path-body 不符/key 非法 |
-| 403 | `FORBIDDEN` | 缺 `device.operation.reconcile`、成员/组织失效 |
-| 404 | `NOT_FOUND` | job 不存在或跨组织 |
-| 409 | `REVISION_CONFLICT` | `expectedRevision` 不符、并发 CAS 失败 |
-| 409 | `INVALID_STATE` | job 非 `terminal_failed/LOCAL_FINALIZE_EXHAUSTED`、已 succeeded |
-| 409 | `RECONCILE_GENERATION_CONSUMED` | 指向已消费旧 revision |
-| 409 | `CONFLICT` | op key 结果损坏、log/audit 预占、同键异摘要 |
-| 409 | `CLEANUP_SNAPSHOT_REQUIRED` | cleanupSnapshot/grant 绑定不符 |
-| 503 | `NOT_CONFIGURED` | K2 缺失/非法、live/真实 Provider |
-| 503 | `ADAPTER_UNAVAILABLE` | Store/clock 不可用 |
+**总门禁**：本卡合并后，九个端点仍然全部关闭；`server.mjs` 不注册、不调用、不新增人脸分支。注册必须另发编码卡，并逐项引用本卡端点 ID。
 
-**边界**
-
-- 只做本地 finalize；不调用 Provider、不重发 `revokeFace`、不自动轮询。
-- 不重置 grant/slot/claim 资源；R2 的 H4-b finalize 仍做完整 slot/claim/device/guard CAS。
-- E09 只处理 `LOCAL_FINALIZE_EXHAUSTED`，不处理 `awaiting_result`；后者只能走 E08。
-
-### 3.10 继续关闭、不得新增的路径
+### 4.2 不存在、不得新增的路径
 
 | 路径/能力 | 状态 | 原因 |
 |---|---|---|
 | `POST /api/v2/device-access-grants` | 不存在 | 现有 routes 无此路径；本卡不新增 |
 | `GET /api/v2/device-operation-jobs/:jobId` | 不存在 | 本卡不新增详情路由；读模型修正见附录 A |
-| `POST /api/v2/device-operation-jobs/:jobId/query` | 不存在 | H3/H4 禁止自动/手动 Provider 查询入口 |
+| `POST /api/v2/device-operation-jobs/:jobId/query` | 不存在 | H3/H4 禁止 Provider 查询入口 |
 | `POST /api/v2/device-operation-jobs/:jobId/cancel` | 不存在 | H3 无取消入口，`sending` 不可取消 |
+| `POST /api/v2/device-operation-jobs/:jobId/retry` | 描述表有、未注册 | E07 候选；本卡不注册 |
+| `POST /api/v2/device-operation-jobs/:jobId/reconcile` | 描述表有、未注册 | E08 候选；C2 未开始 |
+| `POST /api/v2/device-operation-jobs/:jobId/finalize-retry` | 不在描述表、未注册 | E09 候选；C3 未开始 |
 | `POST /api/v2/device-access-grants/:grantId/expire` | 不存在 | 到期扫描器属于内部路径，不是 HTTP |
 | `POST /api/v2/face-credentials/:id/thumbnail` | 不存在 | 禁止缩略图/派生图缓存 |
 | `DELETE`/`PUT` 任何人脸资源 | 不存在 | 状态迁移必须走显式动作 |
 | 设备连接、Provider 调用、Cloud live | 继续关闭 | 本卡与 H4-c 均不接 |
 
-## 4. 私密图片读取与 reviewer/readPrivate 权限分离
+### 4.3 注册门禁（编码卡必须逐项满足）
 
-### 4.1 三权分立
+1. 只注册本卡 §2 冻结的端点；候选端点不得注册，直到对应前置完成。
+2. 每个端点必须在 `routes.mjs` 增加/复用描述行，并在 `server.mjs` 唯一分支内调用服务层；不得新增旁路。
+3. 每个端点的错误码必须落在 §2.5；不得新增同义码。
+4. 每个端点必须携带 §8 对应矩阵行作为验收；候选端点行只能在 C2/C3 完成后启用。
+5. 不得在注册 PR 中顺带实现 retry、reconcile 或 finalize-retry。
+6. 变更必须只落在 `server.mjs`、`routes.mjs`、服务层与测试；其他文件零差异；文档与代码分开提交。
+
+### 4.4 `routes.mjs` 描述表处置（Q8）
+
+现状：E08 在描述表、E09 不在；两者都未注册。三种处置：
+
+| 方案 | 内容 | 风险 |
+|---|---|---|
+| A（建议） | 描述表保留为“候选清单”，但加注释标明未注册、不得接线；E09 不入表 | 读者可能误以为已登记 |
+| B | 从描述表移除 E07/E08 候选行，只在文档记录 | 丢失路径提案的单一来源 |
+| C | 把 E09 也加入描述表 | 更像“已批准路由”，风险最高 |
+
+本卡倾向 A，但需要 Codex 裁定（Q8）。无论哪种，`server.mjs` 都不得出现这三条分支。
+
+## 5. E04 私密图片与三权分立（已冻结）
+
+### 5.1 三权分立
 
 | 权限 | 允许 | 不允许 |
 |---|---|---|
@@ -794,31 +871,56 @@ Body 精确两个字段；不接受 `decision`、`evidence`、`reasonCode`。
 | `device.face.readPrivate` | 按凭证读取原图 | 审核、提交、撤权 |
 | `device.access.manage` | 创建/撤销授权 | 审核、读原图 |
 | `device.audit.read` | 列任务 | 审核、读原图、撤权 |
-| `device.operation.retry` | 重排已到期 retryable job | 对账、读原图 |
-| `device.operation.reconcile` | 对账、finalize-retry | 重试、读原图 |
+| `device.operation.retry` | （未来）重排已到期 retryable job | 对账、读原图；当前端点关闭 |
+| `device.operation.reconcile` | （未来）对账、finalize-retry | 重试、读原图；当前端点关闭 |
 
-`admin` 角色不隐含以上任何权限；`org_memberships.permissions` 是唯一授权来源（[org.mjs](../../admin-web/lib/org.mjs#L95-L104)）。
+`admin` 角色不隐含以上任何权限；`org_memberships.permissions` 是唯一授权来源（[org.mjs](../../admin-web/lib/org.mjs#L89-L105)）。
 
-### 4.2 图片访问判定
+### 5.2 请求与解析顺序
 
-```text
-credential = org-scoped get(face_credentials, credentialId)
-  null/foreign -> 404 FILE_NOT_FOUND
-file = credential.sourceFileId
-FileService.authorizeDownload(file, actor):
-  not own/not ready/not private/not face-biometric -> 404 FILE_NOT_FOUND
-  private && purpose=face-biometric:
-    fresh membership permission device.face.readPrivate required
-    missing -> 404 FILE_NOT_FOUND (not 403)
-  success -> proxy bytes, log download
-```
+| 位置 | 字段 | 类型/约束 |
+|---|---|---|
+| Path | `credentialId` | 不透明 ID |
+| Query | 无 | 不接受 `fileId`、`url`、`purpose`、`download` 等参数 |
 
-- 不允许把 `device.face.review` 当读图权限；也不允许把 `device.face.readPrivate` 当审核权限。
-- 不允许用 `?fileId=` 绕过凭证绑定；`sourceFileId` 只能来自服务端凭证记录。
-- 不允许返回 302 临时 URL；private 文件一律代理字节，避免 URL 泄露/长期可用。
-- 不允许缩略图、转码、OCR、质量评分等派生响应；本端点只返回原图字节。
+无 body、无 Idempotency-Key。解析顺序：
 
-### 4.3 404 同态与审计
+1. 用当前 `orgId` 读取 `face_credentials/<credentialId>`；不存在/跨组织：`FILE_NOT_FOUND/404`。
+2. 取 `credential.sourceFileId`，调用 `FileService.authorizeDownload(fileId, actor)`；该函数按当前成员权限、purpose `face-biometric`、`visibility=private`、`status=ready`、组织归属复核。
+3. 仅鉴权通过后读取字节；private 一律代理下载，不签发临时 URL。
+4. 写 `file_access` denied/download 留痕；不把文件名、objectKey、摘要写入响应。
+
+### 5.3 响应头
+
+| Header | 值 |
+|---|---|
+| `Content-Type` | `image/jpeg` 或 `image/png` |
+| `Content-Length` | 实际字节数 |
+| `Content-Disposition` | `inline; filename*=UTF-8''<encoded>` |
+| `Cache-Control` | `no-store` |
+| `Pragma` | `no-cache` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Content-Security-Policy` | `sandbox; default-src 'none'` |
+| `Referrer-Policy` | `no-referrer` |
+| `Cross-Origin-Resource-Policy` | `same-origin` |
+
+不返回 `ETag`、不处理 `Range`、不返回缩略图、不重定向、不返回 JSON 信封。
+
+### 5.4 错误与 404 同态
+
+| HTTP | code | 条件 | 写 |
+|---:|---|---|---:|
+| 401 | 现有登录门 | 无会话 | 0 |
+| 404 | `FILE_NOT_FOUND` | 凭证不存在/跨组织（尚未解析到 fileId） | 0 |
+| 404 | `FILE_NOT_FOUND` | 文件不存在、非 face-biometric、非 private、非 ready、缺 `device.face.readPrivate` | `L`（file_access denied） |
+| 503 | `STORAGE_UNAVAILABLE` | 文件存储后端与配置不一致 | 0 |
+| 503 | `ADAPTER_UNAVAILABLE` | 读文件/Store 异常 | 0 |
+
+`L` 表示只新增一条 `file_access_log`（denied 或 download）；它不改变凭证、文件、grant、job 等业务集合，也不是“全库零写”。
+
+**关键结论**：缺 `device.face.readPrivate` 返回 **404**，不是 403。原因是文件契约（[files.mjs](../../admin-web/lib/files.mjs#L1049-L1072)）已冻结“无权限与不存在同态”，防止通过 403/404 差异枚举凭证或文件。审核人只有 `device.face.review` 时，调用本端点得到 404。
+
+### 5.5 审计留痕
 
 | 情形 | 响应 | 审计 |
 |---|---|---|
@@ -831,28 +933,30 @@ FileService.authorizeDownload(file, actor):
 
 404 的 message 固定“文件不存在或不可见”；不得出现“无权限”“跨组织”“已停用”等差异。
 
-## 5. `UNKNOWN_RESULT` 的人工收敛
+## 6. `UNKNOWN_RESULT` 的人工收敛
 
-### 5.1 状态事实
+### 6.1 状态事实
 
 - `UNKNOWN_RESULT` 只把 job 迁到 `awaiting_result`；不自动重发，不自动查询。
 - `awaiting_result` 的合法出边只有 `succeeded`/`terminal_failed`（人工对账）与显式失败关闭；H3 状态表虽列 `retryable_failed`，H4/H4-c 明确禁止把它用于自动重发。
-- `retry` 入口只接受 `retryable_failed && cleanupPhase==="dispatch"`；`awaiting_result` 调用 E07 必须 `INVALID_JOB/409`。
-- `finalize-retry` 只接受 `terminal_failed/LOCAL_FINALIZE_EXHAUSTED`；`awaiting_result` 调用 E09 必须 `INVALID_STATE/409`。
+- 普通 `requeue` 只接受 `retryable_failed && cleanupPhase==="dispatch"`；`awaiting_result` 调用必须 `INVALID_JOB`。
+- `retry` 入口（候选 E07）只接受 `retryable_failed && cleanupPhase==="dispatch"`；`awaiting_result` 调用必须 `INVALID_JOB/409`（H3 D53）；当前端点未注册。
+- `finalize-retry`（候选 E09）只接受 `terminal_failed/LOCAL_FINALIZE_EXHAUSTED`；`awaiting_result` 调用必须 `INVALID_STATE/409`；当前端点未注册。
 
-### 5.2 允许与禁止
+### 6.2 允许与禁止
 
 | 操作 | `awaiting_result` 是否允许 | 说明 |
 |---|---|---|
 | E06 只读列表 | 允许 | 零写、Provider 0 |
-| E08 `reconcile` | 允许 | 唯一人工收敛入口；decision 三选一 |
-| E07 `retry` | **禁止** | 409 `INVALID_JOB`，零写 |
-| E09 `finalize-retry` | **禁止** | 409 `INVALID_STATE`，零写 |
+| E08 `reconcile`（候选） | 允许（HTTP 仍有门禁） | 唯一人工收敛入口；decision 三选一 |
+| E07 `retry` | **禁止** | 409 `INVALID_JOB`，零写；当前未注册 |
+| 普通 `requeue` | **禁止** | 服务层直接拒绝；不得绕过 reconcile |
+| E09 `finalize-retry` | **禁止** | 409 `INVALID_STATE`，零写；当前未注册 |
 | 自动调度/定时器 | 禁止 | 不进入 HTTP，也不得直接改 job |
-| Provider `queryOperation` | 禁止 | H3/H4 不提供该入口 |
+| Provider `queryOperation` | 禁止 | H3/H4 不提供该入口；调用 0 |
 | 客户端轮询新键 | 禁止 | 只能同键重放或人工对账 |
 
-### 5.3 HTTP 语义
+### 6.3 HTTP 语义
 
 - E08 的 202 只表示 R1 已提交、R2 本地 finalize 未完成；**不加 `Retry-After`**，避免暗示自动重试。
 - E08 的 `still_unknown` 返回 200 且 job 保持 `awaiting_result`；不新增 evidence 之外的 job 写。
@@ -860,7 +964,7 @@ FileService.authorizeDownload(file, actor):
 - 任何 503/409 都不是“稍后自动重试”的信号；客户端必须重新读取 E06 或同键重放，不得换新键自动重发。
 - `confirmed_present` 是终态，不释放资源；后续重新清理必须另立新 generation/job，不由本卡或 HTTP 自动完成。
 
-## 6. 容量、90 refs 与竞态
+## 7. 容量、90 refs 与竞态
 
 | 项目 | 冻结规则 |
 |---|---|
@@ -872,37 +976,24 @@ FileService.authorizeDownload(file, actor):
 | 请求体 | 与 refs 无关；body 大小只受 64 KiB 上限约束 |
 | 并发 | 线性化点仍是 job/head/guard CAS；HTTP 不提供“先读后写”的跨请求事务 |
 
-## 7. 端点开放状态与前置门禁
-
-| 端点 | 服务层状态 | HTTP 状态 | 可接线前置 | 真实 Provider/设备 |
-|---|---|---|---|---|
-| E01 submit | H1 已实现 | 关闭 | 本卡批准 + 编码卡 | 不需要 Provider；文件存储需可用 |
-| E02 queue | H1 已实现 | 关闭 | 本卡批准 + 编码卡 | 无 |
-| E03 review | H1 已实现 | 关闭 | 本卡批准 + 编码卡 | 无 |
-| E04 image | FileService 已实现；缺 credential 解析层 | 关闭 | 本卡批准 + 解析层编码 | 真实对象存储需另行验证 |
-| E05 revoke | H4-a/H4-b 已实现，Local+Mock | 关闭 | 本卡批准 + 编码卡 | **继续关闭**；live/Cloud/真实设备禁止 |
-| E06 list | 只有 `queryJob(jobId)`，无 list | 关闭 | P0-1 读模型修正 + 编码卡 | 无 |
-| E07 retry | H3-b/H4-b 有 requeue，无 K2 | 关闭 | P0-2 K2 改造 + 编码卡 | **继续关闭**；只重排，不调 Provider |
-| E08 reconcile | H4-c 仅设计 | 关闭 | H4-c 实现 + Codex 终审 + 编码卡 | **继续关闭**；Provider 0 |
-| E09 finalize-retry | H4-c 仅设计 | 关闭 | 同上 | **继续关闭**；只本地 finalize |
-
-**总门禁**：本卡合并后，九个端点仍然全部关闭；`server.mjs` 不注册、不调用、不新增人脸分支。注册必须另发编码卡，并逐项引用本卡端点 ID。
-
 ## 8. 测试矩阵
 
-### 8.1 记号与 harness
+### 8.1 记号、阶段与 harness
 
 - `Z`：全库内容级零变化（所有记录、排序 ID、计数、audit 均不变）。
 - `Zc`：业务核心集合零变化（凭证/grant/job/log/evidence/head/domain/op key 均不变）；E01/E03 使用非确定性 `#audit`，同键重放仍可能追加一条 `admin_audit`，因此这两条重放断言用 `Zc` 而不是 `Z`。
 - `L`：只新增一条 `file_access_log`（denied 或 download），业务集合不变。
 - `P0`：Provider 调用入口增量为 0；`P1`：仅允许一次既有 Mock 调用。
+- **阶段**：本卡矩阵分两类。
+  - **当前静态验收（§8.10，S 系列）**：只读代码/文档即可判定，不启动 server、不发 HTTP、不跑测试。
+  - **未来契约测试（§8.2–§8.9，N/R/C/D/P/V/F/U 系列）**：HTTP 接线卡（候选端点还需 C2/C3 完成）后才能执行；现在不得执行，也不得当作已通过。
 - HTTP 测试使用 `createApp` 启动临时端口，Cookie + CSRF + Origin 登录；每个用例先固化基线快照，再比较。
 - Store 使用 LocalStore 临时目录；禁止 Cloud/live/真实设备。
 - 图片用例比较字节长度、Content-Type 和响应头，不把图片写入日志。
 - 敏感扫描对所有响应体、日志、audit、evidence/head/op key 执行固定正则；零命中才 PASS。
 - 每个失败用例同时断言无 500、无 stack、无配置值、无 Provider 调用。
 
-### 8.2 正常路径
+### 8.2 未来契约测试：正常路径
 
 | ID | 端点 | 前置/请求 | 预期 | Provider | 写集 |
 |---|---|---|---|---|---|
@@ -914,12 +1005,15 @@ FileService.authorizeDownload(file, actor):
 | N06 | E04 | 有 `device.face.readPrivate`，JPEG 凭证 | 200，`image/jpeg`，字节与源文件一致 | 0 | L（download） |
 | N07 | E05 | pending grant，无 blocker | 200，`revoked/cleanupPending=true/jobId` | 0 | grant+job+log+op key+domain+audit |
 | N08 | E06 | 同组织 3 条 job，`device.audit.read` | 200，仅本组织行，`nextCursor` 合法 | 0 | Z |
-| N09 | E07 | `retryable_failed` 已到期，正确 revision | 200，`state=queued`，revision+1 | 0 | job+log（K2 后加 op key/domain） |
-| N10 | E08 | `awaiting_result`，`confirmed_removed`，无 blocker | 200，`succeeded/cleanupPending=false` | 0 | H4-c X + H4-b R2 |
-| N11 | E08 | `awaiting_result`，`confirmed_present` | 200，`terminal_failed/cleanupPending=true`，资源不变 | 0 | H4-c X |
-| N12 | E09 | `terminal_failed/LOCAL_FINALIZE_EXHAUSTED`，正确 revision | 200 或 202，符合 §E09 矩阵 | 0 | H4-c 恢复 + H4-b finalize |
+| N09 | E07 | `retryable_failed` 已到期，持 `device.operation.retry` | **404/405**；未注册、业务未进入；旧版 200 queued 期望作废（无 K2/无审计） | 0 | Z |
+| N10 | E08 | `awaiting_result`，`confirmed_removed` | **404/405**；候选未注册；H4-c C2 完成前不得返回 200 | 0 | Z |
+| N11 | E08 | `awaiting_result`，`confirmed_present` | **404/405**；同上 | 0 | Z |
+| N12 | E09 | `terminal_failed/LOCAL_FINALIZE_EXHAUSTED`，正确 revision | **404/405**；C3 未开始 | 0 | Z |
+| N13 | E06 | 任意 job 列表 | 200；每行精确五字段；不得出现 `revision/action/cleanupPhase/nextAttemptAt` | 0 | Z |
+| N14 | E07/E08/E09 | 客户端在无权威 revision 时尝试 mutation | 0 请求发出（客户端契约）；若强行请求则 404/405 | 0 | Z |
+| N15 | E05 | bodyless 请求带任意字段 | 400 `PARAM_ERROR`；不接受 `expectedRevision/reasonCode/reason` | 0 | Z |
 
-### 8.3 重放与幂等
+### 8.3 未来契约测试：重放与幂等
 
 | ID | 端点 | 前置/请求 | 预期 | Provider | 写集 |
 |---|---|---|---|---|---|
@@ -930,27 +1024,33 @@ FileService.authorizeDownload(file, actor):
 | R05 | E05 | 同键同 grant 重放 | 200，同 jobId | 0 | Z |
 | R06 | E01/E03 | 同一原始 key 用于两个不同 K2 method | 各自成功，不互相重放 | 0 | 各自首次写 |
 | R07 | E01/E05 | 不同 actor 使用同一原始 key | K2 作用域隔离；E01 可产生第二条凭证，E05 第二个请求按资源状态 409 | 0 | 按端点 |
-| R08 | E07 | 同键同 revision，首次已 queued | 200，同 receipt，不重复 log | 0 | Z |
-| R09 | E07 | 同键，revision 改变 | 409 `CONFLICT` | 0 | Z |
-| R10 | E08 | 同键同 body，已终态 | 200，同投影，不新增 evidence/head | 0 | Z |
-| R11 | E09 | 同键同 body，恢复已成功/耗尽 | 200，同 recovery 指针投影 | 0 | Z |
+| R08 | E07 | 同键同 revision 重放 | **404**；未注册，不创建 op key；旧版 200 receipt 期望作废 | 0 | Z |
+| R09 | E07 | 同键，revision 改变 | **404**；不覆盖不存在的 op key | 0 | Z |
+| R10 | E08 | 同键同 body 重放 | **404**；未注册；C2 完成后再验 200 同投影 | 0 | Z |
+| R11 | E09 | 同键同 body 重放 | **404**；未注册；C3 完成后再验 | 0 | Z |
+| R12 | E01/E03/E05 | operation key 记录缺失/非对象/错 org/realm/keyVersion/createdAt/摘要不符 | 409 `CONFLICT`；不新建、不覆盖、不返回旧结果 | 0 | Z |
+| R13 | E01/E03/E05 | 权限撤销后同键重放 | 403 `FORBIDDEN`；不命中 op key 缓存、不返回旧结果 | 0 | Z |
+| R14 | E07/E08/E09 | 未实现端点同键异摘要 | 404/405；不进入 K2、不写 op key | 0 | Z |
 
-### 8.4 竞态
+### 8.4 未来契约测试：竞态
 
 | ID | 端点 | 注入 | 预期 | Provider | 写集 |
 |---|---|---|---|---|---|
 | C01 | E01 | 两并发同键 | 一个凭证；两个 201 同 ID | 0 | 一次核心写 |
 | C02 | E03 | 两并发不同键，同 revision | 一胜 200；另一 409 `REVISION_CONFLICT`/`INVALID_STATE` | 0 | 一次写 |
 | C03 | E05 | 两并发不同键，同 grant | 一胜 200；另一 409 `INVALID_STATE`/`REVISION_CONFLICT` | 0 | 一个 job |
-| C04 | E07 | 人工 retry 与调度器同 job | 一胜 queued；另一 409 `INVALID_JOB`/`RETRY_NOT_DUE` | 0 | 一次 job+log |
-| C05 | E07/E08 | `awaiting_result` 同时 retry + reconcile | retry 409 `INVALID_JOB`；reconcile 正常提交 | 0 | 仅 reconcile |
-| C06 | E08/E05 | reconcile R2 与 H4-b finalize 同 job | 一胜；另一 409 `INVALID_JOB`/`REVISION_CONFLICT` | 0 | 不重复释放 |
-| C07 | E08 | 两并发不同 decision | 一胜 200；另一 409 `INVALID_STATE`/`RECONCILE_CONFLICT` | 0 | 一次终态 |
-| C08 | E09 | 两并发同 generation | 一胜 200/202；另一 409 `REVISION_CONFLICT` | 0 | 一次恢复 |
-| C09 | E08 | 两并发同键 `still_unknown` | 两个 200 同 sequence；不新增第二条 evidence | 0 | 一次写 |
+| C04 | E07 | 人工 retry 与调度器同 job | **404/405**（未注册）；并发均不写；C2 后另验 | 0 | Z |
+| C05 | E07/E08 | `awaiting_result` 同时 retry + reconcile | 两者均 **404/405**（均未注册）；零写 | 0 | Z |
+| C06 | E08/E05 | reconcile R2 与 H4-b finalize 同 job | **404/405**（E08 未注册）；不重复释放 | 0 | Z |
+| C07 | E08 | 两并发不同 decision | **404/405**；C2 后另验一胜 | 0 | Z |
+| C08 | E09 | 两并发同 generation | **404/405**；C3 后另验一胜 | 0 | Z |
+| C09 | E08 | 两并发同键 `still_unknown` | **404/405**；C2 后另验一次写 | 0 | Z |
 | C10 | E05/createGrant | 撤权与 createGrant 争 guard | guard CAS 一胜；另一 409 `REVISION_CONFLICT`/`GRANT_SLOT_CONFLICT` | 0 | 不误放 claim |
+| C11 | E01/E03/E05 | 请求开始后、事务提交前成员权限被撤销 | 403 `FORBIDDEN`；事务内复核生效；零写 | 0 | Z |
+| C12 | E07/E08/E09 | 未注册端点并发请求 | 全部 404/405；无业务写、无 Provider、无 op key | 0 | Z |
+| C13 | E08 | 权限撤销与候选 reconcile 并发 | 404（未注册）；若未来注册必须 403、零写 | 0 | Z |
 
-### 8.5 损坏记录与 DTO
+### 8.5 未来契约测试：DTO 与损坏记录
 
 | ID | 端点 | 注入 | 预期 | Provider | 写集 |
 |---|---|---|---|---|---|
@@ -959,31 +1059,39 @@ FileService.authorizeDownload(file, actor):
 | D03 | E01 | key 15 位、129 位、含空格或 `/` | 400 `PARAM_ERROR` | 0 | Z |
 | D04 | E03 | 缺 `expectedRevision` | 400 `PARAM_ERROR` | 0 | Z |
 | D05 | E03 | `decision=approve` 或大小写漂移 | 400 `PARAM_ERROR` | 0 | Z |
-| D06 | E05 | body 带 `expectedRevision`/`reasonCode` | 400 `PARAM_ERROR` | 0 | Z |
-| D07 | E07 | revision 为 0/小数/字符串 | 400 `PARAM_ERROR` | 0 | Z |
-| D08 | E08 | path jobId 与 body jobId 不同 | 400 `PARAM_ERROR` | 0 | Z |
-| D09 | E08 | evidence 多 `digest`/`raw`/`payload` | 400 `PARAM_ERROR` | 0 | Z |
-| D10 | E08 | `sourceType=mock_provider` 或 sourceCode 不匹配 | 409 `EVIDENCE_INVALID` | 0 | Z |
-| D11 | E08 | observedAt 早于 finishedAt、未来、超 24h | 409 `EVIDENCE_STALE` | 0 | Z |
-| D12 | E08 | previous evidence 缺字段/错 sequence/HMAC 不符 | 409 `EVIDENCE_CHAIN_BROKEN` | 0 | Z |
+| D06 | E05 | body 带 `expectedRevision`/`reasonCode` | 400 `PARAM_ERROR`；bodyless 冻结 | 0 | Z |
+| D07 | E07 | revision 为 0/小数/字符串 | **404**（未注册先于 DTO）；若注册后必须 400 | 0 | Z |
+| D08 | E08 | path jobId 与 body jobId 不同 | **404**（未注册）；C2 后必须 400 | 0 | Z |
+| D09 | E08 | evidence 多 `digest`/`raw`/`payload` | **404**（未注册）；C2 后必须 400 | 0 | Z |
+| D10 | E08 | `sourceType=mock_provider` 或 sourceCode 不匹配 | **404**（未注册）；C2 后必须 409 `EVIDENCE_INVALID` | 0 | Z |
+| D11 | E08 | observedAt 早于 finishedAt、未来、超 24h | **404**（未注册）；C2 后必须 409 `EVIDENCE_STALE` | 0 | Z |
+| D12 | E08 | previous evidence 缺字段/错 sequence/HMAC 不符 | **404**（未注册）；C2 后必须 409 `EVIDENCE_CHAIN_BROKEN` | 0 | Z |
 | D13 | E06 | `limit=0/101`、state 未知 | 400 `PARAM_ERROR` | 0 | Z |
-| D14 | E06/E07 | job 未知字段、revision 非安全整数、phase 矛盾 | 409 `INVALID_JOB` 或 503 `ADAPTER_UNAVAILABLE`，零写 | 0 | Z |
+| D14 | E06/E07 | job 未知字段、phase 矛盾 | E06 仍只投五字段、不读取 revision；E07 404；不得 500 | 0 | Z |
 | D15 | 全部 | 跨组织 credential/grant/job ID | 404 `NOT_FOUND`/`FILE_NOT_FOUND`，同态 | 0 | Z |
 | D16 | 全部 | 路径 `%ZZ`/双重编码/编码斜杠 | 400 `PARAM_ERROR`，不 500/503 | 0 | Z |
+| D17 | E03/E07/E08/E09 | `expectedRevision` 为 0、-1、1.5、`"7"`、NaN、Infinity、2^53 | 400 `PARAM_ERROR`；不进入业务 | 0 | Z |
+| D18 | E03/E05 | stale revision（落后或超前） | 409 `REVISION_CONFLICT`；零写；不得 200/500 | 0 | Z |
+| D19 | E05 | body 带 `reasonCode`、`reason`、`force`、嵌套 `metadata.reasonCode` | 400 `PARAM_ERROR`；未冻结 `reasonCode` 一律拒绝 | 0 | Z |
+| D20 | UI | 无权威 revision | 无启用按钮、不发请求（客户端拦截 0 网络） | 0 | Z |
+| D21 | E03/E05 | revision 边界：`MAX_SAFE_INTEGER` 可读但不可 +1；`MAX_SAFE_INTEGER+1` 输入 | 输入 400；写入侧 409 `INVALID_STATE`/`REVISION_CONFLICT`；零写 | 0 | Z |
+| D22 | 全部 | 用列表行号/数组下标/本地自增/缓存值/时间戳作为 revision | 客户端不得发送；服务端 400 或 409，不得接受为 CAS 基准 | 0 | Z |
 
-### 8.6 容量
+### 8.6 未来契约测试：容量
 
 | ID | 端点 | 注入 | 预期 | Provider | 写集 |
 |---|---|---|---|---|---|
 | P01 | E05 | 82 candidates | 200；R2 成功；claim 按 H4-b 保留 | 0 | H4-b 90 refs 内 |
 | P02 | E05 | 83 candidates 预扫 | 400 `CAPACITY_EXCEEDED`；R1 零写 | 0 | Z |
 | P03 | E05 | R1 后增长到 83 | 202 pending；不半释放 slot/claim | 0 | R1 写 + finalize pending |
-| P04 | E08 | 82 candidates `confirmed_removed` | 200 succeeded | 0 | H4-c X + H4-b R2 |
-| P05 | E08 | 83 candidates `confirmed_removed` | 400 `CAPACITY_EXCEEDED`，零写 | 0 | Z |
+| P04 | E08 | 82 candidates `confirmed_removed` | **404**（未注册）；C2 后另验 200 succeeded | 0 | Z |
+| P05 | E08 | 83 candidates `confirmed_removed` | **404**（未注册）；C2 后另验 400 | 0 | Z |
 | P06 | 全部 | body >65536 字节 | 413 `PARAM_ERROR`，不 503 | 0 | Z |
 | P07 | E06 | `limit=101` | 400 `PARAM_ERROR` | 0 | Z |
+| P08 | E07/E08/E09 | 任意 body（含超大/畸形 JSON）发到未注册端点 | 404/405；不解析 body、不返回 413、不 503 | 0 | Z |
+| P09 | 全部 | HTTP 层 refs 计数 | 不新增 refs；E05 仍 14–15；finalize 90 上限不变 | 0 | Z |
 
-### 8.7 隐私
+### 8.7 未来契约测试：隐私
 
 | ID | 端点 | 注入/检查 | 预期 | Provider | 写集 |
 |---|---|---|---|---|---|
@@ -998,112 +1106,191 @@ FileService.authorizeDownload(file, actor):
 | V09 | 全部 | 触发 404/409/503 | 错误消息无资源存在性、PII、配置值、stack | 0 | Z |
 | V10 | E04 | `?fileId=`、`?url=`、`?purpose=` | 参数被忽略或 400；不得读取其他文件 | 0 | Z |
 | V11 | E04 | 尝试通过 `/api/v2/files/:id/download` 读 face 文件 | 现有文件契约拒绝或 404，不泄露 | 0 | Z |
+| V12 | 全部 | 响应/日志/audit/evidence 扫描 `requestDigest` | 零命中；不得返回任何摘要原值或可逆前缀 | 0 | Z |
+| V13 | 全部 | 扫描原始 `Idempotency-Key` | 零命中；只存在 HMAC 派生 op key | 0 | Z |
+| V14 | E08 | 响应扫描 evidence digest/head/fingerprint/K3 配置 | 零命中；只允许 `evidenceId` 与 `evidenceSequence` | 0 | Z |
+| V15 | 全部 | 扫描 PII 与伪 revision 来源 | 无姓名/手机/证件/人脸/序列号/objectKey；无缓存、行号、本地自增作为 revision | 0 | Z |
+| V16 | UI | 无权威 revision 时监听网络 | 0 个 `/retry`、`/reconcile`、`/finalize-retry` 请求 | 0 | Z |
 
-### 8.8 失败关闭与配置
+### 8.8 未来契约测试：失败关闭与配置
 
 | ID | 端点 | 注入 | 预期 | Provider | 写集 |
 |---|---|---|---|---|---|
 | F01 | E01/E03/E05 | K2 缺失/非法 | 503 `NOT_CONFIGURED` | 0 | Z |
 | F02 | E01/E03/E05 | K2 domain 单边缺失/损坏 | 409 `DOMAIN_INCOMPLETE` | 0 | Z |
 | F03 | E01/E03/E05 | K2 换钥/fingerprint 不符 | 409 `DOMAIN_MISMATCH` | 0 | Z |
-| F04 | E08/E09 | K3 缺失/非法 | 503 `NOT_CONFIGURED` | 0 | Z |
+| F04 | E08/E09 | K3 缺失/非法 | **404**（未注册）；C2/C3 后必须 503 `NOT_CONFIGURED` | 0 | Z |
 | F05 | 全部 | `live`/真实 Provider/设备连接请求 | 503 `NOT_CONFIGURED`；无网络/设备调用 | 0 | Z |
-| F06 | E05/E07/E08/E09 | CloudStore 或非 Mock H4-b | 503 `NOT_CONFIGURED` | 0 | Z |
+| F06 | E05/E07/E08/E09 | CloudStore 或非 Mock H4-b | E05 503 `NOT_CONFIGURED`；E07–E09 404（未注册） | 0 | Z |
 | F07 | E04 | 文件存储后端与配置不一致 | 503 `STORAGE_UNAVAILABLE`，无字节 | 0 | Z |
 | F08 | 全部 | Store/clock 抛错 | 503 `ADAPTER_UNAVAILABLE`，无部分写 | 0 | Z |
 | F09 | 全部 | 未注册路径/错误方法 | 404 或 405，不进入业务 | 0 | Z |
 | F10 | 全部 | 503 响应扫描 | 无密钥、无配置值、无异常 message | 0 | Z |
 | F11 | 全部 | body 超限 | 413 `PARAM_ERROR`，不得落为 503 | 0 | Z |
 | F12 | 全部 | 任一失败路径计数 Provider | Provider 增量为 0 | 0 | Z |
+| F13 | E07 | 持 `device.operation.retry` 调用 `/retry` | 404/405；无 K2 记录、无 job 写、Provider 0 | 0 | Z |
+| F14 | E08/E09 | 调用 `/reconcile`、`/finalize-retry` | 404/405；H4-c 未完成前不注册 | 0 | Z |
+| F15 | 静态/运行时 | 候选路径出现在 `routes.mjs`/`server.mjs` | 静态断言：server 0 分支；运行时三路径 404/405 | 0 | Z |
+| F16 | 全部 | 撤权后下一请求 | 403 `FORBIDDEN`（组织/成员失效同）；无缓存授权、无旧结果复用 | 0 | Z |
+| F17 | E01/E03/E05 | operation key 缺失/损坏 | 缺失 400、损坏 409；零写；不新建、不回退旧结果 | 0 | Z |
 
-### 8.9 `UNKNOWN_RESULT` 人工收敛
+### 8.9 未来契约测试：`UNKNOWN_RESULT` 人工收敛
 
 | ID | 端点 | 前置/请求 | 预期 | Provider | 写集 |
 |---|---|---|---|---|---|
 | U01 | E06 | `awaiting_result` 列表 | 200，可见 `awaiting_result` | 0 | Z |
-| U02 | E07 | 对 `awaiting_result` retry | 409 `INVALID_JOB`，零写 | 0 | Z |
-| U03 | E08 | `still_unknown`，无间隔/次数问题 | 200，状态不变，evidence sequence+1 | 0 | H4-c 证据写 |
-| U04 | E08 | 60 秒内第二次 `still_unknown` | 409 `RECONCILE_THROTTLED` | 0 | Z |
-| U05 | E08 | 第 9 次 `still_unknown` | 409 `RECONCILE_LIMIT` | 0 | Z |
-| U06 | E08 | `confirmed_removed` 成功 | 唯一进入 `succeeded` 的 HTTP 路径 | 0 | H4-c X + R2 |
-| U07 | E08 | `confirmed_present` | `terminal_failed`，grant/slot/claim 不释放 | 0 | H4-c X |
-| U08 | E09 | 对 `awaiting_result` finalize-retry | 409 `INVALID_STATE`，零写 | 0 | Z |
+| U02 | E07 | 对 `awaiting_result` retry | 404（未注册）；若注册必须 409 `INVALID_JOB`（H3 D53） | 0 | Z |
+| U03 | E08 | `still_unknown`，无间隔/次数问题 | 404（未注册）；C2 后 200，状态不变、sequence+1 | 0 | Z |
+| U04 | E08 | 60 秒内第二次 `still_unknown` | 404；C2 后 409 `RECONCILE_THROTTLED` | 0 | Z |
+| U05 | E08 | 第 9 次 `still_unknown` | 404；C2 后 409 `RECONCILE_LIMIT` | 0 | Z |
+| U06 | E08 | `confirmed_removed` 成功 | 404；C2 后唯一进入 `succeeded` 的 HTTP 路径 | 0 | Z |
+| U07 | E08 | `confirmed_present` | 404；C2 后 `terminal_failed`，grant/slot/claim 不释放 | 0 | Z |
+| U08 | E09 | 对 `awaiting_result` finalize-retry | 404；C3 后 409 `INVALID_STATE` | 0 | Z |
 | U09 | 全部 | 503/unknown 后换新键自动重发 | 契约禁止；测试客户端只允许同键重放/读列表 | 0 | Z |
+| U10 | 服务层 | 对 `awaiting_result` 直接调用 `h3b.requeue`/`h4b.requeue` | 409 `INVALID_JOB`；零写；不得推回 `queued` | 0 | Z |
+| U11 | E06/E08 | `awaiting_result` 只允许只读查询与人工对账 | E06 允许；E08 候选（HTTP 门禁）；Provider `queryOperation` 无入口、调用 0 | 0 | Z |
+| U12 | 全部 | 202/409/503 响应头与定时器 | 无 `Retry-After`；无定时器/自动重试/回调重放推动 job | 0 | Z |
+| U13 | E07 | 持 `device.operation.retry` 权限 | 权限存在不等于端点可用；仍 404，不激活未注册路由 | 0 | Z |
+| U14 | 设计 | “未来 retryable_failed 独立设计待办” | 未实现：`device.operation.retry`、K2 method、Idempotency-Key、expectedRevision、lease、attempts、nextAttemptAt、同键重放、异摘要冲突均未冻结 | 0 | Z |
 
-## 9. 逐项追溯矩阵
+### 8.10 当前静态验收（只读代码/文档，不启动服务）
 
-| 契约项 | 冻结值 | 来源 |
+| ID | 检查对象 | 静态预期 | 证据位置 |
+|---|---|---|---|
+| S01 | `publicJobResult` | 精确五字段；无 `revision/action/cleanupPhase/nextAttemptAt` | [dto.mjs](../../admin-web/lib/face-service/dto.mjs#L254-L263) |
+| S02 | `queryJob`/`revoke` | `queryJob` 只收 jobId、需 `device.audit.read`、无 `listJobs`；`revoke(grantId,{idempotencyKey})` 无 body | [service.mjs](../../admin-web/lib/face-service/service.mjs#L652-L736) |
+| S03 | `h3b.requeue` | 无 op key/`requestDigest`/domain；`expectedRevision` 必填 | [h3b.mjs](../../admin-web/lib/face-service/h3b.mjs#L444-L487) |
+| S04 | `h4b.requeue` | 无 op key/digest/domain；`expectedRevision` 仅在 `actor` 非空时校验 | [h4b.mjs](../../admin-web/lib/face-service/h4b.mjs#L482-L519) |
+| S05 | K2 已实现集合 | 仅 `face.submit`/`face.review`/`face.grant`/`face.revoke`；无 `face.operation.retry`/`face.reconcile` | [service.mjs](../../admin-web/lib/face-service/service.mjs#L117-L151)、[service.mjs](../../admin-web/lib/face-service/service.mjs#L199-L727) |
+| S06 | `review` 的 revision | 服务层 `expectedRevision` 可选；HTTP 契约必须收紧为必填 | [service.mjs](../../admin-web/lib/face-service/service.mjs#L291-L293) |
+| S07 | `routes.mjs` | 8 条描述；E08 在表内但 server 未注册；E09 不在表内 | [routes.mjs](../../admin-web/lib/face-service/routes.mjs#L6-L62) |
+| S08 | `server.mjs` | 无三路径分支；人脸相关只有 `files/:id/face-review` | [server.mjs](../../admin-web/server.mjs#L434-L438)、[server.mjs](../../admin-web/server.mjs#L665-L684) |
+| S09 | 权限目录 | 7 个 `device.*`；无新增；admin 不隐含 | [org.mjs](../../admin-web/lib/org.mjs#L89-L105) |
+| S10 | H4-c 阶段 | 设计 `b15aceb` 已批准（`ed7b66f`）；C1 `5dff386` 待独立终审；C2 仅 `42f8970` 文档；C2/C3 未开始 | H4-c 设计、C1 证据包、C2 preflight |
+| S11 | C1 代码边界 | `h4c-evidence.mjs` 只有 evidence/head/domain 只读 helper；无 `reconcile`/`finalize` 服务入口；无 K3 初始化 | C1 `5dff386` |
+| S12 | 九端点登记 | 0 注册；`http-ready` blocked 9/9；状态仅四值 | §0.2、§4.1 |
+| S13 | revision 权威 | 仅 credential revision（E02 投影）与 grant revision（事务内）；job revision 无读取；无详情路由 | [dto.mjs](../../admin-web/lib/face-service/dto.mjs#L235-L263)、[service.mjs](../../admin-web/lib/face-service/service.mjs#L731-L736) |
+| S14 | UI 契约 | 无权威 revision → 无启用按钮、不发请求（文档级断言；UI 编码另卡） | §3.7 |
+| S15 | 状态词 | 无 `ready`/`partial`/`已就绪` 作为状态值；候选只用 `proposed`/`blocked` | §0.2、§3.9 |
+| S16 | 敏感/隐私静态扫描 | 示例中无 `requestDigest` 原值、原始 Idempotency-Key、evidence digest/head、PII | 附录 B |
+| S17 | 三项缺口 | G-01/G-02/G-03 各有事实、结论、关闭、验收行，且无“已实现”宣称 | §0.1 |
+| S18 | 变更范围 | 仅本 Markdown；`server.mjs`/`routes.mjs`/服务层/测试零差异；工作区干净 | `git diff --stat`、`git status` |
+
+### 8.11 数量与连续性
+
+| 系列 | 编号范围 | 条数 | 阶段 |
+|---|---|---:|---|
+| N | N01–N15 | 15 | 未来契约测试 |
+| R | R01–R14 | 14 | 未来契约测试 |
+| C | C01–C13 | 13 | 未来契约测试 |
+| D | D01–D22 | 22 | 未来契约测试 |
+| P | P01–P09 | 9 | 未来契约测试 |
+| V | V01–V16 | 16 | 未来契约测试 |
+| F | F01–F17 | 17 | 未来契约测试 |
+| U | U01–U14 | 14 | 未来契约测试 |
+| S | S01–S18 | 18 | 当前静态验收 |
+| **合计** | — | **138** | — |
+
+- 上一稿 88 条：其中 31 条候选端点期望改写为“未注册/关闭”，57 条保持原意并补阶段标注。
+- 本轮新增 50 条：32 条未来契约（N13–N15、R12–R14、C11–C13、D17–D22、P08–P09、V12–V16、F13–F17、U10–U14）+ 18 条当前静态（S01–S18）。
+- 每个系列编号连续、无重复；全表 138 个 ID 唯一。
+
+## 9. 追溯矩阵
+
+| 契约项 | 冻结/事实值 | 来源 |
 |---|---|---|
 | E01 路径/权限 | `POST /api/v2/face-credentials` + `device.face.submit` | [routes.mjs](../../admin-web/lib/face-service/routes.mjs#L7-L13)、[org.mjs](../../admin-web/lib/org.mjs#L97) |
 | E01 DTO | `{personId,sourceFileId}` → `{credentialId,reviewState}` | [dto.mjs](../../admin-web/lib/face-service/dto.mjs#L112-L120)、[service.mjs](../../admin-web/lib/face-service/service.mjs#L199-L255) |
 | E02 路径/权限 | `GET .../review-queue` + `device.face.review` | [routes.mjs](../../admin-web/lib/face-service/routes.mjs#L14-L20)、[org.mjs](../../admin-web/lib/org.mjs#L98) |
-| E02 DTO | `publicReviewItem[]` | [dto.mjs](../../admin-web/lib/face-service/dto.mjs#L235-L251) |
+| E02 DTO | `publicReviewItem[]`，含 credential `revision` | [dto.mjs](../../admin-web/lib/face-service/dto.mjs#L235-L251) |
 | E03 路径/权限 | `POST .../:credentialId/review` + `device.face.review` | [routes.mjs](../../admin-web/lib/face-service/routes.mjs#L21-L27) |
-| E03 DTO | `{decision,expectedRevision}` → `{credentialId,reviewState}` | [service.mjs](../../admin-web/lib/face-service/service.mjs#L258-L313)、H1 终审 |
+| E03 DTO | `{decision,expectedRevision}` → `{credentialId,reviewState}`；服务层 revision 可选，HTTP 必填 | [service.mjs](../../admin-web/lib/face-service/service.mjs#L258-L313)、H1 终审 |
 | E04 路径/权限 | `GET .../:credentialId/image` + `device.face.readPrivate` | [routes.mjs](../../admin-web/lib/face-service/routes.mjs#L28-L33)、[org.mjs](../../admin-web/lib/org.mjs#L99) |
-| E04 私密读取 | 代理字节、404 同态、无 URL | [files.mjs](../../admin-web/lib/files.mjs#L1045-L1094) |
+| E04 私密读取 | 代理字节、404 同态、无 URL | [files.mjs](../../admin-web/lib/files.mjs#L1049-L1094) |
 | E05 路径/权限 | `POST .../:grantId/revoke` + `device.access.manage` | [routes.mjs](../../admin-web/lib/face-service/routes.mjs#L34-L40)、[org.mjs](../../admin-web/lib/org.mjs#L101) |
-| E05 DTO | 空 body → `{grantId,jobId,grantState,cleanupPending,evidenceScope}` | [service.mjs](../../admin-web/lib/face-service/service.mjs#L652-L728) |
+| E05 DTO | 空 body → `{grantId,jobId,grantState,cleanupPending,evidenceScope}`；digest 仅 `{grantId}` | [service.mjs](../../admin-web/lib/face-service/service.mjs#L652-L728) |
 | E06 路径/权限 | `GET /api/v2/device-operation-jobs` + `device.audit.read` | [routes.mjs](../../admin-web/lib/face-service/routes.mjs#L41-L46)、[org.mjs](../../admin-web/lib/org.mjs#L102) |
-| E06 DTO | `publicJobResult[]` | [dto.mjs](../../admin-web/lib/face-service/dto.mjs#L254-L263) |
-| E07 路径/权限 | `POST .../:jobId/retry` + `device.operation.retry` | [routes.mjs](../../admin-web/lib/face-service/routes.mjs#L47-L53)、[org.mjs](../../admin-web/lib/org.mjs#L103) |
-| E07 DTO | `{expectedRevision}` → `{jobId,state,revision}` | [h4b.mjs](../../admin-web/lib/face-service/h4b.mjs#L482-L517)、H3 Q07 |
-| E08 路径/权限 | `POST .../:jobId/reconcile` + `device.operation.reconcile` | [routes.mjs](../../admin-web/lib/face-service/routes.mjs#L54-L59)、[org.mjs](../../admin-web/lib/org.mjs#L104) |
-| E08 DTO/错误 | H4-c §4/§7/§11/§13 | [H4-c 设计](HK-AI-04-H4C-RECONCILIATION-DESIGN.md#L80-L118)、[H4-c 设计](HK-AI-04-H4C-RECONCILIATION-DESIGN.md#L380-L410) |
-| E09 路径/权限 | `POST .../:jobId/finalize-retry` + `device.operation.reconcile` | H4-c §6.5/§13.2；不在 routes.mjs，属 H4-c 新增提案 |
-| K2 格式/作用域 | 16–128、HMAC、org+method+actor | [dto.mjs](../../admin-web/lib/face-service/dto.mjs#L84-L86)、[collections.mjs](../../admin-web/lib/face-service/collections.mjs#L182-L256) |
-| K2 domain 错误 | `DOMAIN_INCOMPLETE`/`DOMAIN_MISMATCH` | [collections.mjs](../../admin-web/lib/face-service/collections.mjs#L257-L330) |
+| E06 DTO | `publicJobResult[]` 五字段；无 revision | [dto.mjs](../../admin-web/lib/face-service/dto.mjs#L254-L263) |
+| E06 缺口 | 无 `listJobs()`，只有 `queryJob(jobId)` | [service.mjs](../../admin-web/lib/face-service/service.mjs#L731-L736) |
+| E07 现状 | 仅 `requeue`，无 K2/digest/domain/严格重放 | [h3b.mjs](../../admin-web/lib/face-service/h3b.mjs#L444-L487)、[h4b.mjs](../../admin-web/lib/face-service/h4b.mjs#L482-L519) |
+| E07 候选命名 | `face.operation.retry` 仅为候选，未实现 | §1.4、§3.2 |
+| E08 现状 | 仅 H4-c 设计；`routes.mjs` 描述行存在，server 未注册 | [routes.mjs](../../admin-web/lib/face-service/routes.mjs#L54-L59)、[H4-c 设计](HK-AI-04-H4C-RECONCILIATION-DESIGN.md#L539-L614) |
+| E09 现状 | 仅 H4-c §13.2 提案；不在 `routes.mjs` | [H4-c 设计](HK-AI-04-H4C-RECONCILIATION-DESIGN.md#L598-L614) |
+| K2 格式/作用域 | 16–128、HMAC、org+method+actor、原始键不落库 | [dto.mjs](../../admin-web/lib/face-service/dto.mjs#L59-L91)、[collections.mjs](../../admin-web/lib/face-service/collections.mjs#L199-L254) |
+| K2 domain 错误 | `DOMAIN_INCOMPLETE`/`DOMAIN_MISMATCH` | [collections.mjs](../../admin-web/lib/face-service/collections.mjs#L257-L300) |
+| 安全整数 | `assertSafeInt`；revision 必须 1..`MAX_SAFE_INTEGER` | [collections.mjs](../../admin-web/lib/face-service/collections.mjs#L415) |
 | 404 同态 | 跨组织/不存在统一 404 | [org.mjs](../../admin-web/lib/org.mjs#L160-L185)、[service.mjs](../../admin-web/lib/face-service/service.mjs#L112-L115) |
-| 409 revision | review/revoke/reconcile 映射 | H1 终审、[service.mjs](../../admin-web/lib/face-service/service.mjs#L688-L690)、H4-c §11 |
-| 503 配置 | K2/K3/Provider/Store | H4-c §11、[h4b.mjs](../../admin-web/lib/face-service/h4b.mjs#L51-L61) |
-| UNKNOWN 人工 | 只查/只对账，不自动重试 | H3 [Q05/Q07](HK-AI-04-H3-LEASE-DISPATCH-DESIGN.md#L77-L101)、H4-c §1 |
+| 409 revision | review/revoke 映射 | H1 终审、[service.mjs](../../admin-web/lib/face-service/service.mjs#L688-L690) |
+| 503 配置 | K2/K3/Provider/Store | H4-c 设计 §11、[h4b.mjs](../../admin-web/lib/face-service/h4b.mjs#L51-L61) |
+| UNKNOWN 人工 | 只查/只对账，不自动重试、不普通 requeue | H3 [D53](HK-AI-04-H3-LEASE-DISPATCH-DESIGN.md#L77-L101)、H4-c §1、§6 |
+| H4-c 阶段 | 设计已批准；C1 待终审；C2/C3 未开始 | [H4-c 设计](HK-AI-04-H4C-RECONCILIATION-DESIGN.md#L1-L60)、C1 证据包、C2 preflight |
 
-## 10. 待 Codex 裁定
+## 10. 待 Codex 裁定（Q1–Q8）
 
-| 编号 | 问题 | 本卡建议 |
-|---|---|---|
-| Q1 | 是否批准九个端点路径与“无 createGrant HTTP 路径” | 批准；createGrant 另立卡 |
-| Q2 | `publicJobResult` 缺 `revision`，E07/E08/E09 无 CAS 基准 | 批准附录 A 的读模型修正；否则 E06-E09 保持关闭 |
-| Q3 | `face.operation.retry` K2 名称与服务层改造 | 批准名称；E07 编码卡补 K2 后再接线 |
-| Q4 | E05 是否必须 `expectedRevision`/`reasonCode` | 本卡按已实现 bodyless 冻结；若要扩展，另开服务层卡 |
-| Q5 | E01 同键重放用 201 | 批准；不扩展 H1 result |
-| Q6 | 图片缺 `readPrivate` 用 404 还是 403 | 用 404，沿用文件契约 |
-| Q7 | E02 `submittedAt` 缺省、E06 `failureReason` 恒 null | 接受为已知缺口；编码卡不得伪造字段 |
-| Q8 | E08/E09 是否等 H4-c 实现后再开 | 是；本卡不实现 H4-c |
-| Q9 | 202 是否加 `Retry-After` | 不加；禁止暗示自动重试 |
-| Q10 | 413 的 code | `PARAM_ERROR`；不得落为 `ADAPTER_UNAVAILABLE/503` |
+| 编号 | 问题 | 本卡建议 | 若不批准的影响 |
+|---|---|---|---|
+| Q1 | 是否扩展 `publicJobResult`/`queryJob` 返回 `revision` | 批准**只读扩展**（附录 A），且不新增详情路由；扩展前 E07/E08/E09 保持关闭 | 若无权威 revision，三条 mutation 永久关闭，UI 无按钮 |
+| Q2 | 哪些 mutation 必须使用 `expectedRevision` | 未来接线时仅“对已有资源做状态迁移”的 mutation：E03、E07、E08、E09；E01（新建）与 E05（bodyless 事实冻结）不使用 | 若要求 E05 也使用，须先有权威 grant revision 读取端点，否则必然伪造 |
+| Q3 | `requeue` 是否另立 H3/H4 独立任务 | 是。另立“`retryable_failed` 人工重试”任务，冻结 K2/摘要/审计/revision/lease/attempts/nextAttemptAt | 若塞进 H4-c，会与 C2/C3 的 decision/generation 语义冲突 |
+| Q4 | E05 维持无请求体，还是扩展 `expectedRevision`/`reasonCode` | 维持 bodyless（实现事实）；`expectedRevision` 待权威读取后再议；`reasonCode` 在枚举/持久化/审计有据前关闭 | 若强行扩展，E05 变成“客户端编版本号”的伪契约 |
+| Q5 | `reasonCode` 枚举与审计字段在哪个阶段冻结 | 在“独立服务层卡”冻结：先枚举、再持久化字段、再 audit 字段，最后才是 HTTP DTO | 若本卡先冻结，后续服务层无法对齐，必然返工 |
+| Q6 | H4-c 完成前两条路径是否完全不注册 | 是。E08/E09 在 C1 终审 + C2/C3 完成 + 编码卡前**完全不注册** | 若提前注册，会把未实现路径暴露为 404/500 混合面 |
+| Q7 | UI revision 的唯一权威端点 | 读模型扩展后只允许 E06 列表项携带的 `revision`；若 Q1 改为详情路由，则详情路由是唯一权威，两者不得并存 | 若无唯一权威，UI 必然从行号/缓存推导 |
+| Q8 | 候选路由保留 `routes.mjs` 描述表还是仅文档 | 保留描述表但标注“未注册、不得接线”（方案 A），E09 不入表 | 若仅文档，路径提案失去单一来源；若入表，容易被误读为已批准 |
 
-## 附录 A：读模型修正提案（未冻结，需另行批准）
+## 附录 A：读模型最小扩展提案（未冻结，需另行批准）
 
 E07/E08/E09 需要 job 的当前 `revision`。当前 `publicJobResult` 不返回它，E06 也没有详情路由。建议在**不新增路由**的前提下，给 E06 列表项增加以下只读字段：
 
-| 字段 | 类型 | 来源 | 用途 |
-|---|---|---|---|
-| `revision` | 安全整数 ≥1 | `job.revision` | E07/E08/E09 的 CAS 基准 |
-| `action` | `enroll`/`update`/`revoke` | `job.action` | 区分 enroll/revoke 路径 |
-| `cleanupPhase` | `dispatch`/`finalize`/`null` | `job.cleanupPhase`（enroll job 无此字段） | 区分 retryable_failed 是否可 retry |
-| `nextAttemptAt` | 安全整数或 `null` | `job.nextAttemptAt` | 展示退避到期时间 |
+```json
+{
+  "jobId": "job-...",
+  "state": "retryable_failed",
+  "attempts": 1,
+  "lastSuccessAt": null,
+  "failureReason": null,
+  "revision": 4,
+  "action": "revoke",
+  "cleanupPhase": "dispatch",
+  "nextAttemptAt": 1763000000000
+}
+```
+
+| 字段 | 类型 | 来源 | 用途 | 字段权限 | 缺失/跨组织 |
+|---|---|---|---|---|---|
+| `revision` | 安全整数 ≥1 | `job.revision` | E07/E08/E09 的 CAS 基准 | `device.audit.read` | 无权限 403；跨组织 404 同态 |
+| `action` | `enroll`/`update`/`revoke` | `job.action` | 区分 enroll/revoke 路径 | `device.audit.read` | 同上 |
+| `cleanupPhase` | `dispatch`/`finalize`/`null` | `job.cleanupPhase`（enroll job 无此字段） | 区分 retryable_failed 是否可 retry | `device.audit.read` 或 `null` | 同上 |
+| `nextAttemptAt` | 安全整数或 `null` | `job.nextAttemptAt` | 展示退避到期时间 | `device.audit.read` | 同上 |
 
 约束：
 
-- 只读投影，不新增集合、不新增状态/权限、不改变 `publicJobResult` 既有服务调用方。
-- 必须由 H1/H3/H4 契约修订批准；本卡不把它当作已冻结 DTO。
-- 若 Codex 拒绝该提案，则必须新增 `GET /api/v2/device-operation-jobs/:jobId` 详情路由；但该路由不在现有 routes.mjs，本卡不自行新增。
+1. 只读投影，不新增集合、不新增状态/权限、不改变 `publicJobResult` 既有服务调用方。
+2. 必须由 H1/H3/H4 契约修订批准；本卡不把它当作已冻结 DTO。
+3. 类型与安全整数：`Number.isSafeInteger` 且 `>=1`；`0/负数/小数/字符串/NaN/Infinity/2^53` 一律 400。
+4. 禁止来源：缓存、列表行号、数组下标、本地自增、时间戳、digest 前缀。
+5. 若 Codex 拒绝该提案，则必须新增 `GET /api/v2/device-operation-jobs/:jobId` 详情路由；但该路由不在现有 `routes.mjs`，本卡不自行新增。
+6. 在提案批准前，E06 保持 v0 五字段，UI 无按钮、不发请求。
 
 ## 附录 B：交付验证命令
 
 ```text
-git diff --check
+git diff --check                     # 含提交差异
+git show --stat --oneline HEAD       # 仅一份 Markdown
+git status --porcelain               # 工作区干净
+git ls-remote origin docs/hk-face-http-wiring-design   # 远端 SHA 核验
 # 相对链接：解析文档中所有非 http(s) 链接，确认目标存在
 # 敏感扫描：云厂商密钥、私钥块、口令/密钥/令牌赋值、32 字节 Base64、64 位 hex、手机号、身份证号
+# 静态断言：server.mjs 无三路径分支；routes.mjs 无 E09；K2 集合无 retry/reconcile
 ```
 
-验证结果记录在提交说明与最终回报中；本卡不运行任何 Provider、设备或 Cloud 调用。
+本卡只做静态验证：不启动 server、不发 HTTP、不跑 Provider/设备/Cloud、不执行任何业务写。验证结果记录在提交说明与最终回报中。
 
 ## 附录 C：本卡不做的事
 
 - 不修改 `server.mjs`，不注册、不调用任何业务 HTTP。
-- 不修改 `service.mjs`、`h4b.mjs`、`files.mjs`、`collections.mjs`、`store.mjs` 或测试。
-- 不实现 H4-c、不接真实 Provider、不连接设备、不创建 Cloud 资源。
+- 不修改 `service.mjs`、`h4b.mjs`、`h3b.mjs`、`files.mjs`、`collections.mjs`、`store.mjs`、`routes.mjs` 或测试。
+- 不实现 retry、reconcile、finalize-retry；不开始 H4-c C2/C3；不修改 C1。
+- 不接真实 Provider、不连接设备、不创建 Cloud 资源、不合并 `main`。
 - 不新增权限名、状态名、decision、`evidenceScope`、错误码。
 - 不把本卡当作 HTTP 上线批准；Codex 终审通过前，九个端点继续关闭。

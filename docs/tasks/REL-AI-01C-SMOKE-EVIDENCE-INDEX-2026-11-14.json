@@ -1,0 +1,66 @@
+[
+  {
+    "testId": "SMOKE-01",
+    "result": "BLOCKED",
+    "capturedAt": "",
+    "evidencePath": "",
+    "redacted": true,
+    "cleanupResult": "not_applicable"
+  },
+  {
+    "testId": "SMOKE-02",
+    "result": "BLOCKED",
+    "capturedAt": "",
+    "evidencePath": "",
+    "redacted": true,
+    "cleanupResult": "not_applicable"
+  },
+  {
+    "testId": "SMOKE-03",
+    "result": "BLOCKED",
+    "capturedAt": "",
+    "evidencePath": "",
+    "redacted": true,
+    "cleanupResult": "not_applicable"
+  },
+  {
+    "testId": "SMOKE-04",
+    "result": "BLOCKED",
+    "capturedAt": "",
+    "evidencePath": "",
+    "redacted": true,
+    "cleanupResult": "not_applicable"
+  },
+  {
+    "testId": "SMOKE-05",
+    "result": "BLOCKED",
+    "capturedAt": "",
+    "evidencePath": "",
+    "redacted": true,
+    "cleanupResult": "not_applicable"
+  },
+  {
+    "testId": "SMOKE-06",
+    "result": "BLOCKED",
+    "capturedAt": "",
+    "evidencePath": "",
+    "redacted": true,
+    "cleanupResult": "not_applicable"
+  },
+  {
+    "testId": "SMOKE-07",
+    "result": "BLOCKED",
+    "capturedAt": "",
+    "evidencePath": "",
+    "redacted": true,
+    "cleanupResult": "not_applicable"
+  },
+  {
+    "testId": "SMOKE-08",
+    "result": "BLOCKED",
+    "capturedAt": "",
+    "evidencePath": "",
+    "redacted": true,
+    "cleanupResult": "not_applicable"
+  }
+]

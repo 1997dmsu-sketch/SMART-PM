@@ -75,9 +75,22 @@ const QUERY_JOB_STATES = new Set(Object.values(JOB_STATE));
  * 冻结契约只定义 `string | null`（截断 120），且明确 H3/H4 job 恒为 null；
  * 没有完整、明确批准的公开枚举，内部 reasonCode、Provider 原始错误、
  * message/stack 均禁止提升为公开值，因此当前为空集，公开投影固定 null。
- * 未来若冻结公开枚举，只在此 Set 增加，测试直接复用，不维护并行列表。
+ * 未来若冻结公开枚举，只在此模块私有 Set 增加；调用方只能复用
+ * isPublicJobFailureReason 的只读判定，禁止以任何形式导出或返回集合引用
+ * （含 Symbol、default、对象属性、getter、可变副本）。
  */
-export const PUBLIC_JOB_FAILURE_REASONS = new Set();
+const PUBLIC_JOB_FAILURE_REASONS = new Set();
+
+/**
+ * HK-AI-07B 公开 failureReason 的唯一只读判定。
+ * 只返回模块私有白名单 Set.has(value) 的布尔结果，不导出也不返回集合引用，
+ * 因此无法经 add/set/push 等入口修改策略。null 由 queryJobDto 按冻结契约
+ * 先行处理（投影 null），不进入白名单判定，此处恒为 false。
+ * 后续 DTO 统一加固必须复用本判定，禁止另建并行白名单。
+ */
+export function isPublicJobFailureReason(value) {
+  return PUBLIC_JOB_FAILURE_REASONS.has(value);
+}
 
 /**
  * HK-AI-07B：queryJob 的唯一权威 revision 读模型。
@@ -107,8 +120,10 @@ function queryJobDto(job, jobId) {
   if (lastSuccessAt !== null && (!Number.isSafeInteger(lastSuccessAt) || lastSuccessAt < 0)) {
     failCode("INVALID_JOB", "任务 lastSuccessAt 非法", 409);
   }
+  // 仅缺失/null 按冻结契约投影 null；任何其他已存值必须先过唯一只读白名单判定，
+  // 未批准值 INVALID_JOB/409，禁止降级为 null、按正则放行或部分返回。
   const failureReason = job.failureReason ?? null;
-  if (failureReason !== null && !PUBLIC_JOB_FAILURE_REASONS.has(failureReason)) {
+  if (failureReason !== null && !isPublicJobFailureReason(failureReason)) {
     failCode("INVALID_JOB", "任务 failureReason 非法", 409);
   }
   return {

@@ -2,6 +2,17 @@
  * HK-AI-07B：queryJob revision 权威读模型定向测试。
  *
  * 只经过服务层 queryJob；不注册 HTTP、不启动 server、不连接 Provider/云/设备。
+ *
+ * 公开 failureReason 的唯一权威策略是 service.mjs 模块私有空 Set；命名空间
+ * 不得导出 PUBLIC_JOB_FAILURE_REASONS（含 Symbol、default、对象属性、getter）
+ * 或任何集合引用，只读复用面只有 isPublicJobFailureReason(value) => Set.has(value)。
+ *
+ * 技术债（本提交不修复，统一策略落地前禁止绕过）：
+ * - dto.mjs 的 publicJobResult 仍可能把 failureReason 原样投影（截断 120），
+ *   且 mock-provider.mjs 仍在使用；E06 与相关 HTTP 继续 blocked。
+ * - 统一策略前，publicJobResult 不得用于公开列表/读取。
+ * - 后续 DTO 统一加固必须复用同一只读判定 isPublicJobFailureReason，
+ *   禁止另建并行白名单或再次导出集合引用。
  */
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -10,9 +21,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { LocalStore } from "../lib/store.mjs";
+import * as serviceModule from "../lib/face-service/service.mjs";
 import {
   FaceCredentialService,
-  PUBLIC_JOB_FAILURE_REASONS,
+  isPublicJobFailureReason,
 } from "../lib/face-service/service.mjs";
 
 const orgId = "org-queryjob-revision";
@@ -20,6 +32,29 @@ const otherOrgId = "org-queryjob-other";
 const now = 1_700_000_000_000;
 const audit = { actor: "system", actorId: "system", action: "HK-AI-07B queryJob revision" };
 const ref = (collection, id) => ({ collection, id });
+
+// 导出面只允许服务类 + 只读判定；六个 DTO 字段按字典序冻结。
+const EXPECTED_EXPORTS = ["FaceCredentialService", "isPublicJobFailureReason"];
+const DTO_FIELDS = ["attempts", "failureReason", "jobId", "lastSuccessAt", "revision", "state"];
+// 任何非 null 值（含合法短码）都必须被只读判定拒绝；null/undefined 由服务层先行投影。
+const REJECTED_REASON_VALUES = [
+  null,
+  undefined,
+  "INTERNAL_ONLY_REASON",
+  "PROVIDER_TIMEOUT",
+  "FACE_NOT_FOUND",
+  "E1001",
+  "A",
+  "A".repeat(120),
+  "result_unknown",
+  "",
+  "A".repeat(121),
+  "BAD\u0000CODE",
+  { message: "secret" },
+  ["PROVIDER_TIMEOUT"],
+  0,
+  true,
+];
 
 const providerCalls = { count: 0 };
 const fileCalls = { count: 0 };
@@ -115,6 +150,53 @@ async function rejectionOf(fn) {
   assert.fail("预期 queryJob 失败关闭");
 }
 
+function assertSixPrimitiveFields(dto) {
+  assert.deepEqual(Object.keys(dto).sort(), DTO_FIELDS);
+  assert.equal(Object.keys(dto).length, 6);
+  for (const [field, value] of Object.entries(dto)) {
+    assert.ok(value === null || typeof value !== "object", `${field} 不得泄露对象/集合引用`);
+  }
+}
+
+function assertNoWhitelistExport(ns) {
+  assert.equal(Object.hasOwn(ns, "PUBLIC_JOB_FAILURE_REASONS"), false, "命名空间不得导出 PUBLIC_JOB_FAILURE_REASONS");
+  assert.equal("PUBLIC_JOB_FAILURE_REASONS" in ns, false, "命名空间不得导出 PUBLIC_JOB_FAILURE_REASONS");
+  assert.equal(ns.PUBLIC_JOB_FAILURE_REASONS, undefined, "命名空间不得经属性读出白名单");
+  assert.equal(Object.hasOwn(ns, "default"), false, "不得导出 default");
+  assert.deepEqual(
+    Object.getOwnPropertySymbols(ns).filter((symbol) => symbol !== Symbol.toStringTag),
+    [],
+    "不得导出 Symbol 键",
+  );
+  assert.deepEqual(Object.keys(ns).sort(), EXPECTED_EXPORTS, "导出面只允许服务类与只读判定");
+  for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(ns))) {
+    assert.equal(typeof descriptor.get, "undefined", `${key} 不得是 getter 导出`);
+    assert.equal(
+      descriptor.value instanceof Set || descriptor.value instanceof Map ||
+      descriptor.value instanceof WeakSet || descriptor.value instanceof WeakMap,
+      false,
+      `${key} 不得导出集合引用`,
+    );
+  }
+}
+
+function attemptPolicyMutation(ns) {
+  // 若未来有人把白名单或可变副本挂到导出面，这里会真实调用其 add/set/push：
+  // 调用后策略必须仍是空集，否则说明外部可修改公开策略。
+  for (const exported of Object.values(ns)) {
+    for (const method of ["add", "set", "push", "clear", "delete"]) {
+      const mutate = exported?.[method];
+      if (typeof mutate === "function") {
+        try {
+          mutate.call(exported, "PROVIDER_TIMEOUT");
+        } catch {
+          // 拒绝调用同样不改变策略；统一在下面断言。
+        }
+      }
+    }
+  }
+}
+
 before(async () => {
   globalThis.fetch = async () => {
     networkCalls += 1;
@@ -154,6 +236,8 @@ before(async () => {
     ["job-qjr-fr-null", { orgId, action: "enroll", state: "queued", revision: 1, attempts: 0, failureReason: null }],
     ["job-qjr-fr-internal", { orgId, action: "enroll", state: "terminal_failed", revision: 1, attempts: 1, failureReason: "INTERNAL_ONLY_REASON" }],
     ["job-qjr-fr-provider", { orgId, action: "enroll", state: "terminal_failed", revision: 1, attempts: 1, failureReason: "PROVIDER_TIMEOUT" }],
+    ["job-qjr-fr-valid-a", { orgId, action: "enroll", state: "terminal_failed", revision: 1, attempts: 1, failureReason: "A" }],
+    ["job-qjr-fr-valid-120", { orgId, action: "enroll", state: "terminal_failed", revision: 1, attempts: 1, failureReason: "A".repeat(120) }],
     ["job-qjr-fr-lower", { orgId, action: "enroll", state: "terminal_failed", revision: 1, attempts: 1, failureReason: "result_unknown" }],
     ["job-qjr-fr-long", { orgId, action: "enroll", state: "terminal_failed", revision: 1, attempts: 1, failureReason: "A".repeat(121) }],
     ["job-qjr-fr-control", { orgId, action: "enroll", state: "terminal_failed", revision: 1, attempts: 1, failureReason: "BAD\u0000CODE" }],
@@ -219,9 +303,7 @@ test("07B-01 有权查询返回精确六字段 DTO，revision 取当前持久化
     lastSuccessAt: null,
     failureReason: null,
   });
-  assert.deepEqual(Object.keys(dto).sort(), [
-    "attempts", "failureReason", "jobId", "lastSuccessAt", "revision", "state",
-  ]);
+  assertSixPrimitiveFields(dto);
   assert.deepEqual(reads, ["get:org_memberships", "get:device_operation_jobs"]);
 });
 
@@ -278,40 +360,102 @@ test("07B-05 内部 _id 有界且等于查询目标；ID 不一致失败关闭",
   await expectInvalidJob(longJobId);
 });
 
-test("07B-06 无批准公开 failureReason 值：null 原样，任何非 null 值失败关闭", async () => {
-  // 冻结契约只定义 string|null，未批准任何公开 failureReason 值；
-  // 服务层唯一权威 Set 为空，测试直接复用，不维护并行列表。
-  assert.equal(PUBLIC_JOB_FAILURE_REASONS.size, 0, "冻结契约未批准任何公开 failureReason 值");
-  for (const approved of PUBLIC_JOB_FAILURE_REASONS) {
-    assert.fail(`未预期的公开 failureReason：${approved}`);
+test("07B-06 命名空间无 PUBLIC_JOB_FAILURE_REASONS/集合引用；add/set/push 不可改策略；重复 import 不变", async () => {
+  assertNoWhitelistExport(serviceModule);
+
+  // 导出面只允许函数类入口，不得存在 add/set/push 等可写集合方法。
+  for (const exported of Object.values(serviceModule)) {
+    for (const method of ["add", "set", "push", "clear", "delete"]) {
+      assert.equal(Object.hasOwn(exported, method), false, `${method} 不得成为导出面可写入口`);
+    }
   }
 
-  // null、缺失、成功/无失败状态：固定投影 null，不凭空生成原因。
-  for (const id of ["job-qjr-fr-null", "job-qjr-queued", "job-qjr-rev2"]) {
-    const dto = await service("mem-audit").queryJob(id);
-    assert.equal(dto.failureReason, null, id);
-    assert.deepEqual(Object.keys(dto).sort(), [
-      "attempts", "failureReason", "jobId", "lastSuccessAt", "revision", "state",
-    ], id);
+  attemptPolicyMutation(serviceModule);
+  for (const value of REJECTED_REASON_VALUES) {
+    assert.equal(isPublicJobFailureReason(value), false, `外部 add/set/push 后策略仍不得包含 ${String(value)}`);
   }
 
-  for (const id of [
-    "job-qjr-fr-internal",   // 内部 reasonCode
-    "job-qjr-fr-provider",   // 格式合法的 Provider 原始短码
-    "job-qjr-fr-lower",      // 小写
-    "job-qjr-fr-empty",      // 空串
-    "job-qjr-fr-long",       // 超长
-    "job-qjr-fr-control",    // 控制字符
-    "job-qjr-fr-object",     // 对象
-    "job-qjr-fr-stack",      // 原始 stack
-    "job-qjr-fr-message",    // message/路径
-    "job-qjr-fr-array",      // 数组
+  // 重复 import 得到独立模块实例：导出面与只读策略必须保持一致且仍为空。
+  const reimported = await import("../lib/face-service/service.mjs?policy-reimport=1");
+  assertNoWhitelistExport(reimported);
+  attemptPolicyMutation(reimported);
+  for (const value of REJECTED_REASON_VALUES) {
+    assert.equal(reimported.isPublicJobFailureReason(value), false);
+    assert.equal(reimported.isPublicJobFailureReason(value), isPublicJobFailureReason(value));
+  }
+
+  // 导出类的实例与原型也不得暴露集合引用或 getter。
+  const probe = new FaceCredentialService({
+    store: {},
+    orgId: "org-export-probe",
+    actor: { membershipId: "mem-export-probe" },
+    files: {},
+    blacklist: {},
+    provider: {},
+  });
+  for (const object of [probe, Object.getPrototypeOf(probe)]) {
+    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(object))) {
+      assert.equal(typeof descriptor.get, "undefined", `${key} 不得是实例/原型 getter`);
+      assert.equal(descriptor.value instanceof Set, false, `${key} 不得暴露集合引用`);
+    }
+  }
+});
+
+test("07B-07 只读判定：null 按契约、内部码/Provider 码/任意合法短码均 false", () => {
+  assert.equal(typeof isPublicJobFailureReason, "function");
+  assert.equal(typeof isPublicJobFailureReason("PROVIDER_TIMEOUT"), "boolean");
+  // null 由 queryJobDto 先按契约投影为 null，不进入白名单，因此判定必须是 false。
+  assert.equal(isPublicJobFailureReason(null), false);
+  assert.equal(isPublicJobFailureReason(undefined), false);
+  for (const value of [
+    "INTERNAL_ONLY_REASON",
+    "PROVIDER_TIMEOUT",
+    "FACE_NOT_FOUND",
+    "E1001",
+    "A",
+    "A".repeat(120),
   ]) {
+    assert.equal(isPublicJobFailureReason(value), false, value);
+  }
+  // 非字符串一律 false：不字符串化、不正则匹配、不隐式放行。
+  for (const value of [0, 1, true, false, {}, [], ["PROVIDER_TIMEOUT"], Symbol("PROVIDER_TIMEOUT"), "lower", ""]) {
+    assert.equal(isPublicJobFailureReason(value), false);
+  }
+});
+
+test("07B-08 null 正常投影且 DTO 恰好六字段；读路径不写任何集合", async () => {
+  const snapshot = structuredClone(store.data);
+  for (const id of ["job-qjr-fr-null", "job-qjr-queued", "job-qjr-rev2"]) {
+    reads.length = 0;
+    const dto = await service("mem-audit").queryJob(id);
+    assertSixPrimitiveFields(dto);
+    assert.equal(dto.failureReason, null, id);
+    assert.deepEqual(reads, ["get:org_memberships", "get:device_operation_jobs"], id);
+  }
+  assert.deepEqual(store.data, snapshot);
+});
+
+test("07B-09 非 null 值全部 INVALID_JOB/409：合法短码/小写/空串/超长/NUL/对象/数组/stack/message", async () => {
+  for (const id of [
+    "job-qjr-fr-provider",    // 格式合法的 Provider 原始短码
+    "job-qjr-fr-valid-a",     // 单字符合法短码
+    "job-qjr-fr-valid-120",   // 120 字符合法边界
+    "job-qjr-fr-internal",    // 内部 reasonCode
+    "job-qjr-fr-lower",       // 小写
+    "job-qjr-fr-empty",       // 空串
+    "job-qjr-fr-long",        // 超长
+    "job-qjr-fr-control",     // NUL/控制字符
+    "job-qjr-fr-object",      // 对象
+    "job-qjr-fr-stack",       // 原始 stack
+    "job-qjr-fr-message",     // message/路径
+    "job-qjr-fr-array",       // 数组
+  ]) {
+    // expectInvalidJob 每次调用都断言 store.data 前后 deepEqual、只允许两次点查。
     await expectInvalidJob(id);
   }
 });
 
-test("07B-07 不存在与跨组织同态 404", async () => {
+test("07B-10 不存在与跨组织同态 404", async () => {
   reads.length = 0;
   const missing = await rejectionOf(() => service("mem-audit").queryJob("job-qjr-missing"));
   assert.equal(missing.code, "NOT_FOUND");
@@ -326,7 +470,7 @@ test("07B-07 不存在与跨组织同态 404", async () => {
   assert.deepEqual(reads, missingReads);
 });
 
-test("07B-08 无权 403；撤权后下一次立即拒绝", async () => {
+test("07B-11 无权 403；撤权后下一次立即拒绝", async () => {
   reads.length = 0;
   await assert.rejects(
     () => service("mem-none").queryJob("job-qjr-queued"),
@@ -350,7 +494,7 @@ test("07B-08 无权 403；撤权后下一次立即拒绝", async () => {
   assert.deepEqual(reads, ["get:org_memberships"]);
 });
 
-test("07B-09 响应敏感字段扫描零命中", async () => {
+test("07B-12 响应敏感字段扫描零命中", async () => {
   const dto = await service("mem-audit").queryJob("job-qjr-rev7");
   const text = JSON.stringify(dto);
   for (const token of [
@@ -364,7 +508,7 @@ test("07B-09 响应敏感字段扫描零命中", async () => {
   assert.equal(text.includes("undefined"), false);
 });
 
-test("07B-10 读路径零写入：所有集合 deepEqual、transact 0、list 0", async () => {
+test("07B-13 读路径零写入：所有集合 deepEqual、transact 0、list 0", async () => {
   const snapshot = structuredClone(store.data);
   const writesBefore = serviceWrites;
   reads.length = 0;
@@ -396,7 +540,7 @@ test("07B-10 读路径零写入：所有集合 deepEqual、transact 0、list 0",
   assert.equal(reads.filter((read) => read === "get:device_operation_jobs").length, 5);
 });
 
-test("07B-11 全程 Provider/网络/私密文件调用为零，服务层零写", () => {
+test("07B-14 全程 Provider/网络/私密文件调用为零，服务层零写", () => {
   assert.equal(providerCalls.count, 0);
   assert.equal(networkCalls, 0);
   assert.equal(fileCalls.count, 0);

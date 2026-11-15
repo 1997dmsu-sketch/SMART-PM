@@ -53,13 +53,22 @@ realm、version、fingerprint 两记录完全一致；`createdAt=enabledAt` 为�
 
 新增迁移专属全局集合提案 `evidence_digest_bootstrap_markers`；固定 `_id=evidence-digest-bootstrap:v1:global`。不增加 C1 domain 字段，不要求业务运行时创建或维护 marker。集合登记、云权限与备份接线须后续实施，本文不声称已存在。
 
-marker 精确字段建议：`_id, schemaVersion, deploymentId, migrationId, headId, versionId, realm, keyVersion, keyFingerprint, fenceToken, manifestDigest, artifactSha, changeId, operatorRef, reviewerRef, committedAt`。
+marker 精确字段建议：`_id, schemaVersion, deploymentId, migrationId, headId, versionId, realm, keyVersion, keyFingerprint, fenceToken, manifestDigest, preflightDigest, artifactSha, changeId, operatorRef, reviewerRef, committedAt`。
 
 - `schemaVersion=1`；deploymentId 绑定可信云账号/环境/数据库身份，不能只用调用者自由字符串；operator/reviewer 为受限内部引用，不能相同。
-- `migrationId` 为一次操作的唯一 ID；manifestDigest 绑定经过批准的预检清单、空集合结果、目标身份、制品及配置元数据，不含秘密。
+- `migrationId` 为一次操作的唯一 ID；manifestDigest 绑定经过批准的执行计划；preflightDigest 绑定维护窗口内实际扫描证据，二者不得混用，具体见 §3.3。
 - marker 与 head/version **同一原子事务 create-only**，全部不存在才允许提交；任一冲突整笔失败。marker 不可 update/delete，失败尝试写外部审计，不写“pending marker”。
-- marker 的存在永久消耗 bootstrap 资格。marker 丢失也不能恢复资格；外部部署台账保存已签验的初始化收据和备份索引，覆盖数据库整体丢失场景。
+- marker 的存在永久消耗 bootstrap 资格。marker 丢失也不能恢复资格；外部部署台账在数据库提交前持久化执行意图，提交后保存已签验的初始化收据和备份索引，覆盖确认丢失及数据库整体丢失场景。
 - marker 不是独立的真实性证明：必须与外部受控台账、目标身份、备份链交叉核对。台账不可用/不一致即停止。
+
+### 3.3 批准计划、扫描证据与外部台账
+
+- 批准计划至少绑定 schemaVersion、deploymentId、migrationId、changeId、工具制品 SHA、配置 realm/version/fingerprint、预期固定 ID、窗口起止、operator/reviewer、备份及能力证明引用；不包含真实密钥。manifestDigest 为该精确计划的 UTF-8 canonical JSON（沿用 C1 sorted-key 规则）的 SHA-256 小写 64 hex。拒绝未知字段、重复 JSON 键、隐式类型转换；签验与实际执行必须针对同一份规范化字节。
+- 实际扫描证据绑定 manifestDigest、维护策略世代、fenceToken、数据库权威快照/一致性标识、四集合的全量扫描完成标记与计数、服务端检查时间。preflightDigest 采用同一 canonical JSON + SHA-256 规则。四集合指三业务集合加 marker 集合；首次初始化要求全部为空，不能只检查固定 marker ID 而忽略其他 marker。目标集合不存在必须先经独立批准的 schema provisioning 并可权威读空；NOT_FOUND/权限错误不能当作空集合。
+- 扫描证据在锁被接管、维护策略变化、窗口结束或配置变化时失效。续租不改变 token；接管后的新 token 必须重扫并生成新 preflightDigest。同一批准计划可在窗口内重新扫描，但不得复用失效 proof。
+- 外部台账位于不随目标数据库删除/恢复的受控存储，按 deploymentId CAS 保证最多一个活动 bootstrap 意图。顺序为 `ELIGIBLE → INTENT_RECORDED → COMMITTED → VERIFIED`；失败或未知保留为 `BLOCKED/UNKNOWN`，不能删除或自动退回 ELIGIBLE。数据库 commit 前必须收到不可变 INTENT_RECORDED 的持久化确认，绑定两个 digest 和 token；落盘失败禁止 commit。
+- “首次资格”来自独立资源创建记录及从未初始化的受控部署历史，不能仅通过查不到收据推断。未决意图存在时，即使数据库及 marker 全空也禁止新 migrationId 初始化。同操作恢复仅在旧事务确定终止后，更新台账尝试记录、重新 fencing/扫描；没有可靠终止证明则保持 UNKNOWN。旧意图的作废必须有独立复核和可核验未提交证明，不能作为重新 bootstrap 的日常开关。
+- 时间字段为服务端权威毫秒安全整数；digest/fingerprint 为 64 位小写 hex；artifactSha 为完整 Git SHA；fenceToken 使用不会溢出/回绕的单调整数编码（建议规范十进制字符串），格式须在实施 schema 固定。marker committedAt 与 domain createdAt/enabledAt 为同一提交绑定时间，不采用操作者电脑时钟。CLI 只从受控 secret 注入读取密钥，不接受命令行密钥参数，不打印环境、密钥或底层异常原文。
 
 ## 4. 维护窗口、停写与 fencing
 
@@ -69,9 +78,9 @@ marker 精确字段建议：`_id, schemaVersion, deploymentId, migrationId, head
 2. 存储侧切换到维护写策略：仅当前迁移身份可执行限定事务；旧业务凭据撤权/失效。该策略必须拒绝旧客户端提交，不能依赖旧应用自觉检查锁。
 3. 获取数据库权威、全局独占的 fencing lock，锁键绑定 deploymentId，token 为服务端单调递增 epoch；记录 owner、leaseUntil、revision。续租和接管必须 CAS，token 永不复用。
 4. 每个迁移写事务都必须原子读取并核验锁的 owner/token/租约及维护策略世代，提交时 token 已过期或被接管必须拒绝。旧持有者迟到提交必须被数据库强制拒绝。
-5. 在这一稳定窗口用 CloudStore/底层权威数据库做全局完整枚举，读完分页并确认结束；限额、超时、权限不全、未知集合状态、读取失败均失败关闭。LocalStore、副本、缓存或调用者 proof 不可替代生产权威读取。
+5. 在这一稳定窗口用 CloudStore/底层权威数据库做四集合全局完整枚举，读完分页并确认结束；限额、超时、权限不全、未知集合状态、读取失败均失败关闭。LocalStore、副本、缓存或调用者 proof 不可替代生产权威读取。
 
-C1 Store 的点 refs 事务不能原子证明三个集合全局为空。空检查成立的前提是存储侧排除了所有并发写入，而不是把外部扫描包装成 proof。如果数据库/IAM 无法提供上述排他写策略、提交时 fencing 或多记录原子 create-only，结论为 NO-GO；实施卡须先补足基础设施能力，不降级为普通 Store helper。锁、marker、审计的实际事务支持必须通过真实后端的隔离测试证明。
+C1 Store 的点 refs 事务不能原子证明三个集合全局为空。空检查成立的前提是存储侧排除了所有并发写入，而不是把外部扫描包装成 proof。如果数据库/IAM 无法提供上述排他写策略、提交时 fencing 或多记录原子 create-only，结论为 NO-GO；实施卡须先补足基础设施能力，不降级为普通 Store helper。锁、marker、审计的实际事务支持必须通过真实后端的隔离测试证明。单纯在事务开始读取 leaseUntil 并用进程时钟比较不满足“提交时有效”；实施卡必须给出服务端提交条件或等效的可证明隔离机制，否则仍为 NO-GO。fencing epoch 的权威高水位不能随旧备份回退，灾难恢复后必须先废止旧凭据、抬升 epoch 并验证旧持有者无法写入。
 
 ## 5. 首次初始化流程与确认丢失
 
@@ -81,14 +90,18 @@ C1 Store 的点 refs 事务不能原子证明三个集合全局为空。空检�
 |---|---|---|
 | dry-run | 只读检查目标身份、外部首次部署台账、权限、三集合、marker、配置、备份及能力；生成待批准 manifest | 数据库零写；受控外部报告 |
 | prepare | 进入维护窗口、停写排空、获得 fencing，复查批准清单未变化 | 锁/维护控制面与外部审计 |
-| preflight | 在有效 fencing 下重新完整枚举；三集合及 marker 均空；台账证明从未初始化 | 零 domain/evidence 写 |
-| commit | 原子检查锁/策略世代及 marker/head/version 不存在；同事务 create-only 三条记录 | 仅 marker + head + version；锁续租另行受控 |
+| preflight | 在有效 fencing 下重新完整枚举；四集合完整扫描均空；台账证明从未初始化；持久化执行意图并确认 | 零 domain/evidence 写 |
+| commit | 确认外部意图已持久化；数据库事务原子检查锁/策略世代、绑定执行参数及 marker/head/version 不存在，再 create-only 三条记录 | 仅 marker + head + version；外部意图先行，锁续租另行受控 |
 | verify | 权威回读三条，精确 schema、字段绑定、配置 fingerprint、C1 只读 guard；记录事务 ID 和外部收据 | 外部审计；不补写业务数据 |
-| release | 将收据纳入可信备份并验证；双人复核后撤迁移凭据，恢复业务写策略，再释放维护锁 | 控制面；保持运行时 domain/marker 不可写 |
+| release | 将收据纳入可信备份并验证；双人复核后按下述退出顺序操作 | 控制面；保持运行时 domain/marker 不可写 |
+
+进入空库 preflight 前先做状态分类：在维护门禁和有效 fencing 下，若三条完整匹配且台账意图/收据可核验，只走只读 verify，不要求已有 evidence 为空；正常业务曾追加 evidence 不得令合法确认变成重新 bootstrap。若三条全缺且无未决历史，仅经首次资格核验后进入空库分支。任一部分状态、无 marker 的完整旧锚点、额外 marker 或不同操作占用均阻断。固定三条完整并不豁免对异常额外 domain/marker 的盘点；已批准未来迁移的历史版本按其独立清单判断。
+
+退出维护的顺序：核验与备份完成 → 撤销迁移写权限并确认全部迁移事务已结束、旧 token 无法提交 → 在仍阻断业务写时关闭/释放锁 → 最后恢复业务写策略并确认运行时仅有 evidence/head 所需权限、domain/marker 仍只读。任何一步不确定都保持业务停写，不能让迁移写权限与恢复后的业务写窗口重叠。
 
 dry-run 结果不能直接作为 apply 的空库 proof。apply 必须重新扫描；清单、配置、制品或目标变化须重新审批。锁租约不足以覆盖提交时先续租并重验；失锁立即停止。
 
-提交超时/确认丢失时不盲重试创建：保持停写，重新获取有效 fencing 后回读。三条完整、同 migrationId/manifest/deployment/config 且外部事务证据可核验，判为已提交，仅继续 verify；这是只读确认，不是再次初始化。三条全缺且后端确认原事务已终止未提交，才允许同批准操作重试。部分存在、不同操作占用、未知提交状态均停止并进入事故核查。完整且相同的重复执行只返回 ALREADY_APPLIED，不覆盖时间戳或 revision。
+提交超时/确认丢失时不盲重试创建：保持停写，重新获取有效 fencing 后回读。三条完整、同 migrationId/manifest/deployment/config 且外部事务证据可核验，判为已提交，仅继续 verify；这是只读确认，不是再次初始化。三条全缺且后端确认原事务已终止未提交，外部意图也已对账后，才允许同批准操作在有效窗口内重新扫描后重试。部分存在、不同操作占用、未知提交状态均停止并进入事故核查。完整且相同的重复执行只返回 ALREADY_APPLIED，不覆盖时间戳或 revision。确认时 marker 的 fenceToken/preflightDigest 必须匹配原提交尝试的外部意图，不能拿当前接管 token 与旧 marker 强行比较或改写 marker。外部台账与数据库不宣称跨系统原子提交：以先持久化意图、后数据库原子提交、最后回读收敛处理故障；任何无法对账的中间态保持阻断。
 
 ## 6. 受控迁移、回滚与灾难恢复
 
@@ -97,7 +110,7 @@ dry-run 结果不能直接作为 apply 的空库 proof。apply 必须重新扫�
 | 场景 | 裁定 |
 |---|---|
 | 真正首次部署，无历史，无 marker，三集合空 | 仅按 §4–5 bootstrap |
-| 已有完整匹配锚点 | 只读核验；不得重新初始化 |
+| 已有完整匹配锚点 | 有匹配 marker/外部台账时只读核验；无 marker 的旧锚点须另立存量接管设计，禁止补 marker 或重新初始化 |
 | 已有证据/证据 head，但 domain 缺失或旧格式 | 冻结写入；可信备份恢复或另发专项迁移卡，不自动补齐 |
 | 同 realm、同 keyVersion、不同密钥 | 禁止，包括直接改 fingerprint、删 marker 后重建 |
 | 同 realm、升 keyVersion | 另立轮换实施卡；本设计不授权执行，C1 当前仍 DOMAIN_MISMATCH |
@@ -114,7 +127,7 @@ dry-run 结果不能直接作为 apply 的空库 proof。apply 必须重新扫�
 
 可信备份须具备受控来源、不可变清单/完整性签验、明确一致性时间点、部署身份绑定、外部初始化收据、三集合与 marker 的一致副本，以及独立受限托管的原 K3 密钥版本。只备份 head/version 或仅复制 fingerprint 不足以恢复证据真实性。
 
-恢复先隔离演练，再在全局停写和 fencing 下按独立恢复变更单执行。核对 marker/domain/schema、完整 evidence 链、HMAC、head/sequence、关联 job/grant 与审计的一致性；新于备份的证据不得被旧快照静默覆盖，须盘点增量并给出可验证恢复方案，否则保持 NO-GO。不得接受操作者现场拼装记录、当前环境变量、空集合 proof、截图或不明来源导出作为信任锚。无可信备份/原密钥时保持失败关闭并上报不可恢复事实；不生成新钥冒充恢复。
+恢复先隔离演练，再在全局停写和 fencing 下按独立恢复变更单执行。恢复工具必须区别于 bootstrap；marker 的不可改写约束不允许通用 upsert，只有独立恢复授权可从可信备份还原原记录，不能改变初始化身份或重新签发 marker。外部台账不随旧数据库快照回滚。核对 marker/domain/schema、完整 evidence 链、HMAC、head/sequence、关联 job/grant 与审计的一致性；新于备份的证据不得被旧快照静默覆盖，须盘点增量并给出可验证恢复方案，否则保持 NO-GO。不得接受操作者现场拼装记录、当前环境变量、空集合 proof、截图或不明来源导出作为信任锚。无可信备份/原密钥时保持失败关闭并上报不可恢复事实；不生成新钥冒充恢复。
 
 ## 7. 错误矩阵
 
@@ -132,6 +145,7 @@ dry-run 结果不能直接作为 apply 的空库 proof。apply 必须重新扫�
 | marker 存在但操作不同，或任一记录部分缺失/损坏 | K3M_STATE_CONFLICT / 4 | DOMAIN_INCOMPLETE / 409（domain 损坏时） | 不覆盖，事故核查/恢复 |
 | domain 双缺，即使库看似空 | 须验证首次部署，否则 BOOTSTRAP_FORBIDDEN / 4 | DOMAIN_INCOMPLETE / 409 | 运行时永不初始化 |
 | realm/version/同版本 fingerprint 与固定 head 不同 | K3M_DOMAIN_MISMATCH / 4 | DOMAIN_MISMATCH / 409 | 禁止换钥；分类另立卡 |
+| 外部意图落盘失败、存在未决意图或台账回退 | K3M_LEDGER_BLOCKED / 3 | — | 禁止 commit/新 bootstrap；保留未知状态并核查 |
 | create-only 冲突，包括并发抢占 | K3M_CREATE_CONFLICT / 4 | — | 整事务零写，回读分类 |
 | 提交确认丢失/超时 | K3M_COMMIT_UNKNOWN / 5 | — | 可能已原子提交三条；按 §5 对账，禁盲写 |
 | 提交后回读不符、审计收据/备份不能核验 | K3M_VERIFY_BLOCKED / 5 | 运行时仍按 domain 合同判定 | 保持停写，不删记录 |
@@ -165,6 +179,11 @@ C1 的判定顺序保留：固定 head 缺/坏为 DOMAIN_INCOMPLETE；head 完�
 | K3B18 | 可信备份隔离恢复，篡改/错误部署/缺密钥/增量证据 | 正例全链 HMAC/引用一致；反例阻断，不覆盖新证据 |
 | K3B19 | 应用/配置回滚 | 不回退到自动初始化；保持 marker 与不可变历史 |
 | K3B20 | 敏感扫描与副作用 | 无密钥/原始 payload/PII/stack；Provider、设备、HTTP 注册均为 0 |
+| K3B21 | INTENT 已持久化、数据库提交后收据前崩溃，再丢失数据库 | 台账保留 UNKNOWN/意图，不得新 bootstrap；仅可信恢复 |
+| K3B22 | 计划与实际扫描 digest、重复键/未知字段、接管后旧扫描 | 精确绑定；拒绝漂移及旧 token/preflight；新扫描不冒充原批准计划 |
+| K3B23 | 完整三条且已有业务证据的同操作确认；完整旧锚无 marker | 前者仅 verify、不写；后者阻断，不能补 marker |
+| K3B24 | 非固定 ID marker、集合不存在、台账不可用 | 全量识别并阻断；无可信空结论 |
+| K3B25 | 恢复旧锁备份、旧凭据、维护退出各阶段崩溃 | epoch 不回退、旧写拒绝；迁移和业务写窗口无重叠 |
 
 实施验收须提交逐项证据、命令/exit/计数、后端事务及 IAM 证明、故障注入结果、全局停写/锁接管演练和恢复演练。延续 C1 定向、Admin/根回归及生产初始化旁路静态检查。未通过独立复审不得推进生产；Runbook 仍需单独更新并批准，H4-c 合入与发布门槛不因本文降低。
 
@@ -181,6 +200,20 @@ C1 的判定顺序保留：固定 head 缺/坏为 DOMAIN_INCOMPLETE；head 完�
 | Q7 锚点丢失或误初始化如何回滚？ | 提交后不得删锚重来；仅可信备份恢复，缺备份/密钥失败关闭 | §6.2–6.3；保护新增证据，禁止旧快照静默覆盖 |
 | Q8 当前是否可以实施/上线？ | 仅交付文档设计；后续工具、存储权限/fencing、测试、Runbook 更新及独立批准完成后另行授权执行 | §8；本文不使 C1 或门禁系统生产就绪 |
 
-## 10. 本次文档交付校验
+## 10. P0 设计复审与修订记录
 
-本提交以 main 基线新建文档分支，不合并四条输入分支；指定输入通过固定提交读取，避免混入生产代码。校验项为输入 SHA 核对、仅新增本文件、Markdown 本地链接检查、关键冻结项/矩阵完整性和 `git diff --check`。由于仅文档变更，不运行应用测试，不访问 Cloud/live、Provider 或设备。提交 SHA、普通推送及远端一致性由交付回报给出，避免在提交中记录自身 SHA。
+复审对象：首次文档提交 `6a8ca5a591da3db01707ebc817ae00b915d88189`。本轮为 Codex 文档复审与修订，不替代后续独立实施复审或生产批准。
+
+| 发现 | 风险 | 本轮修订 |
+|---|---|---|
+| P0：外部台账只保存提交后收据 | 提交后收据前故障，再丢库会无法判断是否已初始化 | §3.3 持久化执行意图先于 commit；未知态不恢复资格；K3B21 |
+| P0：空库预检与 ALREADY_APPLIED 顺序不明确 | 合法确认被非空检查拦截，或存量无 marker 时补写 | §5 先分类、仅首次路径查空；无 marker 的旧锚单列阻断；K3B23 |
+| P0：fencing 的提交时有效性及恢复高水位未证明 | 开始时租约有效但提交时已失效；旧备份恢复 epoch 后旧写重入 | §4 明确服务端能力门槛及 epoch 不回退；K3B11/25 |
+| P1：批准清单与动态扫描证据混用 | dry-run 与维护扫描的时间/token 不同导致摘要无法稳定核验 | §3.3 分离 manifestDigest/preflightDigest，明确规范化与失效规则；K3B22 |
+| P1：marker 只约束固定 ID，退出维护顺序不充分 | 异常 marker 被漏检，迁移写与业务写重叠 | 四集合完整扫描、迁移权限先撤再开放业务；K3B24/25 |
+
+设计层面的上述缺口已修订。实施仍为 NO-GO，直至真实后端的提交 fencing、原子三条 create-only、权限排他、外部台账及可信恢复能力逐项提供证据；本文不声称这些能力已在 CloudStore 存在。Q1–Q8 建议不变，须连同本轮修订一起评审。
+
+## 11. 本次文档交付校验
+
+首次提交以 main 基线新建文档分支，本轮在同分支追加复审修订，不合并四条输入分支；指定输入通过固定提交读取，避免混入生产代码。校验项为输入 SHA 核对、仅本文变更、固定提交链接目标检查、关键冻结项/矩阵完整性和 `git diff --check`。由于仅文档变更，不运行应用测试，不访问 Cloud/live、Provider 或设备。提交 SHA、普通推送及远端一致性由交付回报给出，避免在提交中记录自身 SHA。

@@ -12,7 +12,7 @@
 - H4 撤权/对账契约：`9fd088da57a1400e4e5fcaaf367b787b2e371dac`
 - H4-c 设计：`b15acebe0a8049f316797bbbd2692c55de25d111`（**已批准**的设计基线）
 - H4-c 批准/任务卡：`ed7b66f84c79339246a81ea76762cc388d7f4778`（批准设计并授权分阶段编码；**不授权 HTTP**）
-- H4-c C1：`90e4189717e21a5d458b09da34677ef29795c767`（最新返工，**待 Codex 独立终审**）；C2/C3 未开始
+- H4-c C1：`5dff386fe5c9648b04d1623d3e1898c59332639e`（最终 C1 收口，**待 Codex 独立终审**）；C2/C3 未开始
 - 审计范围：`hk-face-admin/` 五页及共享脚本；H1～H4 已批准契约与证据；H4-c 设计/批准/C1；页面验证、截图与交接记录
 - 本轮边界：**只写文档**。未修改 HTML/CSS/JS 或 API，未调用应用 HTTP，未连接设备或 Provider，未删除 Mock/模拟标识，未制作演示包，未合并 `main`。
 
@@ -32,7 +32,7 @@
 4. **`awaiting_result`/`UNKNOWN_RESULT` 只允许查询与人工对账。** 禁止自动重试、自动轮询、定时器、回调、Provider `queryOperation`、普通 requeue；E08 未注册，reconcile 按钮必须禁用且不得可执行。
 5. **Revoke 服务 implemented，HTTP blocked。** 服务层 `revoke(grantId,{idempotencyKey})` 无请求体；未来 HTTP mutation 至少 `expectedGrantRevision`；`reasonCode` 的枚举/持久化/审计/投影冻结前不得接收。
 6. **Retry E07 proposed/blocked。** `h3b.requeue`/`h4b.requeue` 缺 operation key、`requestDigest`、domain guard、严格重放，**不是正式 retry 接口**；E07 未注册，不得复用 requeue。
-7. **Reconcile/finalize-retry 等待 H4-c C1 终审 + C2 + C3 + RC01–RC73。** 设计已批准（`b15aceb`/`ed7b66f`），C1 最新 `90e4189` 待独立终审，C2 仅 `42f8970` 文档，C2/C3 未开始；E08/E09 完全不注册，页面不得有可执行按钮。
+7. **Reconcile/finalize-retry 等待 H4-c C1 终审 + C2 + C3 + RC01–RC73。** 设计已批准（`b15aceb`/`ed7b66f`），C1 最终提交 `5dff386` 待独立终审，C2 仅 `42f8970` 文档，C2/C3 未开始；E08/E09 完全不注册，页面不得有可执行按钮。
 8. **H4-c 与 H4 的批准引用已纠正。** 旧稿错误地把 `b15aceb` 写成未批准状态，本轮改为“已批准设计基线 + `ed7b66f` 批准/任务卡”；旧稿的 H4 批准对象引用已替换为可解析的 `6719066` 批准记录与 `9fd088d` 设计，不再引用那个设计返工哈希。
 
 ### 0.2 本轮修订对照
@@ -40,12 +40,12 @@
 | 项目 | 旧稿写法 | 本轮写法 | 依据 |
 |---|---|---|---|
 | H4 设计批准 | 旧稿把一个设计返工哈希当作批准对象 | 批准记录 `6719066`；设计契约 `9fd088d`（H4-c 的输入）；不把设计返工哈希当批准 | `6719066`、`9fd088d` |
-| H4-c 状态 | 旧稿误称 `b15aceb` 未批准、无批准文 | `b15aceb` 是已批准设计；`ed7b66f` 是批准+任务卡；C1 待终审，C2/C3 未开始 | `b15aceb`、`ed7b66f`、`90e4189`、`42f8970` |
+| H4-c 状态 | 旧稿误称 `b15aceb` 未批准、无批准文 | `b15aceb` 是已批准设计；`ed7b66f` 是批准+任务卡；C1 待终审，C2/C3 未开始 | `b15aceb`、`ed7b66f`、`5dff386`、`42f8970` |
 | HTTP | `routes.mjs` 8 条提案未注册 | 九端点 HTTP blocked 9/9；E08 仅描述行；E09 不在表；0 注册 | `2f597e3` |
 | queryJob revision | `1155b7b` 五字段、无 `revision` | `2f597e3` Q1 定六字段；`bc2a8b2` 实现；`cf7c75e` 最终硬化 | `2f597e3`、`bc2a8b2`、`f584471`、`cf7c75e` |
 | Revoke | H4 服务层实现；HTTP 未冻结 | service implemented；HTTP blocked；`expectedGrantRevision`/`reasonCode` 冻结前不接 | `1155b7b`、`2f597e3` |
 | Retry | 页面有重试目标 | E07 proposed/blocked；不完整 requeue 不作正式接口 | `2f597e3`、`1155b7b` |
-| Reconcile | 旧稿把 H4-c 当成仅设计提案 | 设计已批准，但 C1/C2/C3 + RC01–RC73 未齐；无可执行按钮 | `b15aceb`、`ed7b66f`、`90e4189` |
+| Reconcile | 旧稿把 H4-c 当成仅设计提案 | 设计已批准，但 C1/C2/C3 + RC01–RC73 未齐；无可执行按钮 | `b15aceb`、`ed7b66f`、`5dff386` |
 | 66 项差距 | 只有“依赖阶段” | §5.7 逐项给出依赖提交、服务/契约状态、HTTP/页面状态与结论 | 本文 §5.7 |
 
 **建议：不要把 `2e8966b` 直接接到 API。** 先完成 W0 的契约/视图 DTO/权限决策，并为九端点逐项另发编码卡；W7 真实设备生效标志必须单独批准。
@@ -94,7 +94,7 @@
 | H4-b 终审 | `1155b7ba65991d324fb8b22bb8f7dd87f49428f9`；批准文 `296bcba55b26163fe673af96e949ec3332322dbb` | `docs/tasks/HK-AI-04-H4B-APPROVAL-1155B7B-2026-11-13.md` | Mock 清理、local finalize |
 | H4-c 设计 | `b15acebe0a8049f316797bbbd2692c55de25d111` | `docs/tasks/HK-AI-04-H4C-RECONCILIATION-DESIGN.md` | **已批准设计基线**（`ed7b66f`）；字段/路径仍不构成 HTTP 契约 |
 | H4-c 批准/任务卡 | `ed7b66f84c79339246a81ea76762cc388d7f4778` | `docs/tasks/HK-AI-04-H4C-DESIGN-APPROVAL-B15ACEB-2026-11-14.md`、`HK-AI-04-H4C-IMPLEMENTATION-TASK-2026-11-14.md` | 批准设计并授权分阶段编码；**不授权 HTTP**；C1/C2/C3 必须独立复审 |
-| H4-c C1 | `90e4189717e21a5d458b09da34677ef29795c767` | `docs/tasks/HK-AI-04-H4C-C1-REVIEW-EVIDENCE-2026-11-14.md` | 最新 C1 返工；自述“等待 Codex 独立终审”；无 `reconcile`/`finalize-retry` 服务入口 |
+| H4-c C1 | `5dff386fe5c9648b04d1623d3e1898c59332639e` | `docs/tasks/HK-AI-04-H4C-C1-REVIEW-EVIDENCE-2026-11-14.md` | 最终 C1 收口（删除 K3 初始化）；自述“等待 Codex 独立终审”；无 `reconcile`/`finalize-retry` 服务入口 |
 | H4-c C2 前置 | `42f8970f065097f5163dfcbfc723932a72c51faf` | `docs/tasks/HK-AI-04-H4C-C2-PREFLIGHT-2026-11-14.md` | 仅文档；自述 C1 未正式通过、C2 未开始 |
 | HTTP 终审 | `2f597e33acb3563d92cafd2d70ac238a27d796dc` | `docs/tasks/HK-AI-07A-FACE-HTTP-WIRING-CONTRACT.md` | **九端点 HTTP blocked 9/9**；Q1–Q8 已裁定；0 注册 |
 | queryJob revision 契约 | `bc2a8b29441f7c8fdf1250b4c6905526d37b9c2f` | `admin-web/lib/face-service/service.mjs` | HK-AI-07B 六字段读模型；`revision` 只取当前 job；缺失/非法 `INVALID_JOB/409` |
@@ -109,7 +109,7 @@
 
 > 说明：上表中的 `docs/tasks/...` 批准文档多数不在 `feat/hk-face-admin` 树内，来自其他文档分支。本文以“路径 + 提交”记录出处，不把不在当前分支的文件写成可点击相对链接，避免离线链接失效。
 >
-> 证据分组：`2f597e3` 定 HTTP/UI 门禁与 Q1–Q8；`bc2a8b2`/`f584471`/`cf7c75e` 落地 queryJob revision 读模型；`b15aceb`/`ed7b66f` 批准 H4-c 设计并分阶段发卡；`90e4189` 是 C1 最新返工，不等于 C1 终审。**任何一组都不注册 HTTP。**
+> 证据分组：`2f597e3` 定 HTTP/UI 门禁与 Q1–Q8；`bc2a8b2`/`f584471`/`cf7c75e` 落地 queryJob revision 读模型；`b15aceb`/`ed7b66f` 批准 H4-c 设计并分阶段发卡；`5dff386` 是 C1 最终收口，不等于 C1 终审。**任何一组都不注册 HTTP。**
 
 ### 1.3 页面验证结论（只证明 Mock UI，不证明正式接线）
 
@@ -122,7 +122,7 @@
 
 | 编号 | 缺口 | 影响 | 处理建议 |
 |---|---|---|---|
-| E-01 | H4-c C1 最新 `90e4189` 仍自述“等待 Codex 独立终审”；C2 仅 `42f8970` 文档；C2/C3 未开始；RC01–RC73 未完成 | E08/E09 不能注册；页面不得有可执行 reconcile/finalize-retry 按钮 | C1 先终审；C2、C3 独立提交/复审；RC01–RC73 齐备后再谈 HTTP 编码卡 |
+| E-01 | H4-c C1 最终提交 `5dff386` 仍自述“等待 Codex 独立终审”；C2 仅 `42f8970` 文档；C2/C3 未开始；RC01–RC73 未完成 | E08/E09 不能注册；页面不得有可执行 reconcile/finalize-retry 按钮 | C1 先终审；C2、C3 独立提交/复审；RC01–RC73 齐备后再谈 HTTP 编码卡 |
 | E-02 | queryJob revision 读模型已在 `bc2a8b2` 落地、`cf7c75e` 硬化，但 HTTP 读取未批准、未注册 | UI 没有合法 job revision 来源；revision 依赖按钮必须禁用且 0 请求 | 另发 queryJob/列表 HTTP 编码卡；未批准前不接 UI |
 | E-03 | 九端点 HTTP blocked 9/9；无编码卡；E08 仅 `routes.mjs` 描述行，E09 不在表；`server.mjs` 0 注册 | 页面任何正式写路径都不可用 | 逐端点编码卡；E05/E07/E08/E09 先满足各自前置 |
 | E-04 | 没有后台视图 DTO：设备列表、申请详情、任务列表、审计列表 | 页面字段无法逐项映射到正式 DTO | W0 新增视图 DTO 文档并复审 |
@@ -183,7 +183,7 @@ H1～H4 已批准的是**服务层 Mock 契约**，不是 HTTP 契约，也不�
 
 - 页面分支 `origin/feat/hk-face-admin` @ `2e8966b` 基于 `origin/main @ 282a20f`，只有页面与页面测试；不含 `admin-web/lib/face-service/`。
 - 服务层基线 `1155b7b` 含 H1～H4-b 代码与测试；不含 `hk-face-admin/`。
-- queryJob revision 分支 `cf7c75e`（含 `bc2a8b2`、`f584471`）只改服务层与测试；H4-c C1 `90e4189` 只改 C1 helper/证据；两者都不含页面。
+- queryJob revision 分支 `cf7c75e`（含 `bc2a8b2`、`f584471`）只改服务层与测试；H4-c C1 `5dff386` 只改 C1 helper/index/测试/证据；两者都不含页面。
 - 页面、服务层、queryJob、H4-c **没有共同集成分支**。任何“页面直接接 API”的方案都必须先建集成分支，固定页面提交与服务提交，再注册路由；不能只在页面分支里写 `fetch`。
 
 ### 2.4 九个端点与 queryJob 的 HTTP 状态（本次修订核心）
@@ -589,18 +589,18 @@ H1～H4 已批准的是**服务层 Mock 契约**，不是 HTTP 契约，也不�
 | G-A06 | 申请 | 理由只写 toast | `1155b7b`、`2f597e3` | blocked | open | `reasonCode` 冻结前不接；自由文本无字段 |
 | G-A07 | 申请 | 同意记录合成 | `1155b7b`、`2f597e3` | blocked | open | consent `[TBD]`；不显示为正式字段 |
 | G-A08 | 申请 | ID 语义混用 | `1155b7b`、`2f597e3` | implemented | open | credentialId/grantId/identityApplicationId |
-| G-P06 | 任务/错误态 | reconcile 无权限/DTO | `b15aceb`、`ed7b66f`、`90e4189`、`2f597e3` | proposed | blocked | C1 终审+C2+C3+RC01–RC73；无可执行按钮 |
+| G-P06 | 任务/错误态 | reconcile 无权限/DTO | `b15aceb`、`ed7b66f`、`5dff386`、`2f597e3` | proposed | blocked | C1 终审+C2+C3+RC01–RC73；无可执行按钮 |
 | G-P07 | 任务 | 整页用 retry 门控 | `1155b7b`、`2f597e3` | implemented | blocked | 读 audit.read；E07/E08 blocked |
 | G-S02 | 任务 | 无 queued 行 | `1155b7b`、`2f597e3` | implemented | blocked | E06 blocked |
 | G-S03 | 任务 | 无 sending 行 | `1155b7b`、`2f597e3` | implemented | blocked | E06 blocked；sending 无取消/重试 |
-| G-S04 | 任务 | awaiting_result reconcile 未接 | `b15aceb`、`ed7b66f`、`90e4189`、`2f597e3` | proposed | blocked | 只查询+人工对账；E08 blocked；C1-C3 |
+| G-S04 | 任务 | awaiting_result reconcile 未接 | `b15aceb`、`ed7b66f`、`5dff386`、`2f597e3` | proposed | blocked | 只查询+人工对账；E08 blocked；C1-C3 |
 | G-S05 | 任务 | retry 无 due/revision | `1155b7b`、`2f597e3` | proposed | blocked | E07 blocked；不复用 requeue |
 | G-S06 | 任务 | terminal 只在错误文案 | `1155b7b`、`2f597e3` | implemented | blocked | E06 blocked |
 | G-S07 | 任务 | 无 `deviceEffective` 投影 | `1155b7b`、`2f597e3` | implemented | blocked | E06 blocked |
 | G-S08 | 任务 | 无 cancelled | `1155b7b`、`2f597e3` | implemented | blocked | E06 blocked |
 | G-S10 | 任务/审计 | 无 cleanup 投影 | `1155b7b`、`b15aceb`、`2f597e3` | proposed | blocked | H4-c C1/C2/C3；E08 blocked |
 | G-T01 | 任务 | 只有 3 个状态行 | `1155b7b`、`2f597e3`、`bc2a8b2` | implemented | blocked | E06 blocked；revision 无 HTTP |
-| G-T02 | 任务 | reconcile 无门控/DTO | `b15aceb`、`ed7b66f`、`90e4189`、`2f597e3` | proposed | blocked | E08 blocked；C1-C3；无按钮 |
+| G-T02 | 任务 | reconcile 无门控/DTO | `b15aceb`、`ed7b66f`、`5dff386`、`2f597e3` | proposed | blocked | E08 blocked；C1-C3；无按钮 |
 | G-T03 | 任务 | retry 只受 checkbox 控制 | `2f597e3`、`1155b7b` | proposed | blocked | E07 blocked；`expectedJobRevision`；不复用 requeue |
 | G-T04 | 任务 | `failureReason` bug | `1155b7b`、`2f597e3` | blocked | open | `publicJobResult` 未修；E06 blocked |
 | G-T05 | 任务 | 公开 action/result/env | `1155b7b`、`2f597e3` | implemented | blocked | 只显示六字段；E06 blocked |
@@ -1153,7 +1153,7 @@ H1～H4 已批准的是**服务层 Mock 契约**，不是 HTTP 契约，也不�
 | Q06 | 自由文本理由与 revoke `reasonCode` | `admin_audit` 无 reason；H4 `revokeReason` 是枚举；H4-c 是固定短码；`reasonCode` 未冻结 | review/reconcile 理由另定；revoke 先做“撤权服务与 HTTP 契约加固”，冻结前不接收 |
 | Q07 | 审计读取路由/视图 | 无正式路由；两套日志形状 | W0 定义 audit.read 列表/详情/分页 |
 | Q08 | enroll `awaiting_result` 对账 | H4-c 只覆盖 revoke | 只读查询，或另立 H4-d |
-| Q09 | H4-c 阶段门禁与 E08/E09 | 设计已批准（`b15aceb`/`ed7b66f`）；C1 `90e4189` 待终审；C2 仅 `42f8970` 文档；C2/C3 未开始；RC01–RC73 未完成 | 逐阶段复审；C1+C2+C3+RC01–RC73 前 E08/E09 不注册、页面无可执行按钮 |
+| Q09 | H4-c 阶段门禁与 E08/E09 | 设计已批准（`b15aceb`/`ed7b66f`）；C1 `5dff386` 待终审；C2 仅 `42f8970` 文档；C2/C3 未开始；RC01–RC73 未完成 | 逐阶段复审；C1+C2+C3+RC01–RC73 前 E08/E09 不注册、页面无可执行按钮 |
 | Q10 | `deviceEffective` 是否暴露前端 | `projectAccess` 是内部投影；无 HTTP 响应 | 定义只读投影字段；不暴露内部证据 |
 | Q11 | `retrying` 的 UI 语义 | 不是 job 状态 | 只作局部 action pending；不写 job 枚举 |
 | Q12 | 批量审批/导出/补件/设备写 | 无路由/权限/契约 | 首期不做；页面保持禁用 |
@@ -1170,7 +1170,7 @@ H1～H4 已批准的是**服务层 Mock 契约**，不是 HTTP 契约，也不�
 1. `2e8966b` 可以作为 Mock 演示 UI 基线，但**不能直接作为正式接线基线**。
 2. 页面与正式契约的最大差距是**权限名、视图 DTO、九端点 HTTP 未注册、job revision 来源、写路径 CAS/幂等/审计入参**，不是视觉。
 3. 当前页面在 Mock 值层是干净的（21 图 0 泄露、0 非 file 网络、0 真实设备/Provider）；接线时必须保持这些边界。
-4. **H4-c 设计已批准**（`b15aceb`/`ed7b66f`），但 C1 最新 `90e4189` 待独立终审，C2 仅 `42f8970` 文档，C2/C3 未开始，RC01–RC73 未完成；E08/E09 完全不注册，页面当前不得有可执行对账/恢复按钮。
+4. **H4-c 设计已批准**（`b15aceb`/`ed7b66f`），但 C1 最终提交 `5dff386` 待独立终审，C2 仅 `42f8970` 文档，C2/C3 未开始，RC01–RC73 未完成；E08/E09 完全不注册，页面当前不得有可执行对账/恢复按钮。
 5. **九端点 HTTP blocked 9/9**；`queryJob` 六字段读模型已在 `bc2a8b2` 落地、`cf7c75e` 硬化，但 HTTP 读取未批准；revoke 服务 implemented/HTTP blocked；E07 retry proposed/blocked，不完整 requeue 不作正式接口。
 6. 无合法 job revision 时，依赖它的 mutation 按钮必须隐藏/禁用、给出明确原因、网络请求 0；`awaiting_result` 只允许只读查询与人工对账，禁止自动重试/普通 requeue。
 7. 建议先完成 W0 的 16 项决策 + 九端点逐项编码卡，再按 W1～W6 分阶段接线；W7 真实设备单独批准。
@@ -1269,7 +1269,7 @@ H1～H4 已批准的是**服务层 Mock 契约**，不是 HTTP 契约，也不�
 | `docs/tasks/HK-AI-04-H4C-DESIGN-APPROVAL-B15ACEB-2026-11-14.md` | `ed7b66f` | `8f584c1289a10dd0332cd0a5e3b0aa6cb5f1a6e4` |
 | `docs/tasks/HK-AI-04-H4C-IMPLEMENTATION-TASK-2026-11-14.md` | `ed7b66f` | `5068d85fb3584e56dc04ecb971541e8e0b192e35` |
 | `docs/tasks/HK-AI-04-H4C-RECONCILIATION-DESIGN.md` | `b15aceb` | `f99fd3b15bfa7220f538d7f5ce893649d5ab5577` |
-| `docs/tasks/HK-AI-04-H4C-C1-REVIEW-EVIDENCE-2026-11-14.md` | `90e4189` | `c540fc5540cf37b05611c0be93821ea50a455cf4` |
+| `docs/tasks/HK-AI-04-H4C-C1-REVIEW-EVIDENCE-2026-11-14.md` | `5dff386` | `24e2fb664e2f3d51aa7dfb04a87aec611f2611ad` |
 | 21 张截图清单合并哈希 | `2e8966b` | `fb8eb52339e52c096d385e905c43b1f36c1b6140dcc2d75af689be2b196f2e20` |
 
 > 说明：截图为二进制，逐文件 SHA-256 已由 `HK-AI-05A-UI-CHECK.md` 与 `hk-ai-05a-verify-result.json` 记录；本表只记录清单合并哈希，避免在文档中复制 21 行二进制哈希。

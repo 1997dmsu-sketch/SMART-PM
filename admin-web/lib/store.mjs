@@ -9,6 +9,11 @@ const collections = [
   "rooms",
   "admin_audit",
   "property_catalog",
+  "rental_settings",
+  "rental_appointments",
+  "rental_preleases",
+  "rental_room_holds",
+  "rental_identity_documents",
 ];
 export function seed() {
   return {
@@ -95,6 +100,11 @@ export function seed() {
       },
     ],
     property_catalog: [],
+    rental_settings: [],
+    rental_appointments: [],
+    rental_preleases: [],
+    rental_room_holds: [],
+    rental_identity_documents: [],
     admin_audit: [],
   };
 }
@@ -115,6 +125,7 @@ export class LocalStore {
       await this.persist(this.data);
     }
     this.data.property_catalog ||= [];
+    for (const name of collections) this.data[name] ||= [];
     return this;
   }
   async persist(data) {
@@ -122,8 +133,25 @@ export class LocalStore {
     await writeFile(file + ".tmp", JSON.stringify(data), { mode: 0o600 });
     await rename(file + ".tmp", file);
   }
-  async list(name) {
-    return structuredClone(this.data[name] || []);
+  async get(name, id) {
+    if (!collections.includes(name)) throw Error("Invalid collection");
+    return structuredClone(
+      (this.data[name] || []).find((row) => row._id === id) || null,
+    );
+  }
+  async list(name, { where, fields } = {}) {
+    let rows = this.data[name] || [];
+    if (where)
+      rows = rows.filter((row) =>
+        Object.entries(where).every(([k, v]) => row[k] === v),
+      );
+    if (fields)
+      rows = rows.map((row) =>
+        Object.fromEntries(
+          fields.filter((k) => Object.hasOwn(row, k)).map((k) => [k, row[k]]),
+        ),
+      );
+    return structuredClone(rows);
   }
   async transact(refs, build, audit) {
     const task = this.queue.then(async () => {
@@ -204,17 +232,23 @@ export class CloudStore {
     this.app = app;
     this.db = app.database({ throwOnCode: true });
   }
-  async list(name) {
+  async get(name, id) {
+    if (!collections.includes(name)) throw Error("Invalid collection");
+    const r = await this.db.collection(name).where({ _id: id }).limit(1).get();
+    if (r.code || !Array.isArray(r.data))
+      throw new HttpError(503, "云数据库读取失败");
+    return r.data[0] || null;
+  }
+  async list(name, { where, fields } = {}) {
     if (!collections.includes(name)) throw Error("Invalid collection");
     const result = [];
     let skip = 0;
     while (true) {
-      const r = await this.db
-        .collection(name)
-        .orderBy("_id", "asc")
-        .skip(skip)
-        .limit(100)
-        .get();
+      let query = this.db.collection(name);
+      if (where) query = query.where(where);
+      if (fields)
+        query = query.field(Object.fromEntries(fields.map((k) => [k, true])));
+      const r = await query.orderBy("_id", "asc").skip(skip).limit(100).get();
       if (r.code || !Array.isArray(r.data))
         throw new HttpError(503, "云数据库查询失败");
       result.push(...r.data);

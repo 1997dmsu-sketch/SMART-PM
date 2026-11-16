@@ -75,6 +75,53 @@ const house = {
   cover: "",
   description: "测试",
 };
+test("leasing configuration and records require admin; mutations keep origin/CSRF protection", async () => {
+  assert.equal((await request("leasing", { auth: null })).status, 401);
+  assert.equal((await request("leasing", { auth: viewer })).status, 403);
+  assert.equal(
+    (await request("leasing/settings", { auth: editor })).status,
+    403,
+  );
+  const r = await request("leasing/settings");
+  assert.equal(r.status, 200);
+  assert.equal(r.data.depositMonths, 2);
+  assert.equal(r.data.holdHours, 72);
+  assert.equal(r.data.enabled, false);
+  assert.equal(
+    (
+      await request("leasing", {
+        method: "POST",
+        csrf: false,
+        data: { action: "purgeIdentity" },
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request("leasing", {
+        method: "POST",
+        origin: "https://other.invalid",
+        data: { action: "purgeIdentity" },
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request("leasing", {
+        method: "POST",
+        data: { action: "applyPayment", input: { trade_state: "SUCCESS" } },
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (await request("leasing/identity?id=not-a-document")).status,
+    404,
+  );
+});
+
 test("anonymous clients cannot read protected data", async () => {
   assert.equal((await request("users", { auth: null })).status, 401);
 });

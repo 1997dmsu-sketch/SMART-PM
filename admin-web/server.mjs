@@ -1,3 +1,5 @@
+import leasingDomain from "../cloudfunctions/leasing/domain.js";
+import leasingPay from "../cloudfunctions/leasing/wechat-pay.js";
 import { VR_LIMIT, vrUpload, vrFile } from "./lib/vr.mjs";
 import http from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -292,6 +294,44 @@ export async function createApp({
           attempts.delete(key);
           sessions.delete(token);
           return send({ ok: true });
+        }
+        if (path.startsWith("/api/leasing")) {
+          if (account.role !== "admin") fail("无租赁管理权限", 403);
+          const leasing = new leasingDomain.LeasingService({
+            store,
+            actor: { id: account._id, type: "admin" },
+            identityKey: process.env.RENTAL_IDENTITY_KEY_B64 || "",
+            payment: leasingPay.createWechatPay(),
+          });
+          if (path === "/api/leasing/identity" && method === "GET") {
+            const file = await leasing.identityFile(url.searchParams.get("id"));
+            res.writeHead(200, {
+              "Content-Type": file.mime,
+              "Cache-Control": "no-store",
+              "Content-Disposition": "inline",
+            });
+            return res.end(file.bytes);
+          }
+          if (path === "/api/leasing/settings" && method === "GET")
+            return send(await leasing.settings());
+          if (path === "/api/leasing" && method === "GET")
+            return send(await leasing.adminList());
+          if (path === "/api/leasing" && method === "POST") {
+            const input = await body(req);
+            if (
+              ![
+                "saveSettings",
+                "reviewAppointment",
+                "finishOrder",
+                "purgeIdentity",
+              ].includes(input.action)
+            )
+              fail("不支持的管理操作");
+            return send(
+              await leasing.dispatch(input.action, input.input || {}),
+            );
+          }
+          fail("租赁接口不存在", 404);
         }
         if (path === "/api/accounts") {
           authorize(account.role, "accounts", method !== "GET");

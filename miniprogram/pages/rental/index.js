@@ -37,8 +37,7 @@ Page({
   data: {
     loading: true, error: '', house: null, recommendations: [], demo: false,
     statusBarHeight: 20, navHeight: 64, scrolled: false, galleryMode: 'room', galleryImages: [], imageIndex: 0,
-    favorite: false, activeSection: 'overview', appointmentOpen: false,
-    appointmentDate: '', appointmentTime: '', minimumDate: '', formError: '',
+    favorite: false, activeSection: 'overview',
     tabs: [{ id: 'overview', label: '租房简介' }, { id: 'lease', label: '租住详情' }, { id: 'facilities', label: '房屋简介' }, { id: 'community', label: '小区详情' }],
     questions: ['什么时候可以看房？', '价格还能再优惠一下吗？', '房子靠近商场吗？', '房源的采光怎么样？']
   },
@@ -46,9 +45,7 @@ Page({
     this.houseId = options.id || '';
     const app = getApp();
     const statusBarHeight = app.globalData.statusBarHeight || 20;
-    const today = new Date();
-    const minimumDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    this.setData({ statusBarHeight, navHeight: statusBarHeight + 44, demo: api.isDemo(), minimumDate });
+    this.setData({ statusBarHeight, navHeight: statusBarHeight + 44, demo: api.isDemo() });
     this.load();
   },
   onPullDownRefresh() { this.load().finally(() => wx.stopPullDownRefresh()); },
@@ -108,24 +105,7 @@ Page({
       wx.showToast({ title: next ? '已关注此房源' : '已取消关注', icon: 'none' });
     } catch (_) { wx.showToast({ title: '保存失败，请重试', icon: 'none' }); }
   },
-  openAppointment() { this.setData({ appointmentOpen: true, formError: '' }); },
-  closeAppointment() { this.setData({ appointmentOpen: false }); },
-  stopPropagation() {},
-  changeDate(event) { this.setData({ appointmentDate: event.detail.value }); },
-  changeTime(event) { this.setData({ appointmentTime: event.detail.value }); },
-  saveAppointment(event) {
-    const { name, phone, note } = event.detail.value;
-    if (!String(name || '').trim()) { this.setData({ formError: '请填写联系人' }); return; }
-    if (!/^1\d{10}$/.test(String(phone || '').trim())) { this.setData({ formError: '请填写有效的 11 位手机号' }); return; }
-    if (!this.data.appointmentDate || !this.data.appointmentTime) { this.setData({ formError: '请选择看房日期和时间' }); return; }
-    const scheduled = new Date(`${this.data.appointmentDate.replace(/-/g, '/')} ${this.data.appointmentTime}`);
-    if (!Number.isFinite(scheduled.getTime()) || scheduled.getTime() <= Date.now()) { this.setData({ formError: '请选择未来的看房时间' }); return; }
-    try {
-      wx.setStorageSync(`smart-pm-appointment-${this.houseId}`, { houseId: this.houseId, name: name.trim(), phone: phone.trim(), date: this.data.appointmentDate, time: this.data.appointmentTime, note: note || '', status: 'local-draft', savedAt: Date.now() });
-      this.setData({ appointmentOpen: false });
-      wx.showModal({ title: '预约草稿已保存在本机', content: '尚未发送给物业。请通过电话联系或在线咨询，与工作人员确认看房安排。', showCancel: false });
-    } catch (_) { this.setData({ formError: '草稿保存失败，请重试' }); }
-  },
+  openAppointment() { wx.navigateTo({ url: `/pages/leasing/index?houseId=${encodeURIComponent(this.houseId || '')}` }); },
   contactPhone() {
     if (this.data.demo) { wx.showModal({ title: '设计演示', content: '当前为演示房源，不会拨打电话。接入真实房源后可联系工作人员。', showCancel: false }); return; }
     const phone = String(this.data.house.phone || '').replace(/[\s-]/g, '');

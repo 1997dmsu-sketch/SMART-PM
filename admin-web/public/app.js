@@ -1,3 +1,4 @@
+import { mountLeasing } from "./leasing-ui.js";
 import { mountProperties } from "./property-ui.js";
 const $ = (s) => document.querySelector(s);
 const esc = (v) =>
@@ -31,6 +32,7 @@ const paths = {
 const icon = (n) =>
   `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[n] || paths.grid}"/></svg>`;
 const labels = {
+  leasing: "预约与预签约",
   dashboard: "工作台",
   houses: "出租房源",
   content: "内容管理",
@@ -40,6 +42,7 @@ const labels = {
   accounts: "管理员设置",
 };
 const navIcons = {
+  leasing: "calendar",
   dashboard: "grid",
   houses: "house",
   content: "file",
@@ -160,7 +163,7 @@ function shellLogin() {
 }
 function shell() {
   $("#app").innerHTML =
-    `<div class="shell"><aside class="sidebar"><a href="#dashboard" class="brand"><div class="brandmark">${icon("building")}</div><div><strong>宇宙物业</strong><small>SMART PROPERTY</small></div></a><div class="nav-label">日常运营</div><nav class="nav">${["dashboard", "houses", "content", "users", "rooms"].map((n) => `<a href="#${n}" data-nav="${n}" title="${labels[n]}">${icon(navIcons[n])}<span>${labels[n]}</span></a>`).join("")}${session.account.role === "admin" ? `<div class="nav-label">系统管理</div>${["audit", "accounts"].map((n) => `<a href="#${n}" data-nav="${n}">${icon(navIcons[n])}<span>${labels[n]}</span></a>`).join("")}` : ""}</nav><div class="sidebar-bottom"><div class="sidebar-card"><strong>${icon("shield")} 管理服务</strong><small>${config.mode === "demo" ? "演示数据仅保存在本机" : "操作将同步至真实云环境"}<br>账号权限由服务端校验</small></div><small>SMART PM · ADMIN v${esc(config.version)}</small></div></aside><div class="main-wrap"><header class="topbar"><div class="breadcrumb">管理控制台 <span>/ <b id="crumb">工作台</b></span></div><div class="top-right">${modeTag()}<div class="account"><div class="avatar">${esc(session.account.name.slice(0, 1))}</div><span>${esc(session.account.name)}<br><small>${roleNames[session.account.role]}</small></span></div>${session.account._id !== "demo-admin" ? '<button class="logout" id="password-change">修改密码</button>' : ""}<button class="logout" id="logout">退出登录</button></div></header><main class="workspace" id="workspace"></main></div></div>`;
+    `<div class="shell"><aside class="sidebar"><a href="#dashboard" class="brand"><div class="brandmark">${icon("building")}</div><div><strong>宇宙物业</strong><small>SMART PROPERTY</small></div></a><div class="nav-label">日常运营</div><nav class="nav">${["dashboard", "houses", "content", "users", "rooms"].map((n) => `<a href="#${n}" data-nav="${n}" title="${labels[n]}">${icon(navIcons[n])}<span>${labels[n]}</span></a>`).join("")}${session.account.role === "admin" ? `<div class="nav-label">系统管理</div>${["leasing", "audit", "accounts"].map((n) => `<a href="#${n}" data-nav="${n}">${icon(navIcons[n])}<span>${labels[n]}</span></a>`).join("")}` : ""}</nav><div class="sidebar-bottom"><div class="sidebar-card"><strong>${icon("shield")} 管理服务</strong><small>${config.mode === "demo" ? "演示数据仅保存在本机" : "操作将同步至真实云环境"}<br>账号权限由服务端校验</small></div><small>SMART PM · ADMIN v${esc(config.version)}</small></div></aside><div class="main-wrap"><header class="topbar"><div class="breadcrumb">管理控制台 <span>/ <b id="crumb">工作台</b></span></div><div class="top-right">${modeTag()}<div class="account"><div class="avatar">${esc(session.account.name.slice(0, 1))}</div><span>${esc(session.account.name)}<br><small>${roleNames[session.account.role]}</small></span></div>${session.account._id !== "demo-admin" ? '<button class="logout" id="password-change">修改密码</button>' : ""}<button class="logout" id="logout">退出登录</button></div></header><main class="workspace" id="workspace"></main></div></div>`;
   $("#password-change")?.addEventListener("click", changePassword);
   $("#logout").onclick = async () => {
     try {
@@ -204,6 +207,9 @@ async function loadRoute(reset = true) {
       const data = await api("dashboard");
       if (version !== renderVersion) return;
       dashboard(data);
+    } else if (route === "leasing") {
+      if (session.account.role !== "admin") throw new Error("无租赁管理权限");
+      await mountLeasing({container: $("#workspace"), api, esc, toast});
     } else if (route === "rooms") {
       const snapshot = await api("property/snapshot");
       if (version !== renderVersion) return;

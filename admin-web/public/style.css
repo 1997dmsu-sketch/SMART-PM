@@ -1323,3 +1323,12 @@ th input[type="checkbox"] {
   margin: 0;
   padding: 0;
 }
+
+/* Leasing management: keep long contract forms readable. */
+.leasing-page .panel { padding: 24px; margin-bottom: 24px; }
+.leasing-page .panel h2 { font-size: 18px; margin: 0 0 20px; }
+.leasing-page .panel p { line-height: 1.8; color: #737b8a; margin: 12px 0 20px; }
+.leasing-page .field { margin: 14px 0; }
+.leasing-page .table-wrap { margin: 0 -24px; }
+.leasing-page textarea { line-height: 1.8; }
+.leasing-page input[type="checkbox"] { width: auto; margin-right: 8px; }

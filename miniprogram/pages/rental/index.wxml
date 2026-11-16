@@ -109,20 +109,4 @@
       <button class="contact-action chat" bindtap="consult"><text class="chat-bubble">•••</text>在线咨询</button>
     </view>
   </block>
-
-  <view wx:if="{{appointmentOpen}}" class="modal-mask" bindtap="closeAppointment" catchtouchmove="stopPropagation">
-    <view class="appointment-sheet" catchtap="stopPropagation">
-      <view class="sheet-heading">预约看房<button bindtap="closeAppointment" aria-label="关闭">×</button></view>
-      <text class="draft-note">仅保存本机草稿，尚未向物业提交预约。</text>
-      <form bindsubmit="saveAppointment">
-        <label class="field"><text>联系人</text><input name="name" placeholder="请输入姓名" maxlength="30" /></label>
-        <label class="field"><text>手机号</text><input name="phone" type="number" placeholder="用于看房联系" maxlength="11" /></label>
-        <picker mode="date" start="{{minimumDate}}" value="{{appointmentDate}}" bindchange="changeDate"><view class="field"><text>看房日期</text><text class="picker-value">{{appointmentDate || '请选择日期'}} ›</text></view></picker>
-        <picker mode="time" value="{{appointmentTime}}" bindchange="changeTime"><view class="field"><text>看房时间</text><text class="picker-value">{{appointmentTime || '请选择时间'}} ›</text></view></picker>
-        <label class="field"><text>备注</text><input name="note" placeholder="选填" maxlength="200" /></label>
-        <text wx:if="{{formError}}" class="form-error">{{formError}}</text>
-        <button class="submit-draft" form-type="submit">保存预约草稿</button>
-      </form>
-    </view>
-  </view>
 </view>

@@ -72,6 +72,7 @@ Page({
     }
     this.unavailable('优惠券');
   },
+  openLeasing() { wx.navigateTo({url:'/pages/leasing/index'}); },
   closeFavorites() { this.setData({ showFavorites: false }); },
   stopTap() {},
   openFavorite(event) {

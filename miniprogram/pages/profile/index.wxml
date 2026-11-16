@@ -23,6 +23,7 @@
     <view class="service-grid"><button wx:for="{{services}}" wx:key="id" data-name="{{item.name}}" bindtap="openService"><image src="/assets/profile-{{item.icon}}.png" /><text>{{item.name}}</text></button></view>
   </view>
   <view class="menu-card">
+    <button class="menu-row" bindtap="openLeasing"><text>预约看房与预签约</text><text class="chevron">›</text></button>
     <text class="section-heading">更多服务</text>
     <button wx:for="{{menus}}" wx:key="id" class="menu-row" data-id="{{item.id}}" bindtap="openMenu"><image src="/assets/profile-{{item.id}}.png" /><text>{{item.name}}</text><text class="chevron">›</text></button>
   </view>

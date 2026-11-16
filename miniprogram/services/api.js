@@ -105,3 +105,10 @@ function listMeters(type){
  return unsupported('旧水电表接口尚未按住户房产过滤，完成权限对接后开放');
 }
 module.exports={isDemo,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,logout,listFamily,addFamily,getProperty,listMeters};
+
+// Leasing operations always use authenticated cloud identity; no client payment success flag is accepted.
+async function leasing(action,input={}) {
+  if(isDemo())throw new Error('预约与预签约需连接真实服务，请使用已部署的云环境');
+  return (await call('leasing',{action,input})).data;
+}
+module.exports.leasing=leasing;

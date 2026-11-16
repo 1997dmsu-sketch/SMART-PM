@@ -441,48 +441,4 @@ export class H3MockDispatcher {
     return results;
   }
 
-  async requeue(jobId, expectedRevision, actor = null) {
-    assertBoundedId(jobId, "jobId");
-    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) fail("PARAM_ERROR", "expectedRevision 非法", 400);
-    if (actor !== null) {
-      if (!actor || typeof actor !== "object" || Array.isArray(actor)) fail("PARAM_ERROR", "actor 非法", 400);
-      assertBoundedId(actor.membershipId, "membershipId");
-      assertBoundedId(actor.actorId, "actorId");
-    }
-    const found = await this.#store.get(JOBS, jobId, this.orgId);
-    if (!found) fail("NOT_FOUND", "任务不存在", 404);
-    const job = validateDispatchJob(found);
-    const jobRef = ref(JOBS, jobId);
-    const target = logRef(job, "queued");
-    const memberRef = actor ? ref("org_memberships", actor.membershipId) : null;
-    const orgRef = ref("organizations", this.orgId);
-    let committed;
-    await this.#store.transact(unique([jobRef, target, ...(memberRef ? [memberRef, orgRef] : [])]), (state) => {
-      const now = safeNow(this.#clock);
-      const current = validateDispatchJob(state[keyOf(jobRef)]);
-      if (actor) {
-        const member = state[keyOf(memberRef)];
-        if (state[keyOf(orgRef)]?.status !== "active" || member?.orgId !== this.orgId ||
-            member.status !== "active" || (member.principalId ?? member.actorId ?? member._id) !== actor.actorId ||
-            !member.permissions?.includes("device.operation.retry")) fail("FORBIDDEN", "无重试权限", 403);
-      }
-      if (current.state !== "retryable_failed" || current.revision !== expectedRevision ||
-          current.revision !== job.revision || current.attempts >= 4 ||
-          !Number.isSafeInteger(current.nextAttemptAt)) fail("INVALID_JOB");
-      if (now < current.nextAttemptAt) fail("RETRY_NOT_DUE");
-      const revision = current.revision + 1;
-      const next = { ...current, state: "queued", revision, updatedAt: now };
-      const log = {
-        orgId: current.orgId, jobId, action: "enroll", fromState: current.state, state: "queued",
-        actorType: actor ? "user" : "system", actorId: actor?.actorId ?? SERVICE_ACTOR,
-        at: now, revision, attempt: current.attempts, leaseGeneration: current.leaseGeneration,
-        evidenceScope: "simulated", errorKind: null, reasonCode: null, alertCode: null,
-      };
-      assertLogAbsent(state, target);
-      committed = next;
-      return [{ collection: JOBS, id: jobId, data: patch(next) },
-        { collection: LOGS, id: target.id, data: log }];
-    }, this.#audit("重排合成门禁任务", actor?.actorId, actor ? "user" : "system"));
-    return committed;
-  }
 }

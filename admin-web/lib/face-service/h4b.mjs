@@ -479,44 +479,6 @@ export class H4MockRevoker {
     try { return await this.#finalize(job); }
     catch (error) { return this.#localFinalizeFailure(job, error.code || "ADAPTER_UNAVAILABLE"); }
   }
-  async requeue(jobId, expectedRevision = null, actor = null) {
-    const found = await this.#store.get(JOBS, jobId, this.orgId);
-    if (!found) fail("NOT_FOUND", "任务不存在", 404);
-    const job = validateRevokeJob(found);
-    if (job.cleanupPhase !== "dispatch" || job.state !== "retryable_failed" || job.attempts >= 4)
-      fail("INVALID_JOB");
-    if (actor !== null) {
-      if (!actor || typeof actor !== "object" || Array.isArray(actor)) fail("PARAM_ERROR", "actor 非法", 400);
-      assertBoundedId(actor.actorId, "actor.actorId"); assertBoundedId(actor.membershipId, "actor.membershipId");
-      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) fail("PARAM_ERROR", "expectedRevision 非法", 400);
-    }
-    const revision = job.revision + 1;
-    const logId = deterministicLogId(jobId, "queued", revision);
-    const memberRef = actor ? ref("org_memberships", actor.membershipId) : null;
-    const orgRef = actor ? ref("organizations", this.orgId) : null;
-    return this.#tx([ref(JOBS, jobId), ref(LOGS, logId), ...(actor ? [memberRef, orgRef] : [])],
-      job, "requeue", revision, (state) => {
-      const now = safeNow(this.#clock);
-      const current = validateRevokeJob(state[`${JOBS}/${jobId}`]);
-      if (actor) {
-        const member = state[keyOf(memberRef)];
-        if (state[keyOf(orgRef)]?.status !== "active" || member?.orgId !== this.orgId ||
-            member.status !== "active" || (member.principalId ?? member.actorId ?? member._id) !== actor.actorId ||
-            !member.permissions?.includes("device.operation.retry")) fail("FORBIDDEN", "无重试权限", 403);
-      }
-      if (current.revision !== job.revision || current.state !== "retryable_failed" ||
-          (actor && current.revision !== expectedRevision) || current.cleanupPhase !== "dispatch") fail("INVALID_JOB");
-      if (now < current.nextAttemptAt) fail("RETRY_NOT_DUE");
-      const next = { ...current, state: "queued", revision, updatedAt: now,
-        nextAttemptAt: null, result: null };
-      const log = logFor(current, "queued", revision, now);
-      if (state[`${LOGS}/${logId}`]) fail("CONFLICT");
-      return { value: next, writes: [
-        { collection: JOBS, id: jobId, data: patchRecord(next) },
-        { collection: LOGS, id: logId, data: log.data },
-      ] };
-    }, actor);
-  }
   async expire(jobId) {
     const found = await this.#store.get(JOBS, jobId, this.orgId);
     if (!found) fail("NOT_FOUND", "任务不存在", 404);

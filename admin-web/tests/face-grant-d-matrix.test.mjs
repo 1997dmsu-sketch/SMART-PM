@@ -10,7 +10,7 @@ import { BlacklistService, blacklistDecisionHeadId } from "../lib/blacklist.mjs"
 import { FaceCredentialService } from "../lib/face-service/service.mjs";
 import { H3MockDispatcher } from "../lib/face-service/h3b.mjs";
 import { MockFaceAccessProvider } from "../lib/face-service/mock-provider.mjs";
-import { claimDispatchJob } from "../lib/face-service/h3a.mjs";
+import { claimDispatchJob, validateDispatchJob } from "../lib/face-service/h3a.mjs";
 import { projectAccess } from "../lib/face-service/state.mjs";
 import { occupancyClaimId, primarySlotId } from "../lib/face-service/eligibility.mjs";
 import { eligibilityGuardId } from "../lib/claims.mjs";
@@ -1665,6 +1665,15 @@ async function setupH3(t, scenario = "success", options = {}) {
   return { h, created, provider, dispatcher, setClock: (value) => { clock = value; } };
 }
 
+// G1 封闭证据：旧 requeue 在实例与整个原型链上均不存在，任意参数调用抛 TypeError。
+function assertLegacyRequeueClosed(instance, args = []) {
+  assert.equal(instance.requeue, undefined, "实例不得暴露 requeue");
+  for (let proto = instance; proto; proto = Object.getPrototypeOf(proto)) {
+    assert.equal(Object.getOwnPropertyDescriptor(proto, "requeue"), undefined, "原型链不得存在 requeue");
+  }
+  assert.throws(() => instance.requeue(...args), TypeError, "旧入口调用必须抛 TypeError");
+}
+
 async function businessRows(h, created) {
   const grant = await h.store.get("device_access_grants", created.result.grantId, ORG);
   const jobs = await h.store.list("device_operation_jobs", ORG);
@@ -1735,18 +1744,23 @@ test("H3-b D21c：调用期间 grant revoked/expired/suspended/改绑均不复�
   }
 });
 
-test("H3-b D44/D45：pre_send 瞬态统一预算、退避到期 CAS 重排后再发", async (t) => {
+test("H3-b D44/D45：pre_send 退避边界保留；旧 requeue 封闭，测试 fixture 构造 queued 后再发", async (t) => {
   const x = await setupH3(t, "pre_send_fail");
   const first = await x.dispatcher.dispatch(x.created.result.jobId);
   assert.equal(first.state, "retryable_failed");
   assert.equal(first.nextAttemptAt, NOW + 30_000);
   assert.equal(x.provider.calls.length, 1);
+  // 旧入口封闭：退避前后均不可达（原 RETRY_NOT_DUE / 成功重排断言改为封闭负向证据）
+  assertLegacyRequeueClosed(x.dispatcher, [first._id, first.revision]);
   x.setClock(NOW + 29_999);
-  await assert.rejects(() => x.dispatcher.requeue(first._id, first.revision),
-    (error) => error.code === "RETRY_NOT_DUE");
+  assertLegacyRequeueClosed(x.dispatcher, [first._id, first.revision]);
   x.setClock(NOW + 30_000);
-  const queued = await x.dispatcher.requeue(first._id, first.revision);
-  assert.equal(queued.state, "queued");
+  assertLegacyRequeueClosed(x.dispatcher, [first._id, first.revision]);
+  // 测试内构造合法 queued fixture（enroll 保留原 result/nextAttemptAt），经正式 validator
+  patchRecord(x.h, "device_operation_jobs", first._id, {
+    state: "queued", revision: first.revision + 1, updatedAt: NOW + 30_000,
+  });
+  validateDispatchJob(await x.h.store.get("device_operation_jobs", first._id, ORG));
   x.provider.scenario = "success";
   patchRecord(x.h, "occupancies", OCCUPANCY, { endsAt: NOW + 100_000 });
   patchRecord(x.h, "occupancy_cycles", CYCLE, { endsAt: NOW + 100_000 });
@@ -1757,7 +1771,7 @@ test("H3-b D44/D45：pre_send 瞬态统一预算、退避到期 CAS 重排后再
   assert.equal(x.provider.calls.length, 2);
 });
 
-test("H3-b D42/D43：第二、三次失败严格使用 120000/600000 退避边界", async (t) => {
+test("H3-b D42/D43：第二、三次失败 120000/600000 退避边界保留；旧 requeue 封闭", async (t) => {
   for (const [priorAttempts, delay] of [[1, 120_000], [2, 600_000]]) {
     const x = await setupH3(t, "pre_send_fail");
     patchRecord(x.h, "device_operation_jobs", x.created.result.jobId, {
@@ -1769,11 +1783,11 @@ test("H3-b D42/D43：第二、三次失败严格使用 120000/600000 退避边�
     const failed = await x.dispatcher.dispatch(x.created.result.jobId);
     assert.equal(failed.attempts, priorAttempts + 1);
     assert.equal(failed.nextAttemptAt, NOW + delay);
+    // 原 RETRY_NOT_DUE / 成功重排断言改为封闭负向证据：边界前后均不可达
     x.setClock(failed.nextAttemptAt - 1);
-    await assert.rejects(() => x.dispatcher.requeue(failed._id, failed.revision),
-      (error) => error.code === "RETRY_NOT_DUE");
+    assertLegacyRequeueClosed(x.dispatcher, [failed._id, failed.revision]);
     x.setClock(failed.nextAttemptAt);
-    assert.equal((await x.dispatcher.requeue(failed._id, failed.revision)).state, "queued");
+    assertLegacyRequeueClosed(x.dispatcher, [failed._id, failed.revision]);
   }
 });
 
@@ -1857,14 +1871,14 @@ test("H3-b T3 grant 时间字段严格拒绝字符串与非法区间", async (t)
   }
 });
 
-test("H3-b D32/D40：post_send unknown 与异常结果进入 awaiting_result，禁止重排", async (t) => {
+test("H3-b D32/D40：post_send unknown 与异常结果进入 awaiting_result，旧 requeue 已封闭", async (t) => {
   for (const mode of ["post_send_unknown", "malformed"]) {
     const x = await setupH3(t, mode === "malformed" ? "success" : mode);
     if (mode === "malformed") x.provider.enrollFace = async () => ({ status: "succeeded" });
     const result = await x.dispatcher.dispatch(x.created.result.jobId);
     assert.equal(result.state, "awaiting_result");
-    await assert.rejects(() => x.dispatcher.requeue(result._id, result.revision),
-      (error) => error.code === "INVALID_JOB");
+    // 原 INVALID_JOB 断言改为封闭负向证据
+    assertLegacyRequeueClosed(x.dispatcher, [result._id, result.revision]);
   }
 });
 
@@ -2038,8 +2052,8 @@ test("H3-b D44：attempt=4 的名单瞬态与 Mock pre_send 均耗尽终态", as
     assert.equal(result.result.reasonCode, mode === "blacklist" ? "BLACKLIST_RETRY" : "PROVIDER_PRE_SEND");
     assert.equal(result.attempts, 4);
     assert.equal(x.provider.calls.length, mode === "provider" ? 1 : 0);
-    await assert.rejects(() => x.dispatcher.requeue(result._id, result.revision),
-      (error) => error.code === "INVALID_JOB");
+    // 原 attempt=4 INVALID_JOB 断言改为封闭负向证据
+    assertLegacyRequeueClosed(x.dispatcher, [result._id, result.revision]);
   }
 });
 
@@ -2068,34 +2082,31 @@ test("H3-b 超 90 refs 在 attempt=4 原子落 terminal_failed 而非未声明�
   assert.equal(logs[0].alertCode, "RETRY_EXHAUSTED");
 });
 
-test("H3-b D54：人工重排要求 device.operation.retry，自动重排共享 CAS", async (t) => {
+test("H3-b D54：旧人工 requeue 整体封闭，不保留 device.operation.retry/CAS 旁路", async (t) => {
   const x = await setupH3(t, "pre_send_fail");
   const failed = await x.dispatcher.dispatch(x.created.result.jobId);
   x.setClock(failed.nextAttemptAt);
-  await assert.rejects(() => x.dispatcher.requeue(failed._id, failed.revision, {
-    membershipId: MEMBERSHIP, actorId: MEMBERSHIP,
-  }), (error) => error.code === "FORBIDDEN");
   patchRecord(x.h, "org_memberships", MEMBERSHIP,
     { permissions: ["device.access.manage", "device.operation.retry"] });
-  const settled = await Promise.allSettled([
-    x.dispatcher.requeue(failed._id, failed.revision, { membershipId: MEMBERSHIP, actorId: MEMBERSHIP }),
-    x.dispatcher.requeue(failed._id, failed.revision),
-  ]);
-  assert.equal(settled.filter((item) => item.status === "fulfilled").length, 1);
-  assert.equal(settled.filter((item) => item.status === "rejected").length, 1);
+  const before = structuredClone(x.h.store.data);
+  assertLegacyRequeueClosed(x.dispatcher, [failed._id, failed.revision,
+    { membershipId: MEMBERSHIP, actorId: MEMBERSHIP }]);
+  assertLegacyRequeueClosed(x.dispatcher, [failed._id, failed.revision]);
+  assert.deepEqual(x.h.store.data, before, "封闭探针不得改写全库");
 });
 
-test("H3-b 人工重排 actor 与 revision 参数先失败关闭", async (t) => {
+test("H3-b 旧 requeue 的 actor/revision 参数校验入口已整体移除", async (t) => {
   const x = await setupH3(t, "pre_send_fail");
   const failed = await x.dispatcher.dispatch(x.created.result.jobId);
+  const before = structuredClone(x.h.store.data);
   for (const [revision, actor] of [
     ["1", null], [failed.revision, {}],
     [failed.revision, { membershipId: "", actorId: MEMBERSHIP }],
     [failed.revision, { membershipId: MEMBERSHIP, actorId: "\u0000" }],
   ]) {
-    await assert.rejects(() => x.dispatcher.requeue(failed._id, revision, actor),
-      (error) => ["PARAM_ERROR", "INVALID_ID"].includes(error.code));
+    assertLegacyRequeueClosed(x.dispatcher, [failed._id, revision, actor]);
   }
+  assert.deepEqual(x.h.store.data, before, "封闭探针不得改写全库");
 });
 
 test("H3-b D63/D66：仅 LocalStore+Mock，日志冲突与 fence 拒绝内容级零变化", async (t) => {

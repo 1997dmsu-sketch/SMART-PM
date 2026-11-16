@@ -68,6 +68,15 @@ async function harness({ scenario = "success", blocker = false, timeout = null, 
   return { dir, store, provider, dispatcher, jobId, grantId, claimId, slotId, guardId, now };
 }
 
+// G1 封闭证据：旧 requeue 在实例与整个原型链上均不存在，任意参数调用抛 TypeError。
+function assertLegacyRequeueClosed(instance, args = []) {
+  assert.equal(instance.requeue, undefined, "实例不得暴露 requeue");
+  for (let proto = instance; proto; proto = Object.getPrototypeOf(proto)) {
+    assert.equal(Object.getOwnPropertyDescriptor(proto, "requeue"), undefined, "原型链不得存在 requeue");
+  }
+  assert.throws(() => instance.requeue(...args), TypeError, "旧入口调用必须抛 TypeError");
+}
+
 const GRANTS = "device_access_grants";
 const JOBS = "device_operation_jobs";
 
@@ -120,15 +129,21 @@ test("H4-b shared device keeps owner claim active", async () => {
   } finally { await rm(h.dir, { recursive: true, force: true }); }
 });
 
-test("H4-b pre-send retry observes 30 second boundary and never releases resources", async () => {
+test("H4-b pre-send retry boundary; old requeue closed, resources untouched", async () => {
   const h = await harness({ scenario: "device_offline" });
   try {
     const failed = await h.dispatcher.dispatch(h.jobId);
     assert.equal(failed.state, "retryable_failed");
     assert.equal(failed.nextAttemptAt, h.now.value + 30_000);
-    await assert.rejects(() => h.dispatcher.requeue(h.jobId), (e) => e.code === "RETRY_NOT_DUE");
+    // 原 RETRY_NOT_DUE / 成功重排断言改为封闭负向证据
+    assertLegacyRequeueClosed(h.dispatcher, [h.jobId]);
     h.now.value += 30_000;
-    assert.equal((await h.dispatcher.requeue(h.jobId)).state, "queued");
+    assertLegacyRequeueClosed(h.dispatcher, [h.jobId]);
+    // 测试内构造合法 queued fixture（revoke dispatch queued 清空 result/nextAttemptAt），经正式 validator
+    const job = h.store.data.device_operation_jobs[0];
+    Object.assign(job, { state: "queued", revision: job.revision + 1, updatedAt: h.now.value,
+      nextAttemptAt: null, result: null });
+    validateRevokeJob(job);
     assert.equal((await h.store.get("grant_slot_claims", h.slotId, ORG)).state, "active");
   } finally { await rm(h.dir, { recursive: true, force: true }); }
 });
@@ -177,7 +192,7 @@ test("H4 validator rejects enroll jobs without weakening H3 schema", async () =>
   } finally { await rm(h.dir, { recursive: true, force: true }); }
 });
 
-test("H4-b dispatch retry uses exact 30/120/600 boundaries and attempt 4 exhausts", async () => {
+test("H4-b dispatch retry uses exact 30/120/600 boundaries, attempt 4 exhausts; old requeue closed", async () => {
   const h = await harness({ scenario: "device_offline" });
   try {
     const delays = [30_000, 120_000, 600_000];
@@ -186,9 +201,15 @@ test("H4-b dispatch retry uses exact 30/120/600 boundaries and attempt 4 exhaust
       assert.equal(failed.state, "retryable_failed");
       assert.equal(failed.nextAttemptAt, h.now.value + delay);
       h.now.value += delay - 1;
-      await assert.rejects(() => h.dispatcher.requeue(h.jobId), (e) => e.code === "RETRY_NOT_DUE");
+      // 原 RETRY_NOT_DUE / 成功重排断言改为封闭负向证据
+      assertLegacyRequeueClosed(h.dispatcher, [h.jobId]);
       h.now.value += 1;
-      assert.equal((await h.dispatcher.requeue(h.jobId)).state, "queued");
+      assertLegacyRequeueClosed(h.dispatcher, [h.jobId]);
+      // 测试内构造合法 queued fixture（revoke dispatch queued 清空 result/nextAttemptAt），经正式 validator
+      const job = h.store.data.device_operation_jobs[0];
+      Object.assign(job, { state: "queued", revision: job.revision + 1, updatedAt: h.now.value,
+        nextAttemptAt: null, result: null });
+      validateRevokeJob(job);
     }
     const terminal = await h.dispatcher.dispatch(h.jobId);
     assert.equal(terminal.state, "terminal_failed");
@@ -427,7 +448,7 @@ test("H4-b Provider payload/context are minimal and synthetic", async () => {
   } finally { await rm(h.dir, { recursive: true, force: true }); }
 });
 
-test("H4-b manual retry requires current revision and device.operation.retry", async () => {
+test("H4-b old manual requeue is closed; no revision/permission bypass remains", async () => {
   const h = await harness({ scenario: "device_offline" });
   try {
     const failed = await h.dispatcher.dispatch(h.jobId);
@@ -439,10 +460,13 @@ test("H4-b manual retry requires current revision and device.operation.retry", a
     ];
     await h.store.transact(writes.map((w) => ref(w.collection, w.id)), () => writes, audit);
     const actor = { actorId: "actor-retry", membershipId: "member-retry" };
-    await assert.rejects(() => h.dispatcher.requeue(h.jobId, failed.revision, actor), (e) => e.code === "FORBIDDEN");
     h.store.data.org_memberships[0].permissions = ["device.operation.retry"];
-    await assert.rejects(() => h.dispatcher.requeue(h.jobId, failed.revision + 1, actor), (e) => e.code === "INVALID_JOB");
-    assert.equal((await h.dispatcher.requeue(h.jobId, failed.revision, actor)).state, "queued");
+    const before = structuredClone(h.store.data);
+    // 原 FORBIDDEN / INVALID_JOB / 成功重排断言改为封闭负向证据
+    assertLegacyRequeueClosed(h.dispatcher, [h.jobId, failed.revision, actor]);
+    assertLegacyRequeueClosed(h.dispatcher, [h.jobId, failed.revision + 1, actor]);
+    assertLegacyRequeueClosed(h.dispatcher, [h.jobId, failed.revision, actor]);
+    assert.deepEqual(h.store.data, before, "封闭探针不得改写全库");
   } finally { await rm(h.dir, { recursive: true, force: true }); }
 });
 
@@ -742,11 +766,9 @@ test("H4-b awaiting_result rejects every automatic or manual continuation", asyn
   try {
     const unknown = await h.dispatcher.dispatch(h.jobId);
     assert.equal(unknown.state, "awaiting_result");
-    for (const action of [
-      () => h.dispatcher.dispatch(h.jobId),
-      () => h.dispatcher.requeue(h.jobId),
-      () => h.dispatcher.finalize(h.jobId),
-    ]) await assert.rejects(action, (error) => error.code === "INVALID_JOB");
+    await assert.rejects(() => h.dispatcher.dispatch(h.jobId), (error) => error.code === "INVALID_JOB");
+    assertLegacyRequeueClosed(h.dispatcher, [h.jobId]);
+    await assert.rejects(() => h.dispatcher.finalize(h.jobId), (error) => error.code === "INVALID_JOB");
     assert.equal(h.provider.calls.length, 1);
   } finally { await rm(h.dir, { recursive: true, force: true }); }
 });

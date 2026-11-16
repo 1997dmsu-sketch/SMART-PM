@@ -4,6 +4,8 @@ import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import http from "node:http";
+import https from "node:https";
 
 import { LocalStore } from "../lib/store.mjs";
 import { FileService } from "../lib/files.mjs";
@@ -100,14 +102,10 @@ async function seed(h, collections) {
   await h.store.transact(writes.map((w) => ({ collection: w.collection, id: w.id })), () => writes, audit);
 }
 
-async function fullSnapshot(store) {
-  const out = {};
-  for (const name of [
-    "device_operation_jobs", "device_operation_logs", "admin_audit", "operation_keys",
-    "operation_key_domains", "grant_slot_claims", "device_claims",
-    "device_claim_release_guards", "organizations", "org_memberships",
-  ]) out[name] = structuredClone(await store.list(name));
-  return out;
+// 全库快照：直接 structuredClone(store.data)，覆盖 store 中每一个集合（含所有未知/未来集合），
+// 而非固定白名单。任务卡 §4 要求每个独立场景动作前后分别保存 before/after 并 deepEqual。
+function fullSnapshot(store) {
+  return structuredClone(store.data);
 }
 
 test("LC01：直接 import h3b 的 H3MockDispatcher，实例与原型链无 requeue，导出面无替代", async (t) => {
@@ -128,20 +126,23 @@ test("LC02：直接 import h4b 的 H4MockRevoker，实例与原型链无 requeue
   assert.equal(Object.getOwnPropertyDescriptor(serviceIndex.H4MockRevoker.prototype, "requeue"), undefined);
 });
 
-test("LC03：任意 actor/revision 组合均不可达，且全库内容级零变化", async (t) => {
+test("LC03：任意 actor/revision 组合均不可达，且每个独立场景全库内容级零变化", async (t) => {
   const actors = [undefined, null,
     { actorId: "u-normal", membershipId: "m-normal" },
     { actorId: "system", membershipId: "m-system" }];
   const revisions = [undefined, 1, 0];
   for (const instanceKind of ["h3", "h4"]) {
     const h = instanceKind === "h3" ? await makeH3(t) : await makeH4(t);
-    const before = await fullSnapshot(h.store);
     for (const actor of actors) {
       for (const revision of revisions) {
-        assertThrowsTypeError(h.dispatcher, ["job-g1", revision, actor], `${instanceKind} actor/revision`);
+        const label = `${instanceKind} actor=${JSON.stringify(actor)} revision=${JSON.stringify(revision)}`;
+        // 逐场景：每个 actor/revision 组合独立保存动作前后全库快照
+        const before = fullSnapshot(h.store);
+        assertThrowsTypeError(h.dispatcher, ["job-g1", revision, actor], label);
+        const after = fullSnapshot(h.store);
+        assert.deepEqual(after, before, `${label}: 逐场景全库前后内容级相等`);
       }
     }
-    assert.deepEqual(await fullSnapshot(h.store), before, `${instanceKind}: 封闭探针不得改写全库`);
   }
 });
 
@@ -160,11 +161,13 @@ test("LC04/LC05：retryable_failed（到期/未到期）及各旧状态作业均
   ];
   const h = await makeH4(t);
   await seed(h, { device_operation_jobs: states });
-  const before = await fullSnapshot(h.store);
   for (const job of states) {
+    // 逐场景：每种 job 状态独立保存动作前后全库快照
+    const before = fullSnapshot(h.store);
     assertThrowsTypeError(h.dispatcher, [job._id, job.revision, null], `作业 ${job._id}`);
+    const after = fullSnapshot(h.store);
+    assert.deepEqual(after, before, `作业 ${job._id}（${job.state}）: 逐场景全库前后内容级相等`);
   }
-  assert.deepEqual(await fullSnapshot(h.store), before, "各状态作业经封闭探针后内容级不变");
 });
 
 test("LC06：已有旧 queued/log/audit 数据不改写，不新增 op key/domain，不伪造服务回执", async (t) => {
@@ -179,9 +182,10 @@ test("LC06：已有旧 queued/log/audit 数据不改写，不新增 op key/domai
     operation_keys: [{ _id: "key-legacy", orgId: ORG, value: "unchanged" }],
     operation_key_domains: [{ _id: "domain-legacy", orgId: ORG, value: "unchanged" }],
   });
-  const before = await fullSnapshot(h.store);
+  const before = fullSnapshot(h.store);
   assertThrowsTypeError(h.dispatcher, [queued._id, queued.revision, null], "旧 queued 作业");
-  assert.deepEqual(await fullSnapshot(h.store), before, "旧数据零改写、无新增 op key/domain");
+  const after = fullSnapshot(h.store);
+  assert.deepEqual(after, before, "旧数据零改写、无新增 op key/domain（全库前后内容级相等）");
 });
 
 test("LC07：两种 job 的 queued 相反不变量仍由正式 validator 守卫", async (t) => {
@@ -195,20 +199,68 @@ test("LC07：两种 job 的 queued 相反不变量仍由正式 validator 守卫"
   );
 });
 
-test("LC08：封闭探针独立统计 Provider / 私密文件 / 服务写 / 业务网络调用为 0", async (t) => {
+// 安装真实副作用计数器，包裹实例的 Provider / 私密文件 / Store 写 / 业务网络入口。
+// 关键约束（任务卡 §4）：guard 在模块加载与 fixture 就绪"之后"安装，安装时记录当前计数为
+// baseline；自检绝不重置/清零计数，因此不会抹掉模块加载期已发生的调用。封闭探针只统计
+// 安装后的增量（deltas），且与其他 dispatcher 回归使用的 Mock 调用口径分离。
+function installSideEffectCounters(h, t) {
+  const counts = { provider: 0, privateFile: 0, storeWrite: 0, network: 0 };
+  const restoreFns = [];
+  const wrap = (obj, key, bucket) => {
+    if (!obj || typeof obj[key] !== "function") return;
+    const original = obj[key].bind(obj);
+    obj[key] = (...args) => { counts[bucket] += 1; return original(...args); };
+    restoreFns.push(() => { obj[key] = original; });
+  };
+
+  // Provider：真实调用计数（独立于 mock 内部 calls 数组）
+  for (const key of ["enrollFace", "revokeFace", "updateFace", "deleteFace"])
+    wrap(h.provider, key, "provider");
+  // 私密文件：FileService 全部写/授权入口
+  for (const key of ["upload", "registerLegacy", "attach", "detach",
+    "authorizeDownload", "reviewFace", "retire", "logAccess", "prepareReference"])
+    wrap(h.files, key, "privateFile");
+  // 服务写：Store 全部写入口
+  for (const key of ["transact", "change", "persist"])
+    wrap(h.store, key, "storeWrite");
+  // 业务网络：fetch 与 http/https 请求入口
+  wrap(globalThis, "fetch", "network");
+  wrap(http, "request", "network");
+  wrap(http, "get", "network");
+  wrap(https, "request", "network");
+  wrap(https, "get", "network");
+
+  t.after(() => { for (const fn of restoreFns.reverse()) fn(); });
+
+  const baseline = { ...counts }; // 安装时刻基线，含模块加载期既有的真实计数
+  return {
+    baseline,
+    // 自检：返回真实计数快照，绝不改写 counts，故不抹掉模块加载期调用
+    selfCheck: () => ({ ...counts }),
+    read: () => ({ ...counts }),
+    deltas: () => Object.fromEntries(
+      Object.entries(counts).map(([k, v]) => [k, v - baseline[k]]),
+    ),
+  };
+}
+
+test("LC08：封闭探针四类真实副作用计数器（Provider/私密文件/服务写/业务网络）均为 0", async (t) => {
   for (const instanceKind of ["h3", "h4"]) {
     const h = instanceKind === "h3" ? await makeH3(t) : await makeH4(t);
-    // 计数 guard 在实例创建后安装，覆盖探针窗口；模块加载期调用不计入本口径
-    const before = await fullSnapshot(h.store);
+    // 计数 guard 在实例/fixture 就绪后安装，覆盖探针窗口；模块加载期调用计入 baseline 不抹掉
+    const counters = installSideEffectCounters(h, t);
+    const atInstall = counters.selfCheck();
+    assert.deepEqual(atInstall, counters.baseline, `${instanceKind}: 自检不得清零模块加载期计数`);
+
+    const before = fullSnapshot(h.store);
     const callsBefore = h.provider.calls.length;
-    const filesBefore = instanceKind === "h3" ? h.files : null;
     assertThrowsTypeError(h.dispatcher, ["job-g1", 1, null], `${instanceKind} 零副作用探针`);
-    assert.equal(h.provider.calls.length - callsBefore, 0, `${instanceKind}: Provider 调用必须为 0`);
-    assert.deepEqual(await fullSnapshot(h.store), before, `${instanceKind}: 服务写/Store 写必须为 0`);
-    if (filesBefore) {
-      // files 对象引用不变即表示未走私密文件写入路径（无写文件 API 被调用）
-      assert.equal(h.files, filesBefore, "H3: 私密文件对象不得被替换或写入");
-    }
+
+    const delta = counters.deltas();
+    assert.deepEqual(delta, { provider: 0, privateFile: 0, storeWrite: 0, network: 0 },
+      `${instanceKind}: 四类副作用增量必须为 0，实测 ${JSON.stringify(delta)}`);
+    assert.equal(h.provider.calls.length - callsBefore, 0, `${instanceKind}: provider.calls 计数增量为 0`);
+    assert.deepEqual(fullSnapshot(h.store), before, `${instanceKind}: 全库内容级零变化`);
   }
 });
 

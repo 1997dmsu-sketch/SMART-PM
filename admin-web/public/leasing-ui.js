@@ -5,6 +5,7 @@ export async function mountLeasing({ container, api, esc, toast }) {
     submitted: "待确认",
     confirmed: "已确认",
     rejected: "已拒绝",
+    identity_changed: "材料已变更·请重新确认合同",
     awaiting_payment: "待支付",
     payment_expired: "支付超时",
     payment_closed: "支付已关闭",

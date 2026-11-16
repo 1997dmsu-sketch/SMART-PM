@@ -517,3 +517,173 @@ test("private queries use owner filters; retention scans metadata and payment lo
   assert.deepEqual(calls[0].options.fields, ["_id", "expiresAt", "purgedAt"]);
   assert.equal(calls[0].options.fields.includes("ciphertext"), false);
 });
+
+test("replacing reviewed identity invalidates the pending order and blocks the provider before reapproval", async (t) => {
+  for (const side of ["front", "back"]) {
+    const x = await setup(t),
+      a = await x.prepared(),
+      o = await x.order(a);
+    let calls = 0;
+    x.payment.create = async () => {
+      calls++;
+      return { package: "prepay_id=test" };
+    };
+    const upload = await x.user.uploadIdentity({
+      appointmentId: a.id,
+      side,
+      base64: png,
+      consent: true,
+      privacyVersion: 1,
+    });
+    const stored = x.store.data[C.orders].find((row) => row._id === o.id);
+    assert.equal(stored.status, "identity_changed");
+    assert.equal(x.store.data[C.holds][0].until, 0);
+    let before = structuredClone(x.store.data);
+    await assert.rejects(x.user.paymentParams(o.id), (e) => e.status === 409);
+    let after = structuredClone(x.store.data);
+    assert.deepEqual(after, before);
+    assert.equal(calls, 0);
+    const current = (await x.user.mine()).appointments[0];
+    assert.equal(current.identityStatus, "pending");
+    await x.admin.reviewAppointment({
+      id: a.id,
+      revision: current.revision,
+      decision: "identity_approved",
+    });
+    before = structuredClone(x.store.data);
+    await assert.rejects(x.user.paymentParams(o.id), (e) => e.status === 409);
+    after = structuredClone(x.store.data);
+    assert.deepEqual(after, before);
+    assert.equal(calls, 0);
+    const fresh = await x.order(
+      (await x.user.mine()).appointments[0],
+      "fresh-" + side,
+    );
+    assert.notEqual(fresh.id, o.id);
+    assert.equal(
+      x.store.data[C.orders].find((row) => row._id === fresh.id)[
+        side === "front" ? "identityFrontId" : "identityBackId"
+      ],
+      upload.id,
+    );
+    await x.user.paymentParams(fresh.id);
+    assert.equal(calls, 1);
+  }
+});
+
+test("payment guard rejects legacy pending orders with changed bindings, rejected status or expired materials", async (t) => {
+  const cases = [
+    "changed-front",
+    "changed-back",
+    "pending",
+    "rejected",
+    "appointment-rejected",
+    "expired",
+    "purged",
+  ];
+  for (const name of cases) {
+    const x = await setup(t),
+      a = await x.prepared(),
+      o = await x.order(a);
+    let calls = 0;
+    x.payment.create = async () => {
+      calls++;
+      return {};
+    };
+    const appointment = x.store.data[C.appointments].find(
+        (r) => r._id === a.id,
+      ),
+      doc = x.store.data[C.identity][0];
+    if (name === "changed-front")
+      appointment.identityFrontId = "identity-other";
+    if (name === "changed-back") appointment.identityBackId = "identity-other";
+    if (name === "pending" || name === "rejected")
+      appointment.identityStatus = name;
+    if (name === "appointment-rejected") appointment.status = "rejected";
+    if (name === "expired") doc.expiresAt = x.now();
+    if (name === "purged") doc.ciphertext = "";
+    const before = structuredClone(x.store.data);
+    await assert.rejects(x.user.paymentParams(o.id), (e) => e.status === 409);
+    const after = structuredClone(x.store.data);
+    assert.deepEqual(after, before);
+    assert.equal(calls, 0, name);
+  }
+});
+
+test("identity replacement during prepay creation cannot return payment params", async (t) => {
+  const x = await setup(t),
+    a = await x.prepared(),
+    o = await x.order(a);
+  let entered, release;
+  const called = new Promise((r) => (entered = r)),
+    wait = new Promise((r) => (release = r));
+  x.payment.create = async () => {
+    entered();
+    await wait;
+    return { package: "prepay_id=stale" };
+  };
+  const pending = x.user.paymentParams(o.id);
+  await called;
+  await x.user.uploadIdentity({
+    appointmentId: a.id,
+    side: "front",
+    base64: png,
+    consent: true,
+    privacyVersion: 1,
+  });
+  release();
+  await assert.rejects(pending, (e) => e.status === 409);
+  assert.equal(x.store.data[C.orders][0].status, "identity_changed");
+});
+
+test("cached prepay after identity replacement is reconciled as refund-required and never takes a newer hold", async (t) => {
+  const x = await setup(t),
+    a = await x.prepared(),
+    old = await x.order(a, "old");
+  await x.user.paymentParams(old.id); // The client may retain these already-issued params.
+  await x.user.uploadIdentity({
+    appointmentId: a.id,
+    side: "back",
+    base64: png,
+    consent: true,
+    privacyVersion: 1,
+  });
+  const current = (await x.user.mine()).appointments[0];
+  await x.admin.reviewAppointment({
+    id: a.id,
+    revision: current.revision,
+    decision: "identity_approved",
+  });
+  const fresh = await x.order((await x.user.mine()).appointments[0], "fresh");
+  await x.user.applyPayment(x.paid(old));
+  const records = x.store.data[C.orders];
+  assert.equal(records.find((o) => o._id === old.id).status, "refund_required");
+  assert.equal(
+    records.find((o) => o._id === fresh.id).status,
+    "awaiting_payment",
+  );
+  assert.equal(x.store.data[C.holds][0].orderId, fresh.id);
+  const before = structuredClone(x.store.data[C.holds]);
+  await x.user.applyPayment(x.paid(old));
+  assert.deepEqual(x.store.data[C.holds], before);
+});
+
+test("payment first prevents identity replacement from mutating an already-paid contract", async (t) => {
+  const x = await setup(t),
+    a = await x.prepared(),
+    o = await x.order(a);
+  await x.user.applyPayment(x.paid(o));
+  const before = structuredClone(x.store.data);
+  await assert.rejects(
+    x.user.uploadIdentity({
+      appointmentId: a.id,
+      side: "front",
+      base64: png,
+      consent: true,
+      privacyVersion: 1,
+    }),
+    (e) => e.status === 409,
+  );
+  const after = structuredClone(x.store.data);
+  assert.deepEqual(after, before);
+});

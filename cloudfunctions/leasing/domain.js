@@ -446,6 +446,13 @@ class LeasingService {
     const aid = id(input.appointmentId),
       side = input.side;
     if (!["front", "back"].includes(side)) fail("请选择身份证正面或反面");
+    const appointment = await this.get(C.appointments, aid);
+    if (!appointment || appointment.ownerId !== this.actor.id)
+      fail("预约不存在", 404);
+    const priorHold = await this.get(C.holds, appointment.roomId);
+    const orderRef = priorHold?.orderId
+      ? ref(C.orders, priorHold.orderId)
+      : null;
     const key = this.key(),
       { bytes, mime } = imageBytes(input.base64),
       did = "identity-" + randomUUID(),
@@ -459,6 +466,8 @@ class LeasingService {
         ref(C.appointments, aid),
         ref(C.identity, did),
         ref(C.settings, "global"),
+        ref(C.holds, appointment.roomId),
+        ...(orderRef ? [orderRef] : []),
       ],
       (s) => {
         const settings = read(s, C.settings, "global");
@@ -471,7 +480,38 @@ class LeasingService {
         if (!a || a.ownerId !== this.actor.id) fail("预约不存在", 404);
         if (!["submitted", "confirmed"].includes(a.status))
           fail("预约当前不可提交证件", 409);
+        const hold = read(s, C.holds, appointment.roomId);
+        if (
+          a.roomId !== appointment.roomId ||
+          (hold?.orderId || null) !== (priorHold?.orderId || null)
+        )
+          fail("房间占位已变化，请刷新后重新提交材料", 409);
+        const order = orderRef ? read(s, C.orders, orderRef.id) : null;
+        const ownOrder =
+          order?.ownerId === this.actor.id && order.appointmentId === aid;
+        if (
+          ownOrder &&
+          ["paid_held", "signed"].includes(order.status) &&
+          hold.until > this.now()
+        )
+          fail("已有已付款预签约订单，请联系物业处理材料变更", 409);
+        const invalidate = ownOrder && order.status === "awaiting_payment";
         return [
+          ...(invalidate
+            ? [
+                write(C.orders, order._id, {
+                  ...order,
+                  status: "identity_changed",
+                  identityChangedAt: this.now(),
+                  revision: order.revision + 1,
+                }),
+                write(C.holds, appointment.roomId, {
+                  ...hold,
+                  until: 0,
+                  status: "released",
+                }),
+              ]
+            : []),
           write(C.identity, did, {
             ownerId: this.actor.id,
             appointmentId: aid,
@@ -738,25 +778,92 @@ class LeasingService {
     );
     return this.orderDTO({ ...result, _id: oid });
   }
+  paymentIdentityMatches(state, order, now) {
+    const a = read(state, C.appointments, order.appointmentId);
+    if (
+      !a ||
+      a.ownerId !== order.ownerId ||
+      a.status !== "confirmed" ||
+      a.identityStatus !== "approved" ||
+      a.identityFrontId !== order.identityFrontId ||
+      a.identityBackId !== order.identityBackId
+    )
+      return false;
+    return [
+      ["front", order.identityFrontId],
+      ["back", order.identityBackId],
+    ].every(([side, docId]) => {
+      const d = read(state, C.identity, docId);
+      return Boolean(
+        d &&
+        d._id === docId &&
+        d.ownerId === order.ownerId &&
+        d.appointmentId === order.appointmentId &&
+        d.side === side &&
+        d.ciphertext &&
+        d.expiresAt > now,
+      );
+    });
+  }
+  paymentIdentityRefs(o) {
+    return [
+      ref(C.appointments, o.appointmentId),
+      ref(C.identity, o.identityFrontId),
+      ref(C.identity, o.identityBackId),
+    ];
+  }
+  async validatePayableOrder(oid) {
+    const o = await this.get(C.orders, id(oid));
+    if (!o || o.ownerId !== this.actor.id) fail("订单不存在", 404);
+    let checked;
+    await this.store.transact(
+      [
+        ref(C.orders, o._id),
+        ref(C.holds, o.roomId),
+        ...this.paymentIdentityRefs(o),
+      ],
+      (state) => {
+        const cur = read(state, C.orders, o._id),
+          hold = read(state, C.holds, o.roomId);
+        if (!cur || cur.ownerId !== this.actor.id) fail("订单不存在", 404);
+        if (
+          cur.status !== "awaiting_payment" ||
+          cur.paymentDeadline <= this.now() ||
+          hold?.orderId !== o._id ||
+          hold.until <= this.now()
+        )
+          fail("订单不在可支付时间内，请刷新状态", 409);
+        if (!this.paymentIdentityMatches(state, cur, this.now()))
+          fail("身份证材料或审核状态已变化，请重新审核并确认合同", 409);
+        checked = cur;
+        return [];
+      },
+      this.audit("核对支付资格"),
+    );
+    return checked;
+  }
   async paymentParams(oid) {
     this.user();
     if (!this.payment) fail("微信支付商户尚未配置", 503);
-    const o = await this.get(C.orders, id(oid));
-    if (!o || o.ownerId !== this.actor.id) fail("订单不存在", 404);
-    if (o.status !== "awaiting_payment" || o.paymentDeadline <= this.now())
-      fail("订单不在可支付时间内，请刷新状态", 409);
-    return this.payment.create({
+    const o = await this.validatePayableOrder(oid);
+    const params = await this.payment.create({
       order: o,
       tradeNo: o._id.replace("lease-", "L").slice(0, 32),
       openid: o.payerOpenid,
     });
+    // A document replacement can commit while the merchant request is in flight.
+    // Do not return the newly issued params unless the binding still holds.
+    await this.validatePayableOrder(oid);
+    return params;
   }
   async refreshPayment(oid) {
     this.user();
     if (!this.payment) fail("微信支付商户尚未配置", 503);
     const o = await this.get(C.orders, id(oid));
     if (!o || o.ownerId !== this.actor.id) fail("订单不存在", 404);
-    if (!["awaiting_payment", "paid_held"].includes(o.status))
+    if (
+      !["awaiting_payment", "identity_changed", "paid_held"].includes(o.status)
+    )
       return this.orderDTO(o);
     const p = await this.payment.query(
       o._id.replace("lease-", "L").slice(0, 32),
@@ -817,7 +924,11 @@ class LeasingService {
     )
       fail("支付时间不正确", 409);
     await this.store.transact(
-      [ref(C.orders, o._id), ref(C.holds, o.roomId)],
+      [
+        ref(C.orders, o._id),
+        ref(C.holds, o.roomId),
+        ...this.paymentIdentityRefs(o),
+      ],
       (s) => {
         const cur = read(s, C.orders, o._id),
           hold = read(s, C.holds, o.roomId);
@@ -828,7 +939,8 @@ class LeasingService {
         const eligible =
           cur.status === "awaiting_payment" &&
           paidAt <= cur.paymentDeadline &&
-          hold?.orderId === o._id;
+          hold?.orderId === o._id &&
+          this.paymentIdentityMatches(s, cur, this.now());
         const until = paidAt + cur.holdHours * 3600000;
         const status = !eligible
           ? "refund_required"

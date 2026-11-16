@@ -4,6 +4,7 @@ const names = {
   submitted: "待物业确认",
   confirmed: "看房已确认",
   rejected: "预约未通过",
+  identity_changed: "材料已变更·请重新确认合同",
   awaiting_payment: "待交押金",
   payment_expired: "支付已超时",
   payment_closed: "支付已关闭",
@@ -242,14 +243,12 @@ Page({
       if (stat.size > 500 * 1024)
         throw new Error("图片仍超过 500KB，请裁剪后重试");
       const file = await new Promise((resolve, reject) =>
-        wx
-          .getFileSystemManager()
-          .readFile({
-            filePath: path,
-            encoding: "base64",
-            success: resolve,
-            fail: reject,
-          }),
+        wx.getFileSystemManager().readFile({
+          filePath: path,
+          encoding: "base64",
+          success: resolve,
+          fail: reject,
+        }),
       );
       try {
         await api.leasing("uploadIdentity", {

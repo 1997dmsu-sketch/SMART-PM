@@ -1,4 +1,5 @@
-import { test } from "node:test";
+import "./helpers/closure-guard.mjs";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -23,6 +24,13 @@ const ORG = "org-g1";
 const NOW = 1_700_000_000_000;
 const audit = { actor: "g1", actorId: "g1", action: "seed", orgId: ORG };
 const here = dirname(fileURLToPath(import.meta.url));
+
+const guard = globalThis.__G1_GUARD__;
+assert.ok(guard, "G1 guard 必须在业务模块加载前安装");
+const moduleLoadCounters = guard.read();
+assert.deepEqual(moduleLoadCounters, { listen: 0, network: 0 },
+  "业务模块加载期不得监听或调用业务网络");
+after(() => guard.restore());
 
 function assertNoRequeueInChain(instance, label) {
   assert.equal(instance.requeue, undefined, `${label}: 实例不得暴露 requeue`);
@@ -108,6 +116,15 @@ function fullSnapshot(store) {
   return structuredClone(store.data);
 }
 
+// 全库逐项：先比较集合键，再对每个集合做 deepEqual，最后整体 deepEqual。
+function assertWholeStoreEqual(after, before, label) {
+  assert.deepEqual(Object.keys(after).sort(), Object.keys(before).sort(), `${label}: 集合键一致`);
+  for (const name of Object.keys(before)) {
+    assert.deepEqual(after[name], before[name], `${label}: 集合 ${name} 逐项一致`);
+  }
+  assert.deepEqual(after, before, `${label}: 全库整体一致`);
+}
+
 test("LC01：直接 import h3b 的 H3MockDispatcher，实例与原型链无 requeue，导出面无替代", async (t) => {
   const h = await makeH3(t);
   assertNoRequeueInChain(h.dispatcher, "H3");
@@ -140,7 +157,7 @@ test("LC03：任意 actor/revision 组合均不可达，且每个独立场景全
         const before = fullSnapshot(h.store);
         assertThrowsTypeError(h.dispatcher, ["job-g1", revision, actor], label);
         const after = fullSnapshot(h.store);
-        assert.deepEqual(after, before, `${label}: 逐场景全库前后内容级相等`);
+        assertWholeStoreEqual(after, before, label);
       }
     }
   }
@@ -166,7 +183,7 @@ test("LC04/LC05：retryable_failed（到期/未到期）及各旧状态作业均
     const before = fullSnapshot(h.store);
     assertThrowsTypeError(h.dispatcher, [job._id, job.revision, null], `作业 ${job._id}`);
     const after = fullSnapshot(h.store);
-    assert.deepEqual(after, before, `作业 ${job._id}（${job.state}）: 逐场景全库前后内容级相等`);
+    assertWholeStoreEqual(after, before, `作业 ${job._id}（${job.state}）`);
   }
 });
 
@@ -185,7 +202,7 @@ test("LC06：已有旧 queued/log/audit 数据不改写，不新增 op key/domai
   const before = fullSnapshot(h.store);
   assertThrowsTypeError(h.dispatcher, [queued._id, queued.revision, null], "旧 queued 作业");
   const after = fullSnapshot(h.store);
-  assert.deepEqual(after, before, "旧数据零改写、无新增 op key/domain（全库前后内容级相等）");
+  assertWholeStoreEqual(after, before, "旧数据零改写、无新增 op key/domain");
 });
 
 test("LC07：两种 job 的 queued 相反不变量仍由正式 validator 守卫", async (t) => {
@@ -199,68 +216,70 @@ test("LC07：两种 job 的 queued 相反不变量仍由正式 validator 守卫"
   );
 });
 
-// 安装真实副作用计数器，包裹实例的 Provider / 私密文件 / Store 写 / 业务网络入口。
-// 关键约束（任务卡 §4）：guard 在模块加载与 fixture 就绪"之后"安装，安装时记录当前计数为
-// baseline；自检绝不重置/清零计数，因此不会抹掉模块加载期已发生的调用。封闭探针只统计
-// 安装后的增量（deltas），且与其他 dispatcher 回归使用的 Mock 调用口径分离。
-function installSideEffectCounters(h, t) {
-  const counts = { provider: 0, privateFile: 0, storeWrite: 0, network: 0 };
+// 安装 Provider / 私密文件 / Store 写三类真实计数器；网络与监听由预加载 guard 统一计数。
+// 计数只增不清零：安装时记录 baseline，探针只读 delta；finally 恢复原方法。
+function installSideEffectCounters(h) {
+  const counts = { provider: 0, privateFile: 0, storeWrite: 0 };
   const restoreFns = [];
   const wrap = (obj, key, bucket) => {
     if (!obj || typeof obj[key] !== "function") return;
-    const original = obj[key].bind(obj);
-    obj[key] = (...args) => { counts[bucket] += 1; return original(...args); };
+    const original = obj[key];
+    obj[key] = (...args) => {
+      counts[bucket] += 1;
+      return original.apply(obj, args);
+    };
     restoreFns.push(() => { obj[key] = original; });
   };
 
-  // Provider：真实调用计数（独立于 mock 内部 calls 数组）
-  for (const key of ["enrollFace", "revokeFace", "updateFace", "deleteFace"])
+  for (const key of ["enrollFace", "updateFace", "revokeFace", "queryOperation", "verifyEvent", "health"])
     wrap(h.provider, key, "provider");
-  // 私密文件：FileService 全部写/授权入口
   for (const key of ["upload", "registerLegacy", "attach", "detach",
     "authorizeDownload", "reviewFace", "retire", "logAccess", "prepareReference"])
     wrap(h.files, key, "privateFile");
-  // 服务写：Store 全部写入口
   for (const key of ["transact", "change", "persist"])
     wrap(h.store, key, "storeWrite");
-  // 业务网络：fetch 与 http/https 请求入口
-  wrap(globalThis, "fetch", "network");
-  wrap(http, "request", "network");
-  wrap(http, "get", "network");
-  wrap(https, "request", "network");
-  wrap(https, "get", "network");
 
-  t.after(() => { for (const fn of restoreFns.reverse()) fn(); });
-
-  const baseline = { ...counts }; // 安装时刻基线，含模块加载期既有的真实计数
+  const baseline = { ...counts };
   return {
     baseline,
-    // 自检：返回真实计数快照，绝不改写 counts，故不抹掉模块加载期调用
-    selfCheck: () => ({ ...counts }),
     read: () => ({ ...counts }),
     deltas: () => Object.fromEntries(
       Object.entries(counts).map(([k, v]) => [k, v - baseline[k]]),
     ),
+    restore: () => {
+      for (const fn of restoreFns.reverse()) fn();
+      restoreFns.length = 0;
+    },
   };
 }
 
 test("LC08：封闭探针四类真实副作用计数器（Provider/私密文件/服务写/业务网络）均为 0", async (t) => {
+  // 自检在探针前单独执行：真实触碰被禁止入口并读取增量，随后以自检后的计数为基线；
+  // 全程不清零，模块加载期计数由文件顶部 moduleLoadCounters 单独断言为 0。
+  const selfCheck = guard.selfCheck();
+  assert.equal(selfCheck.allThrew, true, `guard 自检必须全部拦截：${JSON.stringify(selfCheck.results)}`);
+  assert.deepEqual(selfCheck.delta, { listen: 1, network: 5 },
+    `guard 自检必须分别计数：${JSON.stringify(selfCheck)}`);
+  const networkBaseline = guard.read();
+
   for (const instanceKind of ["h3", "h4"]) {
     const h = instanceKind === "h3" ? await makeH3(t) : await makeH4(t);
-    // 计数 guard 在实例/fixture 就绪后安装，覆盖探针窗口；模块加载期调用计入 baseline 不抹掉
-    const counters = installSideEffectCounters(h, t);
-    const atInstall = counters.selfCheck();
-    assert.deepEqual(atInstall, counters.baseline, `${instanceKind}: 自检不得清零模块加载期计数`);
+    const counters = installSideEffectCounters(h);
+    try {
+      const before = fullSnapshot(h.store);
+      const callsBefore = h.provider.calls.length;
+      assertThrowsTypeError(h.dispatcher, ["job-g1", 1, null], `${instanceKind} 零副作用探针`);
 
-    const before = fullSnapshot(h.store);
-    const callsBefore = h.provider.calls.length;
-    assertThrowsTypeError(h.dispatcher, ["job-g1", 1, null], `${instanceKind} 零副作用探针`);
-
-    const delta = counters.deltas();
-    assert.deepEqual(delta, { provider: 0, privateFile: 0, storeWrite: 0, network: 0 },
-      `${instanceKind}: 四类副作用增量必须为 0，实测 ${JSON.stringify(delta)}`);
-    assert.equal(h.provider.calls.length - callsBefore, 0, `${instanceKind}: provider.calls 计数增量为 0`);
-    assert.deepEqual(fullSnapshot(h.store), before, `${instanceKind}: 全库内容级零变化`);
+      const delta = counters.deltas();
+      assert.deepEqual(delta, { provider: 0, privateFile: 0, storeWrite: 0 },
+        `${instanceKind}: 三类副作用增量必须为 0，实测 ${JSON.stringify(delta)}`);
+      assert.deepEqual(guard.delta(networkBaseline), { listen: 0, network: 0 },
+        `${instanceKind}: 网络/监听真实调用增量必须为 0`);
+      assert.equal(h.provider.calls.length - callsBefore, 0, `${instanceKind}: provider.calls 计数增量为 0`);
+      assertWholeStoreEqual(fullSnapshot(h.store), before, `${instanceKind}: 全库`);
+    } finally {
+      counters.restore();
+    }
   }
 });
 

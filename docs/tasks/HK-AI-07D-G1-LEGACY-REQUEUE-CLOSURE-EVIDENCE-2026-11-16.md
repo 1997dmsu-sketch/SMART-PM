@@ -1,7 +1,7 @@
 # HK-AI-07D G1 旧 requeue 入口封闭——交付证据
 
 - 日期：2026-11-16（Asia/Shanghai）。
-- 状态：实施完成；已按独立复审提出的两项 P2 证据缺口追加测试与证据修复提交，待 Codex 再次独立复审。本文交付不表示 G1 已被 Codex 验收、不表示 07D 全量关闭、不表示可上线。
+- 状态：实施完成；已按独立复审 P2-1/P2-2 追加测试与证据修复，并按本轮要求追加 P2-3（预加载网络/监听 guard 与过滤式全量回归）。本文交付不表示 G1 已被 Codex 验收、不表示 07D 全量关闭、不表示可上线。
 - 依据：远端 `968e5f3`（`docs/tasks/HK-AI-07D-G1-LEGACY-REQUEUE-CLOSURE-TASK-2026-11-16.md`），通过 `git show` 读取，未合并文档分支。
 
 ## 1. 基线、分支与谱系
@@ -10,8 +10,10 @@
 |---|---|
 | 代码基线（父提交） | `1155b7ba65991d324fb8b22bb8f7dd87f49428f9`（H4-b 终审） |
 | 实施分支 | `feat/hk-face-legacy-requeue-closure` |
-| 隔离工作树 | `.tmp-g1-requeue-closure`（`git worktree add`，`core.autocrlf=false`） |
-| 最终提交 SHA | 见交付回报（即包含本证据文档的提交；普通 push 后以 `git ls-remote` 复核） |
+| 隔离工作树 | `C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\closeout-a` |
+| 输入提交 | `5cba1f889278bbb6def50c8bb06de51f37bb3ab5`（本地 `codex/07d-g1-p2` 起点） |
+| 远端既有补丁 | `9d294f36d1b7a3f7c29fcafbdb887c98953a716e`（`feat/hk-face-legacy-requeue-closure`；本轮仅 fast-forward，未重复提交） |
+| 最终提交 SHA | 见交付回报（包含本证据文档的追加提交；普通 push 后以 `git ls-remote` 复核） |
 | 提交方式 | 追加提交；未 amend、未 rebase、未 squash、未 reset、未 force push |
 | 07B 合并 | 未合并 `59a737a`，未修改 07B 生产读模型；不把「已终审」写成「已合并」 |
 | G2 / H4-c C2/C3 / K3 | 未开始、未实现、未执行初始化或迁移 |
@@ -19,7 +21,7 @@
 
 ## 2. 变更文件清单
 
-相对基线 `1155b7b`，实际变更仅下列 6 个文件（4 个既有文件改动 + 2 个新增文件）：
+相对基线 `1155b7b`，实际变更仅下列 7 个文件（5 个既有文件改动 + 2 个新增文件）：
 
 | 文件 | 变更性质 |
 |---|---|
@@ -27,8 +29,9 @@
 | `admin-web/lib/face-service/h4b.mjs` | 删除 `H4MockRevoker.requeue`（原 482–519 行），共 38 行删除 |
 | `admin-web/tests/face-grant-d-matrix.test.mjs` | 6 处旧调用迁移为封闭负向证据 / 合法 queued fixture；新增 validator 导入与封闭断言 helper |
 | `admin-web/tests/face-h4b.test.mjs` | 4 处旧调用迁移为封闭负向证据 / 合法 queued fixture；新增封闭断言 helper |
-| `admin-web/tests/face-legacy-requeue-closure.test.mjs` | 新增：LC01–LC10 专门封闭测试（9 个测试）；P2 修复后改为逐场景全库快照 + 四类真实副作用计数器 |
-| `docs/tasks/HK-AI-07D-G1-LEGACY-REQUEUE-CLOSURE-EVIDENCE-2026-11-16.md` | 本证据文档；P2 修复后补充快照口径、计数器与复审记录 |
+| `admin-web/tests/face-legacy-requeue-closure.test.mjs` | 新增：LC01–LC10 专门封闭测试（9 个测试）；首个 import 预加载 guard，逐场景全库逐项快照 + 四类真实副作用计数器 |
+| `admin-web/tests/helpers/closure-guard.mjs` | 新增：预加载监听/业务网络 guard；禁 `listen`/`dgram.bind`/`fetch`/`http(s).request|get`，计数只增不清零，自检与恢复 |
+| `docs/tasks/HK-AI-07D-G1-LEGACY-REQUEUE-CLOSURE-EVIDENCE-2026-11-16.md` | 本证据文档；P2-1/P2-2/P2-3 修复与过滤式回归记录 |
 
 锁文件与依赖清单：`npm install` 曾因 npm 版本差异规范化 `admin-web/package-lock.json` 的 `libc` 字段（48 行删除），已 `git restore` 恢复；最终相对基线零差异。
 
@@ -85,16 +88,16 @@
 |---|---|---|
 | LC01 | 新增测试 `LC01`：直接 `import { H3MockDispatcher } from h3b.mjs`，检查实例与每层原型 `Object.getOwnPropertyDescriptor(proto,"requeue")===undefined`，并检查 h3b 模块导出面与公共 index 无 requeue 别名 | PASS |
 | LC02 | 新增测试 `LC02`：直接 `import { H4MockRevoker } from h4b.mjs`，同 LC01；另验证 index 重导出的类原型同样无 requeue | PASS |
-| LC03 | 新增测试 `LC03`：两实例 × actor(undefined/null/user/system) × revision(undefined/1/0) 共 24 组，全部 TypeError；每组各自 `before/after` 全库 `structuredClone(store.data)` + `assert.deepEqual` | PASS |
-| LC04 | 新增测试 `LC04/LC05`：H4（revoke）job 的 `retryable_failed` 到期/未到期两种 seed 入 store，调用旧入口 TypeError，每种状态独立 `before/after` 全库快照 + `assert.deepEqual`；H3（enroll）侧由迁移后的 `D44/D45`、`D42/D43`、`D54` 与 actor/revision 用例提供真实 `retryable_failed` 作业上的封闭探针 + 全库 deepEqual | PASS |
-| LC05 | 同测试覆盖 revoke 的 queued/sending/awaiting_result/terminal_failed 四种旧状态作业，每种状态独立 `before/after` 全库快照 + `assert.deepEqual`，state/attempts/lease/revision/资源字段均不可修改；H3 侧由 `D32/D40`、`attempt=4 耗尽` 用例覆盖 awaiting_result / terminal_failed 的封闭证据 | PASS |
-| LC06 | 新增测试 `LC06`：预置旧 queued job + log + audit + op key + domain，单场景前后全库 `structuredClone(store.data)` + `assert.deepEqual`，无新增 op key/domain，无伪造服务回执 | PASS |
+| LC03 | 新增测试 `LC03`：两实例 × actor(undefined/null/user/system) × revision(undefined/1/0) 共 24 组，全部 TypeError；每组各自 `before/after` 全库 `structuredClone(store.data)` + `assertWholeStoreEqual`（集合键→每集合→整体） | PASS |
+| LC04 | 新增测试 `LC04/LC05`：H4（revoke）job 的 `retryable_failed` 到期/未到期两种 seed 入 store，调用旧入口 TypeError，每种状态独立 `before/after` 全库快照 + `assertWholeStoreEqual`；H3（enroll）侧由迁移后的 `D44/D45`、`D42/D43`、`D54` 与 actor/revision 用例提供真实 `retryable_failed` 作业上的封闭探针 + 全库 deepEqual | PASS |
+| LC05 | 同测试覆盖 revoke 的 queued/sending/awaiting_result/terminal_failed 四种旧状态作业，每种状态独立 `before/after` 全库快照 + `assertWholeStoreEqual`，state/attempts/lease/revision/资源字段均不可修改；H3 侧由 `D32/D40`、`attempt=4 耗尽` 用例覆盖 awaiting_result / terminal_failed 的封闭证据 | PASS |
+| LC06 | 新增测试 `LC06`：预置旧 queued job + log + audit + op key + domain，单场景前后全库 `structuredClone(store.data)` + `assertWholeStoreEqual`（集合键→每集合→整体），无新增 op key/domain，无伪造服务回执 | PASS |
 | LC07 | D-matrix `D44/D45` 用 `patchRecord` 构造 enroll queued（保留 result/nextAttemptAt）并调用 `validateDispatchJob` 通过；h4b 两用例用 `Object.assign` 构造 revoke dispatch queued（清空两字段）并调用 `validateRevokeJob` 通过；新增测试 `LC07` 显式验证 revoke queued 塞入 enroll 语义字段会被 validator 拒绝 | PASS |
-| LC08 | 既有 claim/dispatch/UNKNOWN_RESULT/expire/finalize/释放回归全部保留并通过（admin-web 559/559、root 51/51）；新增测试 `LC08` 用 `installSideEffectCounters` 包裹 Provider（4 方法）、私密文件（9 方法）、Store 写（3 方法）、业务网络（fetch + http/https 共 5 入口），实测四类真实副作用增量全为 0；并断言 `selfCheck()` 不清零模块加载期计数、`provider.calls` 增量为 0、全库内容级零变化；未增加自动重试或 Provider/设备路径 | PASS |
+| LC08 | 过滤式回归 499/499、root 51/51 通过；`closure-guard.mjs` 在业务模块加载前预装，顶部断言模块加载期 `{listen:0,network:0}`；LC08 先单独 `guard.selfCheck()`（真实触发被禁止入口，`allThrew=true`、delta `{listen:1,network:5}`），再以自检后计数为 baseline，探针期间网络/监听 delta 为 0；Provider/私密文件/Store 写三类真实计数器增量为 0，`provider.calls` 增量为 0，全库逐项零变化，`finally` 恢复 | PASS |
 | LC09 | 新增测试 `LC09` 读 h3b.mjs/h4b.mjs 源码断言无 `requeue`/`_requeue`/`actor==null` 标识符；`rg` 复核 lib 目录零命中；公共 index 零差异证明见 §5 | PASS |
 | LC10 | 新增测试 `LC10` 验证导出面无无理由差异；`git diff --name-only 1155b7b..` 证明 server/routes/miniprogram/Store/validator/index/package 全部零差异（§5） | PASS |
 
-注：LC03–LC06 每个独立场景均执行 `before/after` 全库 `structuredClone(store.data)` + `assert.deepEqual`，快照覆盖 store 中每一个集合（含所有未知/未来集合），而非固定集合白名单；范围包含 job/log/audit/op key/domain。LC08 的四类真实副作用计数器（Provider/私密文件/Store 写/业务网络）与既有 dispatcher 回归的 Mock Provider 调用口径分离：前者增量恒为 0，后者不统称为 0。
+注：LC03–LC06 每个独立场景均执行 `before/after` 全库 `structuredClone(store.data)` + `assertWholeStoreEqual`，快照覆盖 store 中每一个集合（含所有未知/未来集合），而非固定集合白名单；范围包含 job/log/audit/op key/domain。LC08 的四类真实副作用计数器（Provider/私密文件/Store 写/业务网络）与既有 dispatcher 回归的 Mock Provider 调用口径分离：前者增量恒为 0，后者不统称为 0。
 
 ## 5. 零副作用 / 范围边界证明
 
@@ -123,43 +126,60 @@ ZERO-DIFF  miniprogram/
 
 ## 6. 测试命令与实际结果
 
-在隔离工作树 `.tmp-g1-requeue-closure` 执行（依赖安装完成后）：
+本轮在 `C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\closeout-a\admin-web` 与仓库根执行。所有 Node 测试均通过 `--import`（根测试用 `NODE_OPTIONS=--import=file:///...`）预加载 `tests/helpers/closure-guard.mjs`；guard 在业务模块加载前禁止监听与业务网络并计数。默认测试隔离在本机因 `spawn EPERM` 不可用，保留一次失败记录；下表结果为 `--experimental-test-isolation=none` 降级，未伪报默认隔离通过。
 
-| 命令 | 工作目录 | exit | 计数 |
+| 命令 | 工作目录 | exit | 计数/结果 |
 |---|---|---|---|
-| `node --test tests/face-grant-d-matrix.test.mjs tests/face-h4b.test.mjs` | `admin-web` | 0 | 142 tests / 142 pass / 0 fail / 0 skipped / 0 todo |
-| `node --test tests/face-legacy-requeue-closure.test.mjs` | `admin-web` | 0 | 9 tests / 9 pass / 0 fail / 0 skipped / 0 todo |
-| `npm test` | `admin-web` | 0 | 559 tests / 559 pass / 0 fail / 0 skipped / 0 todo（含上述定向与封闭测试） |
-| `npm test` | 仓库根 | 0 | 51 tests / 51 pass / 0 fail / 0 skipped / 0 todo |
+| `node --test --experimental-test-isolation=none --import ./tests/helpers/closure-guard.mjs tests/face-legacy-requeue-closure.test.mjs` | `admin-web` | 0 | 9 tests / 9 pass / 0 fail / 0 skipped / 0 todo |
+| 同上，文件为 `tests/face-grant-d-matrix.test.mjs tests/face-h4b.test.mjs` | `admin-web` | 0 | 142 tests / 142 pass / 0 fail / 0 skipped / 0 todo |
+| 同上（closure 置于最后），33 个非监听 `tests/*.test.mjs`（排除下表 8 个） | `admin-web` | 0 | 499 tests / 499 pass / 0 fail / 0 skipped / 0 todo |
+| `node --test --experimental-test-isolation=none` + `NODE_OPTIONS=--import=file:///.../closure-guard.mjs`，7 个 `tests/*.test.cjs` | 仓库根 | 0 | 51 tests / 51 pass / 0 fail / 0 skipped / 0 todo |
+| `node --input-type=module --import ./tests/helpers/closure-guard.mjs -e <selfCheck>` | `admin-web` | 0 | `{"allThrew":true,"delta":{"listen":1,"network":5}}` |
 | `git diff --check` | 仓库根 | 0 | 无 whitespace 错误 |
+| 默认隔离（无 none）复跑封闭测试 | `admin-web` | 1 | `Error: spawn EPERM`（环境限制，保留记录） |
 
-隔离说明：首选 Node 默认测试隔离运行，未使用 `--test-isolation=none` 降级；无 EPERM 记录。锁文件与依赖清单最终零差异，未用 stub/native 跳过掩盖依赖问题。P2 修复后按同一组命令重跑，计数与上表完全一致。
+**排除的监听测试（8 个）**：`server.test.mjs`、`blacklist-http.test.mjs`、`occupancy-http.test.mjs`、`server-face-bounds.test.mjs`、`server-face.test.mjs`、`server-files.test.mjs`、`server-v2.test.mjs`、`verification-http.test.mjs`。审阅源文件后确认它们均调用 `.listen(...)`（部分通过 `createApp`），与 guard 的“禁止启动监听”合同冲突，按指令排除，未运行、未启动任何监听。其余 33 个测试在 guard 下运行；guard 若被任一测试触发监听/业务网络会直接抛错，499/499 通过即证明未发生。过滤式命令将 `face-legacy-requeue-closure.test.mjs` 置于最后，guard 覆盖前 32 个文件后，才在该文件结束时恢复（`after`），不在中途提前恢复。
+
+隔离说明：首选默认隔离；本机 `spawn EPERM` 失败记录已保留，随后使用 `--experimental-test-isolation=none`。锁文件与依赖清单零差异；测试依赖通过指向同仓库已安装 `node_modules` 的环境 junction 提供，未提交、未改依赖清单。
 
 ## 7. 敏感字段与旁路检查
 
 - 封闭测试使用合成 fixture（org-g1 等），不含真实人员、住户、设备、门禁凭据、AppID、商户号或密钥。
 - 不打印 token/Cookie/密码/私钥；不上传真实人脸；不调用真实设备；不执行数据库迁移。
-- `LC08` 通过 `installSideEffectCounters(h, t)` 包裹真实入口并统计增量：Provider=0、私密文件=0、Store 写=0、业务网络=0；同时断言全库内容级零变化、`provider.calls` 增量为 0、`selfCheck()` 不抹掉模块加载期计数。计数 guard 在实例与 fixture 就绪后安装，`t.after()` 逆序恢复；四类入口分别为 Provider 4 个方法、FileService 9 个写/授权方法、Store 3 个写方法、fetch/http/https 共 5 个网络入口。
+- `closure-guard.mjs` 在业务模块加载前安装：禁 `net.Server.listen`、`dgram.Socket.bind`、`globalThis.fetch`、`node:http/https request/get`；计数只增不清零，`restore()` 幂等。
+- `LC08` 先单独执行 `guard.selfCheck()`：真实触发被禁止入口并断言全部抛错，记录自检增量 `{listen:1,network:5}`；此后以自检后计数为 baseline，探针期间 `guard.delta()` 的 `{listen:0,network:0}` 才被接受，没有清零掩盖模块加载期调用。
+- `LC08` 的 Provider/私密文件/Store 写计数器用 `installSideEffectCounters` 包裹真实方法，安装时记录 baseline、探针只读 delta，`finally` 逆序恢复；Provider 6 方法、FileService 9 方法、Store 3 写方法。
 - 其他既有 dispatcher 回归中的 Mock Provider 调用与封闭探针的 4 类真实计数器 0 口径分离陈述，未将全套 Mock 调用统称为 0。
 
 ## 8. 独立复审 P2 缺口修复（追加提交）
 
-独立复审确认生产删除符合范围，但提出两项 P2 证据缺口。本次仅追加测试与证据修复，未改生产代码、未改写历史：
+独立复审确认生产删除符合范围，但提出证据缺口。本文件按 P2-1/P2-2/P2-3 追加测试与证据；本轮只改测试、测试 helper 与证据，不改生产代码、不改写历史。
 
-1. **P2-1 逐场景全库快照**（复审定位 `face-legacy-requeue-closure.test.mjs:103-110`）：
-   - 原 `fullSnapshot(store)` 用固定 10 集合白名单逐个 `store.list(name)`，不满足「全库前后内容级相等」。
-   - 改为 `function fullSnapshot(store) { return structuredClone(store.data); }`，直接克隆 store 全量数据，覆盖所有未知/未来集合。
-   - LC03 的 24 组 actor/revision 组合、LC04/LC05 的 6 种 job 状态、LC06 的旧数据场景，均改为每个独立场景各自 `before`/`after` 全库快照并 `assert.deepEqual`；不再跨场景复用同一快照。
-2. **P2-2 真实副作用计数器**（复审定位 `face-legacy-requeue-closure.test.mjs:198-210`）：
-   - 原 LC08 仅用 `provider.calls.length` 与对象引用比较，未真实统计私密文件、Store 写、网络调用。
-   - 新增 `installSideEffectCounters(h, t)`：包裹 Provider 的 `enrollFace`/`revokeFace`/`updateFace`/`deleteFace`，FileService 的 `upload`/`registerLegacy`/`attach`/`detach`/`authorizeDownload`/`reviewFace`/`retire`/`logAccess`/`prepareReference`，Store 的 `transact`/`change`/`persist`，以及 `globalThis.fetch`、`http.request`、`http.get`、`https.request`、`https.get`。
-   - 安装时刻记录 baseline，`selfCheck()` 返回真实计数且不重置，`deltas()` 给出安装后增量；断言四类增量全为 0，且 `selfCheck()` 与 baseline 相等（不抹掉模块加载期调用）。
-   - `t.after()` 逆序恢复被包裹方法，测试之间不互相污染。
+### P2-1 逐场景全库快照
 
-修复后按 §6 同一组命令重跑：定向 142/142、封闭 9/9、admin 559/559、root 51/51 全部通过，与修复前计数一致。
+- 原 `fullSnapshot(store)` 用固定 10 集合白名单逐个 `store.list(name)`，不满足「全库前后内容级相等」。
+- 改为 `structuredClone(store.data)`，覆盖 store 中每一个集合（含所有未知/未来集合）。
+- 新增 `assertWholeStoreEqual(after, before, label)`：先比较集合键集合，再对每个集合 `deepEqual`，最后整体 `deepEqual`。
+- LC03 的 24 组 actor/revision、LC04/LC05 的 6 种 job 状态、LC06 的单场景，均各自保存动作前后快照并逐项比较，不跨场景复用。
 
+### P2-2 真实副作用计数器
+
+- 原 LC08 仅用 `provider.calls.length` 与对象引用比较，未真实统计私密文件、Store 写、网络。
+- 新增 Provider 6 方法、FileService 9 方法、Store 3 写方法计数器；安装时记录 baseline，探针只读 delta，`finally` 恢复。
+- 网络不再由测试内 wrapper 统计，统一由预加载 guard 统计（见 P2-3），避免两套网络计数重复/互相覆盖。
+
+### P2-3 预加载网络/监听 guard 与过滤式回归（本轮新增）
+
+- 新增 `admin-web/tests/helpers/closure-guard.mjs`，并在测试文件第一个 import 及测试命令 `--import` 中预加载，确保先于 `LocalStore`/`FileService`/h3b/h4b 等业务模块。
+- 顶部断言 `moduleLoadCounters = {listen:0, network:0}`：业务模块加载期不得监听或调用网络。
+- `guard.selfCheck()` 分别真实触发 `listen` 与 5 个网络入口，断言全部拦截、delta `{listen:1,network:5}`；此后以自检后的计数为 baseline，探针期间 delta 为 0；全程不清零。
+- `LC08` 的 `finally` 恢复 Provider/文件/Store wrapper；测试文件 `after` 恢复 guard。
+- 监听测试 8 个全部排除（依据源文件 `.listen` 审阅）；过滤式 admin 499/499、root 51/51、定向 142/142、封闭 9/9 全部通过。
+
+本轮追加后按 §6 重跑；计数与上表一致。
 ## 9. 限制与待复审
 
 - 本卡仅封闭两个旧写入口，未实现 G2 的新 `retry` 严格权限/CAS/到期合同；G1 负向 TypeError 不得计作 G2 已通过。
 - 07D 全量 90 项矩阵、G4 兼容/路由清理、07B 合并门禁均不在本卡范围。
 - 交付后停手，等待 Codex 独立复审；不自行开始 G2。
+- B/C/D 本轮未收到独立输入/SHA 或任务卡，未执行，也未写任何报告/设计卡；仅完成指定的 G1 P2 范围。

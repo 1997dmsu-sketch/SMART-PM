@@ -27,8 +27,8 @@
 | `admin-web/lib/face-service/h4b.mjs` | 删除 `H4MockRevoker.requeue`（原 482–519 行），共 38 行删除 |
 | `admin-web/tests/face-grant-d-matrix.test.mjs` | 6 处旧调用迁移为封闭负向证据 / 合法 queued fixture；新增 validator 导入与封闭断言 helper |
 | `admin-web/tests/face-h4b.test.mjs` | 4 处旧调用迁移为封闭负向证据 / 合法 queued fixture；新增封闭断言 helper |
-| `admin-web/tests/face-legacy-requeue-closure.test.mjs` | 新增：LC01–LC10 专门封闭测试（9 个测试）；P2 修复后改为逐场景全库快照 + 四类真实副作用计数器 |
-| `docs/tasks/HK-AI-07D-G1-LEGACY-REQUEUE-CLOSURE-EVIDENCE-2026-11-16.md` | 本证据文档；P2 修复后补充快照口径、计数器与复审记录 |
+| `admin-web/tests/face-legacy-requeue-closure.test.mjs` | 新增：LC01–LC10 专门封闭测试（9 个测试）；P2 修复后改为逐场景全库快照 + 四类真实副作用计数器；二次复审后补正控、动态方法名单、精确恢复与即时 restore |
+| `docs/tasks/HK-AI-07D-G1-LEGACY-REQUEUE-CLOSURE-EVIDENCE-2026-11-16.md` | 本证据文档；补充快照口径、计数器、两轮复审记录与负向验证 |
 
 锁文件与依赖清单：`npm install` 曾因 npm 版本差异规范化 `admin-web/package-lock.json` 的 `libc` 字段（48 行删除），已 `git restore` 恢复；最终相对基线零差异。
 
@@ -90,7 +90,7 @@
 | LC05 | 同测试覆盖 revoke 的 queued/sending/awaiting_result/terminal_failed 四种旧状态作业，每种状态独立 `before/after` 全库快照 + `assert.deepEqual`，state/attempts/lease/revision/资源字段均不可修改；H3 侧由 `D32/D40`、`attempt=4 耗尽` 用例覆盖 awaiting_result / terminal_failed 的封闭证据 | PASS |
 | LC06 | 新增测试 `LC06`：预置旧 queued job + log + audit + op key + domain，单场景前后全库 `structuredClone(store.data)` + `assert.deepEqual`，无新增 op key/domain，无伪造服务回执 | PASS |
 | LC07 | D-matrix `D44/D45` 用 `patchRecord` 构造 enroll queued（保留 result/nextAttemptAt）并调用 `validateDispatchJob` 通过；h4b 两用例用 `Object.assign` 构造 revoke dispatch queued（清空两字段）并调用 `validateRevokeJob` 通过；新增测试 `LC07` 显式验证 revoke queued 塞入 enroll 语义字段会被 validator 拒绝 | PASS |
-| LC08 | 既有 claim/dispatch/UNKNOWN_RESULT/expire/finalize/释放回归全部保留并通过（admin-web 559/559、root 51/51）；新增测试 `LC08` 用 `installSideEffectCounters` 包裹 Provider（4 方法）、私密文件（9 方法）、Store 写（3 方法）、业务网络（fetch + http/https 共 5 入口），实测四类真实副作用增量全为 0；并断言 `selfCheck()` 不清零模块加载期计数、`provider.calls` 增量为 0、全库内容级零变化；未增加自动重试或 Provider/设备路径 | PASS |
+| LC08 | 既有 claim/dispatch/UNKNOWN_RESULT/expire/finalize/释放回归全部保留并通过（admin-web 559/559、root 51/51）；新增测试 `LC08` 用 `installSideEffectCounters` 从原型链动态枚举包裹 Provider（真实 6 方法：`enrollFace`/`health`/`queryOperation`/`revokeFace`/`updateFace`/`verifyEvent`，不含 `deleteFace`）、私密文件（FileService 全部方法）、Store 写（`transact`/`change`/`persist`）、业务网络（fetch + http/https 共 5 入口）；`verifyCounters()` 正控实际触发四类并断言计数 +1；实测四类真实副作用增量全为 0，`selfCheck()` 不清零模块加载期计数、`provider.calls` 增量为 0、全库内容级零变化；`restore()` 精确恢复原函数身份且无嵌套污染；未增加自动重试或 Provider/设备路径 | PASS |
 | LC09 | 新增测试 `LC09` 读 h3b.mjs/h4b.mjs 源码断言无 `requeue`/`_requeue`/`actor==null` 标识符；`rg` 复核 lib 目录零命中；公共 index 零差异证明见 §5 | PASS |
 | LC10 | 新增测试 `LC10` 验证导出面无无理由差异；`git diff --name-only 1155b7b..` 证明 server/routes/miniprogram/Store/validator/index/package 全部零差异（§5） | PASS |
 
@@ -139,7 +139,7 @@ ZERO-DIFF  miniprogram/
 
 - 封闭测试使用合成 fixture（org-g1 等），不含真实人员、住户、设备、门禁凭据、AppID、商户号或密钥。
 - 不打印 token/Cookie/密码/私钥；不上传真实人脸；不调用真实设备；不执行数据库迁移。
-- `LC08` 通过 `installSideEffectCounters(h, t)` 包裹真实入口并统计增量：Provider=0、私密文件=0、Store 写=0、业务网络=0；同时断言全库内容级零变化、`provider.calls` 增量为 0、`selfCheck()` 不抹掉模块加载期计数。计数 guard 在实例与 fixture 就绪后安装，`t.after()` 逆序恢复；四类入口分别为 Provider 4 个方法、FileService 9 个写/授权方法、Store 3 个写方法、fetch/http/https 共 5 个网络入口。
+- `LC08` 通过 `installSideEffectCounters(h)` 包裹真实入口并统计增量：Provider=0、私密文件=0、Store 写=0、业务网络=0；同时断言全库内容级零变化、`provider.calls` 增量为 0、`selfCheck()` 不抹掉模块加载期计数。计数 guard 在实例与 fixture 就绪后安装，每个 h3/h4 窗口用 `try/finally` 即时 `restore()` 精确恢复（不写回 bind 后的新函数），`active` WeakMap 防二次包裹。四类入口从原型链动态枚举：Provider 真实 6 方法（`enrollFace`/`health`/`queryOperation`/`revokeFace`/`updateFace`/`verifyEvent`）、FileService 全部方法、Store 3 个写方法、fetch/http/https 共 5 个网络入口；`verifyCounters()` 正控实际触发并验证计数有效。
 - 其他既有 dispatcher 回归中的 Mock Provider 调用与封闭探针的 4 类真实计数器 0 口径分离陈述，未将全套 Mock 调用统称为 0。
 
 ## 8. 独立复审 P2 缺口修复（追加提交）
@@ -158,7 +158,17 @@ ZERO-DIFF  miniprogram/
 
 修复后按 §6 同一组命令重跑：定向 142/142、封闭 9/9、admin 559/559、root 51/51 全部通过，与修复前计数一致。
 
-## 9. 限制与待复审
+### 8.1 二次独立复审：P2-2 的三项缺陷与修复
+
+第二轮独立负向验证发现上一版 P2-2 计数器存在三项缺陷，均已修复（仍仅改测试与证据文档，生产代码零变更）：
+
+1. **计数器有效性未被证明**（复审定位 `:235-239`）：负向注入「禁用 `counts[bucket] += 1`」后测试仍 9/9 通过，因为 `selfCheck()` 只读、`deltas()` 恒为 0 也会让「增量为 0」断言成立。修复：新增 `verifyCounters()` 正控——实际触发每个类别的一个包裹方法（底层临时替换为 no-op 杜绝副作用），断言计数恰好 +1，随后回滚计数不污染探针窗口。负向复验：禁用递增后 LC08 失败。
+2. **Provider 名单不准**：负向注入真实 `provider.health()` 调用后测试仍 9/9 通过；上一版名单含不存在的 `deleteFace`，遗漏 `health`/`queryOperation`/`verifyEvent`。修复：改为从原型链动态枚举 `ownMethodNames()`，并显式断言 `wrappedBy.provider === ["enrollFace","health","queryOperation","revokeFace","updateFace","verifyEvent"]` 且不含 `deleteFace`。负向复验：注入 `await h.provider.health()` 后 LC08 失败。
+3. **恢复身份不精确 + 嵌套污染**（复审定位 `:209-213`）：负向加入恢复检查后失败——`.bind(obj)` 产生新函数，写回后 `http.request` 身份改变。修复：`wrap()` 保存原始函数引用（不 bind），用 `Reflect.apply(slot.impl, obj, args)` 保持 this；`restore()` 对自有属性写回原始引用、对原型方法删除遮蔽属性；用 `active` WeakMap 防二次包裹；LC08 每个 h3/h4 窗口用 `try/finally` 即时 `restore()`，不再依赖 `t.after()`，避免窗口嵌套。负向复验：把恢复改为写回 bind 函数后 LC08 失败。
+
+三项负向复验均观察到 `not ok 7 ... LC08` 且 `# fail 1`，恢复正式文件后封闭测试回到 9/9。正控使用 no-op 替换，未发起任何真实网络请求、未启动监听、未运行 HTTP 套件。H4 fixture 补建 FileService 实例，使私密文件类别在 H4 路径也有真实包裹对象（探针窗口内应为 0 次调用）。
+
+## 10. 限制与待复审
 
 - 本卡仅封闭两个旧写入口，未实现 G2 的新 `retry` 严格权限/CAS/到期合同；G1 负向 TypeError 不得计作 G2 已通过。
 - 07D 全量 90 项矩阵、G4 兼容/路由清理、07B 合并门禁均不在本卡范围。

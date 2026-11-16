@@ -173,3 +173,10 @@ ZERO-DIFF  miniprogram/
 - 本卡仅封闭两个旧写入口，未实现 G2 的新 `retry` 严格权限/CAS/到期合同；G1 负向 TypeError 不得计作 G2 已通过。
 - 07D 全量 90 项矩阵、G4 兼容/路由清理、07B 合并门禁均不在本卡范围。
 - 交付后停手，等待 Codex 独立复审；不自行开始 G2。
+
+### P2 续派复核
+
+- 基线为远端 `4f9c43d`。LC03–LC06 的独立场景全库快照保持不变。
+- LC08 在业务模块 import 前安装监听/网络 guard，加载期计数为零。正控验证四类计数器递增，采用正控后的增量基线，保留历史计数。探针四类增量均为零，清理时恢复包装。
+- Codex 实测 `node --test --test-isolation=none --import ./tests/helpers/closure-guard.mjs tests/face-legacy-requeue-closure.test.mjs`，9/9，退出码 0。默认隔离复跑卡住，未计入通过。
+- 未运行监听测试，未启动 G2。

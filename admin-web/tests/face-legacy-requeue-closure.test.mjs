@@ -1,4 +1,5 @@
-import { test } from "node:test";
+import "./helpers/closure-guard.mjs";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -23,6 +24,13 @@ const ORG = "org-g1";
 const NOW = 1_700_000_000_000;
 const audit = { actor: "g1", actorId: "g1", action: "seed", orgId: ORG };
 const here = dirname(fileURLToPath(import.meta.url));
+
+const guard = globalThis.__G1_GUARD__;
+assert.ok(guard, "G1 guard 必须在业务模块加载前安装");
+const moduleLoadCounters = guard.read();
+assert.deepEqual(moduleLoadCounters, { listen: 0, network: 0 },
+  "业务模块加载期不得监听或调用业务网络");
+after(() => guard.restore());
 
 function assertNoRequeueInChain(instance, label) {
   assert.equal(instance.requeue, undefined, `${label}: 实例不得暴露 requeue`);
@@ -277,11 +285,11 @@ function installSideEffectCounters(h) {
     // 自检：只读快照，绝不改写 counts，故不抹掉模块加载期调用
     selfCheck: () => ({ ...counts }),
     read: () => ({ ...counts }),
-    deltas: () => Object.fromEntries(
-      Object.entries(counts).map(([k, v]) => [k, v - baseline[k]]),
+    deltas: (from = baseline) => Object.fromEntries(
+      Object.entries(counts).map(([k, v]) => [k, v - from[k]]),
     ),
     // 正控：实际触发每个类别的一个包裹方法，证明计数器确实会递增；
-    // 底层临时替换为 no-op 杜绝真实副作用，完成后回滚计数不污染探针窗口。
+    // 底层临时替换为 no-op 杜绝真实副作用，正控结束后记录新基线，计数保持单调。
     verifyCounters: () => {
       const before = { ...counts };
       for (const bucket of Object.keys(counts)) {
@@ -299,13 +307,22 @@ function installSideEffectCounters(h) {
       for (const bucket of Object.keys(counts))
         assert.equal(after[bucket] - before[bucket], 1,
           `${bucket}: 正控失败——触发一次包裹方法后计数未 +1（实测 ${after[bucket] - before[bucket]}）`);
-      for (const bucket of Object.keys(counts)) counts[bucket] = before[bucket]; // 回滚，不污染探针窗口
+      return after;
     },
     restore,
   };
 }
 
 test("LC08：封闭探针四类真实副作用计数器（Provider/私密文件/服务写/业务网络）均为 0", async (t) => {
+  // 预载 guard 单独自检：真实触碰 listen 与 5 个网络入口，断言全部拦截并记录增量；
+  // 自检后计数即基线，探针只读 delta，全程不清零。
+  const guardSelfCheck = guard.selfCheck();
+  assert.equal(guardSelfCheck.allThrew, true,
+    `guard 自检必须全部拦截：${JSON.stringify(guardSelfCheck.results)}`);
+  assert.deepEqual(guardSelfCheck.delta, { listen: 1, network: 5 },
+    `guard 自检必须分别计数：${JSON.stringify(guardSelfCheck)}`);
+  const networkBaseline = guard.read();
+
   for (const instanceKind of ["h3", "h4"]) {
     const h = instanceKind === "h3" ? await makeH3(t) : await makeH4(t);
     // 记录网络入口原始引用，用于窗口结束后核验身份精确恢复
@@ -317,7 +334,7 @@ test("LC08：封闭探针四类真实副作用计数器（Provider/私密文件/
     const counters = installSideEffectCounters(h);
     try {
       // P2-2a 正控：实际触发并验证计数有效（禁用递增或名单遗漏时此处即失败）
-      counters.verifyCounters();
+      const probeBaseline = counters.verifyCounters();
       // P2-2b 名单核验：Provider 精确覆盖真实方法，不得含不存在的 deleteFace
       assert.deepEqual(counters.wrappedBy.provider,
         ["enrollFace", "health", "queryOperation", "revokeFace", "updateFace", "verifyEvent"],
@@ -328,15 +345,17 @@ test("LC08：封闭探针四类真实副作用计数器（Provider/私密文件/
       assert.equal(counters.wrappedBy.network.length, 5, "网络类别必须包裹 fetch/http/https 全部 5 个入口");
 
       const atInstall = counters.selfCheck();
-      assert.deepEqual(atInstall, counters.baseline, `${instanceKind}: 自检只读，不得清零模块加载期计数`);
+      assert.deepEqual(atInstall, probeBaseline, `${instanceKind}: 自检只读，不得清零模块加载期计数`);
 
       const before = fullSnapshot(h.store);
       const callsBefore = h.provider.calls.length;
       assertThrowsTypeError(h.dispatcher, ["job-g1", 1, null], `${instanceKind} 零副作用探针`);
 
-      const delta = counters.deltas();
+      const delta = counters.deltas(probeBaseline);
       assert.deepEqual(delta, { provider: 0, privateFile: 0, storeWrite: 0, network: 0 },
         `${instanceKind}: 四类副作用增量必须为 0，实测 ${JSON.stringify(delta)}`);
+      assert.deepEqual(guard.delta(networkBaseline), { listen: 0, network: 0 },
+        `${instanceKind}: 预载 guard 的监听/真实网络增量必须为 0`);
       assert.equal(h.provider.calls.length - callsBefore, 0, `${instanceKind}: provider.calls 计数增量为 0`);
       assert.deepEqual(fullSnapshot(h.store), before, `${instanceKind}: 全库内容级零变化`);
     } finally {

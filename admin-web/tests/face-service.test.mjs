@@ -11,7 +11,9 @@
  *
  * 网络零调用由运行时 guard 实测：globalThis.fetch、node:http request/get、
  * node:https request/get 五入口独立计数，覆盖 service.mjs 及其实际 adapter
- * （本提交 queryJob 不装配网络 adapter），不是 grep/静态判断。
+ * （本提交 queryJob 不装配网络 adapter），不是 grep/静态判断。guard 在动态
+ * import 之前安装，并在 before 自检/清零之前先断言模块加载期五计数全为零，
+ * 避免加载期调用被清零掩盖（复审 P2）。
  *
  * 技术债（本提交不修复，统一策略落地前禁止绕过）：
  * - dto.mjs 的 publicJobResult 仍可能把 failureReason 原样投影（截断 120），
@@ -39,7 +41,7 @@ const NETWORK_KEYS = ["fetch", "httpRequest", "httpGet", "httpsRequest", "httpsG
 const ZERO_NETWORK = Object.freeze(Object.fromEntries(NETWORK_KEYS.map((key) => [key, 0])));
 const network = { ...ZERO_NETWORK };
 let networkCalls = 0; // 既有“fetch 0”证据沿用，由 guard 的 fetch 入口累加。
-const networkGuard = { installed: false, originals: null, selfCheck: null };
+const networkGuard = { installed: false, originals: null, selfCheck: null, loadTime: null };
 
 function installNetworkGuard() {
   if (networkGuard.installed) return;
@@ -343,6 +345,17 @@ function attemptPolicyMutation(ns) {
 }
 
 before(async () => {
+  // 先冻结并断言“模块加载期”五类网络计数为零，再做 guard 自检与归零。
+  // 顺序不可颠倒：自检会人为把计数加到 1 后清零，若加载期已有真实调用，
+  // 清零就会把它掩盖掉（复审 P2）。此断言必须发生在任何清零之前。
+  networkGuard.loadTime = { ...network };
+  for (const key of NETWORK_KEYS) {
+    assert.equal(
+      networkGuard.loadTime[key], 0,
+      `模块加载期 ${key} 计数必须为 0（不得被 guard 自检/清零掩盖）`,
+    );
+  }
+
   // guard 自检：确认五入口确实被替换并可计数，随后归零，正式场景从零开始计。
   networkGuard.selfCheck = {};
   for (const [key, probe] of [
@@ -832,6 +845,9 @@ test("07B-18 运行时网络 guard 自检：五入口均已替换且可计数（
   for (const key of NETWORK_KEYS) {
     assert.equal(network[key], 0, `自检归零后 ${key} 必须为 0`);
   }
+  // 复审 P2：模块加载期（guard 安装后、before 自检前）的真实调用必须被单独记录并为零。
+  assert.deepEqual(networkGuard.loadTime, { ...ZERO_NETWORK }, "模块加载期五类计数必须全为 0");
+  t.diagnostic(`guardLoadTime=${JSON.stringify(networkGuard.loadTime)}`);
   t.diagnostic(`guardSelfCheck=${JSON.stringify(networkGuard.selfCheck)}`);
 });
 

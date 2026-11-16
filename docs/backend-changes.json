@@ -8,5 +8,10 @@
     "originalSha256": "204bb88b13078e19910038035420ae83d444b3e68ee57358c72066878614518d",
     "sha256": "8c110cbb3302b7bf7155dbb7d4450782992f60c2fd1bc75114a7a04f6760edef",
     "reason": "在分页和计数前排除公共用房；支持按 ID 重新验证客户房源详情可见性。"
+  },
+  "cloudfunctions/contentList/index.js": {
+    "originalSha256": "45b53e1badf7e6a957093265c7e51c362d6f0064c0f629ae82fd779332326ee1",
+    "sha256": "3c64f40b44dffc6d8409e296f649b82f96a914871b5e82369104f9d1d18b12d5",
+    "reason": "登记 DB-07 继承的 contentList 收敛：按每条内容所属组织复核 active 成员关系，仅投影公开字段，vrFile 仅返回可证实 public 的已登记文件；查询异常失败关闭。07B 集成预检补齐来源登记，不修改云函数或其鉴权语义。"
   }
 }

@@ -19,7 +19,7 @@
 
 ## 2. 变更文件清单
 
-相对基线 `1155b7b`，实际变更仅下列 5 个文件：
+相对基线 `1155b7b`，实际变更仅下列 6 个文件（4 个既有文件改动 + 2 个新增文件）：
 
 | 文件 | 变更性质 |
 |---|---|
@@ -40,8 +40,8 @@
 
 | 位置 | 处理 | 说明 |
 |---|---|---|
-| `admin-web/lib/face-service/h3b.mjs:444` `H3MockDispatcher.requeue` | 删除 | 仅该方法使用的私有字段/helper 经逐一计数复核均未变成死代码：`assertBoundedId`(3)、`logRef`(5)、`unique`(3)、`assertLogAbsent`(4)、`patch`(4)、`SERVICE_ACTOR`(4)、`safeNow`(6)、`keyOf`(12)、`ref`(10) 仍被其他方法使用 |
-| `admin-web/lib/face-service/h4b.mjs:482` `H4MockRevoker.requeue` | 删除 | 同理：`assertBoundedId`(8)、`deterministicLogId`(10)、`logFor`(3)、`patchRecord`(8)、`safeNow`(12)、`keyOf`(2)、`ref`(13) 仍被其他方法使用 |
+| `admin-web/lib/face-service/h3b.mjs:444` `H3MockDispatcher.requeue` | 删除 | 仅该方法使用的私有字段/helper 经逐一计数复核均未变成死代码（按出现次数计）：`assertBoundedId`(3)、`logRef`(5)、`unique`(3)、`assertLogAbsent`(4)、`patch`(4)、`SERVICE_ACTOR`(4)、`safeNow`(6)、`keyOf`(12)、`ref`(10)、`validateDispatchJob`(6) 仍被其他方法使用 |
+| `admin-web/lib/face-service/h4b.mjs:482` `H4MockRevoker.requeue` | 删除 | 同理（按出现次数计）：`assertBoundedId`(9)、`deterministicLogId`(10)、`logFor`(3)、`patchRecord`(8)、`safeNow`(12)、`keyOf`(2)、`ref`(29)、`validateRevokeJob`(13) 仍被其他方法使用 |
 
 删除后 `rg -n 'requeue' admin-web/lib` 结果为零。无改名（无 `_requeue`）、无重新导出、无转发、无可调用的抛错 stub、无 `actor=null` 分支、无隐藏开关。
 

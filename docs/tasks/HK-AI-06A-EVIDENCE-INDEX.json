@@ -1,0 +1,634 @@
+{
+  "schemaVersion": "hk-ai-06a-evidence/v1",
+  "artifact": "HK-AI-06A",
+  "generatedAt": "2026-11-14",
+  "timezone": "Asia/Shanghai",
+  "target": {
+    "model": "DS-K1T671BM",
+    "provider": "hikvision",
+    "routeDecision": "undecided",
+    "providerReleaseApproved": false,
+    "allowDeviceOperations": false
+  },
+  "boundary": {
+    "purpose": "evidence-and-contract-design-only",
+    "realDeviceConnected": false,
+    "deviceApiCalled": false,
+    "productionCloudCalled": false,
+    "providerProductionCodeWritten": false,
+    "serverMjsModified": false,
+    "httpRouteRegistered": false,
+    "realFaceUsed": false,
+    "realCredentialUsed": false,
+    "realIpUsed": false,
+    "realSerialUsed": false,
+    "realAccountUsed": false,
+    "h4cImplemented": false,
+    "h4dEntered": false
+  },
+  "evidenceClasses": {
+    "O": "公开官方资料；已核验 HTTP 状态、最终 URL、Content-Type 与关键标记；只证明公开页面存在，不证明目标型号",
+    "P": "项目内官方资料摘要；原件为私密 PDF/XLSX，仓库只存元数据、页码、哈希与摘要；仍不证明目标固件",
+    "C": "现有代码/已批准契约；只证明平台侧行为",
+    "D": "设备实测；本次 0 条",
+    "Q": "待现场确认；不得用推测填充"
+  },
+  "counts": {
+    "candidateEndpoints": 27,
+    "documentationPresent": 27,
+    "targetCapabilityVerified": 0,
+    "realCalls": 0,
+    "deviceMeasurements": 0,
+    "publicOfficialLinksChecked": 10,
+    "publicOfficialLinksOk": 10,
+    "exactTargetModelPublicMatches": 0,
+    "firmwareRecords": 0,
+    "eventSignatureEvidence": 0,
+    "eventNonceEvidence": 0
+  },
+  "publicOfficialSources": [
+    {
+      "id": "O01",
+      "publisher": "Hikvision",
+      "title": "海康威视官方网站首页",
+      "url": "https://www.hikvision.com/cn/",
+      "kind": "html",
+      "accessedAt": "2026-11-14",
+      "httpStatus": 200,
+      "finalUrl": "https://www.hikvision.com/cn/",
+      "contentType": "text/html; charset=UTF-8",
+      "bytesRead": 409864,
+      "markerFound": true,
+      "containsTargetModel": false,
+      "supports": ["厂商官网可达"],
+      "doesNotSupport": ["任何具体型号能力"]
+    },
+    {
+      "id": "O02",
+      "publisher": "Hikvision",
+      "title": "DS-K1T671M 产品页（Pro 系列人脸终端）",
+      "url": "https://www.hikvision.com/en/products/Access-Control-Products/terminals/face-recognition-terminal/ds-k1t671m/",
+      "kind": "html",
+      "accessedAt": "2026-11-14",
+      "httpStatus": 200,
+      "finalUrl": "https://www.hikvision.com/en/products/Access-Control-Products/terminals/face-recognition-terminal/ds-k1t671m/",
+      "contentType": "text/html;charset=utf-8",
+      "bytesRead": 959820,
+      "markerFound": true,
+      "containsTargetModel": false,
+      "containsFamilyModel": true,
+      "titleTag": "DS-K1T671M - Terminals - Hikvision Global",
+      "supports": ["DS-K1T671 产品族存在", "DS-K1T671M / DS-K1T671TM-3XF 变体存在"],
+      "doesNotSupport": ["DS-K1T671BM 精确型号", "目标固件能力"]
+    },
+    {
+      "id": "O03",
+      "publisher": "Hikvision",
+      "title": "DS-K1T671(D) 系列人脸识别终端 适用型号",
+      "url": "https://pinfo.hikvision.com/unzip/20200529162252_11893_doc/GUID-94610A63-6105-4972-9CBC-16F6AE031DCD.html",
+      "kind": "html",
+      "accessedAt": "2026-11-14",
+      "httpStatus": 200,
+      "finalUrl": "https://pinfo.hikvision.com/unzip/20200529162252_11893_doc/GUID-94610A63-6105-4972-9CBC-16F6AE031DCD.html",
+      "contentType": "text/html; charset=utf-8",
+      "bytesRead": 28105,
+      "markerFound": true,
+      "containsTargetModel": false,
+      "containsFamilyModel": true,
+      "supports": ["该手册适用 DS-K1T671M(D)/MW(D)/MG(D)"],
+      "doesNotSupport": ["DS-K1T671BM 精确型号"]
+    },
+    {
+      "id": "O04",
+      "publisher": "Hikvision",
+      "title": "DS-K1T671(D) 系列人脸识别终端 技术参数",
+      "url": "https://pinfo.hikvision.com/unzip/20200529162252_11893_doc/GUID-B4D2C8AC-60A2-4066-9270-C9990CBD20B5.html",
+      "kind": "html",
+      "accessedAt": "2026-11-14",
+      "httpStatus": 200,
+      "finalUrl": "https://pinfo.hikvision.com/unzip/20200529162252_11893_doc/GUID-B4D2C8AC-60A2-4066-9270-C9990CBD20B5.html",
+      "contentType": "text/html; charset=utf-8",
+      "bytesRead": 48691,
+      "markerFound": true,
+      "containsTargetModel": false,
+      "containsFamilyModel": true,
+      "supports": ["DS-K1T671M(D)/MW(D)/MG(D) 技术参数存在"],
+      "doesNotSupport": ["DS-K1T671BM 精确型号", "目标固件能力"]
+    },
+    {
+      "id": "O05",
+      "publisher": "Hikvision Open Platform",
+      "title": "ISAPI NET_DVR_SendWithRecvRemoteConfig(ACS_USERFACE) 接口定义",
+      "url": "https://open.hikvision.com/hardware/v2/%e6%8e%a5%e5%8f%a3%e5%ae%9a%e4%b9%89/NET_DVR_SendWithRecvRemoteConfig%28ACS_USERFACE%29.html",
+      "kind": "html",
+      "accessedAt": "2026-11-14",
+      "httpStatus": 200,
+      "finalUrl": "https://open.hikvision.com/hardware/v2/%e6%8e%a5%e5%8f%a3%e5%ae%9a%e4%b9%89/NET_DVR_SendWithRecvRemoteConfig%28ACS_USERFACE%29.html",
+      "contentType": "text/html",
+      "bytesRead": 4403,
+      "markerFound": true,
+      "containsTargetModel": false,
+      "supports": ["官方 SDK 映射中出现 FDSearch/FaceDataRecord/FDSetUp"],
+      "doesNotSupport": ["DS-K1T671BM 精确型号", "删除端点存在性", "目标固件能力"]
+    },
+    {
+      "id": "O06",
+      "publisher": "Hikvision Open Platform",
+      "title": "ISAPI NET_DVR_STDXMLConfig FDLib 图片接口定义",
+      "url": "https://open.hikvision.com/hardware/definitions/NET_DVR_STDXMLConfig_XFA_FDLib_pic.html",
+      "kind": "html",
+      "accessedAt": "2026-11-14",
+      "httpStatus": 200,
+      "finalUrl": "https://open.hikvision.com/hardware/definitions/NET_DVR_STDXMLConfig_XFA_FDLib_pic.html",
+      "contentType": "text/html",
+      "bytesRead": 5957,
+      "markerFound": true,
+      "containsTargetModel": false,
+      "supports": ["FDID/PID、FDSearch、FDLib 图片接口定义存在"],
+      "doesNotSupport": ["DS-K1T671BM 精确型号", "门禁人员人脸流程", "目标固件能力"]
+    },
+    {
+      "id": "O07",
+      "publisher": "Hikvision Open Platform",
+      "title": "ISAPI EventNotificationAlert v2.0 schema",
+      "url": "https://open.hikvision.com/hardware/v2/XML%E6%96%87%E4%BB%B6/XML_EventNotificationAlert.html",
+      "kind": "html",
+      "accessedAt": "2026-11-14",
+      "httpStatus": 200,
+      "finalUrl": "https://open.hikvision.com/hardware/v2/XML%E6%96%87%E4%BB%B6/XML_EventNotificationAlert.html",
+      "contentType": "text/html",
+      "bytesRead": 29402,
+      "markerFound": true,
+      "containsTargetModel": false,
+      "supports": [
+        "dateTime/activePostCount/eventType/eventState/eventDescription 必填",
+        "deviceID/channelID/UUID 等可选",
+        "未记录事件级签名/nonce"
+      ],
+      "doesNotSupport": ["门禁事件子结构", "目标固件能力", "厂商事件签名", "厂商 nonce"]
+    },
+    {
+      "id": "O08",
+      "publisher": "Hikvision Open Platform",
+      "title": "ISAPI SubscribeEvent v2.0 schema",
+      "url": "https://open.hikvision.com/hardware/v2/XML%E6%96%87%E4%BB%B6/XML_SubscribeEvent.html",
+      "kind": "html",
+      "accessedAt": "2026-11-14",
+      "httpStatus": 200,
+      "finalUrl": "https://open.hikvision.com/hardware/v2/XML%E6%96%87%E4%BB%B6/XML_SubscribeEvent.html",
+      "contentType": "text/html",
+      "bytesRead": 3335,
+      "markerFound": true,
+      "containsTargetModel": false,
+      "supports": ["eventMode/EventList/heartbeat/channels/identityKey 存在", "未记录签名/nonce"],
+      "doesNotSupport": ["目标固件能力", "厂商事件签名", "厂商 nonce"]
+    },
+    {
+      "id": "O09",
+      "publisher": "Hikvision Open Platform",
+      "title": "ISAPI 接口定义 PDF",
+      "url": "https://open.hikvision.com/hardware/v2/%E6%8E%A5%E5%8F%A3%E5%AE%9A%E4%B9%89/pdf.pdf",
+      "kind": "pdf",
+      "accessedAt": "2026-11-14",
+      "httpStatus": 200,
+      "finalUrl": "https://open.hikvision.com/hardware/v2/%E6%8E%A5%E5%8F%A3%E5%AE%9A%E4%B9%89/pdf.pdf",
+      "contentType": "application/pdf",
+      "contentLengthHeader": 5776800,
+      "bytesRead": 3000000,
+      "readTruncated": true,
+      "pdfMagic": "%PDF-",
+      "supports": ["官方 PDF 可达，含事件通知等章节"],
+      "doesNotSupport": ["不能替代目标固件实测"]
+    },
+    {
+      "id": "O10",
+      "publisher": "Hikvision",
+      "title": "人脸识别终端产品分类页",
+      "url": "https://www.hikvision.com/en/products/Access-Control-Products/terminals/face-recognition-terminal/",
+      "kind": "html",
+      "accessedAt": "2026-11-14",
+      "httpStatus": 200,
+      "finalUrl": "https://www.hikvision.com/en/products/Access-Control-Products/terminals/face-recognition-terminal/",
+      "contentType": "text/html;charset=utf-8",
+      "bytesRead": 1112601,
+      "markerFound": true,
+      "containsTargetModel": false,
+      "supports": ["人脸识别终端产品分类存在"],
+      "doesNotSupport": ["DS-K1T671BM 精确型号", "目标固件能力"]
+    }
+  ],
+  "projectEvidence": [
+    {
+      "id": "P01",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/tasks/HK-AI-01-EVIDENCE-MATRIX.md",
+      "gitBlob": "f83af4fe3b90b8f984cf731039685ba8807fcec7",
+      "note": "HK-AI-01 任务与三级证据规则"
+    },
+    {
+      "id": "P02",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/devices/HIKVISION-ISAPI-EVIDENCE-MATRIX.md",
+      "gitBlob": "b663bd8bae7007e9e7d7ad3a4725e2b02d4f0cc8",
+      "note": "27 端点/66 字段/50 错误码的文档证据矩阵"
+    },
+    {
+      "id": "P03",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/devices/HIKVISION-ISAPI-PROVIDER-WHITELIST.json",
+      "gitBlob": "7eda86a283109be2f55bf2301068d5e853ae09da",
+      "note": "全部 candidateOnly=true、allowedNow=false；顶层发布/设备门禁 false"
+    },
+    {
+      "id": "P04",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/devices/HIKVISION-ISAPI-DOCS-2026-11-05.md",
+      "gitBlob": "52aada20157751ef032f672c45dc45bdbd0435d5",
+      "note": "两份官方指南的元数据、页码、型号适用性"
+    },
+    {
+      "id": "P05",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/devices/HIKVISION-DS-K1T671BM-CAPABILITY.md",
+      "gitBlob": "10fb87844a41b30e303dbf0aff8dcd0bf69fc8dc",
+      "note": "BM 精确型号 + 目标固件已验证 0 条；路线未定"
+    },
+    {
+      "id": "P06",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/devices/HIKVISION-DS-K1T671BM-RISKS.md",
+      "gitBlob": "677821cc0e5f896a4abe9be99ca8e130f28cb78e",
+      "note": "风险/Q1-Q12/测试环境/合规"
+    },
+    {
+      "id": "P07",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/database/LOCK-01A-CONTRACT.md",
+      "gitBlob": "fa2500f77e55061effe548dfee31fcacd743630a",
+      "note": "Provider 接口、错误分类、幂等、事件校验契约"
+    },
+    {
+      "id": "P08",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/database/LOCK-01A-DATA-DESIGN.md",
+      "gitBlob": "a9c69a016e6e657229c5b1121c9b997b7441359b",
+      "note": "固定 ID/claim/slot、凭据/任务/日志集合"
+    },
+    {
+      "id": "P09",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/devices/LOCK-01A-REVIEW.md",
+      "gitBlob": "b2538ba6613fc6226b35874f439dd05c745149a4",
+      "note": "LOCK-01A 三轮复审；证据分级与 hikvision 枚举"
+    },
+    {
+      "id": "P10",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/tasks/HK-AI-04-H1-FINAL-APPROVAL-6BFE1BA-2026-11-07.md",
+      "gitBlob": "31f4ba70d81b742f6a54cc22295f12e469103046",
+      "note": "H1 终审通过"
+    },
+    {
+      "id": "P11",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/tasks/HK-AI-04-H2D-FINAL-APPROVAL-90CC848-2026-11-12.md",
+      "gitBlob": "31d28f079f5aa471f1d32602fccae27bfc7c01f1",
+      "note": "H2-d 终审；H2 关闭"
+    },
+    {
+      "id": "P12",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/tasks/HK-AI-04-H3-DESIGN-APPROVAL-B2CD7AB-2026-11-13.md",
+      "gitBlob": "12d677b114fc0c9032494c4ffb49e0ffa252c2ba",
+      "note": "H3 设计终审"
+    },
+    {
+      "id": "P13",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/tasks/HK-AI-04-H3A-APPROVAL-5E590EE-2026-11-13.md",
+      "gitBlob": "b06e7c529d8c912f4d4c8f075ab20ea0137ca261",
+      "note": "H3-a 终审"
+    },
+    {
+      "id": "P14",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/tasks/HK-AI-04-H3B-APPROVAL-2B92B30-2026-11-13.md",
+      "gitBlob": "80ba75981acdaa028a8ef10f2cbf2d767fdab715",
+      "note": "H3-b 终审；H3 关闭"
+    },
+    {
+      "id": "P15",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/tasks/HK-AI-04-H4-DESIGN-APPROVAL-1542A6C-2026-11-13.md",
+      "gitBlob": "bc1993893f36ccda64a069e892b61af0efda774c",
+      "note": "H4 设计终审；分阶段发卡"
+    },
+    {
+      "id": "P16",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/tasks/HK-AI-04-H4A-APPROVAL-685AC3A-2026-11-13.md",
+      "gitBlob": "66801cfdc54898a2c5574867e7e0040a77341256",
+      "note": "H4-a 终审"
+    },
+    {
+      "id": "P17",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/tasks/HK-AI-04-H4B-APPROVAL-1155B7B-2026-11-13.md",
+      "gitBlob": "f5619337e2e982de556195970c6804e99f8883d6",
+      "note": "H4-b 终审；H4-a/b Mock 撤权闭环关闭"
+    },
+    {
+      "id": "P18",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/tasks/HK-AI-04-H4C-DESIGN-APPROVAL-B15ACEB-2026-11-14.md",
+      "gitBlob": "8f584c1289a10dd0332cd0a5e3b0aa6cb5f1a6e4",
+      "note": "H4-c 设计终审通过；仅设计"
+    },
+    {
+      "id": "P19",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/tasks/HK-AI-04-H4C-DESIGN-REVIEW-377666A-2026-11-14.md",
+      "gitBlob": "4273bca18dadaa4b3d94ee93e48a0027e5d52f61",
+      "note": "H4-c 返工复审"
+    },
+    {
+      "id": "P20",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/tasks/HK-AI-04-H4C-DESIGN-REVIEW-D681574-2026-11-14.md",
+      "gitBlob": "bad3bb212e52872c7aaef430ef71d9ae6da84a7b",
+      "note": "H4-c 初审"
+    },
+    {
+      "id": "P21",
+      "class": "P",
+      "ref": "b15aceb",
+      "path": "docs/tasks/HK-AI-04-H3-LEASE-DISPATCH-DESIGN.md",
+      "gitBlob": "a9bc05639f0aaad8114e23b28a78dab3593f25f2",
+      "note": "H3 租约/派发设计"
+    },
+    {
+      "id": "P22",
+      "class": "P",
+      "ref": "b15aceb",
+      "path": "docs/tasks/HK-AI-04-H3B-EVIDENCE-2026-11-13.md",
+      "gitBlob": "997cdbebaa3160624d409b8af1838f004421b2b2",
+      "note": "H3-b D01-D66 证据映射"
+    },
+    {
+      "id": "P23",
+      "class": "P",
+      "ref": "b15aceb",
+      "path": "docs/tasks/HK-AI-04-H4B-EVIDENCE-2026-11-13.md",
+      "gitBlob": "b3445e0699770996582d3dbe35c2d6e30a7d0f21",
+      "note": "H4-b R13-R60 运行证据"
+    },
+    {
+      "id": "P24",
+      "class": "P",
+      "ref": "b15aceb",
+      "path": "docs/tasks/HK-AI-04-H4C-RECONCILIATION-DESIGN.md",
+      "gitBlob": "f99fd3b15bfa7220f538d7f5ce893649d5ab5577",
+      "note": "H4-c 冻结设计；simulated only；Provider 0"
+    },
+    {
+      "id": "P25",
+      "class": "P",
+      "ref": "9fd088d",
+      "path": "docs/tasks/HK-AI-04-H4-REVOKE-RECONCILE-DESIGN.md",
+      "gitBlob": "f980ae84a325904fce3b66f14c36249d42a1d3ce",
+      "note": "H4 撤权/清理/未知结果对账契约"
+    },
+    {
+      "id": "P26",
+      "class": "P",
+      "ref": "ed7b66f",
+      "path": "docs/tasks/HK-AI-06-HIKVISION-PROVIDER-PREFLIGHT-TASK-2026-11-11.md",
+      "gitBlob": "ebc07a5ef7a7053562dbdb4d5f1132a9e48e89f1",
+      "note": "真实 Provider 前置框架的禁止项与待现场证据"
+    }
+  ],
+  "codeEvidence": [
+    {
+      "id": "C01",
+      "class": "C",
+      "ref": "1155b7b",
+      "path": "admin-web/lib/face-service/dto.mjs",
+      "gitBlob": "0f77815aaa0c17765078838f622457b632f4409e",
+      "symbols": ["assertEventInput", "publicAccessState"]
+    },
+    {
+      "id": "C02",
+      "class": "C",
+      "ref": "1155b7b",
+      "path": "admin-web/lib/face-service/mock-provider.mjs",
+      "gitBlob": "358e0f7e648526727b5af2ab26fbae15330ea616",
+      "symbols": ["verifyEvent", "mock-sig", "5-minute window"]
+    },
+    {
+      "id": "C03",
+      "class": "C",
+      "ref": "1155b7b",
+      "path": "admin-web/lib/face-service/service.mjs",
+      "gitBlob": "e8be71e9ba34f49af52a5736e955da72882de73d",
+      "symbols": ["#opContext", "#replayValid", "createGrant", "revoke"]
+    },
+    {
+      "id": "C04",
+      "class": "C",
+      "ref": "1155b7b",
+      "path": "admin-web/lib/face-service/state.mjs",
+      "gitBlob": "4d8b362b0ed49d6bf5f64d228a879bf6bae257d2",
+      "symbols": ["JOB_TRANSITIONS", "projectAccess", "deviceEffective"]
+    },
+    {
+      "id": "C05",
+      "class": "C",
+      "ref": "1155b7b",
+      "path": "admin-web/lib/face-service/h4b.mjs",
+      "gitBlob": "04d93cd8cd5df9af04949e24f3fcf54a6a70ed08",
+      "symbols": ["revoke validator", "lease", "local finalize", "82/90"]
+    },
+    {
+      "id": "C06",
+      "class": "C",
+      "ref": "1155b7b",
+      "path": "admin-web/lib/face-service/collections.mjs",
+      "gitBlob": "c7d970aa19108931ca14c5a692fdb9b1a4a4ccef",
+      "symbols": ["validators", "deterministicLogId", "safe integer"]
+    },
+    {
+      "id": "C07",
+      "class": "C",
+      "ref": "1155b7b",
+      "path": "admin-web/lib/face-service/routes.mjs",
+      "gitBlob": "2cab81380dd936b453edfb4f08a03664d7d3f230",
+      "symbols": ["FACE_ROUTES (proposal only)"]
+    },
+    {
+      "id": "C08",
+      "class": "C",
+      "ref": "1155b7b",
+      "path": "admin-web/lib/org.mjs",
+      "gitBlob": "dece8b76cad341bb531e891b522aa0f947aed83b",
+      "symbols": ["device.operation.reconcile", "device.operation.retry", "device.face.readPrivate"]
+    },
+    {
+      "id": "C09",
+      "class": "C",
+      "ref": "1155b7b",
+      "path": "admin-web/lib/face-service/README.md",
+      "gitBlob": "25e9c807d2eb093e3bcca2fa0b9f2af81eb6e00a",
+      "symbols": ["mock boundary", "four-axis states"]
+    },
+    {
+      "id": "C10",
+      "class": "C",
+      "ref": "1155b7b",
+      "path": "admin-web/lib/store.mjs",
+      "gitBlob": "5439172f8fc6c6f68530c99dfdec2414665bfadc",
+      "symbols": ["transact", "deterministic audit", "refs limit"]
+    }
+  ],
+  "deviceEvidence": [],
+  "deviceEvidenceNote": "本次没有连接真实设备；仓库内也没有可引用的非敏感设备实测记录。所有 targetCapability 与 realCall 均保持未验证。",
+  "claimRegister": [
+    {
+      "id": "K01",
+      "claim": "公开官方精确覆盖裸型号 DS-K1T671BM 的资料为 0 条",
+      "status": "已证实（否定证据）",
+      "evidence": ["O02", "O03", "O04", "O10", "P04", "P05"],
+      "limit": "不能证明 BM 不存在，只能证明本次公开检索未找到精确资料"
+    },
+    {
+      "id": "K02",
+      "claim": "DS-K1T671 产品族存在",
+      "status": "已证实（文档存在）",
+      "evidence": ["O02", "O10"],
+      "limit": "族存在不等于 BM 能力"
+    },
+    {
+      "id": "K03",
+      "claim": "27 个候选端点均有文档摘要",
+      "status": "已证实（文档存在）",
+      "evidence": ["P02", "P03"],
+      "limit": "不等于目标设备支持"
+    },
+    {
+      "id": "K04",
+      "claim": "目标设备 capability 支持 0/27",
+      "status": "已证实（未验证）",
+      "evidence": ["P03"],
+      "limit": "需要目标设备只读调用"
+    },
+    {
+      "id": "K05",
+      "claim": "真实设备调用 0/27",
+      "status": "已证实（未执行）",
+      "evidence": ["P03"],
+      "limit": "需要隔离设备授权"
+    },
+    {
+      "id": "K06",
+      "claim": "EventNotificationAlert 通用信封含 dateTime/eventType/eventState 等字段",
+      "status": "已证实（公开 schema）",
+      "evidence": ["O07"],
+      "limit": "不等于门禁事件子结构；不等于目标固件"
+    },
+    {
+      "id": "K07",
+      "claim": "公开 schema 未记录事件签名/nonce/时间窗/防重放",
+      "status": "已证实（否定证据）",
+      "evidence": ["O07", "O08"],
+      "limit": "不能证明厂商绝无此能力，只能证明公开页面未记录"
+    },
+    {
+      "id": "K08",
+      "claim": "Mock 事件使用 mock-sig、5 分钟窗口、版本递增",
+      "status": "已证实（现有代码）",
+      "evidence": ["C01", "C02"],
+      "limit": "仅合成 fixture，不是生产验签"
+    },
+    {
+      "id": "K09",
+      "claim": "H4-c 仅接受 simulated 证据且 Provider 0",
+      "status": "已证实（设计批准）",
+      "evidence": ["P24", "P18"],
+      "limit": "设计通过不等于实现完成"
+    },
+    {
+      "id": "K10",
+      "claim": "K2 幂等、requestDigest、严格重放已实现",
+      "status": "已证实（现有代码）",
+      "evidence": ["C03", "P11"],
+      "limit": "只保证平台侧，不保证厂商侧幂等"
+    },
+    {
+      "id": "K11",
+      "claim": "图片示例为 image/jpeg、项目内官方摘要提示约 200 KB",
+      "status": "待设备验证",
+      "evidence": ["P03", "P04", "P02"],
+      "limit": "格式/尺寸/质量/尾随载荷未证实"
+    },
+    {
+      "id": "K12",
+      "claim": "事件签名/nonce 可生产使用",
+      "status": "暂不支持",
+      "evidence": ["O07", "O08", "C01", "C02"],
+      "limit": "没有厂商证据；Mock 签名不能用于生产"
+    }
+  ],
+  "verification": {
+    "checkedAt": "2026-11-14",
+    "method": "Python urllib GET with redirects; HTML marker check; git blob resolution",
+    "publicLinks": {
+      "checked": 10,
+      "ok": 10,
+      "failures": []
+    },
+    "allCitationLinks": {
+      "checked": 17,
+      "ok": 17,
+      "failures": [],
+      "note": "10 public official Hikvision URLs + 7 GitHub citation URLs"
+    },
+    "repository": {
+      "diffCheck": "passed (git diff --cached --check, exit 0)",
+      "relativeLinks": "none; 17 absolute URLs checked, 17 OK",
+      "sensitiveScan": "0 hits after masking 40/64-character Git/SHA hex digests",
+      "onlyNewDocs": "passed; exactly two docs/tasks/HK-AI-06A-* files"
+    },
+    "noDeviceCalls": true,
+    "noProductionCloudCalls": true,
+    "httpRouteRegistered": false,
+    "serverMjsModified": false
+  },
+  "nonSensitive": {
+    "containsRealFace": false,
+    "containsRealCredential": false,
+    "containsRealIp": false,
+    "containsRealSerial": false,
+    "containsRealAccount": false,
+    "containsRawProviderResponse": false,
+    "note": "本索引只保存公开 URL、项目路径、Git blob SHA、状态码与非敏感摘要。"
+  }
+}

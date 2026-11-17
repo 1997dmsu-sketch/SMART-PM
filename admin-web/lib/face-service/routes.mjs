@@ -44,13 +44,6 @@ export const FACE_ROUTES = Object.freeze([
     permission: "device.audit.read",
   },
   {
-    id: "device-operation-job-retry",
-    method: "POST",
-    path: "/api/v2/device-operation-jobs/:jobId/retry",
-    permission: "device.operation.retry",
-    idempotent: true,
-  },
-  {
     id: "device-operation-job-reconcile",
     method: "POST",
     path: "/api/v2/device-operation-jobs/:jobId/reconcile",

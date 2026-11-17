@@ -15,7 +15,6 @@ import { createHash } from "node:crypto";
 import { failCode } from "../model.mjs";
 import {
   COLLECTIONS,
-  assertBoundedId,
   deterministicLogId,
   applyOperationKeyDomain,
   operationKey,
@@ -24,6 +23,7 @@ import {
   operationKeyFingerprint,
   assertIdempotencyKey,
 } from "./collections.mjs";
+import { LocalStore } from "../store.mjs";
 import { validateDispatchJob } from "./h3a.mjs";
 import { validateRevokeJob } from "./h4b.mjs";
 
@@ -67,6 +67,10 @@ function conflict() { failCode("CONFLICT", "请求与既有记录不一致", 409
 // 合法回执校验（§4.4 严格重放 + §4.9.1 五字段）：绑定 expectedJobRevision+1。
 // now 用于 nextAttemptAt 上限校验；revision 上限与成功路径 CAS 溢出门禁一致。
 function assertReceipt(result, { jobId, expectedJobRevision }, now) {
+  // 回执是嵌套在 op key.result 内的快照，存储元数据不属于它的五字段；
+  // exactSemanticFields 的全局 _id/updatedAt 过滤只适用于外层记录，必须在嵌套回执前拦截。
+  if (result && typeof result === "object" && !Array.isArray(result) &&
+      (result._id !== undefined || result.updatedAt !== undefined)) conflict();
   exactSemanticFields(result, RECEIPT_FIELDS, "幂等回执");
   if (result.jobId !== jobId) conflict();
   if (result.state !== "queued") conflict();
@@ -141,6 +145,19 @@ function normalizeValidatorError(error) {
   failCode("ADAPTER_UNAVAILABLE", "服务暂时不可用", 503);
 }
 
+// 权限/主体门禁纯函数（§4.5 第 2–4 步）：事务外预读与事务内权威复核共用同一逻辑。
+// orgId 默认取 org._id（LocalStore 记录均带 _id），保证两处调用签名一致。
+function assertMembership({ org, member, actor, orgId = org?._id }) {
+  if (!org) failCode("NOT_FOUND", "组织不可用", 404);
+  if (org.status !== "active") failCode("FORBIDDEN", "当前组织不可用", 403);
+  if (!member || member.orgId !== orgId) failCode("NOT_FOUND", "成员关系不可用", 404);
+  if (member.status !== "active" || member.principalId !== actor.actorId)
+    failCode("FORBIDDEN", "当前成员关系无效", 403);
+  if (actor.actorType !== "user") failCode("FORBIDDEN", "当前主体无权人工重试", 403);
+  if (!(member.permissions || []).includes(RETRY_PERMISSION))
+    failCode("FORBIDDEN", "当前成员关系无权人工重试", 403);
+}
+
 /**
  * 严格人工重试服务。
  * 构造：{ store, orgId, actor:{actorId, membershipId, actorType?}, now?, env? }
@@ -148,6 +165,7 @@ function normalizeValidatorError(error) {
 export class StrictRetryService {
   constructor({ store, orgId, actor, now = () => Date.now(), env = process.env }) {
     if (!store || typeof store.transact !== "function") throw new TypeError("store 必须提供 transact");
+    if (!(store instanceof LocalStore)) failCode("NOT_CONFIGURED", "仅支持 LocalStore 合成范围", 503);
     if (typeof orgId !== "string" || !orgId) throw new TypeError("orgId 必填");
     if (!actor || typeof actor.actorId !== "string" || !actor.actorId ||
         typeof actor.membershipId !== "string" || !actor.membershipId) {
@@ -164,7 +182,7 @@ export class StrictRetryService {
   #opContext(idempotencyKey) {
     try { assertIdempotencyKey(idempotencyKey); }
     catch (error) { failCode("PARAM_ERROR", error.message, 400); }
-    const actorType = this.actor.actorType || "user";
+    const actorType = this.actor.actorType;
     if (actorType !== "user") failCode("FORBIDDEN", "当前主体无权人工重试", 403);
     const config = operationKeyConfig(this.env);
     const opKey = operationKey({
@@ -180,22 +198,27 @@ export class StrictRetryService {
   }
 
   #domainWrites(state, op, now) {
-    return applyOperationKeyDomain(state, {
-      realm: op.config.realm, version: op.config.version, fingerprint: op.fingerprint, now,
-    });
+    try {
+      return applyOperationKeyDomain(state, {
+        realm: op.config.realm, version: op.config.version, fingerprint: op.fingerprint, now,
+      });
+    } catch (error) {
+      // collections.mjs 的 domain 错误只带 code 不带 status（§4.10 映射为 409）。
+      // 在 E07 边界补齐 status，不改被复用的 collections.mjs。
+      if (error && (error.code === "DOMAIN_INCOMPLETE" || error.code === "DOMAIN_MISMATCH"))
+        error.status = 409;
+      throw error;
+    }
   }
 
-  // 事务内权限复核（§4.5 第 2–4 步），合法重放同样执行。
+  // 事务内权限权威复核（§4.5 第 2–4 步），合法重放同样执行。
   #authorize(state) {
-    const org = state[`organizations/${this.orgId}`];
-    const member = state[`org_memberships/${this.actor.membershipId}`];
-    if (!org) failCode("NOT_FOUND", "组织不可用", 404);
-    if (org.status !== "active") failCode("FORBIDDEN", "当前组织不可用", 403);
-    if (!member || member.orgId !== this.orgId) failCode("NOT_FOUND", "成员关系不可用", 404);
-    if (member.status !== "active" || member.principalId !== this.actor.actorId)
-      failCode("FORBIDDEN", "当前成员关系无效", 403);
-    if (!(member.permissions || []).includes(RETRY_PERMISSION))
-      failCode("FORBIDDEN", "当前成员关系无权人工重试", 403);
+    assertMembership({
+      org: state[`organizations/${this.orgId}`],
+      member: state[`org_memberships/${this.actor.membershipId}`],
+      actor: this.actor,
+      orgId: this.orgId,
+    });
   }
 
   /**
@@ -214,10 +237,23 @@ export class StrictRetryService {
       failCode("PARAM_ERROR", "请求参数包含非法字段", 400);
     const { expectedJobRevision } = body;
     const { idempotencyKey } = headers;
-    try { assertBoundedId(jobId, "jobId"); }
-    catch { failCode("PARAM_ERROR", "jobId 非法", 400); }
+    // §4.3 jobId 冻结正则（assertBoundedId 仅检查有界字符串，不足以保证不透明 ID 形状）。
+    if (typeof jobId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(jobId))
+      failCode("PARAM_ERROR", "jobId 非法", 400);
     if (!Number.isSafeInteger(expectedJobRevision) || expectedJobRevision < 1)
       failCode("PARAM_ERROR", "expectedJobRevision 非法", 400);
+    // §4.5 第 1 步 Idempotency-Key 格式校验前置：确保 DTO 错误优先于权限/K2（第 2–5 步）。
+    try { assertIdempotencyKey(idempotencyKey); }
+    catch (error) { failCode("PARAM_ERROR", error.message, 400); }
+
+    // §4.5 第 2–4 步事务外权限预读：只决定错误优先级，不作为放行依据；
+    // 权威复核仍在下方 transact 内的 #authorize（§4.5 L382）。
+    assertMembership({
+      org: await this.store.get("organizations", this.orgId),
+      member: await this.store.get("org_memberships", this.actor.membershipId),
+      actor: this.actor,
+      orgId: this.orgId,
+    });
 
     const op = this.#opContext(idempotencyKey);
     const requestDigest = digestOf({ jobId, expectedJobRevision });
@@ -267,7 +303,13 @@ export class StrictRetryService {
           ["orgId", "actorId", "actorType", "action", "target", "createdAt"],
           "审计记录");
         if (existingAudit.orgId !== this.orgId ||
-            !Number.isSafeInteger(existingAudit.createdAt) || existingAudit.createdAt < 0) conflict();
+            !Number.isSafeInteger(existingAudit.createdAt) || existingAudit.createdAt < 0 ||
+            existingAudit.actorId !== this.actor.actorId ||
+            existingAudit.actorType !== op.actorType ||
+            existingAudit.action !== AUDIT_ACTION ||
+            typeof existingAudit.target !== "string" ||
+            !existingAudit.target.includes(`${JOBS}/${jobId}`) ||
+            !existingAudit.target.includes(`${OP_KEYS}/${op.opKey}`)) conflict();
         result = validReplay(existing, op, requestDigest, identity, now);
         return []; // 合法重放：零写（含不新增 audit）
       }
@@ -292,6 +334,11 @@ export class StrictRetryService {
 
       // §4.5 第 11–13 步：阶段/分类/预算 + revision CAS + 时间门禁。
       shapeGate(job, { now, expectedJobRevision });
+
+      // §4.6/§4.8 log create-only：确定性 log ID 被预占 → 整事务回滚（零写 CONFLICT）。
+      // 位于重放提前 return 与状态/形状门禁之后：合法重放不受影响，
+      // 旧重排入口留下的 queued job 仍按 §4.11 先命中 INVALID_STATE。
+      if (state[`${LOGS}/${logId}`]) conflict();
 
       // §4.6 写集（按形状分支）。
       const newRevision = expectedJobRevision + 1;
@@ -322,7 +369,7 @@ export class StrictRetryService {
         } },
       ];
     }, { auditId, orgId: this.orgId, actorId: this.actor.actorId,
-      actorType: this.actor.actorType || "user", action: AUDIT_ACTION });
+      actorType: op.actorType, action: AUDIT_ACTION });
 
     return result;
   }

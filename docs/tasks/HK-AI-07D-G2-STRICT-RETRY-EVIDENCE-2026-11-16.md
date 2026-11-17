@@ -1,7 +1,7 @@
 # HK-AI-07D G2 严格 retry 服务——交付证据
 
 - 日期：2026-11-16（Asia/Shanghai）。
-- 状态：实施完成，追加提交并普通 push 后待 Codex 独立复审。本文交付**不表示** G2 已被 Codex 验收、**不表示** 07D 全量关闭、**不表示**可上线。
+- 状态：初版 `67be0c7` 经独立复审发现 3 项 P1 + 5 项 P2，本轮已逐项修复并补回归测试，追加提交后待再次独立复审。本文交付**不表示** G2 已被 Codex 验收、**不表示** 07D 全量关闭、**不表示**可上线。
 - 依据：批准的实施卡 `d16e7005ac4364bd6a1ae87066c1db150cd1f0ed`（`docs/tasks/HK-AI-07D-G2-STRICT-RETRY-TASK-2026-11-16.md`），由用户明确批准；设计依据 `docs/tasks/HK-AI-07D-RETRY-REQUEUE-DESIGN-2026-11-15.md`（提交 `51e2453`，796 行，已技术复审），经 `git show origin/docs/hk-face-retry-requeue-design:...` 只读读取，未合并文档分支。
 - 批准原文关键约束：合法重放先复核权限/K2/audit、回执绑定 `expectedJobRevision+1`、零写含不新增 audit、存储元数据与语义字段分离校验；仅新增独立模块/测试/证据，需改现有生产文件时停下报告；不授权 G3/G4、不合并 main/07B、不开放 HTTP/UI。
 
@@ -23,8 +23,8 @@
 
 | 文件 | 变更性质 |
 |---|---|
-| `admin-web/lib/face-service/retry.mjs` | 新增：严格 retry 服务 `StrictRetryService`（独立模块）；仅 import 复用 `model.mjs`/`collections.mjs`/`h3a.mjs`/`h4b.mjs`，不修改被复用文件 |
-| `admin-web/tests/face-strict-retry.test.mjs` | 新增：G2-LC01–LC10 服务层契约测试（30 顶层用例 / 98 含子用例）；全合成 fixture |
+| `admin-web/lib/face-service/retry.mjs` | 新增：严格 retry 服务 `StrictRetryService`（独立模块）；仅 import 复用 `model.mjs`/`collections.mjs`/`h3a.mjs`/`h4b.mjs`/`store.mjs`，不修改被复用文件 |
+| `admin-web/tests/face-strict-retry.test.mjs` | 新增：G2-LC01–LC10 服务层契约测试（38 顶层用例 / 118 含子用例，含复审 8 组 20 条回归）；全合成 fixture |
 | `docs/tasks/HK-AI-07D-G2-STRICT-RETRY-EVIDENCE-2026-11-16.md` | 本证据文档 |
 
 对 `h3a.mjs`/`h3b.mjs`/`h4b.mjs`/`service.mjs`/`collections.mjs`/`store.mjs`/`routes.mjs`/`server.mjs`/`model.mjs` 及小程序：`git diff --name-only 4f9c43d..HEAD` 与工作区 `git status --short` 均只含上述 3 个新增文件，既有生产文件零差异。
@@ -90,12 +90,12 @@
 
 | 命令 | exit | pass / fail / total |
 |---|---:|---|
-| `node --test tests/face-strict-retry.test.mjs` | 0 | 98 / 0 / 98（30 顶层用例） |
-| `npm test`（admin-web） | 0 | 657 / 0 / 657 |
+| `node --test tests/face-strict-retry.test.mjs` | 0 | 118 / 0 / 118（38 顶层用例，复审修订后） |
+| `npm test`（admin-web） | 0 | 677 / 0 / 677 |
 | `npm test`（仓库根） | 0 | 51 / 0 / 51 |
 | `git diff --check` | 0 | 无空白错误 |
 
-首选默认测试隔离；无 EPERM 降级。所有计数为实际执行结果，非占位。
+以上为复审修订后 team-lead 独立复跑结果；初版 `67be0c7` 的 98/657/51 见第 10 节。首选默认测试隔离；无 EPERM 降级。所有计数为实际执行结果，非占位。
 
 ## 6. 零写、元数据分离与失败关闭证据
 
@@ -105,7 +105,7 @@
 
 ## 7. 已知限制（交复审确认，非本卡阻断）
 
-1. **DOMAIN_INCOMPLETE / DOMAIN_MISMATCH 无 HTTP status**：由 `collections.mjs` 的 `schemaError` 抛出，只带 `code`、无 `status`；§4.10 映射为 409。属复用 helper 既有行为，G2 不注册 HTTP、服务层按 `.code` 判断，未修改 helper。未来 G6 接线应按 code 映射或单独补 status。
+1. ~~DOMAIN_INCOMPLETE / DOMAIN_MISMATCH 无 HTTP status~~：**已在复审修订中关闭**——`#domainWrites()` 在 E07 边界为这两个码补 `error.status = 409`，未修改 `collections.mjs`（见第 10 节 P2-6）。
 2. 本模块只做服务层，未注册 HTTP/UI（G6 门禁，符合批准范围）。
 3. 测试全为合成 fixture；未在 HTTP 层、真机或生产云验证（本卡范围外）。
 
@@ -119,6 +119,29 @@
 
 ## 9. 交付与复审状态
 
-- 追加提交 SHA、普通 push 与 `git ls-remote` 远端核对结果：见最终交付回报。
-- 交付后停手，等待 G2 独立复审；不自行开始 G3/G4。
-- 三层验证中的静态独立审查已完成（无新 P0/P1），契约真值测试 95/95 全绿；**本文交付不等于 Codex 独立复审通过**。
+- 初版提交 `67be0c7dd74ffd31c1bd30bdef3ee73d6f6edb5e` 已普通 push 并核对远端；本轮修订追加提交 SHA、普通 push 与 `git ls-remote` 远端核对结果：见最终交付回报。
+- 交付后停手，等待 G2 再次独立复审；不自行开始 G3/G4。
+- 初版经独立复审发现 3 P1 + 5 P2，已逐项修复（第 10 节）；修订后契约真值测试 118/118 全绿。**本文交付不等于 Codex 独立复审通过**。
+
+## 10. 独立复审修订记录（对 67be0c7 的 3 P1 + 5 P2）
+
+复审报告位于 Codex 云环境 `/workspace/artifacts/HK-AI-07D-G2-REVIEW-67BE0C7.md`（本机不可读），缺陷清单由用户转述。修订前由独立只读 worker 用最小探针**实测复现全部 8 项**（非静态推断），并确认初版 98 个契约测试全部漏检。
+
+| 项 | 缺陷 | 根因 | 修复（retry.mjs） | 契约依据 |
+|---|---|---|---|---|
+| P1-1 | 预占确定性 log 被覆盖，违反 create-only | 写集无条件写 logId，Store 对已存在 `_id` 合并覆盖 | 状态/形状门禁后、写集前拦截 `if (state[LOGS/logId]) conflict()`；合法重放提前 return 不受影响 | §4.6/§4.8/§4.5、C08、§4.10 CONFLICT |
+| P1-2 | 非 LocalStore 适配器仍能提交 | 构造器仅校验 `transact` 方法 | `instanceof LocalStore` 门禁，否则 NOT_CONFIGURED/503 | §4.13.3、§4.10 |
+| P1-3 | 缺失 actorType 默认 user 绕过门禁 | `actorType \|\| "user"` | 提取 `assertMembership` 要求 `actorType==="user"`，缺失/system → FORBIDDEN；去 `#opContext` 与 audit meta 的默认值 | §4.4/§4.5 步3、P13 |
+| P2-4 | 嵌套回执接受 `_id`/`updatedAt` | `exactSemanticFields` 全局过滤元数据对嵌套 result 同样生效 | `assertReceipt` 进入精确校验前拦截嵌套回执的 `_id`/`updatedAt`（带类型守卫） | §4.4/§4.9.4/§4.9.1 |
+| P2-5 | 权限与 K2 校验顺序错误 | K2 派生在事务外、权限在事务内，K2 非法先于权限返回 | 抽出 `assertMembership`；DTO 后、K2 前做事务外权限预读（仅定优先级），事务内权威复核保留；Idempotency-Key 格式校验前置保住第 1 步 | §4.5 步1-5、L382、N02/N07 |
+| P2-6 | domain 错误缺 409 status | `collections.mjs` 的 `schemaError` 只带 code | `#domainWrites` try/catch 为 DOMAIN_* 补 `status=409`，不改 helper | §4.4/§4.10、K10/K11 |
+| P2-7 | 损坏审计值仍可重放 | audit 成对性只校字段集与 org/createdAt | 追加 actorId/actorType/action/target 值校验，target 须含 job 与 op key 分段 | §4.5 步7、§4.4/§4.9.3、K13/K14 |
+| P2-8 | jobId 未执行冻结正则 | 仅用 `assertBoundedId`，不校验不透明 ID 形状 | `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`，非法 → PARAM_ERROR/400；移除未用 import | §4.3、§4.10、N01 |
+
+**回归测试**：新增 REG-P1-1/P1-2/P1-3、REG-P2-4/P2-5/P2-6/P2-7/P2-8 共 8 组 20 条负向用例，均以全库 `structuredClone` 前后 `deepEqual` 证明零写；`assertSafeError` 收紧为对 DOMAIN_* 强制校验 `status=409`（堵住此前"status 存在才校验"的盲区）。
+
+**可证伪验证**：team-lead 用临时反向补丁禁用 P1-1 检查后 REG-P1-1 精确失败（117/118，fail 1），还原后逐字节一致；修订 worker 另对 P2-6 做过反向补丁验证（fail 3）。测试为契约真值断言，非假阳性。
+
+**对 spec 的必要偏差（均由修订 worker 说明理由并经 team-lead 复核采纳）**：P1-1 落点后移至状态/形状门禁之后（否则合法重放与 §4.11 旧 queued job 会误命中 CONFLICT）；P2-5 的 Idempotency-Key 格式校验前置（否则"非法 key + 无权限"会错误返回 FORBIDDEN 而非 PARAM_ERROR）；P2-4 加类型守卫（避免 null/数组回执泄漏非 CONFLICT 码）。
+
+**范围**：本轮仅改两个本卡新增文件（实现 + 测试）并更新本证据文档；既有生产文件、G1 提交、G3/G4、main/07B、HTTP/UI 均零改动。

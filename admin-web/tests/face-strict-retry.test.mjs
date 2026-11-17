@@ -310,8 +310,9 @@ const SENSITIVE_TOKENS = [ORG, ORG_OTHER, MEMBERSHIP, MEMBERSHIP_B, ACTOR, ACTOR
 function assertSafeError(err) {
   assert.ok(err instanceof Error, "失败必须是 Error");
   assert.ok(typeof err.code === "string" && err.code, "失败必须携带冻结错误码");
-  // 注：applyOperationKeyDomain 抛出的 DOMAIN_INCOMPLETE / DOMAIN_MISMATCH 由 collections.mjs
-  // 的 schemaError 产生（带 code 但不带 status），这是实现层现状；这里只校验“若设置则为合法映射”。
+  // §4.10：DOMAIN_* 必须携带 409 映射；E07 边界负责补齐，收紧断言防止同类缺陷漏检。
+  if (err.code === "DOMAIN_INCOMPLETE" || err.code === "DOMAIN_MISMATCH")
+    assert.equal(err.status, 409, `${err.code} 必须携带 status=409`);
   if (err.status !== undefined)
     assert.ok(err.status >= 400 && err.status <= 503, "失败状态必须是既有 HTTP 映射");
   const message = String(err.message);
@@ -1120,4 +1121,139 @@ test("LC10：构造与失败分支均不写 Store（全库零写）——覆盖 
     const h = await setup(st);
     await expectErrorZeroWrite(h.store, () => h.retry(JOB, 0), "PARAM_ERROR", 400);
   });
+});
+
+// ---------------------------------------------------------------------------
+// 复审 8 项缺陷回归（每条负向用例在修复前均失败）
+// ---------------------------------------------------------------------------
+test("REG-P1-1：确定性 log ID 被预占 → CONFLICT/409 零写，预占记录不被覆盖", async (t) => {
+  const h = await setup(t);
+  const logId = deterministicLogId(JOB, "queued", JOB_REV + 1);
+  putRecord(h.store, LOGS, logId, {
+    orgId: ORG, jobId: JOB, action: "enroll", fromState: "PRESEEDED", state: "queued",
+    actorType: "PRESEEDED", actorId: "PRESEEDED", at: NOW, revision: JOB_REV + 1, attempt: 99,
+    leaseGeneration: 99, evidenceScope: "PRESEEDED", errorKind: null, reasonCode: null, alertCode: null,
+    sentinelMarker: "MUST_SURVIVE",
+  });
+  await expectErrorZeroWrite(h.store, () => h.retry(), "CONFLICT", 409);
+  assert.equal(find(h.store, LOGS, logId).sentinelMarker, "MUST_SURVIVE", "预占 log 不得被合并覆盖");
+});
+
+test("REG-P1-2：非 LocalStore 适配器构造即 NOT_CONFIGURED/503、零写", async (t) => {
+  const h = await setup(t);
+  let transactCalls = 0;
+  const fakeStore = {
+    data: structuredClone(h.store.data),
+    transact: async () => { transactCalls += 1; return []; },
+  };
+  const before = structuredClone(fakeStore.data);
+  await expectError(async () => {
+    new StrictRetryService({
+      store: fakeStore, orgId: ORG,
+      actor: { actorId: ACTOR, membershipId: MEMBERSHIP, actorType: "user" },
+      now: () => NOW, env: h.env,
+    });
+  }, "NOT_CONFIGURED", 503);
+  assert.equal(transactCalls, 0, "非 LocalStore 不得触发任何 transact");
+  assert.deepEqual(fakeStore.data, before, "零写");
+});
+
+test("REG-P1-3：actor 缺失 actorType → FORBIDDEN/403 零写（对照 system 见 LC05）", async (t) => {
+  const h = await setup(t);
+  const service = new StrictRetryService({
+    store: h.store, orgId: ORG,
+    actor: { actorId: ACTOR, membershipId: MEMBERSHIP }, // 无 actorType
+    now: () => NOW, env: h.env,
+  });
+  await expectErrorZeroWrite(h.store,
+    () => service.retry(JOB, { expectedJobRevision: JOB_REV }, { idempotencyKey: h.nextKey() }),
+    "FORBIDDEN", 403);
+});
+
+test("REG-P2-4：嵌套回执 result 含 _id/updatedAt → CONFLICT/409 零写", async (t) => {
+  for (const extra of ["_id", "updatedAt"]) {
+    await t.test(`result 多一个存储字段 ${extra}`, async (st) => {
+      const h = await setup(st);
+      const key = h.nextKey();
+      await h.retry(JOB, JOB_REV, key);
+      const ctx = opContextFor({ env: h.env, idempotencyKey: key });
+      const original = structuredClone(find(h.store, OP_KEYS, ctx.opKey).result);
+      putRecord(h.store, OP_KEYS, ctx.opKey, {
+        ...find(h.store, OP_KEYS, ctx.opKey),
+        result: { ...original, [extra]: "SHOULD_BE_REJECTED" },
+      });
+      await expectErrorZeroWrite(h.store, () => h.retry(JOB, JOB_REV, key), "CONFLICT", 409);
+    });
+  }
+});
+
+test("REG-P2-5：K2 配置非法 + 成员无权限 → FORBIDDEN/403（权限优先于 K2）", async (t) => {
+  const h = await setup(t, {
+    env: { OPERATION_KEY_HMAC_KEY_B64: "not-base64!!", OPERATION_KEY_VERSION: "1", OPERATION_KEY_REALM: "g2-realm" },
+    memberOverrides: { permissions: [] },
+  });
+  await expectErrorZeroWrite(h.store, () => h.retry(), "FORBIDDEN", 403);
+});
+
+test("REG-P2-6：domain 错误必须携带 status=409（直接断言，不依赖 assertSafeError）", async (t) => {
+  await t.test("DOMAIN_INCOMPLETE", async (st) => {
+    const h = await setup(st);
+    const ctx = opContextFor({ env: h.env, idempotencyKey: h.nextKey() });
+    removeRecord(h.store, DOMAINS, ctx.versionId);
+    const before = structuredClone(h.store.data);
+    await assert.rejects(() => h.retry(), (err) => {
+      assert.equal(err.code, "DOMAIN_INCOMPLETE");
+      assert.equal(err.status, 409, "DOMAIN_INCOMPLETE 必须 status=409");
+      return true;
+    });
+    assert.deepEqual(structuredClone(h.store.data), before, "零写");
+  });
+  await t.test("DOMAIN_MISMATCH", async (st) => {
+    const h = await setup(st);
+    const serviceB = new StrictRetryService({
+      store: h.store, orgId: ORG,
+      actor: { actorId: ACTOR, membershipId: MEMBERSHIP, actorType: "user" },
+      now: () => NOW, env: { ...K2_ENV_B },
+    });
+    const before = structuredClone(h.store.data);
+    await assert.rejects(
+      () => serviceB.retry(JOB, { expectedJobRevision: JOB_REV }, { idempotencyKey: h.nextKey() }),
+      (err) => {
+        assert.equal(err.code, "DOMAIN_MISMATCH");
+        assert.equal(err.status, 409, "DOMAIN_MISMATCH 必须 status=409");
+        return true;
+      });
+    assert.deepEqual(structuredClone(h.store.data), before, "零写");
+  });
+});
+
+test("REG-P2-7：audit 语义字段值损坏 → CONFLICT/409 零写", async (t) => {
+  const cases = [
+    ["actorId", "TAMPERED_ACTOR"],
+    ["actorType", "system"],
+    ["action", "H4 requeue"],
+    ["target", "TAMPERED_TARGET"],
+  ];
+  for (const [field, bad] of cases) {
+    await t.test(`audit.${field} 篡改`, async (st) => {
+      const h = await setup(st);
+      const key = h.nextKey();
+      await h.retry(JOB, JOB_REV, key);
+      const ctx = opContextFor({ env: h.env, idempotencyKey: key });
+      const auditId = auditIdFor(ctx.opKey);
+      putRecord(h.store, AUDIT_COLLECTION, auditId, {
+        ...find(h.store, AUDIT_COLLECTION, auditId), [field]: bad,
+      });
+      await expectErrorZeroWrite(h.store, () => h.retry(JOB, JOB_REV, key), "CONFLICT", 409);
+    });
+  }
+});
+
+test("REG-P2-8：jobId 不符合冻结正则 → PARAM_ERROR/400 零写", async (t) => {
+  for (const badId of ["bad job", "-lead", "job@x", "é"]) {
+    await t.test(`jobId=${JSON.stringify(badId)}`, async (st) => {
+      const h = await setup(st);
+      await expectErrorZeroWrite(h.store, () => h.retry(badId, JOB_REV), "PARAM_ERROR", 400);
+    });
+  }
 });

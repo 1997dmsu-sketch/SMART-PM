@@ -70,7 +70,7 @@ function assertReceipt(result, { jobId, expectedJobRevision }, now) {
   // 回执是嵌套在 op key.result 内的快照，存储元数据不属于它的五字段；
   // exactSemanticFields 的全局 _id/updatedAt 过滤只适用于外层记录，必须在嵌套回执前拦截。
   if (result && typeof result === "object" && !Array.isArray(result) &&
-      (result._id !== undefined || result.updatedAt !== undefined)) conflict();
+      (Object.hasOwn(result, "_id") || Object.hasOwn(result, "updatedAt"))) conflict();
   exactSemanticFields(result, RECEIPT_FIELDS, "幂等回执");
   if (result.jobId !== jobId) conflict();
   if (result.state !== "queued") conflict();
@@ -302,14 +302,14 @@ export class StrictRetryService {
         exactSemanticFields(existingAudit,
           ["orgId", "actorId", "actorType", "action", "target", "createdAt"],
           "审计记录");
+        const retryTarget = `${JOBS}/${jobId}, ${LOGS}/${logId}, ${OP_KEYS}/${op.opKey}`;
+        const bootstrapTarget = `${DOMAINS}/${op.headId}, ${DOMAINS}/${op.versionId}, ${retryTarget}`;
         if (existingAudit.orgId !== this.orgId ||
             !Number.isSafeInteger(existingAudit.createdAt) || existingAudit.createdAt < 0 ||
             existingAudit.actorId !== this.actor.actorId ||
             existingAudit.actorType !== op.actorType ||
             existingAudit.action !== AUDIT_ACTION ||
-            typeof existingAudit.target !== "string" ||
-            !existingAudit.target.includes(`${JOBS}/${jobId}`) ||
-            !existingAudit.target.includes(`${OP_KEYS}/${op.opKey}`)) conflict();
+            (existingAudit.target !== retryTarget && existingAudit.target !== bootstrapTarget)) conflict();
         result = validReplay(existing, op, requestDigest, identity, now);
         return []; // 合法重放：零写（含不新增 audit）
       }

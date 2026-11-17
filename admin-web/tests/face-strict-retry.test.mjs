@@ -1320,3 +1320,40 @@ test("REG2-P2-2：audit.target 必须为精确配对写集引用，拒伪造前�
     assert.deepEqual(replay, receipt, "合法 target 同键重放返回原回执");
   });
 });
+
+test("LC05/REG2-P2-2 补充：首次创建 domain（5 条 target）后同键合法重放 → 原回执 + 全库零写", async (t) => {
+  // 合并态 b3a41ea 独立复审补充专项（17/17）实测场景纳入正式测试：
+  // 既有合法重放正例均预置 domain（3 条 target），首次创建 domain 的写集为
+  // [head, version, job, log, opKey]（5 条 target）——该形态的合法重放正向路径此前无正式覆盖。
+  const h = await setup(t, { withDomains: false });
+  assert.equal(count(h.store, DOMAINS), 0, "前置：domain 全缺");
+  const key = h.nextKey();
+
+  const receipt = await h.retry(JOB, JOB_REV, key);
+  assertReceiptShape(receipt);
+  assert.equal(count(h.store, DOMAINS), 2, "首次 retry 必须写入 head+version 两条 domain");
+
+  // 首次写集的 audit.target 必须是 5 条引用有序 join(", ")。
+  const ctx = opContextFor({ env: h.env, idempotencyKey: key });
+  const aid = auditIdFor(ctx.opKey);
+  const expectedTarget = [
+    `${DOMAINS}/${ctx.headId}`,
+    `${DOMAINS}/${ctx.versionId}`,
+    `${JOBS}/${JOB}`,
+    `${LOGS}/${deterministicLogId(JOB, "queued", JOB_REV + 1)}`,
+    `${OP_KEYS}/${ctx.opKey}`,
+  ].join(", ");
+  assert.equal(find(h.store, AUDIT_COLLECTION, aid).target, expectedTarget,
+    "首次创建 domain 的 audit.target 必须是 5 条引用有序序列");
+
+  // 同 key 合法重放：domain 已存在，但 audit.target 仍为首次写入的 5 条形态，
+  // assertAuditTarget 必须接受该形态并放行，返回原回执且全库零写（含不新增 audit/domain）。
+  const auditsBefore = count(h.store, AUDIT_COLLECTION);
+  const domainsBefore = structuredClone(h.store.data[DOMAINS]);
+  const before = structuredClone(h.store.data);
+  const replay = await h.retry(JOB, JOB_REV, key);
+  assert.deepEqual(replay, receipt, "5 条 target 形态的合法重放必须返回原回执");
+  assert.deepEqual(structuredClone(h.store.data), before, "首次 domain 后合法重放必须全库内容级零写");
+  assert.equal(count(h.store, AUDIT_COLLECTION), auditsBefore, "合法重放不得新增 audit");
+  assert.deepEqual(h.store.data[DOMAINS], domainsBefore, "合法重放不得改动 domain 集合");
+});

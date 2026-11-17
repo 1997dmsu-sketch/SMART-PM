@@ -1,7 +1,7 @@
 # HK-AI-07D G2 严格 retry 服务——交付证据
 
 - 日期：2026-11-16（Asia/Shanghai）。
-- 状态：初版 `67be0c7` 经独立复审发现 3 项 P1 + 5 项 P2（第 10 节），第一轮修订 `d2eaca9` 再经独立复审发现 2 项 P2 边界缺口（第 11 节）；两轮均已逐项修复并补回归测试，追加提交后待再次独立复审。本文交付**不表示** G2 已被 Codex 验收、**不表示** 07D 全量关闭、**不表示**可上线。
+- 状态：初版 `67be0c7` 经独立复审发现 3 项 P1 + 5 项 P2（第 10 节），第一轮修订 `d2eaca9` 再经独立复审发现 2 项 P2 边界缺口（第 11 节）；两轮均已逐项修复并补回归测试。合并态 `b3a41ea` 已通过独立复审（定向 129/129、根 51/51、补充专项 17/17，含首次 domain 后合法重放及全库零写）；本轮非阻塞收尾把该正例纳入正式测试并统一全文计数（第 12 节）。本文交付**不表示** 07D 全量关闭、**不表示**可上线；G3/G4、合并 main/07B、HTTP/UI 继续冻结。
 - 依据：批准的实施卡 `d16e7005ac4364bd6a1ae87066c1db150cd1f0ed`（`docs/tasks/HK-AI-07D-G2-STRICT-RETRY-TASK-2026-11-16.md`），由用户明确批准；设计依据 `docs/tasks/HK-AI-07D-RETRY-REQUEUE-DESIGN-2026-11-15.md`（提交 `51e2453`，796 行，已技术复审），经 `git show origin/docs/hk-face-retry-requeue-design:...` 只读读取，未合并文档分支。
 - 批准原文关键约束：合法重放先复核权限/K2/audit、回执绑定 `expectedJobRevision+1`、零写含不新增 audit、存储元数据与语义字段分离校验；仅新增独立模块/测试/证据，需改现有生产文件时停下报告；不授权 G3/G4、不合并 main/07B、不开放 HTTP/UI。
 
@@ -12,7 +12,8 @@
 | 代码基线（父提交） | `4f9c43dfc313187b5fa971cb132dce29c294c286`（G1 验收提交，两项 P2 关闭） |
 | 实施分支 | `feat/hk-face-strict-retry` |
 | 隔离工作树 | `.tmp-g2-strict-retry`（`git worktree add`，`core.autocrlf=false`） |
-| 最终提交 SHA | 见第 9 节交付回报（含本证据文档的提交；普通 push 后以 `git ls-remote` 复核） |
+| 验收提交 SHA | `b3a41eaabf59e84a2f99babfee2f0c45ac418f49`（合并态，独立复审通过，远端一致） |
+| 收尾提交 SHA | 见第 12 节（非阻塞收尾：正例入正式测试 + 统一计数；普通 push 后以 `git ls-remote` 复核） |
 | 提交方式 | 追加提交；未 amend、未 rebase、未 squash、未 reset、未 force push |
 | G1 验收提交 | 保持 `4f9c43d` 不变，未追加、未改写 |
 | 07B / G5 | 未合并 `59a737a`，不依赖、不修改 07B queryJob |
@@ -24,7 +25,7 @@
 | 文件 | 变更性质 |
 |---|---|
 | `admin-web/lib/face-service/retry.mjs` | 新增：严格 retry 服务 `StrictRetryService`（独立模块）；仅 import 复用 `model.mjs`/`collections.mjs`/`h3a.mjs`/`h4b.mjs`/`store.mjs`，不修改被复用文件 |
-| `admin-web/tests/face-strict-retry.test.mjs` | 新增：G2-LC01–LC10 服务层契约测试（40 顶层用例 / 129 含子用例，含两轮复审 + 远端合并共 10 组 31 条回归）；全合成 fixture |
+| `admin-web/tests/face-strict-retry.test.mjs` | 新增：G2-LC01–LC10 服务层契约测试（41 顶层用例 / 130 含子用例，含两轮复审 + 远端合并 + 首次 domain 重放正例共 11 组 32 条回归）；全合成 fixture |
 | `docs/tasks/HK-AI-07D-G2-STRICT-RETRY-EVIDENCE-2026-11-16.md` | 本证据文档 |
 
 对 `h3a.mjs`/`h3b.mjs`/`h4b.mjs`/`service.mjs`/`collections.mjs`/`store.mjs`/`routes.mjs`/`server.mjs`/`model.mjs` 及小程序：`git diff --name-only 4f9c43d..HEAD` 与工作区 `git status --short` 均只含上述 3 个新增文件，既有生产文件零差异。
@@ -90,12 +91,12 @@
 
 | 命令 | exit | pass / fail / total |
 |---|---:|---|
-| `node --test tests/face-strict-retry.test.mjs` | 0 | 129 / 0 / 129（40 顶层用例，第二轮复审修订 + 远端 c075229 合并后） |
-| `npm test`（admin-web） | 0 | 688 / 0 / 688 |
+| `node --test tests/face-strict-retry.test.mjs` | 0 | 130 / 0 / 130（41 顶层用例，合并态复审通过后 + 首次 domain 重放正例收尾） |
+| `npm test`（admin-web） | 0 | 689 / 0 / 689 |
 | `npm test`（仓库根） | 0 | 51 / 0 / 51 |
 | `git diff --check` | 0 | 无空白错误 |
 
-以上为第二轮复审修订后 team-lead 独立复跑结果；初版 `67be0c7` 的 98/657/51 与第一轮修订 `d2eaca9` 的 118/677/51 亦均为实际执行结果，修订脉络见第 10、11 节。首选默认测试隔离；无 EPERM 降级。所有计数为实际执行结果，非占位。
+以上为收尾后 team-lead 独立复跑结果；历史版本计数：初版 `67be0c7` 98/657/51、第一轮修订 `d2eaca9` 118/677/51、合并前本地 `1a99ed1` 127/686/51、合并态验收 `b3a41ea` 129/688/51（均含独立复审实测；补充专项 17/17），脉络见第 10–12 节。首选默认测试隔离；无 EPERM 降级。所有计数为实际执行结果，非占位。
 
 ## 6. 零写、元数据分离与失败关闭证据
 
@@ -119,9 +120,9 @@
 
 ## 9. 交付与复审状态
 
-- 初版提交 `67be0c7dd74ffd31c1bd30bdef3ee73d6f6edb5e` 与第一轮修订 `d2eaca98685d15a895889ca9e76205c7d884a9ec` 均已普通 push 并核对远端；本轮本地修订 `1a99ed1` 与远端平行修复 `c075229` 合并后追加提交，SHA、普通 push 与 `git ls-remote` 远端核对结果：见最终交付回报。
-- 交付后停手，等待 G2 再次独立复审；不自行开始 G3/G4。
-- 初版经独立复审发现 3 P1 + 5 P2，已逐项修复（第 10 节）；第一轮修订再经独立复审发现 2 项 P2 边界缺口（回执键存在判断、audit.target 精确配对），已逐项修复并与远端平行修复合并（第 11 节）。两轮修订 + 合并后契约真值测试 129/129 全绿。**本文交付不等于 Codex 独立复审通过**。
+- 初版提交 `67be0c7dd74ffd31c1bd30bdef3ee73d6f6edb5e` 与第一轮修订 `d2eaca98685d15a895889ca9e76205c7d884a9ec` 均已普通 push 并核对远端；本地修订 `1a99ed1` 与远端平行修复 `c075229` 合并为验收提交 `b3a41eaabf59e84a2f99babfee2f0c45ac418f49`（独立复审通过，远端一致）；非阻塞收尾追加提交见第 12 节。
+- 初版经独立复审发现 3 P1 + 5 P2，已逐项修复（第 10 节）；第一轮修订再经独立复审发现 2 项 P2 边界缺口（回执键存在判断、audit.target 精确配对），已逐项修复并与远端平行修复合并（第 11 节）。
+- **合并态 `b3a41ea` 已通过 G2 独立复审**：验收报告 `/workspace/artifacts/HK-AI-07D-G2-REVIEW-B3A41EA-2026-11-17.md`（本机不可读），用户转述验收结论——冲突消解保持已验收语义、两条父提交新增测试均保留；独立实测定向 129/129、根 51/51、补充专项 17/17（含首次创建 domain 后合法重放及全库零写）。本节仅记录 G2；**不表示 07D 全量关闭或可上线，G3/G4、合并 main/07B、HTTP/UI 继续冻结**。
 
 ## 10. 独立复审修订记录（对 67be0c7 的 3 P1 + 5 P2）
 
@@ -162,3 +163,16 @@
 **远端平行提交合并**：本地追加提交 `1a99ed1` 后普通 push 被拒（non-fast-forward），只读 fetch 发现远端存在平行提交 `c07522950e2871cd6f511d6eec4693e56bc9fef7`（"validate strict retry replay fields exactly"，同在 `d2eaca9` 之上），修复的正是本轮同一对 P2——`Object.hasOwn` 键存在判断 + audit target 精确比对（远端用两个精确构造字符串全等比对，本地用 `assertAuditTarget` 数组解析，语义等价）。未 force push、未 rebase、未 reset：以 `--no-ff` merge 并入，`retry.mjs` 的 audit target 段单点冲突按本地 `assertAuditTarget` 实现消解（保留契约注释），移除远端引入后不再使用的 `retryTarget`/`bootstrapTarget` 局部变量；测试文件自动合并，远端新增的 REG-P2-4 `_id: undefined` 与 REG-P2-7 伪造前缀子用例、本地 REG2-P2-1/P2-2 全部并存。合并后全量复跑：定向 129/129、admin 688/688、根 51/51。
 
 **范围**：本轮仅改两个本卡新增文件（实现 + 测试）并更新本证据文档；既有生产文件、G1 提交、G3/G4、main/07B、HTTP/UI 均零改动。
+
+## 12. 合并态复审通过后的非阻塞收尾（对 b3a41ea）
+
+用户确认合并态 `b3a41ea` 独立复审通过，批准仅限两项非阻塞收尾，不涉及生产代码、不改已验收语义：
+
+1. **首次 domain 重放正例纳入正式测试**：既有合法重放正例均预置 domain（audit.target 为 3 条引用），首次创建 domain 的写集为 `[head, version, job, log, opKey]`（5 条引用）——该形态的合法重放正向路径此前只在复审补充专项（17/17）里实测，未进正式测试。新增顶层用例 `LC05/REG2-P2-2 补充：首次创建 domain（5 条 target）后同键合法重放 → 原回执 + 全库零写`：以 `withDomains:false` 起步，断言首次 retry 写入 head+version、audit.target 精确等于 5 条引用有序 `join(", ")`，再同键重放并断言返回原回执 + 全库 `structuredClone` 内容级零写 + 不新增 audit + domain 集合零改。
+2. **统一证据文档旧计数**：第 2、5、9 节计数全部更新到收尾后实测值（定向 130、admin 689、根 51），并保留历史版本计数供追溯。
+
+**可证伪验证**：临时反向补丁令 `assertAuditTarget` 仅接受 3 条形态（删 `withDomain` 分支）后，恰好新增的 1 条正例失败（129 pass / 1 fail），既有 129 条不受影响；还原后逐字节一致。证明新用例真值依赖 5 条 target 分支，非假阳性。
+
+**最终实测**：定向 130/130（41 顶层）、admin 689/689、根 51/51、`git diff --check` 0，全 0 fail。
+
+**范围**：本节仅追加 1 个测试用例 + 本证据文档计数/状态修订；生产代码 `retry.mjs` 零改动、验收提交 `b3a41ea` 不改写；G3/G4、合并 main/07B、HTTP/UI 继续冻结。

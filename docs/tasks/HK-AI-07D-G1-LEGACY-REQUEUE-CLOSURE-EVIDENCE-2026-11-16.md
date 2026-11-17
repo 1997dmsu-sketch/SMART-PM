@@ -1,7 +1,7 @@
 # HK-AI-07D G1 旧 requeue 入口封闭——交付证据
 
 - 日期：2026-11-16（Asia/Shanghai）。
-- 状态：实施完成；已按独立复审 P2-1/P2-2 追加测试与证据，并在 `4f9c43d` 上追加 P2-3 预载监听/网络 guard。待 Codex 再次独立复审；本文交付不表示 G1 已被 Codex 验收、不表示 07D 全量关闭、不表示可上线。
+- 状态：实施完成；已按独立复审 P2-1/P2-2/P2-3 修复。Codex 复审确认最终代码的正控保留累计计数、以正控后快照作为探针基线、不回滚正控增量；本轮仅修正证据文档。待 Codex 最终复审；本文交付不表示 G1 已被 Codex 验收、不表示 07D 全量关闭、不表示可上线。
 - 依据：远端 `968e5f3`（`docs/tasks/HK-AI-07D-G1-LEGACY-REQUEUE-CLOSURE-TASK-2026-11-16.md`），通过 `git show` 读取，未合并文档分支。
 
 ## 1. 基线、分支与谱系
@@ -140,21 +140,21 @@ ZERO-DIFF  miniprogram/
 
 ### 6.1 本轮 P2-3 关键专项复跑（`closeout-a-current`）
 
-| 命令 | 工作目录 | exit | 计数/结果 |
-|---|---|---|---|
-| `node --test --import ./tests/helpers/closure-guard.mjs tests/face-legacy-requeue-closure.test.mjs` | `admin-web` | 0 | 9 tests / 9 pass / 0 fail / 0 skipped / 0 todo（默认隔离） |
-| 同上，`tests/face-grant-d-matrix.test.mjs tests/face-h4b.test.mjs` | `admin-web` | 0 | 142 tests / 142 pass / 0 fail / 0 skipped / 0 todo（默认隔离） |
-| `node --input-type=module --import ./tests/helpers/closure-guard.mjs -e <selfCheck>` | `admin-web` | 0 | `{"allThrew":true,"delta":{"listen":1,"network":5}}` |
-| `git diff --check` | 仓库根 | 0 | 无 whitespace 错误 |
+| 执行者/来源 | 命令 | 工作目录 | exit | 计数/结果 |
+|---|---|---|---|---|
+| Codex | `node --test --test-isolation=none --import ./tests/helpers/closure-guard.mjs tests/face-legacy-requeue-closure.test.mjs tests/face-grant-d-matrix.test.mjs tests/face-h4b.test.mjs` | `admin-web` | 0 | 151/151（封闭 9 + 定向 142） |
+| lead 原报告 | 默认隔离，分两次运行 closure 与 D-matrix+h4b | `admin-web` | 0 | 9/9、142/142（默认隔离结果来源为 lead 原报告） |
+| lead | `node --input-type=module --import ./tests/helpers/closure-guard.mjs -e <selfCheck>` | `admin-web` | 0 | `{"allThrew":true,"delta":{"listen":1,"network":5}}` |
+| lead | `git diff --check` | 仓库根 | 0 | 无 whitespace 错误 |
 
-本轮未重跑历史 559/51 全量套件，不把旧计数当作本轮复跑结果；未运行任何监听测试。
+本轮未重跑历史 559/51 全量套件，不把旧计数当作本轮复跑结果；未运行任何监听测试。默认隔离的 9/9、142/142 来自 lead 原报告；Codex 的独立实测使用 `--test-isolation=none`，合计 151/151（9+142）。
 
 ## 7. 敏感字段与旁路检查
 
 - 封闭测试使用合成 fixture（org-g1 等），不含真实人员、住户、设备、门禁凭据、AppID、商户号或密钥。
 - 不打印 token/Cookie/密码/私钥；不上传真实人脸；不调用真实设备；不执行数据库迁移。
 - `LC08` 在业务模块 import 前预载 `closure-guard.mjs`：业务模块加载期 `{listen:0,network:0}` 单独断言；guard 不在任何路径清零。`guard.selfCheck()` 单独真实触发 listen 与 5 个网络入口，断言 `allThrew=true`、delta `{listen:1,network:5}`；此后以自检后计数为基线，探针期间 guard delta 恒为 `{listen:0,network:0}`。
-- `installSideEffectCounters(h)` 保留 4f9c43d 的 P2-2 加固：Provider 6 方法、FileService 全部方法、Store 3 写、网络 5 入口；`verifyCounters()` 对四类各触发一次 no-op 包裹调用并断言计数 +1，随后只回滚本次正控增量到 `before`（不置零、不抹掉安装期已有计数）。探针四类 delta 为 0，`provider.calls` 增量为 0，全库内容级零变化；每个 h3/h4 窗口 `try/finally` 精确恢复，`active` WeakMap 防二次包裹。
+- `installSideEffectCounters(h)` 保留 4f9c43d 的 P2-2 加固：Provider 6 方法、FileService 全部方法、Store 3 写、网络 5 入口；`verifyCounters()` 对四类各触发一次 no-op 包裹调用并断言计数 +1，**返回正控后的累计计数快照**；LC08 以该快照为 `probeBaseline`，正控增量不回滚，`selfCheck()` 必须等于 `probeBaseline`。探针四类 delta 为 0，`provider.calls` 增量为 0，全库内容级零变化；每个 h3/h4 窗口 `try/finally` 精确恢复，`active` WeakMap 防二次包裹。
 - 其他既有 dispatcher 回归中的 Mock Provider 调用与封闭探针的 4 类真实计数器 0 口径分离陈述，未将全套 Mock 调用统称为 0。
 
 ## 8. 独立复审 P2 缺口修复（追加提交）
@@ -177,7 +177,7 @@ ZERO-DIFF  miniprogram/
 
 第二轮独立负向验证发现上一版 P2-2 计数器存在三项缺陷，均已修复（仍仅改测试与证据文档，生产代码零变更）：
 
-1. **计数器有效性未被证明**（复审定位 `:235-239`）：负向注入「禁用 `counts[bucket] += 1`」后测试仍 9/9 通过，因为 `selfCheck()` 只读、`deltas()` 恒为 0 也会让「增量为 0」断言成立。修复：新增 `verifyCounters()` 正控——实际触发每个类别的一个包裹方法（底层临时替换为 no-op 杜绝副作用），断言计数恰好 +1，随后回滚计数不污染探针窗口。负向复验：禁用递增后 LC08 失败。
+1. **计数器有效性未被证明**（复审定位 `:235-239`）：负向注入「禁用 `counts[bucket] += 1`」后测试仍 9/9 通过，因为 `selfCheck()` 只读、`deltas()` 恒为 0 也会让「增量为 0」断言成立。修复：新增 `verifyCounters()` 正控——实际触发每个类别的一个包裹方法（底层临时替换为 no-op 杜绝副作用），断言计数恰好 +1。**历史行为**：4f9c43d 的该版实现随后回滚正控增量；最终实现（5d2a4ce 起）改为返回正控后的累计快照作为探针基线、不回滚正控增量（见 §8.2）。负向复验：禁用递增后 LC08 失败。
 2. **Provider 名单不准**：负向注入真实 `provider.health()` 调用后测试仍 9/9 通过；上一版名单含不存在的 `deleteFace`，遗漏 `health`/`queryOperation`/`verifyEvent`。修复：改为从原型链动态枚举 `ownMethodNames()`，并显式断言 `wrappedBy.provider === ["enrollFace","health","queryOperation","revokeFace","updateFace","verifyEvent"]` 且不含 `deleteFace`。负向复验：注入 `await h.provider.health()` 后 LC08 失败。
 3. **恢复身份不精确 + 嵌套污染**（复审定位 `:209-213`）：负向加入恢复检查后失败——`.bind(obj)` 产生新函数，写回后 `http.request` 身份改变。修复：`wrap()` 保存原始函数引用（不 bind），用 `Reflect.apply(slot.impl, obj, args)` 保持 this；`restore()` 对自有属性写回原始引用、对原型方法删除遮蔽属性；用 `active` WeakMap 防二次包裹；LC08 每个 h3/h4 窗口用 `try/finally` 即时 `restore()`，不再依赖 `t.after()`，避免窗口嵌套。负向复验：把恢复改为写回 bind 函数后 LC08 失败。
 
@@ -189,12 +189,12 @@ ZERO-DIFF  miniprogram/
 - 新增 `admin-web/tests/helpers/closure-guard.mjs`，在测试文件首个 import 与测试命令 `--import` 中预加载，先于 `LocalStore`/`FileService`/h3b/h4b 等业务模块执行。
 - guard 禁 `net.Server.listen`、`dgram.Socket.bind`、`globalThis.fetch`、`node:http/https request|get`；计数只增不清零；`selfCheck()` 真实触发 listen 与 5 个网络入口，`restore()` 幂等。
 - 测试顶部断言业务模块加载期 `moduleLoadCounters = {listen:0,network:0}`；LC08 的 `guard.selfCheck()` 结果 `allThrew=true`、delta `{listen:1,network:5}`；随后以自检后的计数为基线，探针 guard delta 为 0。没有用清零掩盖加载期调用。
-- 四类副作用计数器（Provider/私密文件/Store 写/网络）保留 P2-2 的 `verifyCounters()` 正控：每类真实触发一次 no-op 包裹调用并断言 +1；只回滚该次正控增量，安装期 baseline 保留，不置零。探针四类 delta 均为 0。
-- 默认隔离复跑：封闭 9/9、定向 142/142，均 exit 0；未运行监听测试；未启动 HTTP/UI、Provider/设备/生产云、G2。
+- 四类副作用计数器（Provider/私密文件/Store 写/网络）保留 P2-2 的 `verifyCounters()` 正控：每类真实触发一次 no-op 包裹调用并断言 +1；**正控后返回累计计数快照，不回滚、不置零**；LC08 以该快照为 `probeBaseline`，`selfCheck()` 与它相等，探针四类 delta 均为 0。
+- Codex 独立实测（预载 guard + `--test-isolation=none`）：封闭 9 + 定向 142 = **151/151**，exit 0；默认隔离 9/9、142/142 的结果来源为 lead 原报告。未运行监听测试；未启动 HTTP/UI、Provider/设备/生产云、G2。
 
 ## 10. 限制与待复审
 
 - 本卡仅封闭两个旧写入口，未实现 G2 的新 `retry` 严格权限/CAS/到期合同；G1 负向 TypeError 不得计作 G2 已通过。
 - 07D 全量 90 项矩阵、G4 兼容/路由清理、07B 合并门禁均不在本卡范围。
-- 本轮未重跑历史 559/51 全量套件，不把旧计数当作本轮复跑结果；默认隔离已实测通过。
+- 本轮未重跑历史 559/51 全量套件，不把旧计数当作本轮复跑结果；默认隔离 9/9、142/142 来源为 lead 原报告，Codex 独立实测为 `--test-isolation=none` 151/151（9+142）。
 - 交付后停手，等待 Codex 独立复审；不自行开始 G2。

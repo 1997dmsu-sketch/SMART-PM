@@ -1,7 +1,7 @@
 # HK-AI-07D G1 旧 requeue 入口封闭——交付证据
 
 - 日期：2026-11-16（Asia/Shanghai）。
-- 状态：实施完成；已按独立复审提出的两项 P2 证据缺口追加测试与证据修复提交，待 Codex 再次独立复审。本文交付不表示 G1 已被 Codex 验收、不表示 07D 全量关闭、不表示可上线。
+- 状态：实施完成；已按独立复审 P2-1/P2-2 追加测试与证据，并在 `4f9c43d` 上追加 P2-3 预载监听/网络 guard。待 Codex 再次独立复审；本文交付不表示 G1 已被 Codex 验收、不表示 07D 全量关闭、不表示可上线。
 - 依据：远端 `968e5f3`（`docs/tasks/HK-AI-07D-G1-LEGACY-REQUEUE-CLOSURE-TASK-2026-11-16.md`），通过 `git show` 读取，未合并文档分支。
 
 ## 1. 基线、分支与谱系
@@ -10,8 +10,10 @@
 |---|---|
 | 代码基线（父提交） | `1155b7ba65991d324fb8b22bb8f7dd87f49428f9`（H4-b 终审） |
 | 实施分支 | `feat/hk-face-legacy-requeue-closure` |
-| 隔离工作树 | `.tmp-g1-requeue-closure`（`git worktree add`，`core.autocrlf=false`） |
-| 最终提交 SHA | 见交付回报（即包含本证据文档的提交；普通 push 后以 `git ls-remote` 复核） |
+| 隔离工作树 | `C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\closeout-a-current` |
+| 输入/远端基线 | `4f9c43dfc313187b5fa971cb132dce29c294c286`（`feat/hk-face-legacy-requeue-closure`） |
+| 本地分支 | `codex/07d-g1-p2-current`（基于 `4f9c43d`，保留 P2-1/P2-2 加固） |
+| 最终提交 SHA | 见交付回报（包含本证据文档与本轮 guard 的追加提交；普通 push 后以 `git ls-remote` 复核） |
 | 提交方式 | 追加提交；未 amend、未 rebase、未 squash、未 reset、未 force push |
 | 07B 合并 | 未合并 `59a737a`，未修改 07B 生产读模型；不把「已终审」写成「已合并」 |
 | G2 / H4-c C2/C3 / K3 | 未开始、未实现、未执行初始化或迁移 |
@@ -19,7 +21,7 @@
 
 ## 2. 变更文件清单
 
-相对基线 `1155b7b`，实际变更仅下列 6 个文件（4 个既有文件改动 + 2 个新增文件）：
+相对基线 `1155b7b`，实际变更仅下列 7 个文件（5 个既有文件改动 + 2 个新增文件）：
 
 | 文件 | 变更性质 |
 |---|---|
@@ -27,8 +29,9 @@
 | `admin-web/lib/face-service/h4b.mjs` | 删除 `H4MockRevoker.requeue`（原 482–519 行），共 38 行删除 |
 | `admin-web/tests/face-grant-d-matrix.test.mjs` | 6 处旧调用迁移为封闭负向证据 / 合法 queued fixture；新增 validator 导入与封闭断言 helper |
 | `admin-web/tests/face-h4b.test.mjs` | 4 处旧调用迁移为封闭负向证据 / 合法 queued fixture；新增封闭断言 helper |
-| `admin-web/tests/face-legacy-requeue-closure.test.mjs` | 新增：LC01–LC10 专门封闭测试（9 个测试）；P2 修复后改为逐场景全库快照 + 四类真实副作用计数器；二次复审后补正控、动态方法名单、精确恢复与即时 restore |
-| `docs/tasks/HK-AI-07D-G1-LEGACY-REQUEUE-CLOSURE-EVIDENCE-2026-11-16.md` | 本证据文档；补充快照口径、计数器、两轮复审记录与负向验证 |
+| `admin-web/tests/face-legacy-requeue-closure.test.mjs` | 新增：LC01–LC10 专门封闭测试（9 个测试）；逐场景全库快照 + 四类真实副作用计数器；首个 import 预载 guard，二次复审后补正控、动态方法名单、精确恢复与即时 restore |
+| `admin-web/tests/helpers/closure-guard.mjs` | 新增：监听/业务网络预载 guard；禁 `net.Server.listen`/`dgram.bind`/`fetch`/`http(s) request|get`，计数只增不清零，自检与恢复 |
+| `docs/tasks/HK-AI-07D-G1-LEGACY-REQUEUE-CLOSURE-EVIDENCE-2026-11-16.md` | 本证据文档；补充快照口径、计数器、P2-1/P2-2/P2-3 复审记录与负向验证 |
 
 锁文件与依赖清单：`npm install` 曾因 npm 版本差异规范化 `admin-web/package-lock.json` 的 `libc` 字段（48 行删除），已 `git restore` 恢复；最终相对基线零差异。
 
@@ -133,13 +136,25 @@ ZERO-DIFF  miniprogram/
 | `npm test` | 仓库根 | 0 | 51 tests / 51 pass / 0 fail / 0 skipped / 0 todo |
 | `git diff --check` | 仓库根 | 0 | 无 whitespace 错误 |
 
-隔离说明：首选 Node 默认测试隔离运行，未使用 `--test-isolation=none` 降级；无 EPERM 记录。锁文件与依赖清单最终零差异，未用 stub/native 跳过掩盖依赖问题。P2 修复后按同一组命令重跑，计数与上表完全一致。
+隔离说明：上表是此前轮次在旧工作树的结果；本轮只按指令复跑关键专项，不重跑无关全量套件。锁文件与依赖清单最终零差异，未用 stub/native 跳过掩盖依赖问题。
+
+### 6.1 本轮 P2-3 关键专项复跑（`closeout-a-current`）
+
+| 命令 | 工作目录 | exit | 计数/结果 |
+|---|---|---|---|
+| `node --test --import ./tests/helpers/closure-guard.mjs tests/face-legacy-requeue-closure.test.mjs` | `admin-web` | 0 | 9 tests / 9 pass / 0 fail / 0 skipped / 0 todo（默认隔离） |
+| 同上，`tests/face-grant-d-matrix.test.mjs tests/face-h4b.test.mjs` | `admin-web` | 0 | 142 tests / 142 pass / 0 fail / 0 skipped / 0 todo（默认隔离） |
+| `node --input-type=module --import ./tests/helpers/closure-guard.mjs -e <selfCheck>` | `admin-web` | 0 | `{"allThrew":true,"delta":{"listen":1,"network":5}}` |
+| `git diff --check` | 仓库根 | 0 | 无 whitespace 错误 |
+
+本轮未重跑历史 559/51 全量套件，不把旧计数当作本轮复跑结果；未运行任何监听测试。
 
 ## 7. 敏感字段与旁路检查
 
 - 封闭测试使用合成 fixture（org-g1 等），不含真实人员、住户、设备、门禁凭据、AppID、商户号或密钥。
 - 不打印 token/Cookie/密码/私钥；不上传真实人脸；不调用真实设备；不执行数据库迁移。
-- `LC08` 通过 `installSideEffectCounters(h)` 包裹真实入口并统计增量：Provider=0、私密文件=0、Store 写=0、业务网络=0；同时断言全库内容级零变化、`provider.calls` 增量为 0、`selfCheck()` 不抹掉模块加载期计数。计数 guard 在实例与 fixture 就绪后安装，每个 h3/h4 窗口用 `try/finally` 即时 `restore()` 精确恢复（不写回 bind 后的新函数），`active` WeakMap 防二次包裹。四类入口从原型链动态枚举：Provider 真实 6 方法（`enrollFace`/`health`/`queryOperation`/`revokeFace`/`updateFace`/`verifyEvent`）、FileService 全部方法、Store 3 个写方法、fetch/http/https 共 5 个网络入口；`verifyCounters()` 正控实际触发并验证计数有效。
+- `LC08` 在业务模块 import 前预载 `closure-guard.mjs`：业务模块加载期 `{listen:0,network:0}` 单独断言；guard 不在任何路径清零。`guard.selfCheck()` 单独真实触发 listen 与 5 个网络入口，断言 `allThrew=true`、delta `{listen:1,network:5}`；此后以自检后计数为基线，探针期间 guard delta 恒为 `{listen:0,network:0}`。
+- `installSideEffectCounters(h)` 保留 4f9c43d 的 P2-2 加固：Provider 6 方法、FileService 全部方法、Store 3 写、网络 5 入口；`verifyCounters()` 对四类各触发一次 no-op 包裹调用并断言计数 +1，随后只回滚本次正控增量到 `before`（不置零、不抹掉安装期已有计数）。探针四类 delta 为 0，`provider.calls` 增量为 0，全库内容级零变化；每个 h3/h4 窗口 `try/finally` 精确恢复，`active` WeakMap 防二次包裹。
 - 其他既有 dispatcher 回归中的 Mock Provider 调用与封闭探针的 4 类真实计数器 0 口径分离陈述，未将全套 Mock 调用统称为 0。
 
 ## 8. 独立复审 P2 缺口修复（追加提交）
@@ -168,15 +183,18 @@ ZERO-DIFF  miniprogram/
 
 三项负向复验均观察到 `not ok 7 ... LC08` 且 `# fail 1`，恢复正式文件后封闭测试回到 9/9。正控使用 no-op 替换，未发起任何真实网络请求、未启动监听、未运行 HTTP 套件。H4 fixture 补建 FileService 实例，使私密文件类别在 H4 路径也有真实包裹对象（探针窗口内应为 0 次调用）。
 
+### 8.2 第三轮 P2-3：预载监听/网络 guard（本轮）
+
+- 保留 `4f9c43d` 的 P2-1/P2-2 加固，仅追加预载 guard 与证据，未改生产代码、未改写历史。
+- 新增 `admin-web/tests/helpers/closure-guard.mjs`，在测试文件首个 import 与测试命令 `--import` 中预加载，先于 `LocalStore`/`FileService`/h3b/h4b 等业务模块执行。
+- guard 禁 `net.Server.listen`、`dgram.Socket.bind`、`globalThis.fetch`、`node:http/https request|get`；计数只增不清零；`selfCheck()` 真实触发 listen 与 5 个网络入口，`restore()` 幂等。
+- 测试顶部断言业务模块加载期 `moduleLoadCounters = {listen:0,network:0}`；LC08 的 `guard.selfCheck()` 结果 `allThrew=true`、delta `{listen:1,network:5}`；随后以自检后的计数为基线，探针 guard delta 为 0。没有用清零掩盖加载期调用。
+- 四类副作用计数器（Provider/私密文件/Store 写/网络）保留 P2-2 的 `verifyCounters()` 正控：每类真实触发一次 no-op 包裹调用并断言 +1；只回滚该次正控增量，安装期 baseline 保留，不置零。探针四类 delta 均为 0。
+- 默认隔离复跑：封闭 9/9、定向 142/142，均 exit 0；未运行监听测试；未启动 HTTP/UI、Provider/设备/生产云、G2。
+
 ## 10. 限制与待复审
 
 - 本卡仅封闭两个旧写入口，未实现 G2 的新 `retry` 严格权限/CAS/到期合同；G1 负向 TypeError 不得计作 G2 已通过。
 - 07D 全量 90 项矩阵、G4 兼容/路由清理、07B 合并门禁均不在本卡范围。
+- 本轮未重跑历史 559/51 全量套件，不把旧计数当作本轮复跑结果；默认隔离已实测通过。
 - 交付后停手，等待 Codex 独立复审；不自行开始 G2。
-
-### P2 续派复核
-
-- 基线为远端 `4f9c43d`。LC03–LC06 的独立场景全库快照保持不变。
-- LC08 在业务模块 import 前安装监听/网络 guard，加载期计数为零。正控验证四类计数器递增，采用正控后的增量基线，保留历史计数。探针四类增量均为零，清理时恢复包装。
-- Codex 实测 `node --test --test-isolation=none --import ./tests/helpers/closure-guard.mjs tests/face-legacy-requeue-closure.test.mjs`，9/9，退出码 0。默认隔离复跑卡住，未计入通过。
-- 未运行监听测试，未启动 G2。

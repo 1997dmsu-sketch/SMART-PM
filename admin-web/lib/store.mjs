@@ -153,7 +153,7 @@ export class LocalStore {
       );
     return structuredClone(rows);
   }
-  async transact(refs, build, audit) {
+  async transact(refs, build, audit, { writeAudit = true } = {}) {
     const task = this.queue.then(async () => {
       const next = structuredClone(this.data);
       const state = Object.fromEntries(
@@ -180,12 +180,14 @@ export class LocalStore {
         if (index < 0) rows.push(record);
         else rows[index] = record;
       }
-      next.admin_audit.unshift({
-        ...audit,
-        _id: randomUUID(),
-        target: writes.map((w) => `${w.collection}/${w.id}`).join(", "),
-        createdAt: Date.now(),
-      });
+      if (!writeAudit && writes.length === 0) return;
+      if (writeAudit)
+        next.admin_audit.unshift({
+          ...audit,
+          _id: randomUUID(),
+          target: writes.map((w) => `${w.collection}/${w.id}`).join(", "),
+          createdAt: Date.now(),
+        });
       await this.persist(next);
       this.data = next;
     });
@@ -259,7 +261,7 @@ export class CloudStore {
     }
     return result;
   }
-  async transact(refs, build, audit) {
+  async transact(refs, build, audit, { writeAudit = true } = {}) {
     const unique = [
       ...new Map(refs.map((r) => [`${r.collection}/${r.id}`, r])).values(),
     ];
@@ -284,15 +286,17 @@ export class CloudStore {
         const result = await tx.collection(w.collection).doc(w.id).set(data);
         if (result.code) throw new HttpError(503, "批量写入失败，整批回滚");
       }
-      const logged = await tx
-        .collection("admin_audit")
-        .doc(randomUUID())
-        .set({
-          ...audit,
-          target: writes.map((w) => `${w.collection}/${w.id}`).join(", "),
-          createdAt: Date.now(),
-        });
-      if (logged.code) throw new HttpError(503, "日志保存失败，整批回滚");
+      if (writeAudit) {
+        const logged = await tx
+          .collection("admin_audit")
+          .doc(randomUUID())
+          .set({
+            ...audit,
+            target: writes.map((w) => `${w.collection}/${w.id}`).join(", "),
+            createdAt: Date.now(),
+          });
+        if (logged.code) throw new HttpError(503, "日志保存失败，整批回滚");
+      }
     });
   }
   async change(name, id, build, audit) {

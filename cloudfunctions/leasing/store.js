@@ -60,7 +60,7 @@ function createStore(db) {
       }
       throw new Error("Collection capacity reached");
     },
-    async transact(refs, build, audit) {
+    async transact(refs, build, audit, { writeAudit = true } = {}) {
       const unique = [
         ...new Map(refs.map((r) => [`${r.collection}/${r.id}`, r])).values(),
       ];
@@ -84,11 +84,13 @@ function createStore(db) {
             .set({ data });
           if (saved.code || saved.errCode) throw new Error("数据库写入失败");
         }
-        const logged = await tx
-          .collection("admin_audit")
-          .doc(randomUUID())
-          .set({ data: { ...audit, createdAt: Date.now() } });
-        if (logged.code || logged.errCode) throw new Error("审计写入失败");
+        if (writeAudit) {
+          const logged = await tx
+            .collection("admin_audit")
+            .doc(randomUUID())
+            .set({ data: { ...audit, createdAt: Date.now() } });
+          if (logged.code || logged.errCode) throw new Error("审计写入失败");
+        }
       });
     },
   };

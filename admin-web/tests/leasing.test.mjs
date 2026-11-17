@@ -379,6 +379,14 @@ test("formal signing closes listing and holds it beyond expiry; ordinary users c
   await assert.rejects(x.user.finishOrder({ id: o.id }), /权限/);
   await x.admin.finishOrder({ id: o.id });
   assert.equal(
+    x.store.data.admin_audit[0].action,
+    "租赁预约：确认已完成正式签约",
+  );
+  assert.equal(
+    x.store.data[C.orders].find((r) => r._id === o.id).status,
+    "signed",
+  );
+  assert.equal(
     x.store.data.houses.find((h) => h._id === "listing").status,
     "已租",
   );
@@ -614,10 +622,11 @@ test("identity replacement during prepay creation cannot return payment params",
   const x = await setup(t),
     a = await x.prepared(),
     o = await x.order(a);
-  let entered, release;
+  let entered, release, calls = 0;
   const called = new Promise((r) => (entered = r)),
     wait = new Promise((r) => (release = r));
   x.payment.create = async () => {
+    calls += 1;
     entered();
     await wait;
     return { package: "prepay_id=stale" };
@@ -633,7 +642,14 @@ test("identity replacement during prepay creation cannot return payment params",
   });
   release();
   await assert.rejects(pending, (e) => e.status === 409);
+  assert.equal(calls, 1);
   assert.equal(x.store.data[C.orders][0].status, "identity_changed");
+  assert.equal(
+    x.store.data.admin_audit.some(
+      (a) => a.action === "租赁预约：核对支付资格",
+    ),
+    false,
+  );
 });
 
 test("cached prepay after identity replacement is reconciled as refund-required and never takes a newer hold", async (t) => {
@@ -686,4 +702,80 @@ test("payment first prevents identity replacement from mutating an already-paid 
   );
   const after = structuredClone(x.store.data);
   assert.deepEqual(after, before);
+});
+
+test("formal signing revalidates appointment, review and bound documents", async (t) => {
+  for (const mode of ["identity_rejected", "rejected", "expired"]) {
+    const x = await setup(t),
+      a = await x.prepared(),
+      o = await x.order(a);
+    await x.user.applyPayment(x.paid(o));
+    if (mode === "expired")
+      for (const d of x.store.data[C.identity]) d.expiresAt = x.now() - 1;
+    else {
+      const current = (await x.user.mine()).appointments[0];
+      await x.admin.reviewAppointment({
+        id: a.id,
+        revision: current.revision,
+        decision: mode,
+      });
+    }
+    const before = structuredClone(x.store.data);
+    await assert.rejects(
+      x.admin.finishOrder({ id: o.id }),
+      (e) => e.status === 409,
+    );
+    assert.deepEqual(x.store.data, before, mode);
+    assert.equal(
+      x.store.data[C.orders].find((r) => r._id === o.id).status,
+      "paid_held",
+      mode,
+    );
+    assert.equal(x.store.data[C.holds][0].status, "paid_held", mode);
+    assert.equal(
+      x.store.data.houses.find((h) => h._id === "listing").status,
+      "在租",
+      mode,
+    );
+  }
+});
+
+test("payment params adapter failure writes nothing, including audit", async (t) => {
+  const x = await setup(t),
+    a = await x.prepared(),
+    o = await x.order(a);
+  let calls = 0;
+  x.payment.create = async () => {
+    calls += 1;
+    throw new Error("synthetic adapter outage");
+  };
+  const before = structuredClone(x.store.data);
+  await assert.rejects(
+    x.user.paymentParams(o.id),
+    /synthetic adapter outage/,
+  );
+  assert.equal(calls, 1);
+  assert.deepEqual(x.store.data, before);
+  assert.equal(x.store.data[C.orders][0].status, "awaiting_payment");
+});
+
+test("successful payment params writes one audit and calls adapter once", async (t) => {
+  const x = await setup(t),
+    a = await x.prepared(),
+    o = await x.order(a);
+  let calls = 0;
+  x.payment.create = async () => {
+    calls += 1;
+    return { package: "prepay_id=test" };
+  };
+  const auditBefore = x.store.data.admin_audit.length;
+  const params = await x.user.paymentParams(o.id);
+  assert.equal(calls, 1);
+  assert.equal(params.package, "prepay_id=test");
+  assert.equal(x.store.data.admin_audit.length, auditBefore + 1);
+  assert.equal(
+    x.store.data.admin_audit[0].action,
+    "租赁预约：核对支付资格",
+  );
+  assert.equal(x.store.data[C.orders][0].status, "awaiting_payment");
 });

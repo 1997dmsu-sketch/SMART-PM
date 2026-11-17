@@ -838,7 +838,8 @@ class LeasingService {
         checked = cur;
         return [];
       },
-      this.audit("核对支付资格"),
+      null,
+      { writeAudit: false },
     );
     return checked;
   }
@@ -854,6 +855,9 @@ class LeasingService {
     // A document replacement can commit while the merchant request is in flight.
     // Do not return the newly issued params unless the binding still holds.
     await this.validatePayableOrder(oid);
+    // Only a fully successful payment-params request records its audit entry.
+    // A rejected or adapter-failed request must leave every collection unchanged.
+    await this.store.transact([], () => [], this.audit("核对支付资格"));
     return params;
   }
   async refreshPayment(oid) {
@@ -988,7 +992,12 @@ class LeasingService {
       o = await this.get(C.orders, oid);
     if (!o) fail("订单不存在", 404);
     await this.store.transact(
-      [ref(C.orders, oid), ref(C.holds, o.roomId), ref("houses", o.houseId)],
+      [
+        ref(C.orders, oid),
+        ref(C.holds, o.roomId),
+        ref("houses", o.houseId),
+        ...this.paymentIdentityRefs(o),
+      ],
       (s) => {
         const cur = read(s, C.orders, oid),
           hold = read(s, C.holds, o.roomId);
@@ -998,6 +1007,10 @@ class LeasingService {
           hold?.orderId !== oid
         )
           fail("订单不在有效留房期内", 409);
+        // A revoked/returned appointment or changed/rejected/expired identity
+        // must never be promoted to the completed state.
+        if (!this.paymentIdentityMatches(s, cur, this.now()))
+          fail("预约或身份证审核已变化，不能完成正式签约", 409);
         return [
           write("houses", o.houseId, {
             ...read(s, "houses", o.houseId),

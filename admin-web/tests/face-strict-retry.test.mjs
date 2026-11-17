@@ -1257,3 +1257,64 @@ test("REG-P2-8：jobId 不符合冻结正则 → PARAM_ERROR/400 零写", async 
     });
   }
 });
+
+test("REG2-P2-1：嵌套回执显式含 _id/updatedAt（即使值为 undefined）→ CONFLICT/409 零写", async (t) => {
+  // 复审 d2eaca9 缺口：值判断 `result._id !== undefined` 对 `_id: undefined` 失效，
+  // 且 exactSemanticFields 的元数据过滤会吞掉该键。必须按键存在判断。
+  for (const field of ["_id", "updatedAt"]) {
+    await t.test(`result 显式含 ${field}: undefined`, async (st) => {
+      const h = await setup(st);
+      const key = h.nextKey();
+      await h.retry(JOB, JOB_REV, key);
+      const ctx = opContextFor({ env: h.env, idempotencyKey: key });
+      const orig = structuredClone(find(h.store, OP_KEYS, ctx.opKey).result);
+      const tampered = { ...orig };
+      Object.defineProperty(tampered, field, { value: undefined, enumerable: true, configurable: true });
+      putRecord(h.store, OP_KEYS, ctx.opKey, {
+        ...find(h.store, OP_KEYS, ctx.opKey), result: tampered,
+      });
+      await expectErrorZeroWrite(h.store, () => h.retry(JOB, JOB_REV, key), "CONFLICT", 409);
+    });
+  }
+});
+
+test("REG2-P2-2：audit.target 必须为精确配对写集引用，拒伪造前后缀/缺项/多余项", async (t) => {
+  // 复审 d2eaca9 缺口：includes() 子串判断接受伪造前后缀、缺 log 引用仍能重放。
+  // 合法 target 是写集引用的有序 join(", ")：3 条（无 domain 写）或 5 条（head+version+3）。
+  const tamper = async (st, mutate) => {
+    const h = await setup(st);
+    const key = h.nextKey();
+    await h.retry(JOB, JOB_REV, key);
+    const ctx = opContextFor({ env: h.env, idempotencyKey: key });
+    const aid = auditIdFor(ctx.opKey);
+    const legit = find(h.store, AUDIT_COLLECTION, aid).target;
+    putRecord(h.store, AUDIT_COLLECTION, aid, {
+      ...find(h.store, AUDIT_COLLECTION, aid), target: mutate(legit, ctx),
+    });
+    return { h, key };
+  };
+  await t.test("伪造前缀与后缀", async (st) => {
+    const { h, key } = await tamper(st, (legit) => `FAKE/prefix, ${legit}, FAKE/suffix`);
+    await expectErrorZeroWrite(h.store, () => h.retry(JOB, JOB_REV, key), "CONFLICT", 409);
+  });
+  await t.test("缺少 log 引用", async (st) => {
+    const { h, key } = await tamper(st, (_legit, ctx) => `${JOBS}/${JOB}, ${OP_KEYS}/${ctx.opKey}`);
+    await expectErrorZeroWrite(h.store, () => h.retry(JOB, JOB_REV, key), "CONFLICT", 409);
+  });
+  await t.test("多余合法引用（重复 op key）", async (st) => {
+    const { h, key } = await tamper(st, (legit, ctx) => `${legit}, ${OP_KEYS}/${ctx.opKey}`);
+    await expectErrorZeroWrite(h.store, () => h.retry(JOB, JOB_REV, key), "CONFLICT", 409);
+  });
+  await t.test("乱序（op key 提前）", async (st) => {
+    const { h, key } = await tamper(st, (_legit, ctx) =>
+      `${OP_KEYS}/${ctx.opKey}, ${JOBS}/${JOB}, ${LOGS}/${deterministicLogId(JOB, "queued", JOB_REV + 1)}`);
+    await expectErrorZeroWrite(h.store, () => h.retry(JOB, JOB_REV, key), "CONFLICT", 409);
+  });
+  await t.test("合法 target 仍可重放（正面证据）", async (st) => {
+    const h = await setup(st);
+    const key = h.nextKey();
+    const receipt = await h.retry(JOB, JOB_REV, key);
+    const replay = await h.retry(JOB, JOB_REV, key);
+    assert.deepEqual(replay, receipt, "合法 target 同键重放返回原回执");
+  });
+});

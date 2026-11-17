@@ -64,13 +64,27 @@ function invalidJob() { failCode("INVALID_JOB", "任务当前不可重试", 409)
 function invalidState() { failCode("INVALID_STATE", "任务当前不可重试", 409); }
 function conflict() { failCode("CONFLICT", "请求与既有记录不一致", 409); }
 
+// §4.9.3 audit.target 精确配对校验：target 是成功写集引用的有序 join(", ")，
+// 写集顺序固定为 [...domainWrites(head,version 或空), job, log, opKey]。
+// 合法形态仅两种：3 条（domain 已存在、零 domain 写）或 5 条（新建 head+version）。
+// 不接受伪造前后缀、缺项、多余项、乱序或重复——includes() 子串判断无法满足此约束。
+function assertAuditTarget(target, { jobRef, logRef, opKeyRef, headRef, versionRef }) {
+  if (typeof target !== "string") conflict();
+  const refs = target.split(", ");
+  const core = [jobRef, logRef, opKeyRef];
+  const withDomain = [headRef, versionRef, ...core];
+  const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+  if (!same(refs, core) && !same(refs, withDomain)) conflict();
+}
+
 // 合法回执校验（§4.4 严格重放 + §4.9.1 五字段）：绑定 expectedJobRevision+1。
 // now 用于 nextAttemptAt 上限校验；revision 上限与成功路径 CAS 溢出门禁一致。
 function assertReceipt(result, { jobId, expectedJobRevision }, now) {
   // 回执是嵌套在 op key.result 内的快照，存储元数据不属于它的五字段；
   // exactSemanticFields 的全局 _id/updatedAt 过滤只适用于外层记录，必须在嵌套回执前拦截。
+  // 按键是否存在判断：显式写入的 `_id: undefined` / `updatedAt: undefined` 也必须拒绝。
   if (result && typeof result === "object" && !Array.isArray(result) &&
-      (result._id !== undefined || result.updatedAt !== undefined)) conflict();
+      (Object.hasOwn(result, "_id") || Object.hasOwn(result, "updatedAt"))) conflict();
   exactSemanticFields(result, RECEIPT_FIELDS, "幂等回执");
   if (result.jobId !== jobId) conflict();
   if (result.state !== "queued") conflict();
@@ -306,10 +320,14 @@ export class StrictRetryService {
             !Number.isSafeInteger(existingAudit.createdAt) || existingAudit.createdAt < 0 ||
             existingAudit.actorId !== this.actor.actorId ||
             existingAudit.actorType !== op.actorType ||
-            existingAudit.action !== AUDIT_ACTION ||
-            typeof existingAudit.target !== "string" ||
-            !existingAudit.target.includes(`${JOBS}/${jobId}`) ||
-            !existingAudit.target.includes(`${OP_KEYS}/${op.opKey}`)) conflict();
+            existingAudit.action !== AUDIT_ACTION) conflict();
+        assertAuditTarget(existingAudit.target, {
+          jobRef: `${JOBS}/${jobId}`,
+          logRef: `${LOGS}/${logId}`,
+          opKeyRef: `${OP_KEYS}/${op.opKey}`,
+          headRef: `${DOMAINS}/${op.headId}`,
+          versionRef: `${DOMAINS}/${op.versionId}`,
+        });
         result = validReplay(existing, op, requestDigest, identity, now);
         return []; // 合法重放：零写（含不新增 audit）
       }

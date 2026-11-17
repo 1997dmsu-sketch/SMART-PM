@@ -1,7 +1,7 @@
 # HK-AI-07D G2 严格 retry 服务——交付证据
 
 - 日期：2026-11-16（Asia/Shanghai）。
-- 状态：初版 `67be0c7` 经独立复审发现 3 项 P1 + 5 项 P2，本轮已逐项修复并补回归测试，追加提交后待再次独立复审。本文交付**不表示** G2 已被 Codex 验收、**不表示** 07D 全量关闭、**不表示**可上线。
+- 状态：初版 `67be0c7` 经独立复审发现 3 项 P1 + 5 项 P2（第 10 节），第一轮修订 `d2eaca9` 再经独立复审发现 2 项 P2 边界缺口（第 11 节）；两轮均已逐项修复并补回归测试，追加提交后待再次独立复审。本文交付**不表示** G2 已被 Codex 验收、**不表示** 07D 全量关闭、**不表示**可上线。
 - 依据：批准的实施卡 `d16e7005ac4364bd6a1ae87066c1db150cd1f0ed`（`docs/tasks/HK-AI-07D-G2-STRICT-RETRY-TASK-2026-11-16.md`），由用户明确批准；设计依据 `docs/tasks/HK-AI-07D-RETRY-REQUEUE-DESIGN-2026-11-15.md`（提交 `51e2453`，796 行，已技术复审），经 `git show origin/docs/hk-face-retry-requeue-design:...` 只读读取，未合并文档分支。
 - 批准原文关键约束：合法重放先复核权限/K2/audit、回执绑定 `expectedJobRevision+1`、零写含不新增 audit、存储元数据与语义字段分离校验；仅新增独立模块/测试/证据，需改现有生产文件时停下报告；不授权 G3/G4、不合并 main/07B、不开放 HTTP/UI。
 
@@ -24,7 +24,7 @@
 | 文件 | 变更性质 |
 |---|---|
 | `admin-web/lib/face-service/retry.mjs` | 新增：严格 retry 服务 `StrictRetryService`（独立模块）；仅 import 复用 `model.mjs`/`collections.mjs`/`h3a.mjs`/`h4b.mjs`/`store.mjs`，不修改被复用文件 |
-| `admin-web/tests/face-strict-retry.test.mjs` | 新增：G2-LC01–LC10 服务层契约测试（38 顶层用例 / 118 含子用例，含复审 8 组 20 条回归）；全合成 fixture |
+| `admin-web/tests/face-strict-retry.test.mjs` | 新增：G2-LC01–LC10 服务层契约测试（40 顶层用例 / 127 含子用例，含两轮复审 10 组 29 条回归）；全合成 fixture |
 | `docs/tasks/HK-AI-07D-G2-STRICT-RETRY-EVIDENCE-2026-11-16.md` | 本证据文档 |
 
 对 `h3a.mjs`/`h3b.mjs`/`h4b.mjs`/`service.mjs`/`collections.mjs`/`store.mjs`/`routes.mjs`/`server.mjs`/`model.mjs` 及小程序：`git diff --name-only 4f9c43d..HEAD` 与工作区 `git status --short` 均只含上述 3 个新增文件，既有生产文件零差异。
@@ -90,12 +90,12 @@
 
 | 命令 | exit | pass / fail / total |
 |---|---:|---|
-| `node --test tests/face-strict-retry.test.mjs` | 0 | 118 / 0 / 118（38 顶层用例，复审修订后） |
-| `npm test`（admin-web） | 0 | 677 / 0 / 677 |
+| `node --test tests/face-strict-retry.test.mjs` | 0 | 127 / 0 / 127（40 顶层用例，第二轮复审修订后） |
+| `npm test`（admin-web） | 0 | 686 / 0 / 686 |
 | `npm test`（仓库根） | 0 | 51 / 0 / 51 |
 | `git diff --check` | 0 | 无空白错误 |
 
-以上为复审修订后 team-lead 独立复跑结果；初版 `67be0c7` 的 98/657/51 见第 10 节。首选默认测试隔离；无 EPERM 降级。所有计数为实际执行结果，非占位。
+以上为第二轮复审修订后 team-lead 独立复跑结果；初版 `67be0c7` 的 98/657/51 与第一轮修订 `d2eaca9` 的 118/677/51 亦均为实际执行结果，修订脉络见第 10、11 节。首选默认测试隔离；无 EPERM 降级。所有计数为实际执行结果，非占位。
 
 ## 6. 零写、元数据分离与失败关闭证据
 
@@ -119,9 +119,9 @@
 
 ## 9. 交付与复审状态
 
-- 初版提交 `67be0c7dd74ffd31c1bd30bdef3ee73d6f6edb5e` 已普通 push 并核对远端；本轮修订追加提交 SHA、普通 push 与 `git ls-remote` 远端核对结果：见最终交付回报。
+- 初版提交 `67be0c7dd74ffd31c1bd30bdef3ee73d6f6edb5e` 与第一轮修订 `d2eaca98685d15a895889ca9e76205c7d884a9ec` 均已普通 push 并核对远端；本轮（第二轮复审修订）追加提交 SHA、普通 push 与 `git ls-remote` 远端核对结果：见最终交付回报。
 - 交付后停手，等待 G2 再次独立复审；不自行开始 G3/G4。
-- 初版经独立复审发现 3 P1 + 5 P2，已逐项修复（第 10 节）；修订后契约真值测试 118/118 全绿。**本文交付不等于 Codex 独立复审通过**。
+- 初版经独立复审发现 3 P1 + 5 P2，已逐项修复（第 10 节）；第一轮修订再经独立复审发现 2 项 P2 边界缺口（回执键存在判断、audit.target 精确配对），已逐项修复（第 11 节）。两轮修订后契约真值测试 127/127 全绿。**本文交付不等于 Codex 独立复审通过**。
 
 ## 10. 独立复审修订记录（对 67be0c7 的 3 P1 + 5 P2）
 
@@ -143,5 +143,20 @@
 **可证伪验证**：team-lead 用临时反向补丁禁用 P1-1 检查后 REG-P1-1 精确失败（117/118，fail 1），还原后逐字节一致；修订 worker 另对 P2-6 做过反向补丁验证（fail 3）。测试为契约真值断言，非假阳性。
 
 **对 spec 的必要偏差（均由修订 worker 说明理由并经 team-lead 复核采纳）**：P1-1 落点后移至状态/形状门禁之后（否则合法重放与 §4.11 旧 queued job 会误命中 CONFLICT）；P2-5 的 Idempotency-Key 格式校验前置（否则"非法 key + 无权限"会错误返回 FORBIDDEN 而非 PARAM_ERROR）；P2-4 加类型守卫（避免 null/数组回执泄漏非 CONFLICT 码）。
+
+**范围**：本轮仅改两个本卡新增文件（实现 + 测试）并更新本证据文档；既有生产文件、G1 提交、G3/G4、main/07B、HTTP/UI 均零改动。
+
+## 11. 第二次独立复审修订记录（对 d2eaca9 的 2 项 P2 边界缺口）
+
+复审报告位于 Codex 云环境 `/workspace/artifacts/G2-d2eaca9-review/REVIEW.md` 与 `/workspace/SMART-PM-G2-revision-review/admin-web/lib/face-service/retry.mjs`（本机不可读），缺陷清单由用户转述。修订前用临时最小探针**实测复现**：4 个触发场景（`_id: undefined`、`updatedAt: undefined`、伪造 audit target 前后缀、缺 log 引用）修复前均为 `OK(ACCEPTED)`，期望 `CONFLICT/409`；修复后全部转为 `CONFLICT/409`。
+
+| 项 | 缺陷 | 根因 | 修复（retry.mjs） | 契约依据 |
+|---|---|---|---|---|
+| P2-1 | 回执字段校验（原 line 72）：`_id: undefined` / `updatedAt: undefined` 绕过精确五字段检查 | 值判断 `result._id !== undefined` 对「键存在但值为 undefined」失效；`exactSemanticFields` 的元数据过滤又吞掉该键 | `assertReceipt` 改用 `Object.hasOwn(result, "_id") \|\| Object.hasOwn(result, "updatedAt")` 按键存在判断，类型守卫保留（null/数组仍失败关闭） | §4.4/§4.9.1/§4.9.4、L08 |
+| P2-2 | 审计 target 校验（原 line 310）：`includes()` 接受伪造前后缀，缺 log 引用也能重放 | 子串判断只验「含 job 与 op key 两段」，不验引用集合的完整性、有序性与前后缀 | 新增 `assertAuditTarget()`：`target.split(", ")` 解析为引用数组，仅接受精确有序的 `[job, log, opKey]`（3 条）或 `[head, version, job, log, opKey]`（5 条），长度与逐项全等才通过；拒绝伪造前后缀、缺项、多余项、乱序、重复 | §4.5 步7、§4.4/§4.9.3、K13/K14 |
+
+**回归测试**：新增 `REG2-P2-1`（2 条：显式 `_id`/`updatedAt` 为 undefined，用 `Object.defineProperty` 构造可枚举的 undefined 键）、`REG2-P2-2`（5 条：伪造前后缀、缺 log、多余重复引用、乱序、合法 target 正面证据），均以全库 `structuredClone` 前后 `deepEqual` 证明零写；正面证据确认未误伤合法重放。
+
+**可证伪验证**：临时反向补丁同时禁用两处修复（恢复值判断与 `includes()`）后，正好 8 个新断言失败（119 pass / 8 fail），既有 118 条不受影响；还原后逐字节一致，`git diff --check` 通过。测试为契约真值断言，非假阳性。
 
 **范围**：本轮仅改两个本卡新增文件（实现 + 测试）并更新本证据文档；既有生产文件、G1 提交、G3/G4、main/07B、HTTP/UI 均零改动。

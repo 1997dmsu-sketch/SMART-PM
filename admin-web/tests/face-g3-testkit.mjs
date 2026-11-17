@@ -238,7 +238,10 @@ export const {
   operationKeyConfig, operationKeyDomainIds, operationKeyFingerprint,
   assertIdempotencyKey,
 } = collectionsModule;
-export const { validateDispatchJob } = h3aModule;
+export const {
+  validateDispatchJob, claimDispatchJob, buildClaimPlan,
+  assertLeaseFence, isDispatchCandidate,
+} = h3aModule;
 export const { validateRevokeJob } = h4bModule;
 export const { StrictRetryService } = retryModule;
 export const { failCode, HttpError } = modelModule;

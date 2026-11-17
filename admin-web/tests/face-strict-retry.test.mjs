@@ -1171,7 +1171,7 @@ test("REG-P1-3：actor 缺失 actorType → FORBIDDEN/403 零写（对照 system
 });
 
 test("REG-P2-4：嵌套回执 result 含 _id/updatedAt → CONFLICT/409 零写", async (t) => {
-  for (const extra of ["_id", "updatedAt"]) {
+  for (const [extra, value] of [["_id", "extra"], ["updatedAt", "extra"], ["_id", undefined]]) {
     await t.test(`result 多一个存储字段 ${extra}`, async (st) => {
       const h = await setup(st);
       const key = h.nextKey();
@@ -1180,7 +1180,7 @@ test("REG-P2-4：嵌套回执 result 含 _id/updatedAt → CONFLICT/409 零写",
       const original = structuredClone(find(h.store, OP_KEYS, ctx.opKey).result);
       putRecord(h.store, OP_KEYS, ctx.opKey, {
         ...find(h.store, OP_KEYS, ctx.opKey),
-        result: { ...original, [extra]: "SHOULD_BE_REJECTED" },
+        result: { ...original, [extra]: value },
       });
       await expectErrorZeroWrite(h.store, () => h.retry(JOB, JOB_REV, key), "CONFLICT", 409);
     });
@@ -1233,6 +1233,7 @@ test("REG-P2-7：audit 语义字段值损坏 → CONFLICT/409 零写", async (t)
     ["actorType", "system"],
     ["action", "H4 requeue"],
     ["target", "TAMPERED_TARGET"],
+    ["target", (original) => `unexpected/record, ${original}`],
   ];
   for (const [field, bad] of cases) {
     await t.test(`audit.${field} 篡改`, async (st) => {
@@ -1242,7 +1243,8 @@ test("REG-P2-7：audit 语义字段值损坏 → CONFLICT/409 零写", async (t)
       const ctx = opContextFor({ env: h.env, idempotencyKey: key });
       const auditId = auditIdFor(ctx.opKey);
       putRecord(h.store, AUDIT_COLLECTION, auditId, {
-        ...find(h.store, AUDIT_COLLECTION, auditId), [field]: bad,
+        ...find(h.store, AUDIT_COLLECTION, auditId),
+        [field]: typeof bad === "function" ? bad(find(h.store, AUDIT_COLLECTION, auditId)[field]) : bad,
       });
       await expectErrorZeroWrite(h.store, () => h.retry(JOB, JOB_REV, key), "CONFLICT", 409);
     });

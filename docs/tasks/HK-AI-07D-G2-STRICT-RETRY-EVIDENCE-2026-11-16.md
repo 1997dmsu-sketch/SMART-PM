@@ -24,7 +24,7 @@
 | 文件 | 变更性质 |
 |---|---|
 | `admin-web/lib/face-service/retry.mjs` | 新增：严格 retry 服务 `StrictRetryService`（独立模块）；仅 import 复用 `model.mjs`/`collections.mjs`/`h3a.mjs`/`h4b.mjs`/`store.mjs`，不修改被复用文件 |
-| `admin-web/tests/face-strict-retry.test.mjs` | 新增：G2-LC01–LC10 服务层契约测试（40 顶层用例 / 127 含子用例，含两轮复审 10 组 29 条回归）；全合成 fixture |
+| `admin-web/tests/face-strict-retry.test.mjs` | 新增：G2-LC01–LC10 服务层契约测试（40 顶层用例 / 129 含子用例，含两轮复审 + 远端合并共 10 组 31 条回归）；全合成 fixture |
 | `docs/tasks/HK-AI-07D-G2-STRICT-RETRY-EVIDENCE-2026-11-16.md` | 本证据文档 |
 
 对 `h3a.mjs`/`h3b.mjs`/`h4b.mjs`/`service.mjs`/`collections.mjs`/`store.mjs`/`routes.mjs`/`server.mjs`/`model.mjs` 及小程序：`git diff --name-only 4f9c43d..HEAD` 与工作区 `git status --short` 均只含上述 3 个新增文件，既有生产文件零差异。
@@ -90,8 +90,8 @@
 
 | 命令 | exit | pass / fail / total |
 |---|---:|---|
-| `node --test tests/face-strict-retry.test.mjs` | 0 | 127 / 0 / 127（40 顶层用例，第二轮复审修订后） |
-| `npm test`（admin-web） | 0 | 686 / 0 / 686 |
+| `node --test tests/face-strict-retry.test.mjs` | 0 | 129 / 0 / 129（40 顶层用例，第二轮复审修订 + 远端 c075229 合并后） |
+| `npm test`（admin-web） | 0 | 688 / 0 / 688 |
 | `npm test`（仓库根） | 0 | 51 / 0 / 51 |
 | `git diff --check` | 0 | 无空白错误 |
 
@@ -119,9 +119,9 @@
 
 ## 9. 交付与复审状态
 
-- 初版提交 `67be0c7dd74ffd31c1bd30bdef3ee73d6f6edb5e` 与第一轮修订 `d2eaca98685d15a895889ca9e76205c7d884a9ec` 均已普通 push 并核对远端；本轮（第二轮复审修订）追加提交 SHA、普通 push 与 `git ls-remote` 远端核对结果：见最终交付回报。
+- 初版提交 `67be0c7dd74ffd31c1bd30bdef3ee73d6f6edb5e` 与第一轮修订 `d2eaca98685d15a895889ca9e76205c7d884a9ec` 均已普通 push 并核对远端；本轮本地修订 `1a99ed1` 与远端平行修复 `c075229` 合并后追加提交，SHA、普通 push 与 `git ls-remote` 远端核对结果：见最终交付回报。
 - 交付后停手，等待 G2 再次独立复审；不自行开始 G3/G4。
-- 初版经独立复审发现 3 P1 + 5 P2，已逐项修复（第 10 节）；第一轮修订再经独立复审发现 2 项 P2 边界缺口（回执键存在判断、audit.target 精确配对），已逐项修复（第 11 节）。两轮修订后契约真值测试 127/127 全绿。**本文交付不等于 Codex 独立复审通过**。
+- 初版经独立复审发现 3 P1 + 5 P2，已逐项修复（第 10 节）；第一轮修订再经独立复审发现 2 项 P2 边界缺口（回执键存在判断、audit.target 精确配对），已逐项修复并与远端平行修复合并（第 11 节）。两轮修订 + 合并后契约真值测试 129/129 全绿。**本文交付不等于 Codex 独立复审通过**。
 
 ## 10. 独立复审修订记录（对 67be0c7 的 3 P1 + 5 P2）
 
@@ -158,5 +158,7 @@
 **回归测试**：新增 `REG2-P2-1`（2 条：显式 `_id`/`updatedAt` 为 undefined，用 `Object.defineProperty` 构造可枚举的 undefined 键）、`REG2-P2-2`（5 条：伪造前后缀、缺 log、多余重复引用、乱序、合法 target 正面证据），均以全库 `structuredClone` 前后 `deepEqual` 证明零写；正面证据确认未误伤合法重放。
 
 **可证伪验证**：临时反向补丁同时禁用两处修复（恢复值判断与 `includes()`）后，正好 8 个新断言失败（119 pass / 8 fail），既有 118 条不受影响；还原后逐字节一致，`git diff --check` 通过。测试为契约真值断言，非假阳性。
+
+**远端平行提交合并**：本地追加提交 `1a99ed1` 后普通 push 被拒（non-fast-forward），只读 fetch 发现远端存在平行提交 `c07522950e2871cd6f511d6eec4693e56bc9fef7`（"validate strict retry replay fields exactly"，同在 `d2eaca9` 之上），修复的正是本轮同一对 P2——`Object.hasOwn` 键存在判断 + audit target 精确比对（远端用两个精确构造字符串全等比对，本地用 `assertAuditTarget` 数组解析，语义等价）。未 force push、未 rebase、未 reset：以 `--no-ff` merge 并入，`retry.mjs` 的 audit target 段单点冲突按本地 `assertAuditTarget` 实现消解（保留契约注释），移除远端引入后不再使用的 `retryTarget`/`bootstrapTarget` 局部变量；测试文件自动合并，远端新增的 REG-P2-4 `_id: undefined` 与 REG-P2-7 伪造前缀子用例、本地 REG2-P2-1/P2-2 全部并存。合并后全量复跑：定向 129/129、admin 688/688、根 51/51。
 
 **范围**：本轮仅改两个本卡新增文件（实现 + 测试）并更新本证据文档；既有生产文件、G1 提交、G3/G4、main/07B、HTTP/UI 均零改动。

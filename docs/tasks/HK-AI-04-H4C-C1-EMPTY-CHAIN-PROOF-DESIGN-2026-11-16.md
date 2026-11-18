@@ -1,4 +1,4 @@
-# HK-AI-04 H4-c C1 空链证明设计 v5（v4 追加修订稿）
+# HK-AI-04 H4-c C1 空链证明设计 v6（v5 追加修订稿）
 
 > 状态：**设计提案，待 Codex 复审。** 本稿只修订设计文档；不实现 C1、不修改任何生产代码/测试/Store、不进入 C2/C3/G4、不注册 HTTP、不调用 Provider/设备/生产云。
 >
@@ -8,7 +8,7 @@
 >
 > 本稿保留 v3/v4 修订，并在 §15 追加 v5 权威章节：K3 marker/维护窗口/旧 writer 撤权、plan 签名保存与防重放、monitor 健康期限/时钟/事务内停写、统一 bootstrap fence 与预算。**v4 正文与 §15 冲突处以 §15 为准。**
 >
-> v5 输入：`3ac5cf9483caebcaf8f5aeb1df8fd4aca9bfb13f`（父 `575d8b6`）。完整云报告 `/workspace/artifacts/DEL-AI-01-CONTENT-REVIEW-2026-11-18/REVIEW.md` 未提供可读正文；已查可访问位置均不可读，未声称逐项关闭。G3 已在 `5f1d7a4` 关闭、O10 PASS，本卡不重复派发；G4/C2/C3/合并/HTTP/UI/部署/上线继续冻结。
+> v5 输入：`3ac5cf9483caebcaf8f5aeb1df8fd4aca9bfb13f`（父 `575d8b6`）。\n>\n> **v6 输入：`3d52ee878362e4db65f15e947174e73db2947d90`（父 `ad8bb47`）；v6 权威修订见 §16，与 v5/v4 冲突处以 §16 为准。** v6 关闭 marker 短 ID、plan 状态签名、recovery source CAS、不可变 K3 marker/可变 writer 授权四项。\n>\n> 完整云报告 `/workspace/artifacts/DEL-AI-01-CONTENT-REVIEW-2026-11-18/REVIEW.md` 未提供可读正文；已查可访问位置均不可读，未声称逐项关闭。G3 已在 `5f1d7a4` 关闭、O10 PASS，本卡不重复派发；G4/C2/C3/合并/HTTP/UI/部署/上线继续冻结。
 
 ## 0. 结论摘要
 
@@ -19,8 +19,8 @@
 | bootstrap | v5：首次 bootstrap 检查 fence **不存在**；读集合 domain head/version + fence + marker + audit；**5 refs/4 writes**（domain2+marker+audit）；无 fence/marker 时才允许 |
 | 最终审计 | 所有最终写字节（业务写 + 唯一 admin_audit）在 final ticket **之前**生成；ticket 覆盖完整 canonical write set；Store 不自动追加/改审计；禁止双审计 |
 | 持续写入约束 | Store gate 覆盖 transact/change/persist/seed/init；runtime/migration/recovery/monitor/k3-bootstrap 分 kind；旧 writer 持续拒绝 |
-| refs | **v5：C1 16；C2 R1 25；migration anchor 17、finalize 7；recovery 7；monitor 5；k3-bootstrap 5；plan issue 2；R2 8+N≤90** |
-| 裁定 | **v5：Q1–Q31；N01–N96**（v4 Q/N 保留历史；预算/Q 以 §15 为准） |
+| refs | **v6：C1 17；C2 R1 26；migration anchor 18、finalize 8；recovery 8；monitor 7；k3-bootstrap 5；plan/writer-plan issue 2；writer rotate 8；R2 8+N≤90** |
+| 裁定 | **v6：Q1–Q35；N01–N112**（v5 Q/N 保留历史；预算/Q 以 §16 为准） |
 
 ## 1. 输入、基线与问题
 
@@ -586,7 +586,7 @@ Codex 批准后另发 C1 实现卡；至少含：
 
 本卡停止；等 Codex 复审 §15.6（Q28–Q31）及 §11；不进入 C1/C2/C3/G4。
 
-## 15. v5 权威修订（覆盖 v4 冲突处）
+## 15. v5 权威修订（v5 历史；v6 §16 覆盖冲突处）
 
 > v5 输入：`3ac5cf9483caebcaf8f5aeb1df8fd4aca9bfb13f`（父 `575d8b6`）。v4 正文保留作历史；**凡 v4 与 §15 冲突（schema、refs、预算、Q/N、状态机、monitor/fence、plan、bootstrap）以 §15 为准。**
 >
@@ -625,7 +625,7 @@ Codex 批准后另发 C1 实现卡；至少含：
 #### 15.1.3 K3 bootstrap 读集合/refs/writes（统一）
 
 - 触发条件：`BOOTSTRAP` 状态（无 domain/marker/fence/proof），且 `now ∈ [windowStart,windowEnd]`，maintenance manifest/ticket 有效，旧 writer 撤权回执摘要匹配。
-- **读集合（refs 5）**：domain fixed head、domain version、`EVIDENCE_CHAIN_FENCE_ID`、`k3-marker:v1:global`、`admin_audit/<auditId>`。
+- **读集合（refs 5）**：domain fixed head、domain version、`EVIDENCE_CHAIN_FENCE_ID`、`evidence-chain-k3-marker:v1:global`、`admin_audit/<auditId>`。
 - **写集合（writes 4）**：domain head、domain version、K3 marker、唯一 explicit admin_audit；H4-c 子集恰好 head+version+marker，不得写 evidence/head/anchor/audit proof/fence。
 - gate 校验：fence 必须不存在（存在任意状态 → `K3_BOOTSTRAP_DENIED`）；marker 必须不存在；domain head/version 必须都不存在（部分 → `DOMAIN_INCOMPLETE`/denied）；maintenance window 当前；旧 writer 撤权摘要有效；无 proof 要求。
 - 旧 `initializeEvidenceDomain`（90e4189）无 k3-bootstrap admission → 拒绝；K3 轮换不是 bootstrap，domain 已存在时禁止。
@@ -807,4 +807,148 @@ v5 对 v4 Q5/Q7/Q10/Q17/Q26/Q27 的预算/scope 更新：
 
 ---
 
-**提交对象：Codex。请复审 v5 §15（Q28–Q31、N81–N96、预算/状态机/失败矩阵）；本稿不声称完整云报告已读或逐项关闭。不自批。**
+**提交对象：Codex。请复审 v6 §16（Q32–Q35、N97–N112、预算/状态机/失败矩阵）；本稿不声称完整云报告已读或逐项关闭。不自批。**
+
+## 16. v6 权威修订（覆盖 v5/v4 冲突处）
+
+> v6 输入：`3d52ee878362e4db65f15e947174e73db2947d90`（父 `ad8bb47`）。v5/v4 正文保留历史；**凡与 §16 冲突（marker ID、plan 签名/状态、recovery source/CAS、monitor refs、writer 授权、schema/预算/Q/N）以 §16 为准。**
+>
+> 完整云报告 `/workspace/artifacts/DEL-AI-01-CONTENT-REVIEW-2026-11-18/REVIEW.md` 仍不可读；未提供正文，不声称逐项关闭。
+
+### 16.1 marker canonical ID 与 refs 统一（禁短 ID）
+
+- 常量：`EVIDENCE_CHAIN_K3_MARKER_ID = "evidence-chain-k3-marker:v1:global"`。
+- 所有层（bootstrap、runtime C1/C2、migration、recovery、monitor、Store gate）**只用完整常量查找/声明 refs**；禁止 `k3-marker:v1:global` 短 ID；静态扫描（除本禁止条款说明外）该短串 0 命中。
+- K3 marker schema **18 字段**（v6 去掉可变 writer 字段，改为不可变 bootstrap 证明）：
+  `_id, kind, scope, schemaVersion, fenceId, k3DomainHeadId, k3DomainVersionId, k3DomainHeadRevision, realm, keyVersion, keyFingerprint, bootstrapRunId, maintenanceId, maintenanceManifestDigest, windowStart, windowEnd, createdAt, markerDigest`。
+  - `_id = EVIDENCE_CHAIN_K3_MARKER_ID`；`kind="k3-marker"`、`scope="global"`、`schemaVersion=1`；`fenceId=EVIDENCE_CHAIN_FENCE_ID`。
+  - `markerDigest` K3 HMAC `KEYED_DIGEST/h4-evidence-k3-marker` v1；create-only；仅 k3-bootstrap 创建。
+- K3 marker read/refs 统一：C1/C2/migration/recovery/monitor 使用完整 ID；K3 bootstrap refs **5**（domain2+fence+marker+audit）/writes **4**（domain2+marker+audit）；C1 17/C2 26 含 marker ref。
+- 禁止从 realm/epoch/runId 重算 marker ID；marker ID 与 fence ID 都是全局字面常量。
+
+### 16.2 plan 不可变签名负载与可变状态分离
+
+**问题**：v5 plan 的 `planDigest/planTicket` 覆盖含 `status` 的整体；active→consumed/revoked 改 status 后旧 digest/ticket 无法验证，或被迫重签。
+**v6 规则**：
+
+1. **不可变 core**（planDigest/planTicket 覆盖，不含 status）：
+   - 公共：`_id, kind, scope, schemaVersion, planKind, phase, runId, windowStart, windowEnd, issuedAt, keyFingerprint`；
+   - migration/recovery 额外：`targetWriteEpoch, targetAdmissionPolicyVersion, targetWriterSetDigest, targetProofId, finalInventoryDigest, canonicalEvidenceCount, canonicalHeadCount, anchorCount, auditedCollections`；
+   - recovery 额外：`sourceHaltedEpoch, sourceFenceDigest`；
+   - writer 额外：`writerEpoch, k3MarkerId, writerSetDigest, revokedWriterSetDigest, revocationReceiptDigest, sourceHaltedEpoch, sourceFenceDigest`。
+2. **可变状态**（不进入 core digest）：`status ∈ {"active","consumed","revoked"}`, `statusUpdatedAt`, `statusReason`, `statusTicket`。
+3. `planDigest` = SHA-256(canonical core)；`planTicket` = K3 HMAC `KEYED_DIGEST/h4-evidence-plan` v1(core)；**改 status 不重算/不重签 core**。
+4. `statusTicket` = K3 HMAC `KEYED_DIGEST/h4-evidence-plan-status` v1，覆盖 `{planId, fromStatus, toStatus, targetProofId, statusUpdatedAt, statusReason, actor}`；gate 分别验证 core digest/ticket 与 statusTicket。
+5. 状态机：`active → consumed`（finalize/recovery/writer-rotate 成功同事务）或 `active → revoked`（plan-revoke/旧 writer plan）；terminal 不可逆；不得 active 复活。
+6. 防重放：plan `_id` 唯一；已 consumed/revoked/expired 的 plan 再用于 anchor/finalize/recovery/writer-rotate → `PLAN_CONSUMED`/`PLAN_REVOKED`/`PLAN_EXPIRED`；statusTicket 绑定 planId/from/to/targetProofId，重复使用被拒。
+7. 若 Codex 选择“重新签名”而非状态分离，则每次状态变更必须生成新 plan epoch/新 planId/core ticket，旧 plan 置 revoked；v6 推荐状态分离。
+8. 预算：`plan-issue` refs **2**（plan+audit）/writes 2；`plan-revoke` 2/2；status 更新发生在 finalize/recovery/writer-rotate，不新增 ref。
+
+### 16.3 recovery plan source 绑定/CAS 与 monitor 完整 CoverageValid
+
+- **recovery plan 持久化 core** 必含 `sourceHaltedEpoch`、`sourceFenceDigest`；planKind=recovery；plan 记录存于 `evidence_chain_plans`，不是仅内存对象。
+- `recovery-finalize` 事务内：
+  1. 读 fence（完整 ID）；必须 `status="halted"`、`epoch=sourceHaltedEpoch`、`fenceDigest=sourceFenceDigest`；
+  2. 读 recovery plan（完整 schema）；core digest/ticket 通过；status active；statusTicket 通过；
+  3. 读 writerPlan/marker/proof；target proof 不存在；source CAS 失败 → `PLAN_STALE`/`HALTED`，零写；
+  4. 原子写 fence clear(E1)+new proof(E1, writerPlanId)+plan consumed+audit。
+- recovery refs **8**：domain2+fence1+marker1+writerPlan1+plan1+proof1+audit1 =8；writes fence+proof+plan+audit=4。
+- monitor 若验完整 `CoverageValid`：
+  - 必须读 marker（完整 ID）与 writer plan ref；monitor refs 从 v5 的 5 增至 **7**：domain2+proof1+fence1+marker1+writerPlan1+audit1。
+  - heartbeat 要求完整 CoverageValid + FenceValid；halt 可只写 fence+audit，不因 coverage 无效而拒绝（但 refs 仍按 7 声明）。
+  - monitor halt/heartbeat writes fence+audit=2；预算 monitor 7。
+- `CoverageValid` 增 `K3MarkerValid`、`WriterPlanValid`（active/core/statusTicket/keyFingerprint/marker 绑定）；audit proof 24 字段含 `writerPlanId`。
+- recovery plan status active→consumed 使用 §16.2 statusTicket；source CAS 与 fence 更新同事务。
+
+### 16.4 不可变 K3 bootstrap 证明 vs 可变 writer 集授权（同 K3 可达流程）
+
+- **不可变 K3 marker**：只证明 K3 bootstrap/维护窗口/maintenance manifest/fence ID；不含运行时 writer 集；writer 授权不写 marker。
+- **可变 writer 授权**：`evidence_chain_plans` 的 `planKind="writer"` 记录（core+status，§16.2）：
+  - core：`writerEpoch, k3MarkerId, writerSetDigest, revokedWriterSetDigest, revocationReceiptDigest, sourceHaltedEpoch, sourceFenceDigest, windowStart/End...`；
+  - status active/revoked/consumed；statusTicket；
+  - `_id = evidence-chain-plan:v1:writer:<writerEpoch>:writer`。
+- **同 K3 writer 变化/重审/恢复流程**：
+  1. **Halt**：monitor 写 fence halted(E0)（若尚未 halt）；或维护窗口内 gate closed。
+  2. **新 writer plan**：issue `writerEpoch+1`（同 `k3MarkerId`/`keyFingerprint`，新 `writerSetDigest`/`revokedWriterSetDigest`/`revocationReceiptDigest`，source halt fence E0/ digest）；旧 writer plan 用 statusTicket 置 revoked；写 plan+audit。
+  3. **重审**：按新 writer plan 完整 inventory；生成 final inventory digest/counts；plan core final；不写 evidence/head。
+  4. **writer-rotate finalize**：事务内 CAS source fence E0/halted；写旧 writer plan revoked + new proof(E1, writerPlanId=W1, k3MarkerDigest) + fence clear(E1) + new writer plan consumed + audit；旧 K3 marker 不变；refs **8**（domain2+fence+marker+W0+W1+proof+audit），writes **5**（W0 revoked+proof+fence+W1 consumed+audit）；失败 Z_chain/零写。
+  5. **runtime**：读 active/resolved writer plan W1 + proof E1；writerPlanId/KeyFingerprint/marker/audit 全匹配；旧 W0 不可用。
+  6. **K3 换钥**：不是本流程；必须新 marker/bootstrap/维护审计，旧 marker/writer plan 全部失效。
+- audit proof **24 字段**：v5 23 字段 + `writerPlanId`；runtime `WriterPlanValid` 校验 active/statusTicket/core/keyFingerprint/k3MarkerId/window；C1/C2 读 writer plan ref（C1 17/C2 26）。
+- 该流程使同 K3 writer 变化、重审、monitor halt 后恢复可达，而不修改不可变 K3 marker。
+
+### 16.5 v6 预算/状态/失败零写（覆盖 v5）
+
+| 事务 | refs | writes |
+|---|---:|---|
+| C1 首条/非首条 | domain2+audit1+fence1+marker1+writerPlan1+anchor1+head1+E9 = **17** | 3/2 |
+| C2 R1 | C1 17 + org/member/job/grant4 + op3 + log/admin audit2 = **26** | job/evidence/head/anchor/log/op/domain/audit |
+| migration-anchor | domain2+fence1+marker1+writerPlan1+plan1+head1+E9+anchor1+audit1 = **18** | anchor+audit |
+| migration-finalize | domain2+fence1+marker1+writerPlan1+plan1+proof1+audit1 = **8** | fence+proof+plan+audit |
+| recovery-finalize | domain2+fence1+marker1+writerPlan1+plan1+proof1+audit1 = **8** | fence+proof+plan+audit |
+| monitor heartbeat/halt | domain2+proof1+fence1+marker1+writerPlan1+audit1 = **7** | fence+audit |
+| k3-bootstrap | domain2+fence1+marker1+audit1 = **5** | domain2+marker+audit |
+| plan/writer-plan issue | plan1+audit1 = **2** | plan+audit |
+| writer-rotate | domain2+fence1+marker1+W0+W1+proof1+audit1 = **8** | W0 revoked+proof+fence+W1 consumed+audit |
+| C2 R2 | H4-b 8+N≤90 | 独立 |
+
+- C2 R1 26 距 90 余 64；8 集合（evidence/head/domains/anchor/audit/fence/k3-marker/plans）；无新集合；writer 授权在 plans。
+- 状态：`BOOTSTRAP → UNPROVEN(marker) → WRITER_PLAN_ACTIVE → CLEAR(E)/HALTED(E)`；writer-rotate 从 HALTED 到 CLEAR(E1)；monitor health 过期 CLEAR_EXPIRED→HALTED，heartbeat 可恢复。
+- 并发：
+  * 两 marker/ID bootstrap create-only 一胜；
+  * plan status core/statusTicket 并发一胜，旧 statusTicket 拒绝；
+  * recovery source CAS 失败 PLAN_STALE；
+  * 两 writer-rotate/W1 一胜，旧 W0 不可复用；
+  * monitor full coverage refs7；缺 marker/writer plan → PROOF/HALTED；
+  * K3 轮换使 marker/writer plan/proof 全失效。
+- 失败零写增量：
+  * F33 marker 短 ID/ref 不一致 → PROOF/HALTED，Z_all；
+  * F34 plan 改 status 后仍验 core/旧 statusTicket → PLAN_INVALID，Z_all；
+  * F35 recovery source fence/epoch/CAS 不符 → PLAN_STALE/HALTED，Z_all；
+  * F36 monitor 完整 CoverageValid 缺 marker/writer ref → HALTED，Z_all；
+  * F37 writer plan status/key/marker 不符 → PLAN_INVALID，Z_all；
+  * F38 同 K3 writer 变化旧 plan/proof 重放 → PLAN_CONSUMED/STALE，Z_all；
+  * F39 writer-rotate fence/proof/plan/audit 原子失败 → Z_chain；
+  * F40 audit proof writerPlanId 缺失/不符 → PROOF_REQUIRED，Z_all。
+
+### 16.6 v6 裁定与矩阵
+
+**新增 Q32–Q35**：
+| Q | 事项 | 建议 |
+|---|---|---|
+| Q32 | K3 marker 完整 ID/18 字段/refs（禁短 ID） | 批准 |
+| Q33 | plan core/status 分离、statusTicket、active→consumed/revoked | 批准 |
+| Q34 | recovery sourceHaltedEpoch/sourceFenceDigest + CAS；monitor 完整 CoverageValid refs7 | 批准 |
+| Q35 | 不可变 K3 marker vs writer plan；同 K3 writer-rotate 8/5；C1 17/C2 26/预算 | 批准 |
+
+**新增 N97–N112**（N01–N96 保留；N26/N48/N66 等预算按 v6 替换）：
+| ID | 场景 | 期望 |
+|---|---|---|
+| N97 | marker 完整 ID/18 字段/HMAC；短 ID 扫描 | 通过；短 ID 0 |
+| N98 | marker refs 在 C1/C2/migration/recovery/monitor 全一致 | 通过 |
+| N99 | plan core/status 分离；statusTicket；不改 core | 通过 |
+| N100 | plan active→consumed/revoked；旧 statusTicket 重放 | PLAN_*；零写 |
+| N101 | recovery sourceHaltedEpoch/sourceFenceDigest CAS 失败 | PLAN_STALE/HALTED |
+| N102 | recovery source 匹配成功；refs8/writes4 | 成功 |
+| N103 | monitor 完整 CoverageValid refs7；缺 marker/writer plan | HALTED/PROOF |
+| N104 | writer plan core/status/key/marker 校验 | 通过/拒绝 |
+| N105 | 同 K3 writer 变化：halt→W1→重审→rotate | CLEAR(E1)，旧 W0 revoked |
+| N106 | writer-rotate refs8/writes5；旧 W0 重放 | 一胜；PLAN_CONSUMED/STALE |
+| N107 | audit proof writerPlanId 绑定；C1 17/C2 26 | 通过/拒绝 |
+| N108 | C1 17/C2 26/migration18/8/recovery8/monitor7/k3 5/plan2/rotate8 | ≤90 |
+| N109 | F33–F40 失败矩阵 | Z_all/Z_chain |
+| N110 | 不可变 marker vs 可变 writer plan；K3 同 key 变化 | 流程可达 |
+| N111 | K3 换钥后旧 marker/writer plan/proof | 全部失效 |
+| N112 | 完整云报告不可读/未列项 | 明确缺失，不声称关闭 |
+
+### 16.7 v6 未解决/未验证
+
+- 完整云报告正文不可读；报告内未列明项待裁，不猜测关闭。
+- Q32–Q35 待 Codex 裁定；v5/v4 中冲突的预算/scope 以 §16 为准。
+- 未运行测试；N01–N112 为设计矩阵；无 C1/C2/C3 实现。
+- 同 K3 writer 变化的真实 DB 撤权、维护窗口、monitor 运维证据未验证。
+- G3 `5f1d7a4`/O10 PASS 不重派；G4 执行/C1 实现/C2/C3/main/07B 合并/HTTP/UI/部署上线冻结。
+
+---
+
+**提交对象：Codex。请复审 v6 §16（Q32–Q35、N97–N112、writer/marker/plan/recovery/monitor 预算）；本稿不声称完整云报告已读或逐项关闭。不自批。**

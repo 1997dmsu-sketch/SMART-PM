@@ -16,7 +16,7 @@
 |---|---|
 | 空链证明 | K3 精确 + CoverageValid + fence clear + 两阶段 admission + anchor + 1..9 IDs + 完整 canonical 链 |
 | halt 恢复 | `CLEAR(E0) → HALTED(E0) → CLEAR(E1)`；恢复用独立 signed recoveryPlan，**不要求 active clear fence**；proof+fence+audit 单事务原子完成 |
-| bootstrap | 首次 bootstrap 检查 fence **不存在**；fence 纳入 refs（读集合 domain head/version + fence + audit），K3 bootstrap 4 refs/3 writes；无 fence 时才允许 |
+| bootstrap | v5：首次 bootstrap 检查 fence **不存在**；读集合 domain head/version + fence + marker + audit；**5 refs/4 writes**（domain2+marker+audit）；无 fence/marker 时才允许 |
 | 最终审计 | 所有最终写字节（业务写 + 唯一 admin_audit）在 final ticket **之前**生成；ticket 覆盖完整 canonical write set；Store 不自动追加/改审计；禁止双审计 |
 | 持续写入约束 | Store gate 覆盖 transact/change/persist/seed/init；runtime/migration/recovery/monitor/k3-bootstrap 分 kind；旧 writer 持续拒绝 |
 | refs | **v5：C1 16；C2 R1 25；migration anchor 17、finalize 7；recovery 7；monitor 5；k3-bootstrap 5；plan issue 2；R2 8+N≤90** |
@@ -130,7 +130,9 @@ ChainProof(job) =
   ∧ ∀i∈[N+1,9]: E_i=null
 ```
 
-迁移/恢复不受 `FenceClear` 约束：migration-anchor 是 pre-fence；recovery 仅要求 fence halted；二者用 plan/ recovery 独立授权，最终 proof+fence 原子。
+迁移/恢复不受 `FenceClear` 约束：migration-anchor 是 pre-fence；recovery 仅要求 fence halted；二者用 plan/recovery 独立授权，最终 proof+fence 原子。
+
+> **v5 更正**：CoverageValid 增 `K3MarkerValid`、proof exact 23；FenceClear exact 12 且含 monitor 健康/时钟；C1/C2/bootstrap/recovery/plan 预算见 §15.1、§15.4。
 
 ## 4. 数据契约
 
@@ -303,7 +305,7 @@ recoveryPlan = { kind:"recovery-plan", scope:"global", schemaVersion:1,
 4. 计算 refsDigest/writesDigest（含 audit 字节），mint ticket；gate 重算校验。
 5. Store 使用 **`auditMode:"explicit"` / `transactFinal`**：只写 finalWriteSet，**不得**再调用默认 `auditRecord`、不得生成第二个 admin_audit、不得改 `_id/createdAt/target`、不得在终检后追加写。
 6. 若 Store 试图注入/修改 audit 或追加写，digest 不匹配 → `ADMISSION_REQUIRED`，整事务回滚；无双审计。
-7. C1 helper 本身只返回业务写（15 refs 不含 audit）；生产 C2 final set 加唯一 audit。C1 单测用显式 test audit；不得依赖 Store 随机 audit。
+7. C1 helper 本身只返回业务写（v5 16 refs 不含 audit）；生产 C2 final set 加唯一 audit。C1 单测用显式 test audit；不得依赖 Store 随机 audit。
 8. migration/recovery/monitor/k3-bootstrap 同样使用 explicit audit；预算见 §7.3。
 
 ## 5. 运行时算法
@@ -314,7 +316,7 @@ recoveryPlan = { kind:"recovery-plan", scope:"global", schemaVersion:1,
 3. `CoverageValid`、`FenceClear`。
 4. runtime precheck（kind/runtime/genesis/epoch/policy/writer/proofId）→ ADMISSION。
 5. head=null、anchor=null、E1..E9=null；否则 BROKEN。
-6. 构造 anchor/E1/head；C2 生成 finalWriteSet（含唯一 audit）；final ticket；Store gate 校验 shape/shape/digest/fence；写 H4-c+audit；无 domain。
+6. 构造 anchor/E1/head；C2 生成 finalWriteSet（含唯一 audit）；final ticket；Store gate 校验 shape/digest/fence；写 H4-c+audit；无 domain。
 7. 失败回滚零写。
 
 ### 5.2 非首条 `ChainProof`
@@ -324,7 +326,7 @@ recoveryPlan = { kind:"recovery-plan", scope:"global", schemaVersion:1,
 7. 失败回滚。
 
 ### 5.3 删除 `hasExistingEvidence`
-API 无布尔/调用方证明；首链只由 K3/Coverage/Fence/precheck/head/anchor/9 IDs 决定；`evidenceAppendRefs` 返回 15 refs；生产树禁止 `hasExistingEvidence`/`emptyProof`/`callerProof`；测试用合成 proof/admission/fence/audit。
+API 无布尔/调用方证明；首链只由 K3/Coverage/Fence/precheck/head/anchor/9 IDs 决定；`evidenceAppendRefs` 返回 16 refs（v5：含 K3 marker）；生产树禁止 `hasExistingEvidence`/`emptyProof`/`callerProof`；测试用合成 proof/admission/fence/audit。
 
 ### 5.4 顺序
 `config→K3→Coverage→Fence→precheck→anchor/head/9 IDs/链→finalWriteSet（含 audit）→ticket→gate→写`；任一失败不进入后续，不降级。
@@ -578,7 +580,7 @@ Codex 批准后另发 C1 实现卡；至少含：
 2. K3+Coverage+Fence+two-phase admission+anchor+9 IDs+完整链；
 3. finalWriteSet+唯一 audit+explicit mode+no double audit；
 4. recovery 状态机/独立授权/原子 proof+fence+audit；
-5. C1 15/C2 24/migration 15/5/recovery 5/monitor 5/k3 4 ≤90；
+5. v5：C1 16/C2 25/migration 17/7/recovery 7/monitor 5/k3 5/plan 2 ≤90；
 6. N01–N96 实现级测试（N01–N80 沿用 v4；N81–N96 见 §15.6；无 HTTP/外部网络）；
 7. 迁移/恢复/fence/monitor/K3 bootstrap 工具另立卡。
 

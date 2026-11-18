@@ -180,18 +180,18 @@
 
 ### 3.2 实际测试函数计数（另报，非 90）
 
-统一非 HTTP 套件实测（v2）：首版 `5ceb22a` 为 **`# tests 313 / # pass 313 / # fail 0`**；本轮复审修订后为 **`# tests 322 / # pass 322 / # fail 0`**（见 §10/§12）。按文件（每个文件经传递 import 都会运行 testkit 的 SELF-CHECK，故逐文件计数含重复自检）：
+统一非 HTTP 套件实测：首版 `5ceb22a` 为 **`# tests 313 / # pass 313 / # fail 0`**；v2 复审修订后为 **`# tests 322 / # pass 322 / # fail 0`**；R2 剩余项（底层 guard 入口补齐 + SELF-CHECK-7）后为 **`# tests 326 / # pass 326 / # fail 0`**（见 §10/§12/§13）。按文件（每个文件经传递 import 都会运行 testkit 的 SELF-CHECK，故逐文件计数含重复自检；新增一条自检会在 4 个 G3 文件各计一次，合计 +4）：
 
-| 文件 | 首版（5ceb22a） | v2 实测 | 其中矩阵 ID 父测试 | 说明 |
-|---|---:|---:|---:|---|
-| `face-strict-retry.test.mjs` | 130 pass | 130 pass | — | G2 既有回归（LC01–LC10 + REG/P1/P2），本次重跑未改 |
-| `face-g3-testkit.mjs` | 4 pass | 6 pass | — | 首版 SELF-CHECK-1..4；v2 增 SELF-CHECK-5（ESM 同步）、SELF-CHECK-6（独立 oracle） |
-| `face-g3-psrtn.test.mjs` | 96 pass | 98 pass | 52 | 52 ID 父测试 + 子场景（含传递运行的自检） |
-| `face-g3-ko.test.mjs` | 70 pass | 72 pass | 29 | 29 ID 父测试 + 子场景（含传递运行的自检） |
-| `face-g3-c.test.mjs` | 13 pass | 16 pass | 9 | 9 ID 父测试 + C08-RERUN 子用例 + 传递自检 |
-| **统一套件合计** | **313 pass** | **322 pass / 0 fail** | **90** | 五文件显式列举，避免 `tests/*.test.mjs` glob 拉入 HTTP 套件 |
+| 文件 | 首版（5ceb22a） | v2 实测 | R2 后实测 | 其中矩阵 ID 父测试 | 说明 |
+|---|---:|---:|---:|---:|---|
+| `face-strict-retry.test.mjs` | 130 pass | 130 pass | 130 pass | — | G2 既有回归（LC01–LC10 + REG/P1/P2），本次重跑未改 |
+| `face-g3-testkit.mjs` | 4 pass | 6 pass | 7 pass | — | 首版 SELF-CHECK-1..4；v2 增 5（ESM 同步）/6（独立 oracle）；R2 增 7（底层入口） |
+| `face-g3-psrtn.test.mjs` | 96 pass | 98 pass | 99 pass | 52 | 52 ID 父测试 + 子场景（含传递运行的自检） |
+| `face-g3-ko.test.mjs` | 70 pass | 72 pass | 73 pass | 29 | 29 ID 父测试 + 子场景（含传递运行的自检） |
+| `face-g3-c.test.mjs` | 13 pass | 16 pass | 17 pass | 9 | 9 ID 父测试 + C08-RERUN 子用例 + 传递自检 |
+| **统一套件合计** | **313 pass** | **322 pass** | **326 pass / 0 fail** | **90** | 五文件显式列举，避免 `tests/*.test.mjs` glob 拉入 HTTP 套件 |
 
-> 结论：90 指矩阵 ID；实际测试函数 v2 为 322（含 G2 回归 130、testkit 自检按文件传递计数、子场景展开）。不以「恰好 90 个 test()」为目标。
+> 结论：90 指矩阵 ID；实际测试函数 R2 后为 326（含 G2 回归 130、testkit 自检按文件传递计数、子场景展开）。不以「恰好 90 个 test()」为目标。首版 313 保持不变。
 
 ---
 
@@ -222,25 +222,28 @@
 
 ---
 
-## 6. 网络 guard 证据（testkit SELF-CHECK-1..4）
+## 6. 网络 guard 证据（testkit SELF-CHECK-1..7）
 
-### 6.1 入口清单（实测 `guardEntryNames().length = 25`）
+### 6.1 入口清单（实测 `guardEntryNames().length = 49`）
 
-`net.createServer`、`http.Server.prototype.listen`、`https.Server.prototype.listen`、`http.request`、`http.get`、`https.request`、`https.get`、`globalThis.fetch`、`dns.lookup`、`net.connect`、`net.createConnection`，以及 `dns.resolve*` 全 14 个：`dns.resolve/resolve4/resolve6/resolveAny/resolveCaa/resolveCname/resolveMx/resolveNaptr/resolveNs/resolvePtr/resolveSoa/resolveSrv/resolveTlsa/resolveTxt`。SELF-CHECK-1 断言必需 11 类入口全部覆盖、`dns.resolve*` 存在、总数 `>= 20`（实测 25）。
+- 原 25 个：`net.createServer`、`http.Server.prototype.listen`、`https.Server.prototype.listen`、`http.request`、`http.get`、`https.request`、`https.get`、`globalThis.fetch`、`dns.lookup`、`net.connect`、`net.createConnection`，以及 `dns.resolve*` 全 14 个：`dns.resolve/resolve4/resolve6/resolveAny/resolveCaa/resolveCname/resolveMx/resolveNaptr/resolveNs/resolvePtr/resolveSoa/resolveSrv/resolveTlsa/resolveTxt`。
+- R2 新增 7 个底层入口：`net.Server.prototype.listen`、`net.Socket.prototype.connect`、`tls.connect`、`dgram.createSocket`、`dgram.Socket.prototype.send`、`dgram.Socket.prototype.bind`、`dgram.Socket.prototype.connect`。
+- R2 新增 `dns.promises.*` 17 个（promise 风格、mock 返回 Promise）：`dns.promises.lookup/lookupService/resolve/resolve4/resolve6/resolveAny/resolveCaa/resolveCname/resolveMx/resolveNaptr/resolveNs/resolvePtr/resolveSoa/resolveSrv/resolveTlsa/resolveTxt/reverse`。不含 `Resolver`/`getServers`/`setServers`/`getDefaultResultOrder`/`setDefaultResultOrder`（非解析/查询入口）。
+- 合计 **49 = 11 + 14 + 7 + 17**。SELF-CHECK-1 断言 18 个必需入口全覆盖、`dns.resolve*`/`dns.promises.*` 均存在、总数 `>= 48`（实测 49）。
 
 ### 6.2 加载前安装 / 加载期零违规 / 永久保留 vs 可清零
 
 - testkit 顶层**只静态 import Node 内建模块**；被测模块（`store/collections/h3a/h4b/retry/model`）全部走 top-level `await import()`（`:213-218`）。SELF-CHECK-1 以正则断言顶层无 `import ... from "../lib/"`，并实测 `installed=true`、`phase="runtime"`、`getViolations().loadTime=[]`。
-- `install()` 先把 11+14 个入口换成桩，`assertNoLoadTimeViolation()` 通过后切到 `runtime`；有违规抛 `G3_LOADTIME_NETWORK_VIOLATION` 且**不清除** `loadTimeViolations`（SELF-CHECK-4 负向验证：制造 1 次加载期违规后断言 `loadTime.length=1` 且抛错后仍为 1）。
+- `install()` 先把全部 49 个入口（11+14+7+17）换成桩，`assertNoLoadTimeViolation()` 通过后切到 `runtime`；有违规抛 `G3_LOADTIME_NETWORK_VIOLATION` 且**不清除** `loadTimeViolations`（SELF-CHECK-4 负向验证：制造 1 次加载期违规后断言 `loadTime.length=1` 且抛错后仍为 1）。R2 新增入口走完全相同的 install/正控/恢复流程，未改动这五处机制本身。
 - `runtimeViolations` 可由 `resetRuntimeViolations()` 清零；`loadTimeViolations` **无任何清除路径**。
 
 ### 6.3 正控（不转发真实函数）
 
-`positiveControlOne` 直接调用桩：断言 `rec.count +1`、`runtimeViolations +1`、`loadTimeViolations` 不变、返回值为 `g3Mock` sentinel（`__g3Mock===true` 且 `__g3Entry===name`），随后只清 runtime。SELF-CHECK-2 对**全部 25 个入口**逐个正控，`results.length === entries().length`，全部返回 sentinel，正控后 runtime 归零、loadTime 仍空。SELF-CHECK-4 用独立 mock 的 `forwarded` 计数器证明桩**从未转发**到真实原始函数。
+`positiveControlOne` 直接调用桩：断言 `rec.count +1`、`runtimeViolations +1`、`loadTimeViolations` 不变、返回值为 `g3Mock` sentinel（`__g3Mock===true` 且 `__g3Entry===name`），随后只清 runtime。SELF-CHECK-2 对**全部 49 个入口**逐个正控，`results.length === entries().length`，全部返回 sentinel，正控后 runtime 归零、loadTime 仍空。SELF-CHECK-7 对 R2 新增的 24 个入口（7 底层 + 17 `dns.promises.*`）逐一正控，额外断言 `__g3Entry===name`、count +1、loadTime 不变。SELF-CHECK-4 用独立 mock 的 `forwarded` 计数器证明桩**从未转发**到真实原始函数。
 
 ### 6.4 精确恢复
 
-`restore()` 逆序恢复原始函数**身份**与原始**属性描述符**（writable/enumerable/configurable/get/set），不用 bind 副本。SELF-CHECK-3 用自定义 target 验证 `fetch`（data 属性）、`get`（writable:false/enumerable:true）、`accessor`（getter）三类描述符逐项 `deepEqual` 恢复，恢复后 `installed=false`。
+`restore()` 逆序恢复原始函数**身份**与原始**属性描述符**（writable/enumerable/configurable/get/set），不用 bind 副本。SELF-CHECK-3 用自定义 target 验证 `fetch`（data 属性）、`get`（writable:false/enumerable:true）、`accessor`（getter）三类描述符逐项 `deepEqual` 恢复，恢复后 `installed=false`。SELF-CHECK-7 追加 tls/dgram 风格独立 mock（`connect` writable:true/enumerable:false、`createSocket` writable:false/enumerable:true）的 install→restore 验证，原始身份与描述符逐项一致，主守卫全程未受污染。
 
 ---
 
@@ -311,25 +314,25 @@ node --test \
 实测输出（TAP 汇总）：
 
 ```
-# tests 322
+# tests 326
 # suites 0
-# pass 322
+# pass 326
 # fail 0
 # cancelled 0
 # skipped 0
 # todo 0
 ```
 
-按文件逐跑（v2，均 0 fail）：`face-strict-retry` 130、`face-g3-testkit` 6（新增 SELF-CHECK-5 ESM 同步、SELF-CHECK-6 独立 oracle）、`face-g3-psrtn` 98、`face-g3-ko` 72、`face-g3-c` 16（含 C08-RERUN 子用例）；合计 322（含传递运行的 SELF-CHECK）。首版（5ceb22a）为 313 pass；v2 修订新增用例后为 322 pass。`git diff --check` 通过；生产文件零差异（§9）。
+按文件逐跑（R2 后，均 0 fail）：`face-strict-retry` 130、`face-g3-testkit` 7（SELF-CHECK-1..7，R2 增底层入口自检）、`face-g3-psrtn` 99、`face-g3-ko` 73、`face-g3-c` 17（含 C08-RERUN 子用例）；合计 326（含传递运行的 SELF-CHECK）。首版（5ceb22a）为 313 pass；v2 修订后为 322 pass；R2 补齐底层入口后为 326 pass（新增 1 条自检在 4 个 G3 文件各计一次，+4）。`git diff --check` 通过；生产文件零差异（§9）。
 
-**声明**：本次仅运行上述显式列举的非 HTTP 单元/服务层测试套件，**未运行** `npm test` 全量（避免 glob 拉入 HTTP 套件）、**未启动 HTTP 服务**、**未监听任何端口**、**未发起任何业务网络请求**。网络 guard 已在被测模块加载前安装，25 个入口全覆盖，加载期与运行期网络违规均为 0（§6）。
+**声明**：本次仅运行上述显式列举的非 HTTP 单元/服务层测试套件，**未运行** `npm test` 全量（避免 glob 拉入 HTTP 套件）、**未启动 HTTP 服务**、**未监听任何端口**、**未发起任何业务网络请求**。网络 guard 已在被测模块加载前安装，49 个入口全覆盖，加载期与运行期网络违规均为 0（§6）。
 
 ---
 
 ## 11. 结论
 
 - 矩阵 **90 个 ID**：**89 条 PASS + 1 条（O10）blocked**。不得宣称 90/90 全通过。
-- 统一非 HTTP 套件 v2 **322 pass / 0 fail**（首版 313）；生产文件零差异；网络 guard 25 入口、加载期零违规、正控与精确恢复自检全过。
+- 统一非 HTTP 套件 **326 pass / 0 fail**（首版 313、v2 322）；生产文件零差异；网络 guard 49 入口、加载期零违规、正控与精确恢复自检全过。
 - 三项裁定（C05 只验 retry 侧、S09 只验 finalize、O10/O11 计入 G3 且不替代 G4）均按用户批准落实。
 - **G3 未整体关闭**：O10 因 `routes.mjs:47-53` 的 E07 描述行未清理而 blocked，待独立 Q8 小提交清理后用同一用例复验（O10 用例已改为动态 gate，清理后自动转 PASS，见 §12）。
 - 本次**不开始 G4**、**不合并任何分支**、**不开 HTTP/UI**、**不上线**、**不改任何生产文件**；如测试暴露服务缺陷，回退 G2 另立任务，不在 G3 修改契约或生产代码。
@@ -372,7 +375,64 @@ node --test \
 - 首版证据文档 §1/§9/§10/§11 描述 `5ceb22a` 之前"三矩阵文件 untracked、未提交"的 313-pass 状态。本 v2 已更新：谱系表补入 `5ceb22a`（已推送并核对一致）与本轮修订提交；计数更新为 322 pass；§9 改为"已提交"口径；新增本节记录 6 项修订取证。
 
 ### 12.7 v2 统一验证
-- 统一非 HTTP 套件 `node --test tests/face-strict-retry.test.mjs tests/face-g3-testkit.mjs tests/face-g3-psrtn.test.mjs tests/face-g3-ko.test.mjs tests/face-g3-c.test.mjs` → **322 pass / 0 fail**。
+- 统一非 HTTP 套件 `node --test tests/face-strict-retry.test.mjs tests/face-g3-testkit.mjs tests/face-g3-psrtn.test.mjs tests/face-g3-ko.test.mjs tests/face-g3-c.test.mjs` → v2 为 **322 pass / 0 fail**；R2 补齐底层入口后复跑为 **326 pass / 0 fail**（§13）。
 - 生产文件零差异；FALSIFY-TEMP/临时补丁零残留；`git diff --check` 通过。
 - 三项独立可证伪（P1 注入 fetch、P2-3 改生产 op: 前缀、P2-5 内存清理 routes）均由 team-lead 独立复核通过；P2-2、P2-4 由实现 worker 反向补丁验证通过。
 - 结论口径不变：90 ID 中 89 PASS + 1（O10）blocked，G3 整体未关闭；O10 待 Q8 独立清理后用同一用例复验；G4/合并/HTTP/UI/上线继续冻结。
+
+---
+
+## 13. G3 v2 独立复审 R2 剩余项 — 底层 guard 入口补齐（2026-11-18）
+
+### 13.1 缺口（复审原话）
+guard 仍未覆盖以下底层入口，ESM 同步不能代替这些入口的拦截：
+- `net.Server.prototype.listen`
+- `net.Socket.prototype.connect`
+- `tls.connect`
+- UDP（dgram）相关入口
+- `dns.promises` 相关入口
+
+### 13.2 补齐内容（仅 `face-g3-testkit.mjs`）
+- 顶层新增 Node 内建静态 import：`node:tls`、`node:dgram`（被测模块仍全部走 top-level `await import()`）。
+- `resolveEntries()` 追加 7 个底层入口：`net.Server.prototype.listen`、`net.Socket.prototype.connect`、`tls.connect`、`dgram.createSocket`、`dgram.Socket.prototype.send`、`dgram.Socket.prototype.bind`、`dgram.Socket.prototype.connect`。
+- `dns.promises` 按正则 `/^(lookup|lookupService|resolve|reverse)/` 枚举 17 个 promise 风格入口（mock 返回 `Promise.resolve(g3Mock(...))` 供正控 `await`）；未包裹 `Resolver`/`getServers`/`setServers`/`getDefaultResultOrder`/`setDefaultResultOrder`。
+- 入口总数由 25 增至 **49**（11 + 14 + 7 + 17）。`makeStub`「绝不转发 original」、active WeakMap 防嵌套、正控、`restore()` 精确恢复、`syncBuiltinESMExports()` 五处机制**未改动**。
+
+### 13.3 可配置性与 ESM 同步实测（Node v22.22.2-6）
+- 7 个新底层入口均 `hasOwn=true`、`configurable=true`、`writable=true`、`typeof=function`，可安全打桩。
+- `dns.promises` 正则命中 17 个函数键，与 §6.1 清单一致。
+- `tls.connect = stub` / `dgram.createSocket = stub` 后，命名导出 `import { connect } from "node:tls"` 与 `import { createSocket } from "node:dgram"` 在 `syncBuiltinESMExports()` 前 `=== stub` 为 false、之后为 true；testkit 的 `install()` 已在打桩后调用同步，SELF-CHECK-7 实测两者 `=== rec.stub`。
+
+### 13.4 SELF-CHECK-7（新增第 7 条自检）
+1. `networkGuard.entries()` 包含全部 7 个底层入口与 17 个 `dns.promises.*` 入口；
+2. 对每个新增入口跑 `positiveControlOne(name)`，断言 `__g3Mock===true`、`__g3Entry===name`、count +1、runtime +1 后归零、loadTime 不变；
+3. `await import("node:tls").connect` 与 `await import("node:dgram").createSocket` 均 `===` 对应 `rec.stub`，并调用命名入口确认返回 sentinel、记 1 次 runtime 违规；
+4. 参照 SELF-CHECK-3 的独立 mock 思路，对自定义 target 上的 tls/dgram 风格函数做 install→restore，断言原始身份与属性描述符（`writable`/`enumerable`/`configurable`/`value`）逐项一致，主守卫零污染。
+
+### 13.5 实测计数
+- testkit 单文件：`# tests 7 / # pass 7 / # fail 0`；`guardEntryNames().length = 49`。
+- 统一五文件套件：`# tests 326 / # pass 326 / # fail 0`（首版 313、v2 322 保持不变；新增 1 条自检在 4 个 G3 文件各计一次）。
+- `git diff --check` 通过；生产代码零改动；未 commit / 未 push（由 team-lead 统一提交）。
+
+### 13.6 可证伪实测结果（独立验收员 g2-review-repro，fresh eyes）
+两项反向补丁均先备份到工作树外、真跑、再逐字节 `cmp` 精确还原，复跑回全绿：
+- **可证伪 A（桩转发检测）**：临时把 `makeStub` 的 `return rec.mock();` 改为 `return rec.original();`。
+  testkit 单文件由 7/7 变为 **`# tests 7 / # pass 3 / # fail 4 / exit 1`**，失败用例为
+  **SELF-CHECK-2、SELF-CHECK-4、SELF-CHECK-5、SELF-CHECK-7**（均为依赖 sentinel 的断言；
+  首个错误原文 `net.createServer: 桩返回值必须是安全 sentinel（证明未转发真实原始函数）`）。
+  这证明桩确实阻断真实网络函数、哨兵断言非橡皮图章。恢复后 `grep -n "return rec.mock();"`
+  原语句在第 119 行在位，`cmp` IDENTICAL，复跑 7/7。
+- **可证伪 B（新入口可移除检测）**：临时从 `resolveEntries()` 删除 `tls.connect` 条目。
+  testkit 单文件由 7/7 变为 **`# tests 7 / # pass 5 / # fail 2 / exit 1`**，失败用例恰为
+  **SELF-CHECK-1、SELF-CHECK-7**，错误原文 `缺少必需拦截入口：tls.connect`。
+  恢复后 `grep -n 'name: "tls.connect"'` 原条目在第 81 行在位，`cmp` IDENTICAL，复跑 7/7。
+- **ESM 同步独立复现**：`tlsNs.connect === recTls.stub`、`dgramNs.createSocket === recDgram.stub`
+  均为 true（`=== original` 为 false）；直接调用命名入口返回 `__g3Entry` 匹配的 sentinel 并记
+  1 次 runtime 违规。单列脚本证明命名导出在 `syncBuiltinESMExports()` 前不跟随 CJS 改动、同步后指向桩。
+- **可配置性真相**：49 入口 = 11 基础 + 14 `dns.resolve*` + 7 底层 + 17 `dns.promises.*`，无重复，
+  未包裹 `Resolver`/`getServers`/`setServers`/`getDefaultResultOrder`/`setDefaultResultOrder`。
+- **干净性**：生产代码与其余四个测试文件对 `fd1ab69` 零差异，`git diff --check` 通过，无
+  FALSIFY/TEMP/`rec.original();` 残留，`git status --short` 仍只有 testkit 与证据文档两文件 M。
+- **结论**：V1–V6 全部 PASS，建议追加提交。HEAD 终态仍 `fd1ab69`，由 team-lead 统一提交。
+
+> 口径不变：90 ID 中 89 PASS + 1（O10）blocked，G3 整体未关闭；O10 待 Q8 独立清理后复验；G4 / 合并 / HTTP / UI / 上线继续冻结。

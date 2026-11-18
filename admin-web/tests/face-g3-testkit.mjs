@@ -33,6 +33,8 @@ import net from "node:net";
 import http from "node:http";
 import https from "node:https";
 import dns from "node:dns";
+import tls from "node:tls";
+import dgram from "node:dgram";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -73,11 +75,26 @@ function createNetworkGuard(entriesOverride = null) {
       { name: "dns.lookup", obj: dns, key: "lookup", mock: () => g3Mock("dns.lookup") },
       { name: "net.connect", obj: net, key: "connect", mock: () => g3Mock("net.connect") },
       { name: "net.createConnection", obj: net, key: "createConnection", mock: () => g3Mock("net.createConnection") },
+      // R2 剩余项：底层 Server/Socket、TLS、UDP 入口。ESM 同步不能代替这些入口的拦截。
+      { name: "net.Server.prototype.listen", obj: net.Server.prototype, key: "listen", mock: () => g3Mock("net.Server.prototype.listen") },
+      { name: "net.Socket.prototype.connect", obj: net.Socket.prototype, key: "connect", mock: () => g3Mock("net.Socket.prototype.connect") },
+      { name: "tls.connect", obj: tls, key: "connect", mock: () => g3Mock("tls.connect") },
+      { name: "dgram.createSocket", obj: dgram, key: "createSocket", mock: () => g3Mock("dgram.createSocket") },
+      { name: "dgram.Socket.prototype.send", obj: dgram.Socket.prototype, key: "send", mock: () => g3Mock("dgram.Socket.prototype.send") },
+      { name: "dgram.Socket.prototype.bind", obj: dgram.Socket.prototype, key: "bind", mock: () => g3Mock("dgram.Socket.prototype.bind") },
+      { name: "dgram.Socket.prototype.connect", obj: dgram.Socket.prototype, key: "connect", mock: () => g3Mock("dgram.Socket.prototype.connect") },
     ];
     // dns.resolve* 全部入口逐一包裹，每个都有正控。
     for (const key of Object.getOwnPropertyNames(dns).sort()) {
       if (/^resolve/.test(key) && typeof dns[key] === "function")
         list.push({ name: `dns.${key}`, obj: dns, key, mock: () => Promise.resolve(g3Mock(`dns.${key}`)) });
+    }
+    // dns.promises 解析/查询入口（promise 风格，mock 返回 Promise 供正控 await）。
+    // 不含 Resolver / getServers / setServers / getDefaultResultOrder / setDefaultResultOrder。
+    for (const key of Object.getOwnPropertyNames(dns.promises).sort()) {
+      if (typeof dns.promises[key] === "function" && /^(lookup|lookupService|resolve|reverse)/.test(key))
+        list.push({ name: `dns.promises.${key}`, obj: dns.promises, key,
+          mock: () => Promise.resolve(g3Mock(`dns.promises.${key}`)) });
     }
     return list;
   }
@@ -678,11 +695,16 @@ test("SELF-CHECK-1：guard 在模块加载前已安装 + 加载期零违规 + �
     "net.createServer", "http.Server.prototype.listen", "https.Server.prototype.listen",
     "http.request", "http.get", "https.request", "https.get", "globalThis.fetch",
     "dns.lookup", "net.connect", "net.createConnection",
+    // R2 剩余项：底层 Server/Socket、TLS、UDP 入口
+    "net.Server.prototype.listen", "net.Socket.prototype.connect", "tls.connect",
+    "dgram.createSocket", "dgram.Socket.prototype.send", "dgram.Socket.prototype.bind",
+    "dgram.Socket.prototype.connect",
   ];
   const names = networkGuard.entries();
   for (const r of required) assert.ok(names.includes(r), `缺少必需拦截入口：${r}`);
   assert.ok(names.some((n) => n.startsWith("dns.resolve")), "dns.resolve* 入口必须被覆盖");
-  assert.ok(names.length >= 20, `拦截入口总数应 >= 20，实际 ${names.length}`);
+  assert.ok(names.some((n) => n.startsWith("dns.promises.")), "dns.promises.* 入口必须被覆盖");
+  assert.ok(names.length >= 48, `拦截入口总数应 >= 48，实际 ${names.length}`);
 
   // 顶层无被测模块静态 import 的结构性证据。
   const src = await readFile(join(here, "face-g3-testkit.mjs"), "utf8");
@@ -842,4 +864,84 @@ test("SELF-CHECK-6：测试侧独立 oracle 与生产 helper 互相印证", () =
   assert.equal(independentOpKey({ env: K2_ENV_B, idempotencyKey: idem }),
     operationKey({ orgId: ORG, method: REQ_METHOD, actorType: "user", actorId: ACTOR,
       idempotencyKey: idem, config: configB }));
+});
+
+test("SELF-CHECK-7：R2 底层入口（net.Server/Socket、tls、dgram、dns.promises）真拦截", async () => {
+  // 1) 入口清单包含全部新增项。
+  const newNames = [
+    "net.Server.prototype.listen", "net.Socket.prototype.connect", "tls.connect",
+    "dgram.createSocket", "dgram.Socket.prototype.send", "dgram.Socket.prototype.bind",
+    "dgram.Socket.prototype.connect",
+  ];
+  const names = networkGuard.entries();
+  for (const n of newNames) assert.ok(names.includes(n), `缺少 R2 底层入口：${n}`);
+  const dnsPromiseNames = names.filter((n) => n.startsWith("dns.promises."));
+  assert.ok(dnsPromiseNames.length >= 17,
+    `dns.promises.* 入口应 >= 17，实际 ${dnsPromiseNames.length}`);
+  for (const n of ["dns.promises.lookup", "dns.promises.lookupService",
+    "dns.promises.resolve", "dns.promises.reverse"])
+    assert.ok(names.includes(n), `缺少 dns.promises 入口：${n}`);
+
+  // 2) 每个新增入口逐一正控：sentinel 身份正确、count +1、runtime +1、loadTime 不变。
+  assert.deepEqual(getViolations().loadTime, [], "进入自检时 loadTimeViolations 必须为空");
+  for (const n of [...newNames, ...dnsPromiseNames]) {
+    const rec = networkGuard.state.records.find((r) => r.name === n);
+    assert.ok(rec, `入口 ${n} 未安装`);
+    const countBefore = rec.count;
+    const loadBefore = getViolations().loadTime.length;
+    const ret = await networkGuard.positiveControlOne(n); // 内部断言 +1 并在末尾 reset runtime
+    assert.equal(rec.count, countBefore + 1, `${n}: 正控计数必须 +1`);
+    assert.equal(ret.ret.__g3Mock, true, `${n}: 正控必须返回 sentinel`);
+    assert.equal(ret.ret.__g3Entry, n, `${n}: sentinel 入口名必须匹配（证明未转发）`);
+    assert.equal(getViolations().loadTime.length, loadBefore, `${n}: 正控不得触碰 loadTimeViolations`);
+  }
+  assert.deepEqual(getViolations().runtime, [], "全部新入口正控后 runtime 必须归零");
+  assert.deepEqual(getViolations().loadTime, [], "全部新入口正控后 loadTime 仍为空");
+
+  // 3) ESM 命名绑定同步：node:tls / node:dgram 命名导出必须指向桩。
+  const tlsNamed = await import("node:tls");
+  const dgramNamed = await import("node:dgram");
+  const recTls = networkGuard.state.records.find((r) => r.name === "tls.connect");
+  const recDgram = networkGuard.state.records.find((r) => r.name === "dgram.createSocket");
+  assert.equal(tlsNamed.connect, recTls.stub, "tls 命名导出 connect 必须指向桩");
+  assert.equal(dgramNamed.createSocket, recDgram.stub, "dgram 命名导出 createSocket 必须指向桩");
+  resetRuntimeViolations();
+  const tlsRet = await tlsNamed.connect();
+  assert.ok(tlsRet && tlsRet.__g3Entry === "tls.connect", "命名入口 tls.connect 必须返回 sentinel");
+  assert.equal(getViolations().runtime.length, 1, "命名入口 tls.connect 必须记为运行期违规");
+  resetRuntimeViolations();
+  const dgramRet = await dgramNamed.createSocket();
+  assert.ok(dgramRet && dgramRet.__g3Entry === "dgram.createSocket", "命名入口 dgram.createSocket 必须返回 sentinel");
+  assert.equal(getViolations().runtime.length, 1, "命名入口 dgram.createSocket 必须记为运行期违规");
+  resetRuntimeViolations();
+
+  // 4) 精确恢复：参照 SELF-CHECK-3 的独立 mock 思路，验证 tls/dgram 风格函数
+  //    安装→恢复后原始身份与属性描述符逐项一致（不污染主守卫）。
+  const originalTls = () => "REAL_TLS";
+  const originalDgram = () => "REAL_DGRAM";
+  const target = {};
+  Object.defineProperty(target, "connect", {
+    value: originalTls, writable: true, enumerable: false, configurable: true,
+  });
+  Object.defineProperty(target, "createSocket", {
+    value: originalDgram, writable: false, enumerable: true, configurable: true,
+  });
+  const descTls = Object.getOwnPropertyDescriptor(target, "connect");
+  const descDgram = Object.getOwnPropertyDescriptor(target, "createSocket");
+  const iso = createNetworkGuard([
+    { name: "iso.tls.connect", obj: target, key: "connect", mock: () => g3Mock("iso.tls.connect") },
+    { name: "iso.dgram.createSocket", obj: target, key: "createSocket", mock: () => g3Mock("iso.dgram.createSocket") },
+  ]);
+  iso.install();
+  assert.notEqual(target.connect, originalTls, "安装后 tls 风格函数应换成桩");
+  assert.notEqual(target.createSocket, originalDgram, "安装后 dgram 风格函数应换成桩");
+  iso.restore();
+  assert.equal(target.connect, originalTls, "恢复后 tls 风格函数必须是原始身份（非 bind 副本）");
+  assert.equal(target.createSocket, originalDgram, "恢复后 dgram 风格函数必须是原始身份");
+  assert.deepEqual(Object.getOwnPropertyDescriptor(target, "connect"), descTls,
+    "tls 风格函数描述符（writable/enumerable/configurable/value）必须逐项一致");
+  assert.deepEqual(Object.getOwnPropertyDescriptor(target, "createSocket"), descDgram,
+    "dgram 风格函数描述符 writable:false/enumerable:true 必须精确恢复");
+  assert.equal(iso.state.installed, false, "独立守卫恢复后 installed 必须为 false");
+  assert.deepEqual(getViolations().loadTime, [], "主守卫全程未被污染");
 });

@@ -5,7 +5,7 @@
 - 工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\rental-contract-decisions`
 - 分支：`codex/rental-contract-decisions`
 - 输入 SHA：`9026f514ce93df9a453351e0ba861afde8fc071d`
-- 父提交：`585e925af439b63df6a17b4a8bc3ca3ac93a0a79`
+- 本卡父提交：`9026f514ce93df9a453351e0ba861afde8fc071d`
 - 代码基线：`3bf595140088bc71a3939fb67880807965e9c566`
 - 状态：**仅卡文修订，不实现、不改生产代码/测试/Store；待 Codex 批准**
 - 来源说明：完整云报告 `/workspace/artifacts/DEL-AI-01-CONTENT-REVIEW-2026-11-18/REVIEW.md` 在本机不可读；已检查 `/workspace`、`C:\workspace`、`D:\workspace` 及工作区目录，未找到可读副本。**不声称已读完整报告或已逐项关闭其内容**；本卡按本轮消息已明确的裁定修订，未明确处列入 §9。

@@ -1,180 +1,214 @@
-# 预签约三项开放问题 · 契约澄清与修复卡
+# 预签约三项开放问题 · 技术裁定回写
 
 - 日期：2026-11-18
 - 执行者：DSH 根代理 `lead`（`deepseek-flash`），Windows PowerShell 5.1 / Node v24.19.0
-- 唯一工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\rental-open-items`
-- 分支：`codex/rental-open-items`
-- 基线 SHA：`3bf595140088bc71a3939fb67880807965e9c566`
-- 工作树：clean；本卡提交前无生产代码改动
-- 状态：**仅契约澄清/修复卡，不进入实现，交 Codex 批准**
+- 工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\rental-contract-decisions`
+- 分支：`codex/rental-contract-decisions`
+- 输入 SHA：`585e925af439b63df6a17b4a8bc3ca3ac93a0a79`
+- 代码基线：`3bf595140088bc71a3939fb67880807965e9c566`
+- 状态：**仅文档裁定回写；不实现、不改生产代码/测试/Store，待 Codex 批准后实施**
+- 裁定来源：按本轮消息明确裁定；完整云报告不可读，本卡不声称已读附件
+- 范围冻结：G3 已在 `5f1d7a4` 验收关闭、O10 PASS，不重复派发；G4/C2/C3、合并、HTTP/UI、部署/上线继续冻结
 
-## 1. 本轮结论
+## 1. 已裁定摘要
 
-三项开放问题需要产品/契约裁定；本轮只给出建议裁定、兼容策略、验收矩阵和修复范围，不改生产代码。基线离线回归已通过：租赁 22/22、根 55/55、admin 非 HTTP 56/56。
+| 开放项 | 最终裁定 |
+|---|---|
+| 同订单并发 `paymentParams` | **持久单飞**：事务内抢占；并发第二方 **409**；成功参数持久缓存并复用；不得以进程锁替代 |
+| 未知支付结果 | **先查询对账，禁止直接重发**；覆盖超时、崩溃、租约过期、重试、旧单/新占位；外部 exactly-once 不作承诺 |
+| 通知重放 | **重复通知零新增（含审计）**；同流水幂等、异流水冲突、非法/空流水拒绝；不丢弃已核验的真实到账事实 |
+| 隐私说明版本 | **独立 privacyVersion**；旧数据不得自动视为已同意；隐私变化不丢真实到账事实；已付订单进入退款/人工处置；需重新同意 |
+| 非隐私变更 | 押金/留房/合同模板文本等仅影响合同快照/`templateVersion`，**不**递增 privacyVersion，不强制重传 |
 
-| 项 | 当前基线行为（实测） | 结论 |
-|---|---|---|
-| 并发 paymentParams | 两个并发请求 adapter 调用 **2 次**，两个均 fulfilled；订单无 prepay 缓存字段 | 需持久幂等/单飞机制；外部 exactly-once 不可承诺 |
-| 空 transaction_id / 重复通知 | 空流水首次 `paid_held`，同 payload 重放变 `refund_required`；两次均写审计 | 需严格非空校验 + 幂等/冲突区分 + 新占位保护 |
-| 隐私说明/审核绑定 | 押金变更使 `templateVersion` 2，旧 `privacyVersion=1` 上传 409，但旧审核 quote 仍 ok；隐私文本变更后 quote/createOrder 仍 ok | 需独立 privacyVersion/hash；旧同意/审核失效；无关押金变更不得强制重传 |
+## 2. 当前代码事实（基线 3bf5951）
 
-## 2. 静态代码现状
-
-- `paymentParams` 无持久预支付状态/缓存：`cloudfunctions/leasing/domain.js:846-861`；仅校验后直接调用适配器。
+- `paymentParams` 无持久预支付状态/缓存：`cloudfunctions/leasing/domain.js:846-861`。
 - `validatePayableOrder` 只读校验：`domain.js:815-843`。
 - 空/重复流水：`typeof p.transaction_id !== "string"` 在 `domain.js:920`；幂等判断 `if (cur.transactionId)` 在 `domain.js:939`。
 - `applyPayment` 到账事实/新占位：`domain.js:907-969`。
 - `saveSettings` 每次保存递增 `templateVersion`：`domain.js:178-246`，递增在 `domain.js:239`。
 - 上传绑定 `consentVersion: cfg.templateVersion`：`domain.js:523`。
 - `quote` 只检查 `identityStatus === approved`：`domain.js:618-665`；`createOrder` 只检查审核/证件有效：`domain.js:666-780`。
-- `paymentIdentityMatches` 不比较隐私版本：`domain.js:781-807`；`finishOrder` 只在 `domain.js:989-1013` 复核预约/材料/审核。
+- `paymentIdentityMatches` 不比较隐私版本：`domain.js:781-807`。
+- `finishOrder` 已在 `domain.js:989-1013` 复核预约/材料/审核。
 - 小程序上传发送 `privacyVersion: settings.templateVersion`：`miniprogram/pages/leasing/index.js:259`。
 
-## 3. 契约裁定建议
+上述为静态代码事实；本轮未运行测试（按要求，无运行时代码变动）。
 
-以下为待 Codex/产品批准的**建议**；涉及外部商户/失败未知/旧数据的选择必须先裁定，不能由实现自行假定。
+## 3. 裁定细则
 
-### 3.1 同订单并发 paymentParams
+### 3.1 同订单并发 paymentParams：持久单飞与缓存
 
-建议契约：
+#### 3.1.1 持久状态
 
-1. 每个订单保存**持久**支付请求状态（orders 内嵌字段或专用集合，需裁定）；不得使用进程内锁。
-2. 状态机：
-   - `none → preparing(token, leaseUntil, startedAt)`
-   - `preparing → ready(params, expiresAt)`（适配器成功且绑定仍有效）
-   - `preparing → failed/unknown(reason, at)`（适配器失败或结果未知）
-   - `failed/unknown → preparing`（重试；每次重试仍可能调用外部一次）
-3. 并发：
-   - 同订单同时最多一个 `preparing`；第二个调用建议返回 `409 PAYMENT_PARAMS_IN_PROGRESS`，不调用适配器。
-   - 已 `ready` 且在订单付款截止前：直接返回缓存的参数，adapter 0 次；不再新生成。
-   - 缓存到期/订单过期：拒绝；不得返回旧参数。
-4. 失败/未知：
-   - 适配器超时、5xx 或结果未知时**不得声称外部 exactly-once**；不得把“本地失败”误报为“商户未创建”。
-   - 建议保留 `unknown` 记录（含时间/原因/租约）以便重试与对账；是否允许该持久写入，需产品裁定。
-   - 若验收要求“失败全库零写（含 audit）”严格包含适配器失败，则实现必须做补偿回滚并接受外部未知/可能重复；这会削弱对账，需裁定。
-5. 材料变更：
-   - 材料重传/审核退回使订单失效并清除预支付缓存；已发到客户端的旧参数到账仍按 `refund_required`，不得夺取新占位。
-6. 适配器计数：首个成功请求 1 次；并发失败方 0 次；缓存命中 0 次；每次重试最多 1 次；不承诺跨进程/跨外部 exactly-once。
+每个订单保存一个持久支付请求状态（订单内嵌字段或专用记录，二者择一；不得仅用进程锁）。建议状态机：
 
-**必须裁定的点**：
-- 并发第二方返回 409 还是等待并返回缓存（建议 409，缓存命中则 200）。
-- 适配器失败/未知是否保留持久 `unknown` 标记；若要求字面全库零写，是否接受补偿回滚。
-- 崩溃/租约过期后的重试与人工对账流程。
+| 状态 | 含义 | 关键字段 |
+|---|---|---|
+| `none` | 无请求 | 无 |
+| `preparing` | 已抢占，准备调用商户 | `attemptId`、`leaseUntil`、`startedAt`、`previous` |
+| `ready` | 商户参数已生成且绑定有效 | `params`、`expiresAt`、`attemptId` |
+| `reconciling` | 商户结果未知，必须查询 | `attemptId`、`reason`、`lastCheckedAt`、`leaseUntil` |
+| `failed` | 已查询确认无有效支付/预支付，可显式重试 | `reason`、`checkedAt` |
 
-### 3.2 transaction_id 与通知重放
+状态变更必须在 Store 事务内完成；`preparing` 抢占通过同订单记录的写冲突实现单飞。
 
-建议契约：
+#### 3.1.2 并发与缓存
 
-1. `transaction_id` 必须为非空字符串，建议格式 `^[A-Za-z0-9_-]{1,64}$`；空白/空串/非法字符在事务前返回 409。
-2. 同一订单、同一 `transaction_id` 重复通知：幂等成功；订单/占位/到账事实不变；审计建议最多一条幂等记录（或零新增，需裁定）。
-3. 同一订单、不同 `transaction_id`：409 冲突；不得改订单/新占位。
-4. 空/非法流水：409；失败全库（含 `admin_audit`）零写。
-5. 旧订单/新占位：到账记 `refund_required`，不写新 hold；重复通知不得延长/夺取占位。
-6. 真实商户通知仍需验签/解密；本轮仅定义服务层契约，不接真实支付。
+1. 同订单同时只允许一个 `preparing`。
+2. 第二并发调用：**409 PAYMENT_PARAMS_IN_PROGRESS**，不调用适配器、不写审计。
+3. 已 `ready` 且在订单 `paymentDeadline` 前：直接返回缓存参数；adapter create **0 次**，不再生成。
+4. `ready` 过期或订单过期：拒绝，不得返回旧参数。
+5. 成功参数只对同一订单有效；材料/审核/隐私变化使订单失效时必须清除缓存。
 
-### 3.3 隐私说明版本与审核绑定
+#### 3.1.3 未知结果、超时、崩溃、重试
 
-建议契约：
+1. 适配器调用超时/5xx/连接中断等**结果未知**时，状态进入 `reconciling`；不得直接再次调用 create。
+2. 下次 `paymentParams` 必须先向商户**查询对账**（同一 `out_trade_no`）：
+   - 查询到 `SUCCESS`：按真实到账事实处理；若订单已失效，记 `refund_required`/人工退款待办；不得生成新 hold。
+   - 查询确认无有效支付/预支付（且订单仍有效）：才允许进入 `failed` 后显式重试；每次重试仍可能调用外部一次。
+   - 查询失败/仍未知：保持 `reconciling`，返回 503/409；不得直接重发。
+3. 进程崩溃/租约过期：状态保持 `preparing`/`reconciling`；恢复后先查询对账，禁止在查询前重新 create。
+4. 旧单/新占位：旧单到账记 `refund_required` 或人工退款待办，不夺取、不延长新 hold；重复通知不改变新占位。
+5. 不承诺外部 exactly-once；本地单飞只保证同一订单同一时刻最多一个 create 调用，不保证商户侧唯一/不重复。
 
-1. 独立 `privacyVersion`（整数，仅 `privacyText` 变化时 +1）或隐私文本哈希；`templateVersion` 继续用于合同快照，不因押金/留房/模板文本变化而改变 `privacyVersion`。
-2. 新上传的证件文档记录 `privacyVersion`；`consentVersion` 保留兼容但不再作为隐私版本判断依据。
-3. 旧数据兼容：
-   - 旧 settings 无 `privacyVersion`：按基线 `privacyVersion=1` 读取，不批量迁移。
-   - 旧证件无 `privacyVersion`：在 `privacyVersion=1` 时视为有效；首次隐私说明变化（版本 ≥2）后统一失效，要求重新上传/同意。
-   - 这是建议迁移裁定；需 Codex 批准。
-4. 无关押金变更：只递增 `templateVersion`，不递增 `privacyVersion`；旧审核继续有效，不强制重传。
-5. 隐私说明变化：
-   - `uploadIdentity` 必须使用新 `privacyVersion`；旧审核/旧同意不再满足 `quote`、`createOrder`、`paymentParams`、`applyPayment`、`finishOrder`、`reviewAppointment` 的身份绑定。
-   - 未付款订单：建议按材料变更同等失效并释放 hold；已付款/已签约订单不能自动退款/改写，需人工退款/复核规则，**需产品裁定**。
-6. 客户端：小程序 `privacyVersion` 改读 `settings.privacyVersion`；旧客户端发送 `templateVersion` 的兼容策略需裁定（建议要求刷新客户端，不静默放行）。
-7. 兼容边界：旧证件在首次隐私变化前可用；之后必须重传，不得因押金变更误伤。
+#### 3.1.4 事务、回滚、审计
 
-**必须裁定的点**：
-- 旧数据基线 `privacyVersion=1` 的 grandfather 规则。
-- 隐私变化时已付款/已签约订单的处理（仅阻断签约/人工退款/其他）。
-- 旧客户端字段兼容窗口。
+- Claim refs：`rental_preleases`（订单）、`rental_room_holds`、`rental_appointments`、两份 `rental_identity_documents`、`rental_settings`（隐私版本）。
+- 成功 complete refs 同上，写订单缓存 + 一条成功审计；失败回滚/清理 refs 同上，不写审计。
+- 并发冲突由订单/占位写冲突决定；失败方不得写订单、hold 或 audit。
+- 材料/审核/隐私在 `preparing` 中变化：complete 事务复核失败，不返回参数；订单失效，缓存清除；旧参数到账仍按真实事实处理。
+- 适配器调用失败/未知：不得写成“已支付/已退款”；`reconciling` 是内部状态，不是支付事实。
+- **全库零写边界**：预校验/并发 409/身份/隐私/流水校验失败零写（含 audit）；适配器未知需要持久 `reconciling` 的，作为单飞内部状态例外，必须在验收中单列，不计为业务支付事实；真实到账必须落事实。
 
-## 4. 验收矩阵（修复后必须满足/或按裁定）
+#### 3.1.5 适配器计数
+
+| 场景 | create 次数 | query 次数 |
+|---|---:|---:|
+| 两并发，第二在 preparing | 1 | 0 |
+| ready 缓存复用 | 0 | 0 |
+| 未知结果后首次对账 | 0（若仍未知）或 1（确认无有效支付后重试） | ≥1 |
+| 成功首次生成 | 1 | 0 |
+| 材料/隐私在 preparing 中变化 | 1 | 0（complete 拒绝） |
+
+## 3.2 transaction_id 与重复通知
+
+1. `transaction_id` 必须是非空字符串；建议格式 `^[A-Za-z0-9_-]{1,64}$`。空、空白、非法字符在进入事务前返回 409。
+2. 同一订单、同一 `transaction_id` 重复通知：
+   - 幂等成功；
+   - 订单、hold、支付事实不变；
+   - **零新增写入，包括 `admin_audit`**（已记录事实不重复记）。
+3. 同一订单、不同 `transaction_id`：409 冲突；不得改订单/新占位；零写入。
+4. 空/非法流水：409；全库（含 `admin_audit`）零写。
+5. 旧订单/新占位：首次真实到账记 `refund_required` 或人工待办，**不能丢弃真实到账事实**；不写新 hold；重复通知零新增。
+6. 首笔合法到账：按既有 `applyPayment` 语义写支付事实/必要审计；这是“真实外部事实例外”，即使订单状态失效也必须保留到账事实用于退款对账。
+7. 真实商户通知仍需验签/解密；本轮只定服务层契约，不接真实支付。
+
+## 3.3 隐私说明版本与材料审核绑定
+
+### 3.3.1 独立版本
+
+1. 新增独立 `privacyVersion`（整数）或隐私文本哈希；**仅 `privacyText` 变化时递增/变化**。
+2. `templateVersion` 继续用于合同快照；押金、留房、模板文本等非隐私变化只影响 `templateVersion`，不得递增 `privacyVersion`。
+3. 新上传证件记录 `privacyVersion`；`consentVersion` 仅作旧字段兼容，不再作为隐私版本判断依据。
+
+### 3.3.2 旧数据：不得自动视为已同意
+
+旧数据不采用 grandfather 自动放行：
+
+1. 旧 settings 无 `privacyVersion`：读取为兼容基线，但不把旧证件视为已同意当前隐私说明。
+2. 旧 identity 文档无 `privacyVersion`：标记为 `legacy_unverified`，在 `quote`、`createOrder`、`paymentParams`、`applyPayment`、`finishOrder`、`reviewAppointment` 中一律不满足隐私绑定；必须先重新阅读并同意当前说明、重新上传/审核。
+3. 重新同意路径：用户看到当前 `privacyText` → 勾选同意 → 上传（绑定当前 `privacyVersion`）→ 后台审核 → 新 quote/新订单；旧审核不能复用。
+4. 旧客户端发送 `templateVersion` 不视为隐私同意；服务端不静默放行，要求刷新/升级客户端。
+
+### 3.3.3 隐私变化与真实到账
+
+1. 隐私说明变化后，旧同意/审核立即失效；未付款订单建议按材料变更失效并释放 hold，清除预支付缓存。
+2. **不得丢弃真实到账事实**：
+   - 若隐私变化前/后已有真实支付到账，订单必须保留支付记录；
+   - 已付款订单进入 `refund_required`/`privacy_review_required` 或既有异常到账处置，不能自动退款、不能自动改成已签约、不能夺取新占位；
+   - 由物业在微信商户平台核对退款/人工处置，并对账。
+3. 用户完成重新同意/新材料审核后，可创建新订单；旧已付订单仍走退款/人工处置，不自动恢复。
+4. 非隐私变更（押金、留房、合同模板文本）：不递增 `privacyVersion`，不要求重新上传证件/同意；旧审核继续有效（合同金额/规则按订单快照）。
+
+### 3.3.4 隐私绑定在各状态
+
+`quote`、`createOrder`、`paymentParams`、`applyPayment`、`finishOrder`、`reviewAppointment` 均须校验当前 `privacyVersion` 与证件绑定；不一致返回 409，不写业务事实（真实到账除外）。小程序改为读取 `settings.privacyVersion`。
+
+## 4. 验收矩阵
 
 ### 4.1 并发预支付
 
-| 场景 | adapter calls | 期望状态/DB |
+| 场景 | adapter create | 期望 |
 |---|---:|---|
-| 两并发，第一在 preparing | 1 | 第一成功 ready；第二 409 或缓存（按裁定）；无第二份调用 |
-| ready 后再次调用 | 0 | 返回同一缓存参数 |
-| 适配器失败/未知 | 1/次 | 返回错误；unknown/回滚按裁定；不得返回参数 |
-| 材料/审核在 preparing 中变化 | 1 | 不返回参数；订单失效；旧缓存到账 refund_required |
-| 成功生成 | 1 | 订单/缓存/审计一致；不声称外部 exactly-once |
+| 两并发，第一 preparing | 1 | 第一成功 ready；第二 409；无第二份创建 |
+| ready 后再次调用 | 0 | 返回缓存参数；不重复审计 |
+| 未知结果后直接重发 | 0 | 拒绝；必须先 query |
+| 未知结果 query 确认无支付后重试 | 1 | 允许显式重试；记录 attempt |
+| 崩溃/租约过期 | 0（恢复后先 query） | 不得直接 create |
+| 材料/隐私在 preparing 中变化 | 1 | 不返回参数；订单失效；旧参数到账按事实 |
 
 ### 4.2 通知/流水
 
-| 场景 | 期望 |
-|---|---|
-| 空/空白/非法 transaction_id | 409；全库（含 audit）零写 |
-| 同流水重复 | 幂等；订单/hold/支付事实不变；审计按裁定 |
-| 不同流水 | 409；hold 不变 |
-| 旧订单/新占位到账 | refund_required；新 hold 不变；不重复延长 |
-| 正常到账 | 一次 paid_held/异常事实；成功审计保留 |
+| 场景 | 写入 | 期望 |
+|---|---|---|
+| 空/空白/非法流水 | 零（含 audit） | 409 |
+| 同流水重复 | 零（含 audit） | 幂等成功；订单/hold/事实不变 |
+| 异流水 | 零（含 audit） | 409；hold 不变 |
+| 首笔合法到账 | 支付事实 + 必要 audit | 保留真实事实 |
+| 旧单/新占位到账 | 旧单真实事实 + refund/人工待办 | 新 hold 不变；重复零新增 |
 
 ### 4.3 隐私/审核
 
 | 场景 | 期望 |
 |---|---|
-| 仅押金/留房变更 | privacyVersion 不变；旧审核不重传 |
-| privacyText 变化 | privacyVersion +1；旧证件/审核在 quote/create/pay/finish/review 均拒绝 |
-| 旧数据无 privacyVersion | 基线 v1 可用；首次隐私变化后失效（待批准） |
-| 新上传 | 绑定当前 privacyVersion；审核通过后才可 quote |
-| 失效订单 | 未付款订单失效/释放 hold 按裁定；已付款按人工规则 |
-| 无关模板文本变更 | templateVersion 变化，不要求重传 |
+| 仅押金/留房/模板文本变更 | privacyVersion 不变；不重传、不重新同意 |
+| privacyText 变化 | privacyVersion +1；旧同意/审核失效；quote/pay/finish/review 拒绝 |
+| 旧证件无 privacyVersion | 不自动视为同意；必须重新同意/上传/审核 |
+| 隐私变化时已到账 | 保留真实到账；refund_required/人工；不自动退款/不签约/不夺新 hold |
+| 重新同意后 | 新上传/审核 → 新 quote/新订单；旧已付订单仍人工退款 |
+| 小程序 | 使用 settings.privacyVersion；旧客户端不静默放行 |
 
-### 4.4 失败零写/审计
+### 4.4 零写/审计
 
 | 场景 | 期望 |
 |---|---|
-| 预校验/身份/隐私/txn 校验失败 | 全库零写（含 admin_audit） |
-| 适配器失败/未知 | 按裁定：持久 unknown 或补偿回滚；不得谎报 |
-| 成功 | 业务事实 + 成功审计；不重复 |
-| 并发失败方 | 零写；不写失败审计 |
+| 预校验/身份/隐私/流水/并发 409 | 全库零写（含 audit） |
+| 同流水重复 | 零新增（含 audit） |
+| 适配器未知 | 允许内部 reconciling 状态（非支付事实）；不得直接重发 |
+| 真实到账 | 必须落支付事实；这是外部事实例外 |
+| 成功预支付 | 缓存 + 一条成功审计 |
+| finish 失败 | 零写（含 audit） |
 
-## 5. 修复范围与停止点
+## 5. 实施文件范围
 
-**建议实现范围（待批准后才做）**：
-- `domain.js`：paymentParams 持久状态/缓存、transaction_id 严格校验、privacyVersion 与各状态校验。
-- `store.js` / admin store：如采用订单内嵌状态，仅用现有事务；若需删除/保留字段或新集合，先提交设计裁定。
-- `miniprogram/pages/leasing/index.js`：读取 `settings.privacyVersion`。
-- 回归：`admin-web/tests/leasing.test.mjs` 增加并发/缓存/失败/隐私/流水测试；现有 22/55/56 基线保持。
-- 不部署、不接真实支付、不启动 HTTP/UI、不操作设备/生产云。
+- `cloudfunctions/leasing/domain.js`：持久 payment request 状态/单飞/缓存/对账；`transaction_id` 严格校验/幂等；独立 privacyVersion 与各状态校验；`quote`/`createOrder`/`paymentParams`/`applyPayment`/`finishOrder`/`reviewAppointment` 绑定。
+- `cloudfunctions/leasing/store.js`、`admin-web/lib/store.mjs`：仅在现有事务能力内补必需字段/状态；不在本卡实施。
+- `miniprogram/pages/leasing/index.js`：读取 `settings.privacyVersion`；UI 重新同意/重传提示。
+- `admin-web/public/leasing-ui.js`：隐私版本/旧数据重新同意提示（仅必要展示）。
+- `admin-web/tests/leasing.test.mjs`、`tests/leasing.test.cjs`：新增并发/缓存/未知/重复/隐私/旧数据测试；不在本卡实施。
+- `docs/RENTAL-PRESIGNING.md`：部署/验收说明更新；不在本卡实施。
+- 禁止：部署、真实支付、HTTP/UI、设备、生产云、合并、G4/C2/C3。
 
-**停止点**：本卡提交后交 Codex 批准；以下依赖未批准前不实现：
-1. 并发第二方 409/缓存选择；
-2. 适配器未知状态持久化 vs 字面全库零写；
-3. 隐私变化的已付款订单处理；
-4. 旧数据 grandfather/旧客户端兼容。
+## 6. 上线前待验证
 
-## 6. 本轮实测证据（只读，不改代码）
+1. 真实云 `runTransaction` 冲突/重试/权限/索引；崩溃后 lease/reconciling 恢复。
+2. 真实微信商户 create/query/notify：超时、5xx、未知、重复、关闭、退款对账；确认锁语义。
+3. 重复通知零新增（含 audit）与真实到账事实落库的数据库级验证。
+4. 隐私版本迁移：旧 settings/旧证件/旧客户端；重新同意全链路。
+5. 隐私变化时已付订单退款待办、旧/新 hold 隔离。
+6. 微信开发者工具/真机 UI、管理员操作、合同/支付展示。
+7. 小程序静态/真机验收、后台 HTTP 路由（本轮不运行监听测试）。
+8. 全库零写断言在真实云事务下的可重复性；外部事实例外单独记录。
 
-guard 路径：`C:\Users\Administrator\AppData\Local\Temp\dsh-NBuV68\smartpm-no-io.mjs`；自检通过，阻断 listen/socket/http/https/fetch。
+## 7. 本轮验证边界
 
-| 命令 | exit | 结果 |
-|---|---:|---|
-| guard 自检 | 0 | `NO_IO_GUARD_SELFTEST_OK` |
-| `node --import <guard> --test --test-isolation=none admin-web/tests/leasing.test.mjs` | 0 | 22/22 pass |
-| `node --import <guard> --test --test-isolation=none tests/*.test.cjs` | 0 | 55/55 pass |
-| `node --import <guard> --test --test-isolation=none`（6 个 admin 非 server 文件） | 0 | 56/56 pass |
-| 三项合成契约 probe | 0 | 见下 |
+- 本轮**未运行测试**（按用户要求，无运行时代码变动）；基线 3bf5951 的 22/55/56 结果和三项 probe 结果属于上一轮证据，仅供现状参考，不作为本轮新增验收。
+- 未启动 HTTP 监听、未运行 `server.test.mjs`、未运行 `release:live`、未接真实支付/云/设备。
+- 完整云报告不可读；本卡依据本轮明确裁定，不声称已读附件。
+- 远端：本卡提交后需普通 push 到 `codex/rental-contract-decisions` 并 `ls-remote`；若远端已有且前移/分叉即停，不 force。
 
-Probe 实测（基线 3bf5951，LocalStore + mock payment）：
+## 8. 停止点
 
-- `concurrent.paymentParams adapterCalls=2 fulfilled=2 rejected=0`，订单 `prepayField=null`。
-- `empty.transaction first=paid_held replay=refund_required`；两次均写“核验微信支付”审计。
-- `privacy.deposit-only templateVersion=2 uploadWithV1=409 quote=ok`。
-- `privacy.text-change templateVersion=3 quote=ok:3 order=ok:awaiting_payment`。
-
-排除：`admin-web/tests/server.test.mjs`（唯一含 `listen`/`fetch` 的测试文件，21 项）未运行；未运行 `release:live`；未启动任何 HTTP 监听。
-
-## 7. 未验证
-
-- 真实云 `runTransaction` 冲突/重试、权限、索引、跨进程崩溃与租约恢复。
-- 真实微信商户 prepay/query/notify、真实证书/验签/解密、未知结果对账。
-- HTTP 后台路由、微信开发者工具/真机 UI、部署与计时器。
-- 远端分支核验：`git ls-remote` 因本机 HTTPS 凭据缺失失败（`SEC_E_NO_CREDENTIALS`）；本卡提交后普通推送/`ls-remote` 结果需以实际命令为准；若远端已存在且前移，按用户要求停止报告。
+- 本卡提交后交 Codex 批准；不进入实现，不改生产代码/测试/Store。
+- 已裁定项不再重复派发；G3/O10 不重复；G4/C2/C3 继续冻结。

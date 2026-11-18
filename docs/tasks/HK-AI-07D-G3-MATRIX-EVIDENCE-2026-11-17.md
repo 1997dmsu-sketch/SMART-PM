@@ -187,7 +187,7 @@
 | `face-strict-retry.test.mjs` | 130 pass | 130 pass | — | G2 既有回归（LC01–LC10 + REG/P1/P2），本次重跑未改 |
 | `face-g3-testkit.mjs` | 4 pass | 6 pass | — | 首版 SELF-CHECK-1..4；v2 增 SELF-CHECK-5（ESM 同步）、SELF-CHECK-6（独立 oracle） |
 | `face-g3-psrtn.test.mjs` | 96 pass | 98 pass | 52 | 52 ID 父测试 + 子场景（含传递运行的自检） |
-| `face-g3-ko.test.mjs` | 70 pass | 73 pass | 29 | 29 ID 父测试 + 子场景（含传递运行的自检） |
+| `face-g3-ko.test.mjs` | 70 pass | 72 pass | 29 | 29 ID 父测试 + 子场景（含传递运行的自检） |
 | `face-g3-c.test.mjs` | 13 pass | 16 pass | 9 | 9 ID 父测试 + C08-RERUN 子用例 + 传递自检 |
 | **统一套件合计** | **313 pass** | **322 pass / 0 fail** | **90** | 五文件显式列举，避免 `tests/*.test.mjs` glob 拉入 HTTP 套件 |
 
@@ -320,7 +320,7 @@ node --test \
 # todo 0
 ```
 
-按文件逐跑（v2，均 0 fail）：`face-strict-retry` 130、`face-g3-testkit` 6（新增 SELF-CHECK-5 ESM 同步、SELF-CHECK-6 独立 oracle）、`face-g3-psrtn` 98、`face-g3-ko` 73、`face-g3-c` 16（含 C08-RERUN 子用例）；合计 322（含传递运行的 SELF-CHECK）。首版（5ceb22a）为 313 pass；v2 修订新增用例后为 322 pass。`git diff --check` 通过；生产文件零差异（§9）。
+按文件逐跑（v2，均 0 fail）：`face-strict-retry` 130、`face-g3-testkit` 6（新增 SELF-CHECK-5 ESM 同步、SELF-CHECK-6 独立 oracle）、`face-g3-psrtn` 98、`face-g3-ko` 72、`face-g3-c` 16（含 C08-RERUN 子用例）；合计 322（含传递运行的 SELF-CHECK）。首版（5ceb22a）为 313 pass；v2 修订新增用例后为 322 pass。`git diff --check` 通过；生产文件零差异（§9）。
 
 **声明**：本次仅运行上述显式列举的非 HTTP 单元/服务层测试套件，**未运行** `npm test` 全量（避免 glob 拉入 HTTP 套件）、**未启动 HTTP 服务**、**未监听任何端口**、**未发起任何业务网络请求**。网络 guard 已在被测模块加载前安装，25 个入口全覆盖，加载期与运行期网络违规均为 0（§6）。
 

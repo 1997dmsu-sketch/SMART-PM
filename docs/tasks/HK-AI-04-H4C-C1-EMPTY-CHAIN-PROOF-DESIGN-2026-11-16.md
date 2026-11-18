@@ -1,51 +1,48 @@
-# HK-AI-04 H4-c C1 空链证明设计返工卡（P1 复审返工稿）
+# HK-AI-04 H4-c C1 空链证明设计 v3（阻断关闭稿）
 
-> 状态：**设计提案，待 Codex 批准。** 本稿只改设计卡；不实现 C1、不修改 f2bb6de/5dff386 代码或测试、不进入 C2/C3、不注册 HTTP、不调用 Provider/设备/生产云。
+> 状态：**设计提案，待 Codex 复审。** 本稿只修订设计文档；不实现 C1、不修改任何生产代码/测试、不进入 C2/C3、不注册 HTTP、不调用 Provider/设备/生产云。
 >
-> 输入设计卡：`f2bb6deda6fa4a5e967b405b358956480ac4516a`（父 `5dff386`）；C1 代码基线：`5dff386fe5c9648b04d1623d3e1898c59332639e`。
+> 输入设计卡：`fb75cf0071faaf932bb48d74438b00774cb2558b`（父 `f2bb6de`，C1 代码基线 `5dff386`）。
 >
 > 已批准设计：`docs/hk-face-h4c-reconciliation-design @ b15aceb`；批准/任务卡：`ed7b66f`；C2 前置检查：`42f8970`。
 >
-> 本稿针对 P1 复审补充：全量盘点后的持续写入权威约束、覆盖失效 fail-closed、并发/迁移切换、失败全库零写矩阵、refs 预算和残留 seq2 拒绝重建。只交 Codex 复审；批准后再另发 C1 实现卡。
+> 本稿关闭 v2 五项阻断：admission 两阶段时序、`evidence_digest_domains` 写入门与 K3 bootstrap、Store 全写路径/change/persist/seed 边界、proof 前迁移 plan 授权、monitor→runtime 停写 fence；并统一 digest 规范化、2 万行盘点上限、清单时点、全局停写范围、错误码映射。
 
 ## 0. 结论摘要
 
 | 项 | 结论 |
 |---|---|
-| 当前缺口 | C1 `appendEvidenceWrites` 信任调用方 `hasExistingEvidence`，事务内只检查新 sequence 的 evidence ID；head/seq1 丢失而合法 seq2..9 残留时可能建立新首链 |
-| 推荐方案 | **job 链锚 + 全局链审计证明 + 持续写入准入（write epoch/policy/ticket） + 1..9 确定性 evidence IDs 全量点查 + 完整 canonical 链校验** |
-| 核心不变量 | 先验证 global K3 锚完整；再验证 `CoverageValid` 审计覆盖；再验证 per-job anchor/head/1..9；写入必须通过 canonical admission；任一不满足即失败关闭、全库零写 |
-| 持续禁止旧写入者 | 全量盘点后，旧 C1/legacy/任何未持当前 `writeEpoch + admissionPolicyVersion + writerSetDigest` 的事务写入 H4-c 集合一律被 Store 写入门拒绝；不是一次性审计 |
-| 覆盖失效 | proof 缺失/HMAC/绑定/epoch/policy/writer/collection 覆盖任一失效，或 gate/monitor 异常，全部 `EVIDENCE_CHAIN_PROOF_REQUIRED`，不降级到 anchor/9 IDs |
-| 调用方布尔值 | **删除 `hasExistingEvidence`**；不再接受任何调用方“空链”断言 |
-| legacy | 规范 legacy 由受控迁移补 anchor；旧 realm 作用域 domain、非规范 ID、无法补齐的记录一律阻断，不自动修复 |
-| refs 预算 | C1 14；C2 R1 23；C2 R2 H4-b `8+N≤90`；admission 为事务选项，**0 新增 refs**；均低于 90 上限 |
-| 裁定 | 新增两个集合、审计证明 HMAC/K3 绑定、write admission/epoch/policy、legacy 迁移、迁移切换、完整链校验、错误码/refs 均需 Codex 逐项批准 |
+| 空链证明 | K3 精确 + CoverageValid + fence clear + 两阶段 admission + per-job anchor + 1..9 IDs + 完整 canonical 链 |
+| 持续写入约束 | Store 写入门覆盖 transact/change/persist/seed/init 全部入口；旧 writer 无当前两阶段 admission 持续被拒绝 |
+| K3 domain | `evidence_digest_domains` 纳入写入门；只有独立 `k3-bootstrap` admission 能创建固定 head+version；runtime/migration 不可写 |
+| proof 前迁移 | 预证明迁移由签名 migration plan 授权未来 `proofId/epoch/policy/writerSet`；final plan 冻结 final inventory；不依赖尚不存在的 proof |
+| monitor 停写 | 新增 `evidence_chain_fences`；monitor 写 halt fence 后，runtime/gate 对所有 H4-c 写入返回 `EVIDENCE_CHAIN_HALTED`；clear 必须基于新 epoch proof |
+| 空性权威 | canonical/abnormal/legacy 由 audit proof + anchor + 9 IDs + admission + fence 共同覆盖；不信任调用方布尔值 |
+| refs | C1 15；C2 R1 24；迁移 anchor 14、finalize 4；R2 8+N≤90；admission/plan 0 新增 refs |
+| 裁定 | Q1–Q24；N01–N70 |
 
 ## 1. 输入、基线与问题
 
 ### 1.1 输入事实
 
-- 专属工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\parallel-c1`，分支 `codex/h4c-empty-chain-design-followup`，HEAD = `f2bb6deda6fa4a5e967b405b358956480ac4516a`（父 `5dff386`）。
-- 本地分支 `feat/hk-face-h4c-reconciliation` 仍为 `90e4189`；`origin/feat/hk-face-h4c-reconciliation` 跟踪 ref 为 `5dff386`。本卡不修改输入分支。
-- C1 代码基线仍为 `5dff386`：evidence/head/K3 domain validator、只读 domain guard、HMAC、append helper；无 reconcile 服务入口，无 HTTP 注册。
-- C2 仅 `42f8970` 前置文档，未开始；C3 未开始。
-- 本稿只改本设计卡；不新增生产代码、测试、Store 注册或迁移脚本。
+- 唯一工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-design-v3`，分支 `codex/h4c-empty-proof-v3`，HEAD = `fb75cf0071faaf932bb48d74438b00774cb2558b`，父 `f2bb6de`。
+- 输入分支 `feat/hk-face-h4c-reconciliation` 本地 ref 与 `origin/feat/...` 跟踪 ref 均为 `5dff386`（本卡未修改该分支；观测值以本次核对为准）。
+- C1 代码基线 `5dff386`：evidence/head/K3 domain validator、只读 domain guard、HMAC、append helper；无 reconcile 服务入口、无 HTTP 注册。
+- C2 仅 `42f8970` 前置文档，未开始；C3 未开始；调度工作区 `SMART-PM-H3` 未被本卡修改。
+- 本稿只改设计卡；不新增生产代码、测试、Store 注册、迁移脚本。
 
 ### 1.2 当前实现缺口（只读核对）
 
 | 缺口 | 位置 | 事实 |
 |---|---|---|
-| 调用方布尔值 | `admin-web/lib/face-service/h4c-evidence.mjs:352-381` | `appendEvidenceWrites` 接收 `hasExistingEvidence`；`expectedHead == null` 时只看 `hasExistingEvidence !== false` |
-| refs 只含新 sequence | 同文件 `:322-343` | `evidenceAppendRefs` 只声明新 sequence 的 evidence ID + head + K3 pair；没有 1..9 全量 ID、没有 anchor/audit |
-| 只检查新 ID | 同文件 `:424-427` | 事务内只读 `evidenceId(org,job,newSequence)`；seq2..9 孤儿不在 state，无法发现 |
-| 首链判断依赖预读 | 设计 `b15aceb` §5.4 `:222-226` | “预读 null + 事务内再次为空”只覆盖调用方正确预读的路径，未原子覆盖全部 9 个 ID |
-| 已知缺口 | `42f8970:docs/tasks/HK-AI-04-H4C-C2-PREFLIGHT-2026-11-14.md:743`（Q04）、`:552`（T11）、`:691`（RC56） | C2 前置已明确：head 被删除但 seq2..9 仍存在时，C1 可能留下孤儿链 |
-| Store 限制 | `admin-web/lib/store.mjs:94`、`:428` | 单事务 refs 上限 90；Store 只按声明 refs 点读，不能事务内全集合扫描 |
+| 调用方布尔值 | `admin-web/lib/face-service/h4c-evidence.mjs:352-381` | `appendEvidenceWrites` 接收 `hasExistingEvidence`；head 为空时只看该布尔值 |
+| refs 只含新 sequence | 同文件 `:322-343` | 只声明新 sequence 的 evidence ID + head + K3 pair；无 1..9 全量、anchor/audit/fence |
+| 只检查新 ID | 同文件 `:424-427` | seq2..9 孤儿不在 state，无法发现 |
+| 首链依赖预读 | `b15aceb` §5.4 `:222-226` | 未原子覆盖全部 9 IDs |
+| 已知缺口 | `42f8970:...C2-PREFLIGHT...:743`（Q04）、`:552`（T11）、`:691`（RC56） | head 删除而 seq2..9 残留时可能留下孤儿链 |
+| Store 限制 | `store.mjs:94`、`:428` | 单事务 refs 上限 90；Store 只按声明 refs 点读，不能事务内全集合扫描 |
 
 ### 1.3 必须关闭的失败场景
-
-设 `H = head(org,job)`，`A = anchor(org,job)`，`E_i = evidence(org,job,i)`：
 
 ```text
 H = null
@@ -54,19 +51,17 @@ E_2 ... E_9 中存在合法 canonical evidence（例如 E_2）
 调用方传入 hasExistingEvidence = false
 ```
 
-当前 C1 会写 `E_1 + H` 并建立新链。目标设计必须返回 `EVIDENCE_CHAIN_BROKEN/409`，且 **anchor/evidence/head 全部零写**，即使调用方布尔值为 false。该场景是“job head/seq1 丢失、合法 seq2 残留”，不是重新开始一条链。
+目标结果：`EVIDENCE_CHAIN_BROKEN/409`，anchor/evidence/head/domain/fence 全部零写；即使调用方布尔值为 false。不得把 E2 改名/重编号/adopt 成新链。
 
-### 1.4 本稿对 P1 复审要求的落点
+### 1.4 v2 五项阻断与 v3 关闭位置
 
-| P1 要求 | 本稿落点 |
-|---|---|
-| 全量盘点后持续禁止非规范/旧写入者 | §4.5 持续写入准入、§8.2/8.3 迁移切换与旧写入者隔离、Q11–Q16 |
-| 覆盖失效时 fail closed | §4.6 CoverageValid/失效触发器、§5.4 优先级、§9.2 零写矩阵 |
-| 并发、迁移切换 | §8.1–8.4 |
-| 失败全库零写矩阵 | §9.2（运行时 Z_all；迁移 Z_chain 例外显式） |
-| refs 预算 | §7；admission 0 新增 refs |
-| 残留 seq2 拒绝重建 | §5.5、§6、N02/N03/N42 |
-| 不实现 C1/C2/C3 | §13.3、§14 |
+| v2 阻断 | v3 处置 | 位置 |
+|---|---|---|
+| admission 预检与终检时序；writesDigest 循环 | 两阶段：`admissionPrecheck`（无 digest）→ 构造最终 writes → `admissionTicket`（含 refsDigest/writesDigest）→ Store gate 终检 | §4.6、§4.9、§5、N49/N50 |
+| `evidence_digest_domains` 未在写入门；K3 bootstrap 准入缺失 | domain 写入门 + 独立 `k3-bootstrap` admission（只允许 fixed head+version） | §4.5、N51/N52/N68 |
+| gate 未覆盖 `Store.change`/所有写路径；persist/seed 边界 | change 对 H4-c 一律拒绝；transact 才有 admission；persist 私有；seed/init 仅空数组 | §4.4、N53/N54 |
+| proof 前迁移准入的未来 proofId/epoch/inventory 权威性 | 预证明 migration plan（pre-anchor/final）签名授权；finalize 不依赖已有 proof | §4.7、N55–N59 |
+| monitor→runtime 权威停写 | `evidence_chain_fences` halt/clear record；runtime/gate 事务内检查；clear 需新 epoch proof | §4.8、N60–N63 |
 
 ## 2. 术语与信任模型
 
@@ -74,559 +69,629 @@ E_2 ... E_9 中存在合法 canonical evidence（例如 E_2）
 
 | 类别 | 定义 |
 |---|---|
-| **canonical** | C1 v1 精确 schema；evidence `_id` 为 `(orgId,jobId,sequence)` 确定性 ID；sequence 1..9；previous 链完整；K3 realm/version/fingerprint 与当前 config/domain 一致；HMAC 可重算 |
-| **abnormal** | head 缺失/多余/seq0、seq1 缺失但 seq2 存在、seqN 孤儿、anchor/head 不配对、anchor 缺字段、链内某条缺失、ID/字段/HMAC/K3 不一致 |
-| **legacy** | 在 anchor/audit/write-admission 方案启用前写入的 evidence/head（含 C1 历史提交 3fce9b0/6dbc9e0/aa0db29/90e4189 的数据、旧 LocalStore 数据文件、非确定性 ID/旧 schema/旧 domain 形态） |
+| **canonical** | C1 v1 精确 schema；evidence 确定性 ID；sequence 1..9；previous 链完整；K3 与当前 config/domain 一致；HMAC 可重算 |
+| **abnormal** | head 缺失/多余/seq0、seq1 缺失但 seq2 存在、seqN 孤儿、anchor/head 不配对、链内缺失、ID/字段/HMAC/K3 不一致、fence halted |
+| **legacy** | anchor/audit/admission/fence 方案启用前的 evidence/head（含 3fce9b0/6dbc9e0/aa0db29/90e4189 C1 数据、旧 LocalStore 数据、非确定性 ID/旧 schema/旧 domain） |
 
 ### 2.2 信任模型
 
-1. **不信任调用方布尔值/预读。** 事务内只信任已声明 refs 的 Store state、K3 domain guard 和 HMAC 验证。
-2. **global K3 锚优先。** `applyEvidenceDomain` 必须是第一道校验；任何 `DOMAIN_INCOMPLETE`/`DOMAIN_MISMATCH` 都先于空链证明返回，不允许用 legacy/audit/anchor 绕过 K3。
-3. **anchor/audit 不写 K3 domain。** 新记录不能成为 K3 初始化或修复入口；domain 仍只读。
-4. **审计证明是受控迁移事实，不是运行时能力。** 生产 C1/C2 代码只读/校验 `evidence_chain_audits`；只有独立迁移工具能创建它，静态扫描和复审保证生产树无写入口。
-5. **审计不是一次性许可。** 审计后必须持续限制写入：H4-c 集合写入门要求当前 epoch/policy/writerSet/ticket；旧写入者没有这些凭据，不能写。
-6. **覆盖失效即关闭。** proof 失效、gate 缺失、monitor 发现非规范记录、K3/代码/集合范围变化，全部 fail closed；不得以 anchor/9 IDs 继续工作。
-7. **Store 完整性假设。** 本设计防止应用层部分写、head/seq1 丢失、并发分叉和 legacy 漏检；不声称能抵抗恶意删除全部 evidence/head/anchor/audit 或绕过 Store 直接改数据库。该残余风险写入“已知边界”；部署必须撤销旧写者 DB 凭证/权限并用 monitor 报警。
+1. **不信任调用方布尔值/预读。** 只信任事务内 refs state、K3 guard、审计证明、fence 和 HMAC。
+2. **global K3 锚优先。** `applyEvidenceDomain` 第一道；任何 `DOMAIN_*` 先于空链/fence/admission 返回。
+3. **K3 domain 与链写分离。** domain 只读；唯一写入口是独立 `k3-bootstrap` admission，且只能创建 fixed head+version；runtime/migration 均不能写 domain。
+4. **审计是持续约束，不是一次性许可。** 全量盘点后由 Store 写入门 + epoch/policy/writerSet/ticket + fence 持续限制；旧 writer 无 admission 持续被拒绝。
+5. **覆盖失效即关闭。** proof/fence/gate/monitor/K3/代码/集合任一失效，全部 fail closed；不降级到 anchor/9 IDs。
+6. **停写是持久事实。** monitor 的 halt 写入 `evidence_chain_fences`，runtime/gate 事务内读取；不是进程内 health flag/缓存。
+7. **Store 完整性假设。** 本设计防止应用层部分写、head/seq1 丢失、并发分叉、legacy 漏检；不声称能抵抗恶意删除全部记录或绕过 Store 直接改数据库。部署必须撤销旧 DB 凭证/权限并用 monitor 报警。
 
 ## 3. 方案总览
 
 ### 3.1 证明层
 
-| 层 | 记录/机制 | 证明什么 | 谁写/谁执行 |
-|---|---|---|---|
-| L0 | global K3 domain head + version（现有） | K3 配置/换钥锚完整 | 既有受控部署（C1 只读） |
-| L1 | `evidence_chain_audits`（新增，全局） | 部署时已对全部 evidence/head 做权威盘点；legacy 已处理或证明为空；绑定 K3、写入 epoch/policy/writer 集 | 仅受控迁移 |
-| L2 | `device_operation_evidence_chain_anchors`（新增，每 job） | 该 job 曾经存在一条 evidence 链；head/seq1 丢失也可发现 | 首条 append 与 evidence+head 同事务 |
-| L3 | 1..9 确定性 evidence IDs 全量点查 + 完整 canonical 链校验 | 当前 job 没有孤儿/断链/分叉；首链确实为空 | 运行时事务 |
-| L4 | **canonical write admission**（新增，Store 写入门） | 只有持当前 epoch/policy/writerSet/ticket 的 canonical writer 能写 H4-c 集合；旧写入者持续被拒绝 | Store gate + C1/C2 |
-| L5 | **coverage monitor**（新增，运维周期扫描） | 审计后没有非规范/未知记录；anchor/head/E1 一致；发现即关闭 | 独立监控任务 |
+| 层 | 记录/机制 | 证明/约束 |
+|---|---|---|
+| L0 | global K3 domain head + version | K3 配置/换钥锚完整 |
+| L1 | `evidence_chain_audits` | 全量盘点、legacy 处理、K3/epoch/policy/writer/collection 覆盖 |
+| L2 | `device_operation_evidence_chain_anchors` | 每 job 曾经有链，head/seq1 丢失可发现 |
+| L3 | 1..9 IDs + 完整 canonical 链 | 当前 job 无孤儿/断链/分叉 |
+| L4 | 两阶段 canonical admission + Store gate | 只有当前 canonical writer 能写；旧 writer 持续拒绝 |
+| L5 | `evidence_chain_fences` + monitor | monitor halt 对 runtime/gate 是权威停写事实 |
+| L6 | 独立 `k3-bootstrap` admission | 只在受控 bootstrap 创建固定 domain pair |
 
-推荐证明式：
+### 3.2 证明式
 
 ```text
 CoverageValid =
-  proof 存在（ID 由 K3 fingerprint + domainHeadRevision + writeEpoch 计算）
-  ∧ exact 22 字段 ∧ HMAC 通过
-  ∧ realm/keyVersion/keyFingerprint/domainHeadId/domainHeadRevision 与当前 K3/domain 一致
-  ∧ status ∈ {empty, backfilled} ∧ legacyCount = 0
-  ∧ writeEpoch / admissionPolicyVersion / writerSetDigest / auditedCollections 与当前部署一致
+  audit proof 存在（ID = f(K3 fingerprint, domainHeadRevision, writeEpoch)）
+  ∧ exact 22 字段 ∧ auditDigest HMAC 通过
+  ∧ kind/scope/schemaVersion 合法
+  ∧ realm/keyVersion/keyFingerprint/domainHeadId/domainHeadRevision 与当前一致
+  ∧ status ∈ {empty,backfilled} ∧ legacyCount=0
+  ∧ writeEpoch/admissionPolicyVersion/writerSetDigest/auditedCollections 与当前部署一致
+
+FenceClear =
+  fence 存在（固定 ID）∧ exact 字段 ∧ fenceDigest HMAC 通过
+  ∧ status="clear" ∧ fence.epoch = CoverageValid.writeEpoch
 
 AdmissionValid(op) =
-  Store gate 收到当前 writeEpoch + admissionPolicyVersion + writerSetDigest + proofId
-  ∧ K3 HMAC ticket 通过 ∧ operation/write-set 形状正确
+  precheck 字段与 CoverageValid/FenceClear/当前配置一致
+  ∧ final ticket 的 refsDigest/writesDigest 与 Store 实际 refs/writes 一致
+  ∧ K3 HMAC 通过 ∧ operation/write-set 形状正确
 
 EmptyProof(job) =
-  K3Exact ∧ CoverageValid ∧ AdmissionValid("genesis")
-  ∧ head(job) = null ∧ anchor(job) = null
-  ∧ ∀ i ∈ [1,9]: evidence(job,i) = null
+  K3Exact ∧ CoverageValid ∧ FenceClear ∧ AdmissionValid("genesis")
+  ∧ head=null ∧ anchor=null ∧ ∀ i∈[1,9]: evidence(i)=null
 
 ChainProof(job) =
-  K3Exact ∧ CoverageValid ∧ AdmissionValid("append")
-  ∧ anchor(job) valid ∧ head(job) valid（lastSequence ∈ [1,9]）
-  ∧ ∀ i ∈ [1,lastSequence]: evidence(job,i) canonical 且链式 previous 正确
-  ∧ ∀ i ∈ [lastSequence+1,9]: evidence(job,i) = null
+  K3Exact ∧ CoverageValid ∧ FenceClear ∧ AdmissionValid("append")
+  ∧ anchor valid ∧ head valid（lastSequence∈[1,9]）
+  ∧ ∀ i∈[1,lastSequence]: evidence(i) canonical、previous 链正确
+  ∧ ∀ i∈[lastSequence+1,9]: evidence(i)=null
 ```
 
-只有 `EmptyProof` 才允许首条；只有 `ChainProof` 才允许非首条。任一条件失败即抛错，写集为空；Store gate 还会在写阶段做最终 admission/shape 校验。
+只有 `EmptyProof` 允许首条，`ChainProof` 允许非首条；任一失败即零写。Store gate 在写阶段用 final ticket 做最终校验，precheck 只是 fail-fast。
 
-### 3.2 为什么不是“只检查 9 个 ID”
+### 3.3 备选方案
 
-- 只检查 9 个 ID 可以关闭 canonical/abnormal 的 seq2..9 孤儿，但无法发现 **head+seq1+全部 evidence 都被删除** 的曾经存在链；job 链锚解决这一点。
-- 只检查 9 个 ID + anchor 仍无法发现 **非确定性 ID/旧 schema 的 legacy 记录**；全局审计证明解决这一点。
-- 只做一次性审计仍无法阻止 **审计后旧写入者** 继续写非规范记录；持续 write admission + monitor 解决这一点。
-- 只信任全局审计证明而不检查 anchor/9 IDs，会让运行时漏掉审计之后的新损坏；各层缺一不可。
+| 方案 | canonical | seq2..9 | head/seq1 全丢 | legacy | 审计后旧 writer | 结论 |
+|---|---|---|---|---|---|---|
+| 9 IDs only | 通过 | 通过 | 不可发现 | 不可发现 | 不可阻止 | 不足 |
+| 9 IDs + anchor | 通过 | 通过 | 通过 | 不可发现 | 不可阻止 | 不足 |
+| + audit proof | 通过 | 通过 | 通过 | 迁移证明 | 仅审计时点 | 不足 |
+| + two-phase admission + fence | 通过 | 通过 | 通过 | 迁移证明 | 持续拒绝 | **推荐** |
 
-### 3.3 备选方案比较
-
-| 方案 | canonical | abnormal seq2..9 | head/seq1 全丢 | legacy 非规范 | 审计后旧写入者 | 新集合 | 结论 |
-|---|---|---|---|---|---|---|---|
-| A 仅 9 IDs | 通过 | 通过 | 不可发现 | 不可发现 | 不可阻止 | 无 | 不足 |
-| B 9 IDs + job anchor | 通过 | 通过 | 通过 | 不可发现 | 不可阻止 | 1 | 接近 |
-| C 9 IDs + anchor + 全局审计 | 通过 | 通过 | 通过 | 由迁移证明/阻断 | 仅审计时点 | 2 | 不足 |
-| D C + 持续 write admission + monitor | 通过 | 通过 | 通过 | 迁移证明/阻断 | 持续拒绝/报警 | 2 | **推荐** |
-| E 每次全集合扫描 | 通过 | 通过 | 通过 | 可发现 | 可发现 | 0 | Store 事务不支持；竞态/成本不可接受 |
-
-## 4. 数据契约（新增两个集合）
+## 4. 数据契约
 
 ### 4.1 job 链锚 `device_operation_evidence_chain_anchors`
 
-| 项目 | 冻结建议 |
+| 项目 | 建议 |
 |---|---|
-| 集合 | `device_operation_evidence_chain_anchors`（组织域，带 `orgId`；每 job 一条） |
 | `_id` | `h4c-evidence-anchor-v1:<sha256(stable([orgId,jobId])).slice(0,32)>` |
-| 字段 | `_id, orgId, jobId, schemaVersion, firstEvidenceId, createdAt`（6 字段，精确） |
-| `schemaVersion` | 固定 `1` |
-| `firstEvidenceId` | 固定 `evidenceId(orgId,jobId,1)`；必须在 anchor 创建时写入 |
-| `createdAt` | 服务端安全整数；与首条 evidence 的 `createdAt` 同值 |
-| 写入 | **仅首条 append 同事务 create-only 写入**；不更新、不删除、不修复 |
-| 校验 | 精确字段；`_id` 公式；`orgId/jobId` opaque；`firstEvidenceId` 公式；`createdAt` safe int |
-| 语义 | anchor 存在 = 该 job 曾经有一条合法链；head/seq1 丢失时 anchor 仍应存在，运行时不得建立新链 |
+| 字段 | `_id, orgId, jobId, schemaVersion, firstEvidenceId, createdAt`（6 字段） |
+| 写入 | 仅首条 append 同事务 create-only；不更新/删除/修复 |
+| 语义 | anchor 存在 = 曾有一条链；head/seq1 丢失时不得重建 |
 
 ### 4.2 全局链审计证明 `evidence_chain_audits`
 
-| 项目 | 冻结建议 |
+| 项目 | 建议 |
 |---|---|
-| 集合 | `evidence_chain_audits`（全局部署域，无 `orgId`） |
 | `_id` | `evidence-chain-audit:v1:<keyFingerprint>:<domainHeadRevision>:<writeEpoch>` |
-| 字段 | `_id, kind, scope, schemaVersion, realm, keyVersion, keyFingerprint, domainHeadId, domainHeadRevision, writeEpoch, admissionPolicyVersion, writerSetDigest, auditedCollections, status, canonicalEvidenceCount, canonicalHeadCount, anchorCount, legacyCount, inventoryDigest, checkedAt, checkedBy, auditDigest`（22 字段，精确） |
-| `kind` / `scope` | 固定 `"audit"` / `"global"` |
-| `schemaVersion` | 固定 `1` |
-| K3 绑定 | `realm/keyVersion/keyFingerprint/domainHeadId/domainHeadRevision` 必须与当前 K3 config 和 domain head 完全一致 |
-| `writeEpoch` | 正整数安全整数；本次审计的部署代次；纳入 `_id`；每次重新审计、代码 policy/writer 集变更或 K3 换钥都必须提升 `writeEpoch`（旧 proof 保留但不被读取） |
-| `admissionPolicyVersion` | 正整数；Store gate/C1/C2 的 admission 策略版本；proof 与当前代码/Store 不一致即失效 |
-| `writerSetDigest` | 64 位小写 hex；允许的 canonical writer 清单（C1/C2/Store gate 规格）的 SHA-256；旧 writer 集合不匹配即失效 |
-| `auditedCollections` | 精确数组，且必须等于 `["device_operation_evidence","device_operation_evidence_heads","device_operation_evidence_chain_anchors"]`；缺/多集合即失效 |
-| `status` | `"empty"`（审计时三集合全空）或 `"backfilled"`（全部有链 job 已补 anchor 且校验通过） |
-| counts | `canonicalEvidenceCount/canonicalHeadCount/anchorCount/legacyCount` 为非负安全整数；`legacyCount` 必须为 `0` |
-| `inventoryDigest` | 64 位小写 hex；对审计时排序后的 `(collection/id)` 清单做 `SHA-256(stableStringify(...))`；用于审计报告复算，运行时只校验格式/绑定 |
-| `auditDigest` | 64 位小写 hex；K3 HMAC-SHA256，绑定 domain `KEYED_DIGEST/h4-evidence-chain-audit`、algorithmVersion `1` 及除 `auditDigest` 外全部字段 |
-| `checkedAt/checkedBy` | safe int / opaque；仅审计迁移写入 |
-| 写入 | **仅受控迁移、create-only**；生产 C1/C2 不写、不更新、不删除 |
-| 语义 | 该部署在 `checkedAt` 已做权威盘点，并且**该 proof 的 writeEpoch/policy/writerSet/collections 覆盖当前运行时代**；没有未处理的 legacy |
+| 字段 | `_id, kind, scope, schemaVersion, realm, keyVersion, keyFingerprint, domainHeadId, domainHeadRevision, writeEpoch, admissionPolicyVersion, writerSetDigest, auditedCollections, status, canonicalEvidenceCount, canonicalHeadCount, anchorCount, legacyCount, inventoryDigest, checkedAt, checkedBy, auditDigest`（22 字段） |
+| `kind`/`scope` | `audit` / `global` |
+| `status` | `empty` 或 `backfilled`；`legacyCount` 必须 0 |
+| `inventoryDigest` | 64 hex；对 **final inventory**（anchor backfill 后、proof 创建前）的 canonical 清单做 SHA-256，见 §4.10 |
+| `auditDigest` | K3 HMAC-SHA256，domain `KEYED_DIGEST/h4-evidence-chain-audit` v1，覆盖除自身外全部字段 |
+| 写入 | 仅 migration finalize（与 fence clear 同事务）create-only；runtime 只读 |
 
-**注意**：counts 是审计时点的历史快照，不是运行时实时计数；运行时只校验 proof 的 HMAC/K3/覆盖字段，不把 counts 与当前集合比较。审计后新增的 canonical 链由 anchor + 9 IDs + admission 继续证明。
+`writeEpoch` 每次重新审计/代码 policy/writer 集/集合范围/K3 变化都必须提升；proof ID 含 `writeEpoch`，旧 proof 保留但不读取。
 
-### 4.3 Store 登记与写约束（实现时）
+### 4.3 停写 fence `evidence_chain_fences`
 
-| 项目 | 要求 |
+| 项目 | 建议 |
 |---|---|
-| `collections` | 追加 `device_operation_evidence_chain_anchors`、`evidence_chain_audits`（现有 `admin-web/lib/store.mjs:43-49` 风格） |
-| `seed()` / `init()` | 两集合初始化为 `[]`；旧 LocalStore 数据文件用现有 `||= []` 模式补齐（`store.mjs:225-226`、`:262-263`） |
-| exact | 两集合加入 `exactWriteCollections`；禁止 Store 注入 `updatedAt`（对齐现有 `store.mjs:104-114`） |
-| create-only | 两集合加入 `createOnlyCollections`；anchor/audit 不允许 update/merge（对齐 `store.mjs:111-115`） |
-| 写入者 | anchor 仅 `appendEvidenceWrites` 首链事务；audit 仅迁移工具；运行时函数只读 |
-| 静态证明 | 生产树扫描 `evidence_chain_audits` 的 `write(`/`transact(` 0 命中（迁移工具不在生产树）；C1 模块只读 audit |
-| 90 refs | 两集合均按确定 ID 点读/点写，不引入 list/scan；C1 14、C2 23（见 §7） |
-| 写入门 | 对 H4-c 三集合/audit 的写入必须通过 §4.5 admission；旧代码无 admission 被拒绝 |
+| `_id` | `evidence-chain-fence:v1:global` |
+| 字段 | `_id, kind, scope, schemaVersion, status, epoch, reasonCode, monitorId, updatedAt, fenceDigest`（10 字段） |
+| `kind/scope` | `fence` / `global` |
+| `status` | `clear` 或 `halted` |
+| `epoch` | 当前 `writeEpoch`；必须与 CoverageValid proof 一致 |
+| `reasonCode` | 固定枚举：`COVERAGE_INVALID`、`MONITOR_ERROR`、`OPERATOR_HALT`、`INITIAL_CLEAR` |
+| `fenceDigest` | K3 HMAC-SHA256，domain `KEYED_DIGEST/h4-evidence-chain-fence` v1，覆盖除自身外全部字段 |
+| 写入 | 初始 `clear` 与 audit proof 在 migration finalize 同事务 create；halt/clear 仅 monitor admission 精确更新；runtime 只读 |
 
-### 4.4 校验与错误码
+**缺失/损坏/epoch 不符/`halted` 即 `EVIDENCE_CHAIN_HALTED`，所有 H4-c 写关闭。**
 
-| 情形 | 错误码 | HTTP | 写 |
-|---|---|---:|---:|
-| K3 config 缺失/非法 | `NOT_CONFIGURED` | 503 | 0 |
-| K3 domain 双缺/单缺/损坏/内部矛盾 | `DOMAIN_INCOMPLETE` | 409 | 0 |
-| K3 realm/version/fingerprint 变化 | `DOMAIN_MISMATCH` | 409 | 0 |
-| 审计证明缺失、ID/HMAC/绑定/status/覆盖字段非法 | `EVIDENCE_CHAIN_PROOF_REQUIRED`（**新增建议码**） | 409 | 0 |
-| 旧 writer 无 admission、epoch/policy/ticket 不匹配 | `EVIDENCE_CHAIN_PROOF_REQUIRED` | 409 | 0 |
-| anchor/head/evidence 缺失、孤儿、断链、anchor 不配对 | `EVIDENCE_CHAIN_BROKEN` | 409 | 0 |
-| head CAS 失败 | `EVIDENCE_HEAD_CONFLICT` | 409 | 0 |
-| 新 evidence ID 预占/写冲突 | `CONFLICT` | 409 | 0 |
-| sequence/字段/来源非法 | `EVIDENCE_INVALID` | 409 | 0 |
-| 时间越界 | `EVIDENCE_STALE` | 409 | 0 |
+### 4.4 Store 写路径与边界（全部路径）
 
-`EVIDENCE_CHAIN_PROOF_REQUIRED` 与 `NOT_CONFIGURED` 的区别：前者是“部署已运行但审计覆盖/admission 不可用”，后者是“K3 配置不可用”。两者都 fail-closed，不自动补写。
+| Store API | H4-c 写行为 | gate/边界 |
+|---|---|---|
+| `transact` | 唯一允许写 H4-c 的 API | 必须携带两阶段 admission；final ticket 通过后写 |
+| `change` | **一律拒绝** H4-c 集合 | 无 admission 路径；旧代码企图 change 被 `ADMISSION_REQUIRED` 拒绝 |
+| `persist` | LocalStore 私有持久化 | 只允许 `transact` 在 active admission 内调用；非公开/直接调用拒绝 |
+| `seed()` | 仅空数组初始化 | H4-c 数组必须为 `[]`；出现记录即拒绝 |
+| `init()` | 仅对旧数据补 `||= []`，不写记录 | 不 persist 记录；非空 H4-c 旧数据只读，不得借此写链 |
+| `list`/`get` | 只读 | 无 gate |
+| 直接 Cloud DB/旧 Store | 绕过 Store gate | 部署 P0 撤销旧凭证/权限；monitor 报警；不属于应用可保证范围 |
 
-### 4.5 持续写入准入（审计后的权威约束）
+`Store.change` 不提供 H4-c 写入能力；任何需要写 H4-c 的场景（runtime、migration、monitor fence、K3 bootstrap）都必须走 `transact` + 对应 admission。
 
-**问题**：审计只证明 `checkedAt` 的库存；如果旧 C1 `5dff386` 代码、legacy 脚本或其他非规范 writer 在审计后继续写 `device_operation_evidence`，9 IDs/anchor 看不到未知 ID，审计 proof 仍是“有效”的。因此必须有**持续的写入门**，而不是一次性审计。
+### 4.5 K3 domain 写入门与独立 bootstrap
 
-**权威约束组成**：
+- `evidence_digest_domains` 纳入 write gate；**runtime/migration 对 domain 的任何写一律拒绝**，保持 C1 只读。
+- 唯一例外是 `kind="k3-bootstrap"` 的独立 admission：
+  ```text
+  k3Bootstrap = { kind:"k3-bootstrap", operation:"k3-domain-bootstrap",
+                  bootstrapRunId, realm, keyVersion, keyFingerprint, domainHeadId,
+                  authorizedAt, ticket }
+  ```
+  `ticket` = K3 HMAC `KEYED_DIGEST/h4-k3-bootstrap` v1，覆盖上述字段；由受控 bootstrap 任务持有，不依赖 chain audit proof / writeEpoch。
+- gate 校验：
+  1. 只允许**恰好 2 条写**：fixed domain head + version；create-only；无 evidence/head/anchor/audit/fence 写。
+  2. head/version 必须都不存在；任一存在/部分存在 → `DOMAIN_INCOMPLETE`/`K3_BOOTSTRAP_DENIED`。
+  3. realm/keyVersion/fingerprint/domainHeadId 必须与当前 K3 config 一致；ID 公式正确。
+  4. fence 必须不存在（bootstrap 只能发生在 fence/proof 之前）；存在/ halted → `K3_BOOTSTRAP_DENIED`。
+  5. 无 proof 要求；bootstrap 成功后仍必须走全量 audit 才可 append。
+- 旧 `initializeEvidenceDomain`（90e4189）没有 k3-bootstrap admission → 被 gate 拒绝；C1 runtime 仍只读。
+- K3 轮换不是 bootstrap；domain 已存在时禁止 bootstrap，另立受控迁移（Q16）。
 
-1. **Store 写入门**：对 `device_operation_evidence`、`device_operation_evidence_heads`、`device_operation_evidence_chain_anchors`、`evidence_chain_audits` 的任何写操作，必须携带 `chainAdmission`；无 admission、未知 op、错误形状直接拒绝。
-2. **admission 字段**：
-   ```text
-   kind: "runtime" | "migration"
-   operation: "genesis" | "append" | "migration-anchor" | "migration-audit"
-   writeEpoch: 当前正整数
-   admissionPolicyVersion: 当前正整数
-   writerSetDigest: 当前允许 writer 集
-   proofId: 当前 evidence_chain_audits._id
-   ticket: K3 HMAC over canonical manifest
-   ```
-3. **ticket**：`HMAC-SHA256(K3, stable({domain:"KEYED_DIGEST/h4-canonical-write-admission", version:1, kind, operation, writeEpoch, admissionPolicyVersion, proofId, writerSetDigest, refsDigest, writesDigest}))`；Store 通过注入的 K3 verifier 校验。ticket 绑定 epoch/policy/writer/proof/refs/writes，篡改任一即失败。ticket 必须在最终 writes 列表确定后统一生成；C2 在 C1 helper 写集上追加 job/log/op/audit 后不得改写 C1 已签 ticket，应由 C2 transaction builder 统一 mint。
-4. **写形状**：
-   - H4-c 写集合范围内，`runtime/genesis`：**恰好** anchor + evidence + head；`append`：**恰好** evidence + head；不得写 `evidence_digest_domains` 或 `evidence_chain_audits`；同一事务可包含 C2 的 job/log/op key/op domain/admin_audit 等非 H4-c 写，gate 只校验 H4-c 子集。
-   - `migration/migration-anchor`：H4-c 子集仅 anchor；`migration-audit`：仅 audit；不得写 evidence/head/domain；只在迁移冻结模式可用。
-   - Store gate 还校验 evidence/head/anchor/audit 的 canonical ID 前缀/exact schema（通过注册的 validator）；链语义由 C1 helper 校验。
-5. **旧写入者**：旧 C1 `5dff386`、legacy 脚本、任何未携带当前 `writeEpoch + admissionPolicyVersion + writerSetDigest + proofId + ticket` 的写入者，全部收到 `EVIDENCE_CHAIN_PROOF_REQUIRED/409`，**零写**；即使它写的是 canonical ID/合法 schema 也一样。
-6. **部署约束**（必须与代码门同时满足）：
-   - 审计前停止所有旧 C1/legacy 进程/脚本，撤销旧 DB 凭证/权限；审计/迁移窗口内只有 migration admission 可用。
-   - 审计后启动的新 runtime 必须使用同一 `writeEpoch`/policy/writerSet/proofId；旧 writer 重启无 admission，被 gate 拒绝；旧 Store 代码/直连数据库的残余访问由 DB 权限、网络隔离和 monitor 报警兜底。
-   - 任何 gate 拒绝、未知集合写、非规范 ID、monitor 异常都是安全事件；不得自动修复或降级。
-7. **配置来源**（待裁定）：`H4_EVIDENCE_WRITE_EPOCH`、`H4_EVIDENCE_ADMISSION_POLICY_VERSION`、`H4_EVIDENCE_WRITER_SET_DIGEST` 由部署配置提供；迁移写入 proof 时冻结，runtime/Store 必须完全一致。缺失/不一致 → `PROOF_REQUIRED`。
+### 4.6 两阶段 canonical admission（消除 writesDigest 循环）
 
-**为什么不是“只加一个 epoch 字段”**：记录字段会给旧 schema/旧记录带来迁移问题；admission 是事务级选项，不改变 evidence/head/anchor 记录字段，也不增加 refs（proof ref 已存在）。旧 writer 没有 admission 代码路径，因此被 gate 拒绝。
+**阶段 A：admissionPrecheck（无 digest，fail-fast）**
 
-### 4.6 CoverageValid 与失效 fail-closed
+```text
+precheck = { kind, operation, writeEpoch, admissionPolicyVersion,
+             writerSetDigest, proofId }
+```
+- runtime 在读取 anchor/head/9 IDs 之前校验：与 CoverageValid、FenceClear、当前配置一致；migration 的 precheck 由 prePlan/finalPlan 校验（pre-fence 允许 fence 缺失）。失败 → `EVIDENCE_CHAIN_ADMISSION_REQUIRED/409`，零写。
+- **不含 `refsDigest/writesDigest/ticket`**；不要求尚未构造的 writes。
 
-`CoverageValid` 是运行时每次 append 必须验证的完整覆盖：
+**阶段 B：admissionTicket（final，写阶段权威）**
+
+```text
+refsDigest  = SHA-256(canonical sorted refs [{collection,id}])
+writesDigest= SHA-256(canonical sorted writes [{collection,id,data}])
+ticket      = HMAC-SHA256(K3, canonical({
+                domain:"KEYED_DIGEST/h4-canonical-write-admission", version:1,
+                kind, operation, writeEpoch, admissionPolicyVersion,
+                writerSetDigest, proofId, refsDigest, writesDigest }))
+```
+- **在最终 writes 列表（含 C2 的 job/log/op/audit 等非 H4-c 写）确定后**由 C2 transaction builder 统一 mint；C1 helper 返回 H4-c writes，不提前签 ticket。
+- Store gate 从实际 refs/writes 重算两个 digest 并验证 ticket；ticket 不含自身、不写入任何记录，因此无循环。
+- Gate 同时校验 H4-c 子集形状（§4.8）；ticket 覆盖 full writes，C2 追加写不能绕过。
+- 失败 → `ADMISSION_REQUIRED`；与 proof 失效（`PROOF_REQUIRED`）区分。
+
+**四类 admission**：
+
+| kind | 授权 | 要求 | 可写 |
+|---|---|---|---|
+| runtime | precheck + final ticket | CoverageValid + FenceClear | genesis / append |
+| migration | prePlan/finalPlan + final ticket（targetProofId） | 不要求已有 proof；pre-fence 阶段 fence 可缺失；halted fence 拒绝 | anchor / finalize（fence+proof） |
+| monitor | fenceDigest HMAC + 当前 proof/epoch（clear 需新 proof） | 只写 fence；halt 不依赖 proof 有效 | fence halt/clear |
+| k3-bootstrap | k3BootstrapTicket | 无 proof/fence；fence 存在/ halted 拒绝 | domain head+version |
+
+### 4.7 proof 前迁移 plan 与未来字段权威
+
+迁移在 proof 之前没有 `proofId`，因此不能用“当前 proof”作准入。定义离线签名 **migration plan**（不新增集合/refs）：
+
+```text
+prePlan = { kind:"migration-plan", scope:"global", schemaVersion:1,
+            migrationRunId, phase:"pre-anchor",
+            targetWriteEpoch, targetAdmissionPolicyVersion,
+            targetWriterSetDigest, targetProofId,
+            preInventoryDigest, auditedCollections, scannedAt, checkedBy,
+            planDigest, planTicket }
+
+finalPlan = { ...same target fields..., phase:"final",
+              prePlanDigest, finalInventoryDigest,
+              canonicalEvidenceCount, canonicalHeadCount, anchorCount,
+              checkedAt, planDigest, planTicket }
+```
+
+- `targetProofId` 由 K3 fingerprint + domainHeadRevision + targetWriteEpoch **确定性计算**；gate 可重算，不要求 proof 已存在。
+- `prePlan` 在 anchor 前签名，授权 `migration-anchor`；`finalPlan` 在 anchor 后、final inventory 后签名，引用 `prePlanDigest`，授权 `migration-finalize`（fence+proof 同事务）。
+- `planTicket` = K3 HMAC `KEYED_DIGEST/h4-evidence-migration-plan` v1；gate 校验 plan/runId/phase/target 字段/`prePlanDigest`/final inventory/counts。
+- **不依赖未来 proofId 记录**：未来字段由签名 plan 授权；proof 创建时字段必须与 `finalPlan` 完全一致，否则拒绝。
+- plan 不作为运行时记录；migration 工具持有，Store gate 使用注入的 verifier 校验；是否持久化 plan 列入 Q19。
+- `migration-anchor` 是 **pre-fence** 操作：fence 可以不存在（ref 读 null）；若 fence 存在且 `halted` 则拒绝；不要求 `FenceClear`；不得写 fence/domain/audit。`migration-finalize` 才创建 clear fence + proof。
+
+### 4.8 CoverageValid 与 fence/monitor
 
 ```text
 CoverageValid =
-  proof = read(evidence_chain_audits, _id(K3 fingerprint, domainHeadRevision, writeEpoch))
-  ∧ exact 22 字段 ∧ auditDigest HMAC 通过
-  ∧ kind="audit" ∧ scope="global" ∧ schemaVersion=1
-  ∧ realm/keyVersion/keyFingerprint/domainHeadId/domainHeadRevision 与当前 K3/domain 一致
-  ∧ status ∈ {"empty","backfilled"} ∧ legacyCount=0
-  ∧ writeEpoch = 当前 runtime/Store epoch
-  ∧ admissionPolicyVersion = 当前代码/Store policy version
-  ∧ writerSetDigest = 当前允许 writer set
-  ∧ auditedCollections = 精确三集合数组
+  audit proof 存在（ID=f(K3 fingerprint,domainHeadRevision,writeEpoch)）
+  ∧ exact 22 字段 ∧ auditDigest HMAC
+  ∧ K3 绑定 ∧ status/legacyCount
+  ∧ writeEpoch/admissionPolicyVersion/writerSetDigest/auditedCollections 与当前一致
+
+FenceClear =
+  fence 存在 ∧ exact 10 字段 ∧ fenceDigest HMAC
+  ∧ status="clear" ∧ fence.epoch=CoverageValid.writeEpoch
 ```
 
-**失效触发器**（任一命中）：
+失效触发器：proof/fence 缺失/篡改/HMAC 错；K3 换钥/domain revision 变；epoch/policy/writerSet/collections 不符；gate 缺失/禁用；monitor halt/异常；K3 bootstrap 后未 audit；任一 → `PROOF_REQUIRED`/`HALTED`（按层映射），所有 append（含已有链）阻断，不降级、不自动修复。
 
-| 触发器 | 结果 |
-|---|---|
-| proof 缺失、被删除、HMAC/字段/ID 非法 | `EVIDENCE_CHAIN_PROOF_REQUIRED`，全库零写 |
-| K3 换钥/realm/version/fingerprint 变化，domain head revision 变化 | proof ID 不再命中；`PROOF_REQUIRED`（或先 `DOMAIN_MISMATCH`） |
-| `writeEpoch`/`admissionPolicyVersion`/`writerSetDigest` 与当前配置/代码不一致 | `PROOF_REQUIRED` |
-| `auditedCollections` 缺/多集合，或新增 schema/集合 | `PROOF_REQUIRED`；需重新审计 |
-| Store gate 缺失/禁用/版本不一致 | 启动自检失败，服务不就绪；绝不降级 |
-| coverage monitor 发现未知 ID/非规范 schema/anchor-head-E1 不一致 | 服务进入关闭态；`PROOF_REQUIRED`；人工事件/重新审计 |
-| 审计 proof 仅由 migration 写，runtime 试图写 | Store gate 拒绝；`PROOF_REQUIRED` |
+**monitor→runtime 停写**：
 
-**行为**：覆盖失效时，**所有 append（含已有链）一律阻断**，即使 anchor/head/9 IDs 看起来完整；不降级到 9 IDs/anchor，不自动补 proof，不自动修复。重新审计必须产生新 `writeEpoch`/新 proof（旧 proof 不可更新，create-only），runtime/Store 切换到新 epoch 后才恢复。
+1. monitor 周期扫描 evidence/head/anchor/fence；发现未知 ID、非规范 schema、anchor/E1/head 不一致等，使用 `kind="monitor"`、`operation="fence-halt"` 的 admission 写 fence：`status="halted"`、`reasonCode`、`monitorId`、`updatedAt`、当前 epoch，重算 `fenceDigest`。
+2. gate 对 monitor admission 只允许 fence 精确更新；其他任何 H4-c 写同时被拒绝。
+3. runtime 每次 append 读取 fence ref；`halted`/缺失/损坏/epoch 不符 → `EVIDENCE_CHAIN_HALTED/409`，零写；Store gate 在写阶段复查 state[fence]。
+4. halt 是**全局 H4-c 停写**：runtime genesis/append、migration anchor/finalize、K3 bootstrap、domain/evidence/head/anchor/audit/fence 的写全部关闭；读允许；C2 reconcile 返回 HALTED。
+5. 清除：`kind="monitor"`/`operation="fence-clear"`，必须引用**新 epoch 的新 proof**（`newProofId`）且 CoverageValid/epoch 匹配；否则 `HALTED`。旧 proof 不能 clear；clear 只写 fence。
+6. 若 fence 缺失（proof 存在后）视为 tamper/未初始化 → HALTED；初始 clear fence 与首个 proof 在 migration finalize 同事务创建。
+7. 事务已在 halt 前读取 clear 并提交的在途写允许完成；halt 对之后事务生效；monitor 同时停止流量。
 
-**启动自检**：C1/C2 服务装配时必须验证 Store gate 存在、policy/epoch/writerSet 与 proof 一致、monitor 健康；任一失败 → 服务不就绪（`NOT_CONFIGURED/503` 或 `PROOF_REQUIRED/409`，Q13 裁定），不得接流量。
+### 4.9 digest 规范化（统一）
 
-## 5. 运行时算法（设计）
+**canonical JSON 规则**：plain object；keys 按 UTF-16 code unit 升序（复用 `stableStringify`）；数组保持顺序；字符串 NFC 后 UTF-8；仅 null/bool/safe integer/string/array/plain object；拒绝 `undefined`/function/symbol/BigInt/NaN/Infinity/-0；hex 一律小写 64 位。
 
-### 5.1 首条链：`EmptyProof`
+| digest | 算法 | domain/version | 输入 |
+|---|---|---|---|
+| `auditDigest` | HMAC-SHA256(K3) | `KEYED_DIGEST/h4-evidence-chain-audit` v1 | proof 除自身外全部字段 |
+| `fenceDigest` | HMAC-SHA256(K3) | `KEYED_DIGEST/h4-evidence-chain-fence` v1 | fence 除自身外全部字段 |
+| `ticket` | HMAC-SHA256(K3) | `KEYED_DIGEST/h4-canonical-write-admission` v1 | 两阶段字段 + refsDigest + writesDigest |
+| `planTicket` | HMAC-SHA256(K3) | `KEYED_DIGEST/h4-evidence-migration-plan` v1 | plan 除 planTicket 外字段 |
+| `refsDigest` | SHA-256 | — | 排序 `[{collection,id}]` canonical JSON |
+| `writesDigest` | SHA-256 | — | 排序 `[{collection,id,data}]` canonical JSON |
+| `inventoryDigest` | SHA-256 | — | 最终 inventory 排序 `[{collection,id,recordDigest}]`；recordDigest=SHA-256(canonical record) |
+| `writerSetDigest` | SHA-256 | — | 排序 canonical writer manifests |
+| `preInventoryDigest`/`finalInventoryDigest` | SHA-256 | — | 对应时点 inventory，规则同上 |
+| `k3BootstrapTicket` | HMAC-SHA256(K3) | `KEYED_DIGEST/h4-k3-bootstrap` v1 | bootstrap 字段 |
 
-输入：`job`、`expectedHead = null`、`config`、`now`、`decision/source/observedAt/actorId`、`chainAdmission`。**没有 `hasExistingEvidence` 参数。**
+`writesDigest` 在最终 writes 确定后计算；ticket 不在 writes 中，无循环。
 
-1. 校验 config/job/now/decision/source/observedAt/actorId（现有 `:356-368` 规则）。
-2. `applyEvidenceDomain(state, cfg)` 只读精确匹配；失败即 `DOMAIN_*`，零写。
-3. 读取并验证 `evidence_chain_audits` 的当前 proof：
-   - `CoverageValid`（exact 22 字段、K3 绑定、epoch/policy/writerSet/collections、status、`legacyCount=0`、HMAC）；
-   - 缺失/损坏/覆盖失效/换钥 → `EVIDENCE_CHAIN_PROOF_REQUIRED`，零写。
-4. 校验 `chainAdmission`：kind=`runtime`、operation=`genesis`、epoch/policy/writerSet/proofId 与 proof/当前配置一致、ticket HMAC 通过；失败 → `PROOF_REQUIRED`，零写。
-5. 读 head；必须为 null；否则走非首条路径。
-6. 读 anchor；必须为 null；存在 → `EVIDENCE_CHAIN_BROKEN`，零写。
-7. 读 `evidenceId(org,job,1..9)`；**9 个必须全为 null**；任一存在（包括合法 seq2..9）→ `EVIDENCE_CHAIN_BROKEN`，零写。
-8. 构造并校验 anchor/evidence seq1/head（字段同 §4.1/现有 validator）；返回 3 条写：`anchor + evidence + head`；无 domain 写。
-9. Store gate 在写阶段再次校验 admission/ticket/形状；失败 → 事务回滚，零写。
+### 4.10 inventory 时点与 2 万行上限
 
-### 5.2 非首条：`ChainProof`
+- **时点**：pre-anchor inventory 用于 prePlan/校验；**final inventory** = anchor backfill 完成后、fence+proof 创建前的完整快照，用于 proof 的 `inventoryDigest`/counts/`checkedAt`。
+- **2 万行**：`Store.list` 在 20,000 行上限会抛 503，不能作为大集合完整盘点。迁移必须使用受控 Cloud DB export/游标分页；若只能用 `Store.list` 且任一集合超过 20,000 行 → `MIGRATION_CAPACITY_EXCEEDED/409`，不写 proof，anchors 可部分（Z_chain），runtime 保持关闭。
+- 不得截断/采样/只看前 2 万行；`inventoryDigest` 必须覆盖完整集合；proof counts 必须与 final inventory 一致；否则拒绝。
+- 记录扫描方法（export/cursor）在迁移报告/plan 中；proof 绑定 digest/counts，不额外加字段。
 
-1. 步骤 1–4 同上（K3 + CoverageValid + admission 优先）。
-2. 读 head；必须存在，且 `expectedHead` 的 `revision/lastEvidenceId/lastSequence` 完全匹配；否则 `EVIDENCE_HEAD_CONFLICT`/`EVIDENCE_CHAIN_BROKEN`。
-3. 读 anchor；必须存在，且 `orgId/jobId` 匹配、`firstEvidenceId=E_1`、`createdAt=E_1.createdAt`；否则 `EVIDENCE_CHAIN_BROKEN`。
-4. 校验完整 canonical 链：
-   - 对 `i=1..head.lastSequence`：`E_i` 存在；`validateEvidenceRecord`；`_id`/`orgId`/`jobId`/`sequence`/`previousEvidenceId` 正确；K3 realm/version/fingerprint 与当前 config/domain 一致；HMAC 通过；
-   - `E_head.lastSequence._id === head.lastEvidenceId`；`E_head.lastSequence.observedAt === head.lastObservedAt`；
-   - 对 `i=head.lastSequence+1..9`：必须为 null（新 sequence 必须为空；若存在 → `EVIDENCE_CHAIN_BROKEN`/`CONFLICT`）。
-5. `sequence = head.lastSequence+1`；`sequence > 9` → `EVIDENCE_INVALID`；构造 evidence + next head；返回 2 条写：`evidence + head`；anchor 不写；无 domain 写。
-6. Store gate 写阶段校验 admission operation=`append`/ticket/形状；失败 → 回滚。
+### 4.11 错误码映射（按层，消除重复）
+
+| 层/情形 | code | HTTP |
+|---|---|---:|
+| K3 config 缺失/非法 | `NOT_CONFIGURED` | 503 |
+| K3 domain 缺失/单边/损坏 | `DOMAIN_INCOMPLETE` | 409 |
+| K3 realm/version/fingerprint 变化 | `DOMAIN_MISMATCH` | 409 |
+| domain 写无 k3-bootstrap / 部分存在 / fence 存在 | `K3_BOOTSTRAP_DENIED` | 409 |
+| audit proof 缺失/HMAC/绑定/覆盖字段失效 | `EVIDENCE_CHAIN_PROOF_REQUIRED` | 409 |
+| precheck/final ticket/epoch/policy/writer/proof 不匹配；旧 writer；change/persist 写 H4-c | `EVIDENCE_CHAIN_ADMISSION_REQUIRED` | 409 |
+| fence halted/缺失/损坏/epoch 不符/clear 无新 proof | `EVIDENCE_CHAIN_HALTED` | 409 |
+| anchor/head/evidence 结构损坏/孤儿/断链 | `EVIDENCE_CHAIN_BROKEN` | 409 |
+| head CAS 失败 | `EVIDENCE_HEAD_CONFLICT` | 409 |
+| evidence ID 预占/写冲突 | `CONFLICT` | 409 |
+| inventory 超 2 万且无 export | `MIGRATION_CAPACITY_EXCEEDED` | 409 |
+| sequence/字段/来源非法 | `EVIDENCE_INVALID` | 409 |
+| 时间越界 | `EVIDENCE_STALE` | 409 |
+
+C2 统一信封映射：除 K3 config 503 外均 409；不返回原始异常；不得把 ADMISSION/HALTED 混用 PROOF。
+
+## 5. 运行时算法
+
+### 5.1 首条链 `EmptyProof`
+
+输入：job、expectedHead=null、config、now、decision/source/observedAt/actorId、precheck；**无 hasExistingEvidence**。
+
+1. 校验 config/job/now/source/observedAt/actorId。
+2. `applyEvidenceDomain` 只读精确；失败 `DOMAIN_*`。
+3. `CoverageValid`（proof 22 字段/HMAC/epoch/policy/writer/collections）。
+4. `FenceClear`（fence 存在/clear/HMAC/epoch）。
+5. `admissionPrecheck`（无 digest）校验 kind=runtime/operation=genesis/epoch/policy/writer/proofId。
+6. 读 head 必须 null；读 anchor 必须 null；读 E1..E9 必须全 null；任一存在 → `BROKEN`。
+7. 构造 anchor/E1/head；C2 追加 job/log 等；最终 writes 确定。
+8. 计算 refsDigest/writesDigest，mint final ticket；Store gate 重算/校验 shape；写 anchor+E1+head；无 domain/fence 写。
+9. 失败 → 事务回滚，零写。
+
+### 5.2 非首条 `ChainProof`
+
+1. 步骤 1–5 同上，operation=append。
+2. head 必须存在且与 expectedHead revision/lastEvidenceId/lastSequence 完全匹配；否则 HEAD_CONFLICT/BROKEN。
+3. anchor 必须存在且 org/job/firstEvidenceId/createdAt 匹配；否则 BROKEN。
+4. 完整链校验 E1..lastSequence；>last 必须 null；否则 BROKEN/CONFLICT。
+5. sequence=last+1；>9 → EVIDENCE_INVALID；构造 evidence+next head；C2 追加写；final ticket；Store gate；写 evidence+head；anchor/fence/domain 不写。
 
 ### 5.3 删除 `hasExistingEvidence`
 
-- `appendEvidenceWrites` 不再接收任何“是否有既有 evidence”的布尔值或调用方证明对象。
-- 首链判断只来自 `EmptyProof` 的事务内事实：K3、CoverageValid、admission、head null、anchor null、9 个 ID null。
-- `evidenceAppendRefs` 改为返回 §7 的完整 refs；不再用 `head?.lastSequence ?? 0` 选择“新 ID”作为唯一空性依据。
-- 生产树静态扫描禁止 `hasExistingEvidence`、`emptyProof`、`callerProof` 等 token 出现在 C1/C2 生产代码；测试只使用合成 audit proof/admission fixture。
-- 不允许以“调用方已扫描”或“调用方保证为空”替代事务内证明。
+- API 不再接受任何“空链”布尔/调用方证明。
+- 首链只由 K3/CoverageValid/FenceClear/precheck/head/anchor/9 IDs 决定。
+- `evidenceAppendRefs` 返回完整 15 refs（含 fence）；不再只声明新 ID。
+- 生产树静态扫描禁止 `hasExistingEvidence`/`emptyProof`/`callerProof`；测试只用合成 proof/admission/fence fixture。
 
-### 5.4 global K3 / coverage / admission 的优先级
-
-运行时顺序固定为：
+### 5.4 优先级与最终校验
 
 ```text
-config 合法性
-  → K3 applyEvidenceDomain（只读）
-  → CoverageValid（audit proof + epoch/policy/writer/collections）
-  → admission 预检（ticket/op/shape）
-  → anchor/head/9 IDs/完整链
-  → 构造写
-  → Store gate 最终 admission/形状校验
+config → K3 → CoverageValid → FenceClear → precheck
+  → anchor/head/9 IDs/完整链 → 构造 writes → final ticket → Store gate → 写
 ```
 
-任何前置失败都不得进入后续层；不得因为“legacy 没有 domain”而跳过 K3，不得因为“audit proof 有 counts”而跳过 K3，不得写 domain 来修复，不得用 anchor/9 IDs 绕过失效的 coverage/admission。
+任一失败不进入后续；不得用 anchor/9 IDs 绕过 proof/fence/admission；不得写 domain 修复。
 
-### 5.5 残留 seq2 的硬规则（拒绝重建）
+### 5.5 残留 seq2 硬规则
 
-当 `H = null`、`A = null`，而 `E_2..E_9` 中任一存在：
+当 H=null、A=null、E2..E9 任一存在：
 
-1. `EmptyProof` 的 `∀ i ∈ [1,9]: evidence(job,i)=null` 为假，返回 `EVIDENCE_CHAIN_BROKEN/409`。
-2. **不得**写 `E_1`、head、anchor；不得把 `E_2` 改名/重编号/adopt 成新链；不得删除/修复 `E_2`。
-3. 即使调用方（旧 C1/legacy）传 `hasExistingEvidence=false`，也不影响判定；新 API 已删除该参数，旧 writer 也被 admission gate 拒绝。
-4. 若 `head` 存在且 `lastSequence=2`、`E_1` 缺失、`E_2` 存在：完整链校验失败，`EVIDENCE_CHAIN_BROKEN`；不得追加 `E_3`。
-5. 迁移/审计发现该形态时不得补 anchor、不得写 proof；标记为不可补齐 legacy，运行时保持关闭；人工事件/另行受控恢复，C1/C2 不自动修复。
+1. `EmptyProof` 的 9 IDs 全空为假 → `EVIDENCE_CHAIN_BROKEN/409`。
+2. 不写 E1/head/anchor/fence/domain；不改名/重编号/adopt/删除 E2。
+3. 旧 writer 的 `hasExistingEvidence=false` 不再有机会：API 删除参数，旧 writer 无两阶段 admission 被 gate 拒绝。
+4. head 存在 seq2 且 E1 缺失：完整链失败；不得追加 E3。
+5. 迁移发现该形态：不补 anchor、不写 proof；标记不可补齐 legacy；运行时保持关闭；C1/C2 不自动修复。
 
-## 6. canonical / 异常 / legacy 证明矩阵
+## 6. canonical / 异常 / legacy 矩阵
 
-| 类别 | 具体形态 | 运行时判定依据 | 结果 | 写 |
-|---|---|---|---|---:|
-| canonical empty | K3 完整；CoverageValid；admission 正确；head/anchor/E1..E9 全空 | `EmptyProof` | 允许首条 | X（anchor+evidence+head） |
-| canonical chain | anchor/head 有效；E1..EN 完整 canonical；E>N 空 | `ChainProof` | 允许追加 | X（evidence+head） |
-| abnormal：head/seq1 丢失、E2 残留 | head null、anchor null、E2 canonical、无调用方布尔值 | 9 IDs 全量点查发现 E2 | `EVIDENCE_CHAIN_BROKEN/409` | Z |
-| abnormal：E2..E9 任意残留 | head null、anchor null、任意 E_i (i≥2) 存在 | 9 IDs 全量点查 | `EVIDENCE_CHAIN_BROKEN` | Z |
-| abnormal：anchor 存在但 head/seq1 丢失 | anchor != null、head null | anchor 存在即不得重建 | `EVIDENCE_CHAIN_BROKEN` | Z |
-| abnormal：head 存在但 anchor 缺失 | head/E1..EN 存在、anchor null | anchor 缺失视为 legacy/损坏，不得追加 | `EVIDENCE_CHAIN_BROKEN` | Z |
-| abnormal：anchor/head 不配对 | anchor.firstEvidenceId 或 org/job 不匹配 | anchor + head 双校验 | `EVIDENCE_CHAIN_BROKEN` | Z |
-| abnormal：链内祖先缺失 | head.lastSequence=N，E1..E_{k} 缺一条 | 完整 1..N 校验 | `EVIDENCE_CHAIN_BROKEN` | Z |
-| abnormal：head 后孤儿 | head.lastSequence=N，E_{N+1} 存在 | 9 IDs 中 >N 非空 | `EVIDENCE_CHAIN_BROKEN`/`CONFLICT` | Z |
-| abnormal：head seq0 | head.lastSequence=0（无 anchor/证据） | 新不变量要求首链 head 从 seq1 开始 | `EVIDENCE_CHAIN_BROKEN` | Z |
-| abnormal：审计后旧 writer 写 canonical/非规范 | 旧 C1/legacy 无 admission 或 epoch/policy 不符 | Store gate 在写前拒绝 | `EVIDENCE_CHAIN_PROOF_REQUIRED/409` | Z |
-| abnormal：覆盖失效 | proof 缺失/HMAC/绑定/epoch/policy/writer/collections 失效 | `CoverageValid` | `PROOF_REQUIRED`；已有链也阻断 | Z |
-| abnormal：gate/monitor 异常 | gate 缺失/禁用；monitor 发现未知 ID | 启动自检/monitor | 服务不就绪/`PROOF_REQUIRED` | Z |
-| legacy L1：3fce9b0 旧 realm 作用域 domain | `evidence-digest-domain:<realm>`、fixed global head 缺失 | `applyEvidenceDomain` 先失败 | `DOMAIN_INCOMPLETE/409` | Z |
-| legacy L2：固定 global domain 但无 anchor | head/E1..EN canonical、anchor null | anchor 缺失；待迁移补 anchor | `EVIDENCE_CHAIN_BROKEN` | Z |
-| legacy L3：非确定性 ID/旧 schema | 9 个确定性 ID 可能全空、但 collection 内有其他 ID | 9 IDs 看不到；由 audit proof 的“全量盘点”排除；审计后由 admission/monitor 持续限制 | 无 proof → `PROOF_REQUIRED`；有 proof 且 gate 生效才允许 canonical | Z |
-| legacy L4：LocalStore 旧文件缺数组 | 集合缺失/空 | 初始化后 audit proof 必须存在 | 无 proof → `PROOF_REQUIRED` | Z |
-| legacy L5：审计迁移发现不可补齐记录 | 非 canonical、head 缺、anchor 冲突、E1 缺失 | 迁移 abort，不写 proof | 运行时永久 `PROOF_REQUIRED` | Z |
-| K3 失效 | domain 单边/损坏/换钥/realm 变化 | K3 优先 | `DOMAIN_INCOMPLETE`/`DOMAIN_MISMATCH` | Z |
-| audit 失效 | proof 缺失/HMAC 错/绑定错/status 非法/legacyCount≠0 | `CoverageValid` | `PROOF_REQUIRED` | Z |
+| 类别 | 判定 | 结果 | 写 |
+|---|---|---|---:|
+| canonical empty | K3+Coverage+Fence+precheck+head/anchor/9 全空 | 首条成功 | X |
+| canonical chain | anchor/head/1..N valid + >N null | 追加成功 | X |
+| head/seq1 丢失、E2 残留 | 9 IDs 发现 E2 | BROKEN | Z |
+| E2..E9 任意残留 | 9 IDs | BROKEN | Z |
+| anchor 存在/head 空 | anchor 阻断 | BROKEN | Z |
+| head 存在/anchor 缺 | anchor 阻断 | BROKEN | Z |
+| 祖先缺失/后孤儿 | 完整链/>last | BROKEN/CONFLICT | Z |
+| head seq0 | 不变量失败 | BROKEN | Z |
+| 审计后旧 writer | gate 无 ticket | ADMISSION_REQUIRED | Z |
+| coverage 失效 | proof/HMAC/绑定/epoch/policy/collections | PROOF_REQUIRED；已有链也阻断 | Z |
+| fence halted/缺失/损坏 | fence | HALTED；全局 H4-c 停写 | Z |
+| gate/monitor 异常 | 启动自检/monitor | 不就绪/HALTED | Z |
+| domain 写无 bootstrap | gate | K3_BOOTSTRAP_DENIED | Z |
+| legacy L1 3fce9b0 realm domain | K3 先失败 | DOMAIN_INCOMPLETE | Z |
+| legacy L2 无 anchor | anchor 缺 | BROKEN；待迁移 | Z |
+| legacy L3 非规范 ID/旧 schema | audit proof 排除 + gate/monitor | 无 proof→PROOF；有 proof 且 gate/fence 有效才 canonical | Z |
+| legacy L4 LocalStore 缺数组 | 无 proof | PROOF_REQUIRED | Z |
+| legacy L5 不可补齐 | 迁移 abort | 永久 PROOF_REQUIRED | Z |
+| K3 失效 | K3 | DOMAIN_* | Z |
+| audit 失效 | CoverageValid | PROOF_REQUIRED | Z |
+| fence 失效 | FenceClear | HALTED | Z |
 
-**legacy 权威性说明**：9 个确定性 ID 只能证明 canonical 命名空间；非确定性 ID/旧 schema 无法用点读发现。因此 `evidence_chain_audits` 必须是“部署级全量盘点”的受控事实；运行时验证其 HMAC/K3/覆盖字段，而不是重新扫描。若审计迁移漏扫，属于迁移错误；审计后的旧 writer 由 admission gate/DB 权限/monitor 持续限制。
+**legacy 权威性**：9 IDs 只覆盖 canonical 命名空间；非规范/旧 schema 由全量 audit 排除，audit 后由 admission/fence/monitor 持续限制；审计漏扫是迁移错误。
 
-## 7. 事务 refs / writes 预算
+## 7. refs / writes 预算
 
 ### 7.1 C1 helper
 
-| 事务 | refs（去重后） | 数量 | writes | 说明 |
-|---|---|---:|---|---|
-| 首条 append | K3 head、K3 version、audit proof、anchor、head、evidence 1..9 | **14** | anchor + evidence + head = **3** | domain 0；previous 无；新 sequence 在 1..9 内 |
-| 非首条 append | 同上（9 IDs 含 previous/新 sequence） | **14** | evidence + head = **2** | anchor 只读；domain 0 |
+| 事务 | refs | 数量 | writes |
+|---|---|---:|---|
+| 首条 | K3 head/version、audit、fence、anchor、head、E1..E9 | **15** | anchor+E1+head=3 |
+| 非首条 | 同上（9 IDs 含 previous/新） | **15** | evidence+head=2 |
 
-### 7.2 C2 R1（三种 decision 共用）
+### 7.2 C2 R1
 
 | ref | 数量 |
 |---|---:|
-| `organizations/org` | 1 |
-| `org_memberships/actor` | 1 |
-| `device_operation_jobs/job` | 1 |
-| `device_access_grants/grant` | 1 |
-| `device_operation_evidence_heads/head` | 1 |
-| `device_operation_evidence_chain_anchors/anchor` | 1 |
-| `evidence_chain_audits/global` | 1 |
-| `device_operation_evidence/1..9` | 9 |
-| `evidence_digest_domains/head+version` | 2 |
-| `operation_keys/op` | 1 |
-| `operation_key_domains/head+version` | 2 |
-| `device_operation_logs/log` | 1 |
-| `admin_audit/audit` | 1 |
-| **合计** | **23** |
+| org、membership、job、grant | 4 |
+| head、anchor、audit、fence | 4 |
+| evidence 1..9 | 9 |
+| K3 domain head+version | 2 |
+| op key、op domain head+version | 3 |
+| log、admin audit | 2 |
+| **合计** | **24** |
 
-C2 R1 writes：job pre-finalize、evidence、head、首链 anchor（仅首链）、log、op key、op domain 0–2、audit；**0** grant/slot/claim/device；**0** domain。C2 R2 继续使用 H4-b `8+N`，N≤82 → ≤90，和 R1 分离事务。
+C2 R1 writes：job pre-finalize、evidence、head、首链 anchor、log、op key、op domain 0–2、audit；0 grant/slot/claim/device、0 domain、0 fence。R2 H4-b `8+N≤90` 独立事务。
 
-### 7.3 迁移事务
+### 7.3 迁移/控制事务
 
 | 事务 | refs | writes |
 |---|---:|---|
-| 单 job anchor 补齐 | K3 head/version + head + evidence 1..9 + anchor = **13** | anchor = 1 |
-| 写 audit proof | K3 head/version + audit = **3** | audit = 1 |
+| migration-anchor | K3 2 + fence 1 + head 1 + evidence 1..9 + anchor 1 = **14** | anchor=1 |
+| migration-finalize | K3 2 + fence 1 + audit 1 = **4** | fence+audit=2 |
+| monitor halt/clear | K3 2 + proof 1 + fence 1 = **4** | fence=1 |
+| k3-bootstrap | domain head+version = **2** | head+version=2 |
 
-### 7.4 上限核对与 admission 开销
+### 7.4 上限
 
-- Store 上限 90（`store.mjs:94`、`:428`）。
-- C1 14；C2 R1 23；迁移 13/3；C2 R2 ≤90（H4-b 独立事务）。
-- **write admission 0 新增 refs**：它是事务选项/ticket，不读新记录；当前 audit proof 已计入 1 条 ref。Store gate 的配置来自部署 config，不占 refs。
-- 若 Codex 决定把 admission policy 持久化为可读记录，才需要额外 ref；本卡建议不这样做（Q11）。
-- C2 R1 23 距 90 余 67；不得再新增未列出的 ref。
-- 所有 refs 去重；9 个 evidence ID 已包含 previous/新 sequence，不重复声明。
+- Store 90 上限；C1 15；C2 R1 24；migration 14/4；monitor 4；R2 ≤90。
+- C2 R1 距 90 余 66；admission/plan/ticket 0 新增 refs；所有 refs 去重。
 
-## 8. 并发与线性化
+## 8. 并发、迁移切换、停写
 
-### 8.1 链写入竞争
-
-| 竞争 | 线性化点 | 结果 |
-|---|---|---|
-| 两个首条 append（不同键） | anchor create-only + evidence/head create + admission | 一胜；另一 `EVIDENCE_CHAIN_BROKEN`/`CONFLICT`；只有 1 组 anchor/head/E1；不分叉 |
-| 两个非首条 append | head revision/lastEvidenceId CAS + expectedHead | 一胜；另一 `EVIDENCE_HEAD_CONFLICT`；无分叉 |
-| 首条 append 与已有链 append | anchor/head/expectedHead | 已有链者按 `ChainProof`；首链者发现 head/anchor 非空 → `EVIDENCE_CHAIN_BROKEN` |
-| 旧 writer 与 canonical writer | Store gate admission | 旧 writer 无当前 ticket → `PROOF_REQUIRED`；不产生任何写 |
-| coverage 失效与 append | `CoverageValid` | append 在构造写前失败；已有链也阻断；Z_all |
-| CloudStore 事务冲突 | Cloud transaction + create-only | 一胜；失败方 409/事务回滚；无部分写 |
-| LocalStore 并发 | 队列串行化 | 第二个事务看到已提交 anchor/head/evidence 后失败 |
-| K3 换钥与 audit | proof ID 含 keyFingerprint/domainHeadRevision | 旧 proof 失效；新审计前全部 `PROOF_REQUIRED` |
-
-### 8.2 迁移切换时序（write freeze / gate / audit / switchover）
-
-| 阶段 | 动作 | 允许写 | 失败/阻断 |
-|---|---|---|---|
-| P0 停止旧写者 | 停旧 C1/legacy 进程/脚本；撤销旧 DB 凭证/权限；流量冻结 | 无 | 任何旧写者尝试 → 拒绝/告警；不进入 P1 |
-| P1 部署 gate（closed） | 部署新 Store gate 与 migration admission；runtime admission 尚不可用 | 仅 migration（且仅 anchor/audit） | gate 缺失/版本不符 → 服务不就绪 |
-| P2 全量盘点 | 分页扫描三集合；校验 canonical；输出 inventory/legacy 清单 | 无 | 发现不可补齐 → 不写 proof；保持在 P1 |
-| P3 anchor 补齐 | 对 canonical 无 anchor job，逐 job create-only 补 anchor | anchor only | 部分 anchor 可留存；无 proof；runtime 仍关闭 |
-| P4 写 audit proof | 全部成功且 `legacyCount=0` 后，写 22 字段 proof（writeEpoch=E、policy=P、writerSetDigest=W） | audit only | proof 失败 → 无 proof；anchor 可部分留存；runtime 关闭 |
-| P5 启动新 runtime | 以 E/P/W 启动；启动自检 CoverageValid + gate；接流量 | runtime genesis/append | 自检失败 → 不接流量；旧 proof/旧 writer 仍关闭 |
-| P6 监控 | coverage monitor 周期扫描；异常即关闭 | 正常 canonical | monitor 失败/异常 → `PROOF_REQUIRED`，人工事件 |
-
-**关键顺序**：gate 必须在 audit proof 之前部署并生效；proof 之前旧 writer 已停止/凭证撤销；proof 之后旧 writer 即使重启也无当前 admission，被 gate 拒绝。禁止“先 proof 后 gate”。
-
-### 8.3 旧写入者隔离与回滚
-
-- 旧 C1 `5dff386` 的 `store.transact` 调用没有 `chainAdmission`；新 Store gate 对 H4-c 集合写入直接 `PROOF_REQUIRED`，不落盘。
-- 旧进程若仍使用旧 Store 代码/直连 DB，Store gate 无法拦截；P0 的进程停止 + DB 凭证/权限撤销 + 网络隔离 + monitor 报警是必要约束。任何残余旧写者都是安全事件。
-- 迁移/审计 workers 使用 migration admission；只能写 anchor/audit；不得写 evidence/head/domain；迁移窗口结束后撤销 migration 凭据。
-- 回滚：**不得**恢复旧 writer；如新 runtime 失败，保持 gate closed/服务不就绪，修复后以新 epoch 重新审计；旧 proof 保留但不再被 runtime 读取（ID 含 epoch）。不得删除 proof/anchor/evidence。
-- 两个迁移 worker：anchor create-only 幂等；proof create-only 一胜；失败方验证并退出；不得生成两个 epoch 的 proof 同时被 runtime 使用。
-
-### 8.4 proof / gate / runtime 竞争
+### 8.1 链竞争
 
 | 竞争 | 结果 |
 |---|---|
-| runtime 在 proof 提交前启动 | 读不到当前 proof → `PROOF_REQUIRED`；零写 |
-| proof 提交后、runtime 启动前旧 writer 重启 | 无 admission/ticket → gate 拒绝；零写 |
-| 两个 migration 同时写 proof | create-only 一胜；另一 409；anchor 幂等；只使用一个 epoch |
-| gate 版本/policy 与 proof 不一致 | 启动自检失败；不接流量 |
-| monitor 在 append 期间发现异常 | 已完成事务不受影响；后续 append `PROOF_REQUIRED`；人工事件 |
-| K3 换钥/domain revision 变化 | 旧 proof ID 不命中；新审计前全部关闭 |
+| 两首条 | anchor create-only + ticket；一胜；另一 BROKEN/ADMISSION |
+| 两非首条 | head CAS；一胜；另一 HEAD_CONFLICT |
+| 首条 vs 已有 | head/anchor 检查；首条方 BROKEN |
+| 旧 writer vs gate | 无 ticket → ADMISSION；零写 |
+| fence halt vs append | fence 读在事务内；halt 后 append HALTED；在途可完成 |
+| Cloud 冲突 | 一胜；回滚；无部分写 |
+| K3 换钥 | proof/fence epoch 失效；PROOF/HALTED |
+
+### 8.2 迁移切换（plan/gate/fence/proof）
+
+| 阶段 | 动作 | 允许写 |
+|---|---|---|
+| P0 | 停旧 writer/撤 DB 凭证/流量冻结 | 无 |
+| P1 | 部署 gate（closed）+ migration admission | 仅 migration |
+| P2 | pre-scan/validate，生成 prePlan | 无 |
+| P3 | migration-anchor（prePlan），补 anchor | anchor |
+| P3.5 | final inventory（完整；>20k 中止） | 无 |
+| P4 | finalPlan；migration-finalize 原子写 clear fence + audit proof | fence+audit |
+| P5 | 启动 runtime，检查 CoverageValid/FenceClear/gate | runtime genesis/append |
+| P6 | monitor | 正常 canonical |
+
+顺序强制：gate 先于 proof；fence+proof 同事务；旧 writer 在 proof 后无 admission 仍被拒绝；禁止先 proof 后 gate/fence。
+
+### 8.3 旧 writer 隔离/回滚
+
+- 旧 C1 `5dff386` 无两阶段 admission；gate 拒绝。
+- 旧 Store 代码/直连 DB 绕过 gate 的部分由 P0 停进程/撤销凭证/网络隔离/monitor 兜底；残余即安全事件。
+- 回滚不得恢复旧 writer；新 runtime 失败保持 gate closed/HALTED；修复后新 epoch 重新审计；旧 proof/fence 不删除。
+- 两 migration：anchor 幂等；finalize create-only 一胜；同一 targetEpoch/runId；失败方验证退出。
+
+### 8.4 monitor 停写/清除
+
+- monitor halt 可随时写 fence（只 fence），不依赖 proof 有效；halt 后 runtime/migration/K3 bootstrap/domain 全停。
+- clear 必须引用新 epoch 新 proof；旧 proof 不能 clear；clear 只 fence，不写链/domain/audit。
+- fence 缺失/损坏/tamper → HALTED；初始 clear 与首个 proof 同事务。
+- monitor 自身不可用不自动 clear；启动/周期健康检查失败 → 不就绪/告警（Q20）。
 
 ## 9. 失败零写
 
 ### 9.1 规则
 
-1. 所有证明/覆盖/admission 校验在构造写之前；`EmptyProof`/`ChainProof`/`CoverageValid`/`AdmissionValid` 任一失败立即抛错，返回空写集。
-2. Store `transact` 的 build 抛错 → 不持久化；LocalStore 用 `next` 工作副本，CloudStore 回滚；anchor/evidence/head/audit/domain 均无部分写。
-3. Store gate 在写阶段再次校验 admission/ticket/形状；失败 → 事务回滚；不得先写 anchor 再写 evidence/head 的分步提交。
-4. audit 迁移：anchor 补齐可分批提交（create-only）；audit proof 只在全部成功且写冻结下创建。proof 未创建时运行时仍 `PROOF_REQUIRED`，不会因为“部分 anchor 已存在”而放行。
-5. 每个运行时负向用例必须以**全库快照**（含新增两集合、C2 的 job/grant/log/op/audit）比较内容级零变化；不得只比较 evidence/head。
-6. 迁移失败不得修复/删除已有 evidence/head/anchor；只输出失败清单和阻断结果。
+1. 所有 proof/fence/admission/chain 检查在构造写之前；失败空写集。
+2. Store build 抛错不持久化；LocalStore next 副本/Cloud 回滚；无部分写。
+3. gate 在写阶段校验 final ticket/digest/shape/fence；失败回滚。
+4. migration finalize 的 fence+proof 同事务；失败两者都不写；anchor 可部分（Z_chain）。
+5. 每个负向用例全库快照（含 6 集合 + C2 job/grant/log/op/audit）。
+6. 迁移失败不修复/删除记录；只报告。
 
 ### 9.2 全库零写矩阵
 
-定义：
+- `Z_all`：domain/evidence/head/anchor/audit/fence + C2 job/grant/log/op/domain/audit 零变化；Provider 0。
+- `Z_chain`：chain 关键（domain/evidence/head/audit/fence）零写；仅 anchor 可部分 create-only；runtime 关闭。
 
-- `Z_all`：全库内容级零变化，含 `evidence_digest_domains`、`device_operation_evidence`、`device_operation_evidence_heads`、`device_operation_evidence_chain_anchors`、`evidence_chain_audits`，以及 C2 的 job/grant/log/op key/op domain/audit；Provider 0。
-- `Z_chain`：chain 关键集合（domain/evidence/head/audit proof）零写；仅迁移 anchor 可能已部分 create-only 提交（幂等），runtime 仍关闭。
-
-| ID | 失败 | 检测层 | 期望 | 零写范围 |
+| ID | 失败 | 检测 | 结果 | 范围 |
 |---|---|---|---|---|
-| F01 | K3 config/domain 缺失/单边/损坏/换钥 | K3 | `DOMAIN_*` | `Z_all` |
-| F02 | audit proof 缺失/HMAC/绑定/status/legacyCount/覆盖字段 | CoverageValid | `PROOF_REQUIRED` | `Z_all` |
-| F03 | head=null、anchor=null、E2..E9 任一存在 | EmptyProof 9 IDs | `CHAIN_BROKEN` | `Z_all` |
-| F04 | anchor/head 不配对、E1 缺失、链内祖先缺失、head 后孤儿 | ChainProof | `CHAIN_BROKEN`/`CONFLICT` | `Z_all` |
-| F05 | head CAS 失败/并发非首条 loser | Store CAS | `HEAD_CONFLICT` | `Z_all` |
-| F06 | 并发首条 loser | anchor create-only | `CHAIN_BROKEN` | `Z_all` |
-| F07 | 旧 writer 无 admission/epoch/policy/ticket 错 | Store gate | `PROOF_REQUIRED` | `Z_all` |
-| F08 | gate 缺失/禁用/版本不符（启动） | 启动自检 | 服务不就绪 | `Z_all` |
-| F09 | 写形状违规（genesis 缺 anchor / append 写 anchor / 写 `evidence_digest_domains` / runtime 写 `evidence_chain_audits`） | Store gate | `PROOF_REQUIRED`/`CHAIN_BROKEN` | `Z_all` |
-| F10 | Cloud 事务冲突/写阶段失败 | Cloud transaction | 409/回滚 | `Z_all` |
-| F11 | coverage monitor 发现未知 ID/非规范记录 | monitor | 关闭态/`PROOF_REQUIRED` | `Z_all`（后续写） |
-| F12 | K3 换钥/domain revision 变化 | CoverageValid | `DOMAIN_MISMATCH`/`PROOF_REQUIRED` | `Z_all` |
-| F13 | 迁移扫描发现不可补齐记录 | migration | 不写 proof | `Z_chain`（anchor 未写/部分） |
-| F14 | 迁移 proof 写失败 | migration | 无 proof | `Z_chain`（anchor 可部分） |
-| F15 | 迁移期间旧 writer 尝试 | gate/freeze | 拒绝/告警 | `Z_all`（该 writer 事务） |
+| F01 | K3 config/domain 缺失/损坏/换钥 | K3 | DOMAIN_* | Z_all |
+| F02 | proof 缺失/HMAC/绑定/status/legacyCount/覆盖 | CoverageValid | PROOF_REQUIRED | Z_all |
+| F03 | head=null + E2..E9 | 9 IDs | BROKEN | Z_all |
+| F04 | anchor/head/链/孤儿 | ChainProof | BROKEN/CONFLICT | Z_all |
+| F05 | head CAS/并发 loser | Store | HEAD_CONFLICT | Z_all |
+| F06 | 首条并发 loser | anchor | BROKEN | Z_all |
+| F07 | 旧 writer/epoch/policy/ticket | gate | ADMISSION_REQUIRED | Z_all |
+| F08 | fence halted/缺失/epoch | FenceClear/gate | HALTED | Z_all |
+| F09 | gate 缺失/禁用/版本 | 启动 | 不就绪 | Z_all |
+| F10 | 形状违规（genesis 缺 anchor/append 写 anchor/domain/audit） | gate | ADMISSION/BROKEN | Z_all |
+| F11 | Cloud 冲突/写失败 | Cloud | 409/回滚 | Z_all |
+| F12 | monitor 发现未知/非规范 | monitor | HALTED | Z_all（后续） |
+| F13 | K3 换钥/domain revision | Coverage/Fence | DOMAIN/PROOF/HALTED | Z_all |
+| F14 | 迁移扫描不可补齐 | migration | 不写 proof | Z_chain |
+| F15 | finalize fence+proof 失败 | migration | 无 fence/proof | Z_chain |
+| F16 | inventory >20k 无 export | migration | CAPACITY | Z_chain |
+| F17 | plan 缺失/字段不符 | gate | ADMISSION | Z_chain/Z_all |
+| F18 | domain 写无 bootstrap | gate | K3_BOOTSTRAP_DENIED | Z_all |
 
-**迁移例外说明**：anchor 是 create-only 幂等阻断记录，不是业务链写；迁移失败时允许部分 anchor 已提交，但不得有 evidence/head/domain/audit proof 写入，且 runtime 必须保持关闭。若 Codex 要求迁移也全库零写，则必须改为 staging/事务化方案（Q14），本卡不假设可行。
+## 10. 与 v2/已批准设计差异
 
-## 10. 与已批准设计/当前实现的差异
+| 项 | v2/`b15aceb` | v3 |
+|---|---|---|
+| admission | 单阶段 ticket 含 writesDigest | 两阶段 precheck/final ticket；无循环 |
+| domain | 未在 gate；只读 | domain 在 gate；独立 k3-bootstrap |
+| Store 路径 | 主要 transact | change 拒绝、persist 私有、seed/init 空数组 |
+| migration | 依赖当前 proof/epoch | prePlan/finalPlan 授权未来 proofId/epoch/inventory |
+| monitor | health flag/服务关闭 | 持久 fence + runtime/gate 事务内停写 + clear 新 proof |
+| digest | 分散 | §4.9 统一 canonical/算法/domain |
+| inventory | 2 万行未处理 | export/cursor；超限 CAPACITY；final 时点 |
+| refs | C1 14/C2 23 | C1 15/C2 24（fence） |
+| 错误码 | PROOF_REQUIRED 混用 | PROOF/ADMISSION/HALTED/K3_BOOTSTRAP/CAPACITY 分层 |
 
-| 项 | `b15aceb`/`5dff386` 现状 | 本卡设计 | 原因/需批准 |
-|---|---|---|---|
-| 空链证明 | 事务外预读 + `hasExistingEvidence`（`h4c-evidence.mjs:352-381`） | 事务内 K3 + CoverageValid + admission + anchor + 9 IDs | 关闭 Q04；不信任调用方 |
-| refs | C1 4/5；C2 设计 14–15（`b15aceb` §8.1 `:416`） | C1 14；C2 23；admission 0 refs | 9 IDs + anchor + audit |
-| 集合 | 3 个（`b15aceb` §5.5 `:239-260`） | 5 个（加 anchor/audit） | legacy/head 丢失证明 |
-| 首链写 | evidence + head（`5dff386:467-470`） | anchor + evidence + head | 防 head/seq1 丢失后重建 |
-| 链校验 | 只校验 previous（`5dff386:397-417`） | 完整 1..lastSequence + >last 为空 | 防祖先缺失/孤儿；Q4 |
-| 审计后写入 | 无持续约束；旧 C1 仍可写 | Store admission/epoch/policy/ticket + monitor | 持续禁止旧/非规范 writer；Q11–Q16 |
-| 覆盖失效 | 无 | CoverageValid/失效触发器/启动自检 | 失效 fail closed；Q13 |
-| legacy/迁移 | 设计 §10 `:475` 禁止自动迁移；C1 无迁移 | 受控全量 audit + anchor 补齐 + gate-first switchover；不自动运行 | 部署迁移例外；Q3/Q14 |
-| 错误码 | 无 audit/admission 证明码 | 加 `EVIDENCE_CHAIN_PROOF_REQUIRED/409` | 区分部署未审计与 K3 不可用 |
-| API | `hasExistingEvidence` 入参 | **删除**；只读 Store proof + admission | 消除调用方布尔值 |
-| K3 domain | 固定 global head + 只读 guard | 不变；audit 只绑定、不写 domain | 保持 global K3 锚完整 |
+## 11. 待 Codex 裁定
 
-## 11. 待 Codex 裁定事项
+| 编号 | 事项 | 建议 |
+|---|---|---|
+| Q1 | 新增 anchor/audit/fence 三集合及 Store 注册/exact/create-only | 批准 |
+| Q2 | audit proof HMAC/K3、仅 migration finalize 写 | 批准 |
+| Q3 | legacy L2 补 anchor；L1/L3 abort；部署迁移例外 | 批准 |
+| Q4 | 完整 1..lastSequence 链校验 | 采用 |
+| Q5 | C1 15/C2 24/migration 14/4/monitor 4 refs | 批准 |
+| Q6 | 两阶段 precheck/final ticket/writesDigest 时序 | 批准 |
+| Q7 | domain 写入门 + 独立 k3-bootstrap admission/字段/ticket | 批准 |
+| Q8 | Store.change/persist/seed/init 边界 | 批准 |
+| Q9 | prePlan/finalPlan 未来 proofId/epoch/inventory 授权 | 批准 |
+| Q10 | fence schema/admission/halt/clear/全局停写范围 | 批准 |
+| Q11 | digest canonical/NFC/算法/domain/输入 | 批准 |
+| Q12 | 2 万行 export/cursor/CAPACITY 错误 | 批准 |
+| Q13 | inventory final 时点（anchor 后 proof 前） | 批准 |
+| Q14 | 错误码分层/C2 409/503 映射 | 批准 |
+| Q15 | fence clear 必须新 epoch proof | 批准 |
+| Q16 | K3 bootstrap 与 fence/轮换边界 | 批准 |
+| Q17 | C2 R1 24 refs | 批准 |
+| Q18 | precheck 非权威、final ticket 权威 | 批准 |
+| Q19 | migration plan 是否需要持久化/如何验签 | 裁定 |
+| Q20 | monitor 不可用时启动/周期健康策略 | 裁定 |
+| Q21 | fence 初始 clear 与 proof 同事务 | 批准 |
+| Q22 | C2 reconcile 错误投影（ADMISSION/HALTED/PROOF） | 裁定 |
+| Q23 | persist 私有化/静态扫描方式 | 批准 |
+| Q24 | inventoryDigest 是否包含 recordDigest（建议包含） | 批准 |
 
-| 编号 | 事项 | 建议 | 影响 |
-|---|---|---|---|
-| Q1 | 新增 `device_operation_evidence_chain_anchors` 与 `evidence_chain_audits` 两集合、Store `collections/seed/init/exact/create-only` | 批准 | C1 实现/迁移 |
-| Q2 | audit proof 是否 HMAC + K3 绑定、仅迁移可写 | 批准 HMAC + 静态扫描 | 证明权威性/换钥 |
-| Q3 | legacy 处理：L2 补 anchor；L1/L3 abort；是否允许部署迁移例外 | 批准“只补 anchor、不改 evidence/head、不初始化 K3” | 关闭 legacy |
-| Q4 | 是否采用完整 1..lastSequence 链校验（而非仅 previous） | 建议采用；9 IDs 已付成本 | 祖先缺失/孤儿 |
-| Q5 | C2 R1 23 refs、C1 14、迁移 13/3 是否接受 | 批准；<90 | 90 上限 |
-| Q6 | `EVIDENCE_CHAIN_PROOF_REQUIRED/409` 是否接受；还是复用 `CHAIN_BROKEN` | 建议新增 | 错误投影 |
-| Q7 | 首链并发失败映射 `CHAIN_BROKEN`（建议）还是 `CONFLICT`；是否允许重试为普通 append | 建议 BROKEN，不自动重试首链 | 并发语义 |
-| Q8 | audit ID 含 `keyFingerprint + domainHeadRevision + writeEpoch`；K3 换钥/重新审计必须新 epoch | 批准 | 换钥/迁移 |
-| Q9 | 是否所有 append（含已有链）都要求 coverage/admission；还是仅首链 | 建议全部要求 | 部署门禁 |
-| Q10 | Store 层 canonical evidence ID 前缀/写形状校验是否纳入 admission gate | 建议纳入 gate，不再作为可选 | 非规范写入 |
-| Q11 | **Store admission gate 机制**：K3-HMAC ticket + epoch/policy/writerSet + 写形状（建议）还是 opaque capability/仅 shape | 建议 K3-HMAC ticket；gate 缺失即关闭 | 持续禁止旧 writer |
-| Q12 | audit proof 新字段 `writeEpoch/admissionPolicyVersion/writerSetDigest/auditedCollections`、ID 含 epoch；代码/K3/集合变化必须重新审计 | 批准 | 覆盖权威性 |
-| Q13 | CoverageValid 失效触发器、启动自检、monitor 关闭态 | 建议逻辑失效 + monitor + 启动自检；不引入时效字段 | 覆盖失效 fail closed |
-| Q14 | 迁移切换 gate-first 时序、旧 writer 凭证撤销、回滚禁止旧 writer、迁移 partial anchor 例外 | 批准；迁移失败仅允许 anchor 部分 | 切换安全 |
-| Q15 | admission 拒绝错误码：`PROOF_REQUIRED`（建议）还是 `CHAIN_BROKEN`；旧 writer 是否记录审计事件 | 建议 PROOF_REQUIRED + 告警 | 观测/投影 |
-| Q16 | `writeEpoch/admissionPolicyVersion/writerSetDigest` 的部署配置来源和轮换/重新审计流程 | 批准配置 + 新 epoch proof | 部署运维 |
+## 12. 防御性负向矩阵 N01–N70
 
-## 12. 防御性负向用例矩阵（设计，不执行）
+> 设计矩阵，不执行。`Z`=全库零变化；`X`=允许写集；实现时 LocalStore/fake CloudStore，无 HTTP/外部网络。
 
-> 以下为设计验收矩阵；实现时全部使用 LocalStore/fake CloudStore/合成 fixture，不启动 HTTP、不调用 Provider/设备/生产云。`Z` = 全库内容级零变化（含 anchor/audit）；`X` = 允许写集。
-
-| ID | 前置/注入 | 期望 | 写 |
+| ID | 场景 | 期望 | 写 |
 |---|---|---|---:|
-| N01 | K3 完整；CoverageValid；admission 正确；head/anchor/E1..E9 全空 | 首条成功；anchor+E1+head；domain 0 | X |
-| N02 | **head=null、anchor=null、E2 合法 canonical、无调用方布尔值** | `EVIDENCE_CHAIN_BROKEN/409`；不建 E1/head/anchor | Z |
-| N03 | head=null、anchor=null、E2..E9 任一/全部存在 | `EVIDENCE_CHAIN_BROKEN`；9 IDs 全量拒绝 | Z |
-| N04 | head=null、E1 存在 | `EVIDENCE_CHAIN_BROKEN` | Z |
-| N05 | head=null、anchor 存在、E1..E9 空 | `EVIDENCE_CHAIN_BROKEN`；不得重建 | Z |
-| N06 | head=null、anchor=null、E1..E9 空、audit proof 缺失 | `EVIDENCE_CHAIN_PROOF_REQUIRED` | Z |
-| N07 | audit proof HMAC 错/字段多/少/status 非法/legacyCount>0 | `EVIDENCE_CHAIN_PROOF_REQUIRED` | Z |
-| N08 | K3 domain 双缺/单缺/损坏，audit proof 有效 | `DOMAIN_INCOMPLETE`；K3 优先 | Z |
-| N09 | K3 realm/version/fingerprint 变化 | `DOMAIN_MISMATCH`；不写 | Z |
-| N10 | 已有 canonical 链 E1..EN + anchor；追加 EN+1；admission append | 成功；只写 EN+1+head；anchor 不变 | X |
-| N11 | head.lastSequence=2、E1 缺失、E2 存在 | 完整链校验 `EVIDENCE_CHAIN_BROKEN` | Z |
-| N12 | head.lastSequence=1、E3 孤儿 | >last 非空 `EVIDENCE_CHAIN_BROKEN`/`CONFLICT` | Z |
-| N13 | head/E1..EN 存在、anchor 缺失（legacy L2） | `EVIDENCE_CHAIN_BROKEN`；待迁移 | Z |
-| N14 | anchor 存在、firstEvidenceId 错/org/job 错 | `EVIDENCE_CHAIN_BROKEN` | Z |
-| N15 | anchor 字段多/少/ID 错/createdAt 非法 | anchor validator 失败 → `CHAIN_BROKEN` | Z |
-| N16 | audit proof 的 domainHeadRevision/keyFingerprint/realm 不匹配 | `PROOF_REQUIRED` | Z |
-| N17 | 两个首条 append 并发（不同键） | 一胜；另一 `CHAIN_BROKEN`/`CONFLICT`；仅 1 组 anchor/E1/head | X/Z |
-| N18 | 两个非首条 append 并发 | 一胜；另一 `HEAD_CONFLICT`；无分叉 | X/Z |
-| N19 | 首链事务中 anchor create-only 冲突 | 事务回滚；无 E1/head/部分 anchor | Z |
-| N20 | 首链事务中 E1 预占/head 写冲突 | 事务回滚；无部分写 | Z |
-| N21 | audit 迁移遇到非规范 ID/旧 schema/缺 head | 不写 proof；运行时 `PROOF_REQUIRED` | Z |
-| N22 | legacy L1：3fce9b0 realm 作用域 domain | `DOMAIN_INCOMPLETE`；不自动建 fixed head | Z |
-| N23 | LocalStore 旧数据缺 anchor/audit 数组 | 初始化数组；无 proof → `PROOF_REQUIRED`；不隐式建链 | Z |
-| N24 | audit 迁移成功但某 job anchor 未补齐 | 该 job `CHAIN_BROKEN`；不放行 | Z |
-| N25 | K3 换钥后旧 audit proof | 新 ID 无 proof → `PROOF_REQUIRED`；重新审计前阻断 | Z |
-| N26 | C2 R1 23 refs + R2 8+N≤90 | 无超限；无未声明写；R2 独立事务 | X |
-| N27 | 生产树静态扫描 | 无 `hasExistingEvidence`、无运行时 audit 写、无 K3 init、无无 admission 的 H4-c 写 | Z |
-| N28 | anchor/audit 记录注入敏感字段/未知字段 | exact validator 拒绝；零写 | Z |
-| N29 | head.lastSequence=9 再 append | `EVIDENCE_INVALID`；零写 | Z |
-| N30 | 全空且 audit proof 有效，但 audit proof 绑定旧 domain revision | `PROOF_REQUIRED`；不首链 | Z |
-| N31 | 已有链 anchor/audit 有效，但 expectedHead 过期 | `HEAD_CONFLICT`；零写 | Z |
-| N32 | Store 写阶段 Cloud 事务冲突 | 一胜；失败方回滚；无部分 anchor/evidence/head | Z/X |
-| N33 | 旧 C1 5dff386 writer 无 chainAdmission 写 E1/head | gate 拒绝；`PROOF_REQUIRED`；零写 | Z |
-| N34 | 旧 writer 带错误 epoch/policy/proofId/ticket | gate 拒绝；零写 | Z |
-| N35 | admission 的 writerSetDigest/auditedCollections 与 proof 不一致 | `PROOF_REQUIRED`；零写 | Z |
-| N36 | proof 被删除/HMAC 篡改；已有 canonical 链追加 | 所有 append `PROOF_REQUIRED`；零写 | Z |
-| N37 | K3 换钥/domain revision 变化后 runtime 仍用旧 epoch | proof ID 不命中；`PROOF_REQUIRED`；零写 | Z |
-| N38 | Store gate 未部署/禁用/版本不符 | 启动自检失败；服务不就绪；零写 | Z |
-| N39 | 迁移冻结期旧 writer 尝试写 | gate/freeze 拒绝；无 chain 写 | Z |
-| N40 | 两个 migration 同时写 proof/补 anchor | proof create-only 一胜；anchor 幂等；一个 epoch | X/Z |
-| N41 | 迁移补 anchor 后 proof 写失败 | 无 proof；runtime `PROOF_REQUIRED`；无 evidence/head/domain/audit 写 | Z_chain |
-| N42 | 残留 E2 + 旧 writer 无 admission | `CHAIN_BROKEN`/`PROOF_REQUIRED`；不建新链 | Z |
-| N43 | genesis 缺 anchor / append 写 anchor / 写 domain / runtime 写 audit | gate shape 拒绝；零写 | Z |
-| N44 | 新 epoch 重新审计后旧 runtime/旧 epoch 写入 | gate 拒绝旧 epoch；新 epoch 正常 | Z/X |
-| N45 | monitor 发现未知 ID/非规范记录 | 服务关闭态；后续 append `PROOF_REQUIRED` | Z |
-| N46 | K3 domain 无效但 proof/9 IDs 看似有效 | `DOMAIN_*` 优先；零写 | Z |
-| N47 | proof status/legacyCount/auditedCollections 非法 | `PROOF_REQUIRED`；零写 | Z |
-| N48 | C2 R1 + admission 0 refs + R2 ≤90 | refs 不超限；无未声明写；无额外 refs | X |
+| N01 | canonical empty + proof/fence/admission | 首条成功 | X |
+| N02 | head/anchor null + E2 canonical + no boolean | BROKEN；不建链 | Z |
+| N03 | E2..E9 残留 | BROKEN | Z |
+| N04 | E1 存在 | BROKEN | Z |
+| N05 | anchor 存在/head 空 | BROKEN | Z |
+| N06 | proof 缺失 | PROOF_REQUIRED | Z |
+| N07 | proof HMAC/字段/status/legacyCount 非法 | PROOF_REQUIRED | Z |
+| N08 | K3 domain 缺失/损坏 | DOMAIN_INCOMPLETE | Z |
+| N09 | K3 变化 | DOMAIN_MISMATCH | Z |
+| N10 | canonical chain 追加 | 成功；只写 E+head | X |
+| N11 | head seq2/E1 缺 | BROKEN | Z |
+| N12 | head seq1/E3 孤儿 | BROKEN/CONFLICT | Z |
+| N13 | head/evidence 存在/anchor 缺 | BROKEN | Z |
+| N14 | anchor 字段/ID 错 | BROKEN | Z |
+| N15 | anchor created/firstEvidence 错 | BROKEN | Z |
+| N16 | proof domain/key/revision 不符 | PROOF_REQUIRED | Z |
+| N17 | 两首条并发 | 一胜；另一 BROKEN | X/Z |
+| N18 | 两非首条并发 | 一胜；HEAD_CONFLICT | X/Z |
+| N19 | 首链 anchor 冲突 | 回滚 | Z |
+| N20 | E1/head 写冲突 | 回滚 | Z |
+| N21 | 迁移非规范/缺 head | 不写 proof；PROOF | Z_chain |
+| N22 | legacy L1 3fce9b0 domain | DOMAIN_INCOMPLETE | Z |
+| N23 | LocalStore 缺数组 | 无 proof → PROOF | Z |
+| N24 | 迁移 anchor 未补齐 | BROKEN | Z |
+| N25 | K3 换钥旧 proof | PROOF_REQUIRED | Z |
+| N26 | C1 15/C2 24/R2≤90 | 不超限 | X |
+| N27 | 生产树静态扫描 | 无 boolean/无未授权 audit/domain/change 写 | Z |
+| N28 | anchor/audit/fence 未知字段 | validator 拒绝 | Z |
+| N29 | head seq9 再 append | EVIDENCE_INVALID | Z |
+| N30 | 旧 domain revision proof | PROOF_REQUIRED | Z |
+| N31 | expectedHead 过期 | HEAD_CONFLICT | Z |
+| N32 | Cloud 写冲突 | 回滚 | Z/X |
+| N33 | 旧 C1 无 admission | ADMISSION | Z |
+| N34 | epoch/policy/proof/ticket 错 | ADMISSION | Z |
+| N35 | writerSet/collections 不符 | PROOF_REQUIRED | Z |
+| N36 | proof 删除/HMAC 篡改 | PROOF_REQUIRED；已有链也停 | Z |
+| N37 | K3 换钥旧 epoch | PROOF/HALTED | Z |
+| N38 | gate 缺失/禁用 | 不就绪 | Z |
+| N39 | 迁移冻结旧 writer | ADMISSION | Z |
+| N40 | 两 migration finalize | 一胜；anchor 幂等 | X/Z |
+| N41 | anchor 后 proof 失败 | 无 proof；PROOF | Z_chain |
+| N42 | E2 残留 + 旧 writer | BROKEN/ADMISSION | Z |
+| N43 | 形状违规/domain/audit 写 | ADMISSION/BROKEN | Z |
+| N44 | 新 epoch 后旧 epoch | ADMISSION | Z/X |
+| N45 | monitor 未知 ID | HALTED | Z |
+| N46 | K3 无效但 proof 看似有效 | DOMAIN 优先 | Z |
+| N47 | proof 字段/collections 非法 | PROOF_REQUIRED | Z |
+| N48 | C2 24 + admission 0 refs | 不超限 | X |
+| N49 | precheck 无 writesDigest；final ticket 后 mint | 无循环；成功 | X |
+| N50 | writesDigest 篡改/追加写 | ADMISSION；回滚 | Z |
+| N51 | runtime/migration 写 domain | K3_BOOTSTRAP_DENIED | Z |
+| N52 | k3-bootstrap 精确 head+version；部分/已存在/fence | 成功或拒绝；无其他写 | X/Z |
+| N53 | Store.change H4-c | ADMISSION；其他集合可 | Z |
+| N54 | seed/init 非空；persist 直调 | 拒绝/静态 | Z |
+| N55 | prePlan 缺失/签名错 | anchor 拒绝 | Z |
+| N56 | targetProofId/epoch/policy 不符 | ADMISSION | Z |
+| N57 | finalPlan/inventory/counts 不符 | finalize 拒绝 | Z_chain |
+| N58 | inventory >20k 无 export | CAPACITY；无 proof | Z_chain |
+| N59 | final inventory 时点 anchor 后 proof 前 | digest/counts 一致 | X |
+| N60 | monitor halt | runtime/migration/domain/audit HALTED | Z |
+| N61 | fence 缺失/损坏/epoch 错 | HALTED | Z |
+| N62 | clear 无新 proof | HALTED；不 clear | Z |
+| N63 | halt 全局范围（6 集合） | 全停；读可 | Z |
+| N64 | digest canonical/NFC/key/非法值/recordDigest | 规范一致/拒绝非规范 | Z |
+| N65 | 错误码映射 | PROOF/ADMISSION/HALTED/K3_BOOTSTRAP/CAPACITY 正确 | Z |
+| N66 | C1 15/C2 24/migration 14/4 | ≤90；无未声明写 | X |
+| N67 | C2 追加 job/log 后 final ticket | writesDigest 覆盖；成功 | X |
+| N68 | k3-bootstrap 无 audit proof | 成功；之后仍需 audit | X |
+| N69 | halted 时仅 fence 更新可写 | 其他 H4-c 全拒 | Z |
+| N70 | finalize fence+proof 原子失败 | 两者都不写 | Z_chain |
 
 ## 13. 迁移与交付边界
 
-### 13.1 受控迁移（未来任务，不在本卡实现）
+### 13.1 受控迁移
 
-1. **先停旧写者**：维护窗口/写冻结；停止旧 C1/legacy 进程/脚本，撤销旧 DB 凭证/权限；确认无 in-flight。
-2. **先部署 gate（closed）**：新 Store gate + migration admission；runtime admission 尚不可用；gate 版本/epoch/policy 确定。
-3. 用 CloudStore 权威 `list` 分页扫描 `device_operation_evidence`、`device_operation_evidence_heads`、`device_operation_evidence_chain_anchors`。
-4. 按 `(orgId,jobId)` 校验 canonical 链；对无 anchor 的 canonical job，逐 job create-only 补 anchor；不改 evidence/head。
-5. legacy L1（3fce9b0 realm 作用域 domain）、非规范 ID、缺 head/断链、E1 缺失、不可补齐记录：不写 proof，输出阻断清单；需另立 K3 迁移/清理卡。
-6. 全部成功且 `legacyCount=0` 后，在同一写冻结窗口创建 22 字段 `evidence_chain_audits` proof（writeEpoch=E、policy=P、writerSetDigest=W、auditedCollections=三集合；HMAC/K3 绑定、create-only）。
-7. proof 创建失败或部分 anchor 已提交：运行时仍 `PROOF_REQUIRED`；重跑幂等（已存在 anchor 跳过/校验）。
-8. proof 成功后启动新 runtime（同 E/P/W），启动自检 CoverageValid + gate；接流量；monitor 开启。
-9. 迁移不初始化 K3、不写 domain、不修改 evidence/head、不自动修复业务数据；不保留旧 writer 回滚路径。
+1. P0 停旧 writer/撤 DB 凭证/冻结。
+2. P1 部署 gate（closed）+ migration admission。
+3. P2 pre-scan/validate；生成 prePlan。
+4. P3 补 anchor（prePlan）。
+5. P3.5 final inventory；>20k 无 export → CAPACITY，停止。
+6. P4 finalPlan；migration-finalize 原子写 clear fence + audit proof。
+7. P5 启动 runtime，验证 CoverageValid/FenceClear/gate；接流量。
+8. P6 monitor；halt/clear 按 §4.8。
+9. 不初始化 K3（除独立 k3-bootstrap 卡）；不写 evidence/head；不修复 legacy；不保留旧 writer 回滚。
+10. 迁移 plan 签名/持久化待 Q19；迁移报告记录 inventory 方法/digest。
 
-### 13.2 本卡交付范围
+### 13.2 交付范围
 
-- 只交本设计卡；不新增生产代码、测试、Store 注册、迁移脚本。
-- 不修改 `f2bb6de`/`5dff386` 代码/测试/证据包；不合并 `main`；不 push；不注册 HTTP；不调用 Provider/设备/生产云。
-- C2/C3 继续关闭；本卡不构成 C2 前置批准，也不替代 G1/C2 门禁。
+- 只交设计卡；不新增代码/测试/Store 注册/迁移脚本。
+- 不修改输入分支/代码；不合并/push 共享主线；不注册 HTTP/UI；不调用 Provider/设备/生产云。
+- C2/C3 继续关闭；本卡不构成 C2 前置批准。
 
 ## 14. 验收与停止点
 
-Codex 批准本卡后，才可另发 C1 实现卡；实现卡至少包含：
+Codex 批准后另发 C1 实现卡；至少含：
 
-1. 两集合 schema/Store 注册/静态扫描；
-2. K3 + CoverageValid + admission gate + anchor + 9 IDs + 完整链的运行时代码；
-3. C1 14 refs、C2 23 refs、admission 0 refs 和 90 上限测试；
-4. 本卡 N01–N48 的实现级测试（LocalStore + fake CloudStore，无 HTTP/无外部网络）；
-5. 迁移/切换/gate-first 脚本另立卡，不在 C1/C2 实现中运行。
+1. 三集合 schema/Store 注册/gate 全路径/change 拒绝/persist-seed-init 边界；
+2. K3 + CoverageValid + FenceClear + 两阶段 admission + anchor + 9 IDs + 完整链；
+3. C1 15/C2 24/migration 14/4/monitor 4 refs 与 90 上限；
+4. N01–N70 实现级测试（LocalStore+fake CloudStore，无 HTTP/外部网络）；
+5. migration plan/fence/monitor/K3 bootstrap 工具另立卡。
 
-本卡到此停止；等 Codex 复审并批准设计。
+本卡到此停止；等 Codex 复审并裁定 §11；不进入 C1/C2/C3。
 
 ---
 
-**提交对象：Codex。请复审并裁定 §11；批准后再进入 C1 实现，不启动 C2/C3。**
+**提交对象：Codex。请复审 §11；批准后再进入实现。**

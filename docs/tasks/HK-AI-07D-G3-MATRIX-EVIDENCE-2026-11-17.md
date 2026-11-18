@@ -435,4 +435,60 @@ guard 仍未覆盖以下底层入口，ESM 同步不能代替这些入口的拦�
   FALSIFY/TEMP/`rec.original();` 残留，`git status --short` 仍只有 testkit 与证据文档两文件 M。
 - **结论**：V1–V6 全部 PASS，建议追加提交。HEAD 终态仍 `fd1ab69`，由 team-lead 统一提交。
 
-> 口径不变：90 ID 中 89 PASS + 1（O10）blocked，G3 整体未关闭；O10 待 Q8 独立清理后复验；G4 / 合并 / HTTP / UI / 上线继续冻结。
+> 口径至 `dcb36b8`：90 ID 中 89 PASS + 1（O10）blocked，G3 整体未关闭；O10 待 Q8 独立清理后复验。候选基线状态见 §14。
+
+## 14. E07 清理引入候选基线 + O10 复验（2026-11-18，用户单独授权）
+
+> 本节为**独立候选分支**上的增量状态；§1–§13 是 `fd1ab69` 及之前的历史事实，口径保持不变。
+> 用户原话授权：「将已验收 E07 清理 521a0f0 引入 G3 候选基线，并复验 O10」，并明确
+> 「复验通过不自动代表 G3 关闭」。
+
+### 14.1 候选谱系（来源记录保留）
+- 分支 / 工作树：`feat/hk-face-g3-e07-candidate` / `.tmp-g3-e07-candidate`，从 `dcb36b8` 新建。
+- 谱系：`c8290db … → dcb36b8`（G3 R2 验收）→ cherry-pick `521a0f0` → **`5abfd74`**（候选 HEAD）。
+- 以**普通 cherry-pick** 引入 E07 清理，无冲突；`git show --no-patch HEAD` 保留原 author
+  `1997dmsu-sketch <1997dm.su@gmail.com>`、原 author-date `Tue Nov 17 17:19:10 2026 +0800`
+  与完整 commit body（Q8 cleanup 说明 + 5 行 verification），来源记录未丢。
+- 引入内容：`git show HEAD --stat` 仅 `admin-web/lib/face-service/routes.mjs | 7 -------`，
+  只删 `device-operation-job-retry` 描述符；`device-operation-job-list` 与
+  `device-operation-job-reconcile` 冻结条目保留。
+
+### 14.2 测试零放宽证据
+- `git diff dcb36b8 -- admin-web/tests` 为**空**——测试文件零改动，未放宽任何断言。
+- `git diff dcb36b8 -- admin-web/lib admin-web/server.mjs admin-web/model.mjs` 的唯一差异
+  即删除 retry 描述符那 7 行。
+- 49 入口 guard 仍全挂载：`guardEntryNames().length = 49`（E07 清理不影响 guard）。
+
+### 14.3 O10 三子项复验（现有动态 gate 原断言，未改测试）
+O10 用例（`face-g3-ko.test.mjs:597`）本为动态门禁：三子项全 true → 判 PASS，任一 false → BLOCKED。
+清理引入后实测 diagnostic：
+```
+O10 动态判定 PASS：[["① grep admin-web/lib：无 requeue 可调用入口",true],
+                    ["② server.mjs 无 /retry 分支",true],
+                    ["③ routes.mjs 无 device-operation-job-retry 描述行",true]]
+```
+- ① lib 无 requeue 可调用入口 = true；② server.mjs 无 `/retry` 分支 = true；
+  ③ routes.mjs 无 retry 描述行 = true（E07 清理直接导致）。
+- `BLOCKED_RECORDS` 中 O10 不再登记（blocked=false 与登记一致性已由原断言校验）。
+- **口径提醒（诚实表述）**：O10 是**诊断型门禁**——判定体现在 `t.diagnostic` 日志，
+  O10 子用例本身恒 PASS，不会因 blocked 而 fail 套件。故「套件全绿」不自动等于 O10 强制生效，
+  O10 状态须以本 diagnostic 判定串为准，不得写成「失败即挂套件」。
+
+### 14.4 可证伪（独立验收员 A5，证明 PASS 由清理驱动非橡皮图章）
+- 备份 routes.mjs 后，临时把 retry 描述符 7 行插回（pre-E07 形态）：O10 diagnostic 翻转为
+  **`BLOCKED`，③=false**（①②仍 true）；精确 `cmp` 逐字节还原后回到 PASS。
+- 因果链成立：删那 7 行 → ③=true/PASS；插回那 7 行 → ③=false/BLOCKED。
+
+### 14.5 实测计数（候选基线，全程预载 guard 的非 HTTP 套件）
+- 五文件统一套件：`# tests 326 / # pass 326 / # fail 0`（cancelled/skipped/todo 均 0）。
+- 逐文件：`face-strict-retry` 130、`face-g3-testkit` 7、`face-g3-psrtn` 99、
+  `face-g3-ko` 73、`face-g3-c` 17（合计 326）。与 `dcb36b8` 计数一致。
+- 独立验收员 6/6 PASS（谱系/来源记录、cherry-pick 精确、O10 三子项、五文件套件、
+  可证伪复现、49 入口 guard），生产零越界改动、`git diff --check` 通过、工作树干净。
+
+### 14.6 90 ID 状态与边界
+- 90 ID：89 条原 PASS 不变 + **O10 在候选基线由 blocked 转 PASS**（同一原断言复验，未改测试）。
+  候选基线层面 90 ID 均达 PASS 判据。
+- **G3 整体仍未关闭**：按用户授权「复验通过不自动代表 G3 关闭」，本候选基线交 Codex 独立复审，
+  复审通过前不得宣布 G3 关闭。
+- 继续冻结：G4、main/07B 合并、HTTP/UI 接线、部署、上线。停手于候选分支，不合并回 `feat/hk-face-g3-matrix`。

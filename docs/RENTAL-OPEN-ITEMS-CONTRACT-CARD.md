@@ -1,11 +1,12 @@
-# 预签约三项开放问题 · 技术裁定回写（第三版）
+# 预签约三项开放问题 · 技术裁定回写（第四版）
 
 - 日期：2026-11-18
 - 执行者：DSH 根代理 `lead`（`deepseek-flash`），Windows PowerShell 5.1 / Node v24.19.0
-- 工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\rental-contract-decisions`
-- 分支：`codex/rental-contract-decisions`
-- 输入 SHA：`cfd25193934094c1653d4898f7df053f25becca4`
-- 本卡父提交：`cfd25193934094c1653d4898f7df053f25becca4`
+- 工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\rental-v4-review-fixes`
+- 分支：`docs/rental-contract-v4-review-fixes`
+- 输入分支：`codex/rental-contract-decisions`
+- 输入 SHA：`95e438939e8d8812dbb9838ac2c4a6e7ac50db24`
+- 本卡父提交：`95e438939e8d8812dbb9838ac2c4a6e7ac50db24`
 - 代码基线：`3bf595140088bc71a3939fb67880807965e9c566`
 - 状态：**仅卡文修订，不实现、不改生产代码/测试/Store；待 Codex 批准**
 - 来源说明：完整云报告 `/workspace/artifacts/DEL-AI-01-CONTENT-REVIEW-2026-11-18/REVIEW.md` 在本机不可读；已检查 `/workspace`、`C:\workspace`、`D:\workspace` 及工作区目录，未找到可读副本。**不声称已读完整报告或已逐项关闭其内容**；本卡按本轮消息已明确的裁定修订，未明确处列入 §9。
@@ -15,10 +16,10 @@
 
 | 项 | 最终裁定 |
 |---|---|
-| 同订单并发 paymentParams | **持久单飞**：订单内嵌 `paymentRequest`；事务 CAS + lease/epoch；并发第二方 409；成功缓存复用 |
+| 同订单并发 paymentParams | **持久单飞**：订单内嵌 `paymentRequest`；事务 CAS + lease/epoch；并发第二方 409 `PAYMENT_PARAMS_IN_PROGRESS`；成功缓存复用 |
 | 外部请求可能已发出后 complete 失败 | **保留待对账事实**；不得回滚为 `none` 或可重发 `failed`；旧 attempt 不得覆盖新 epoch |
 | 未知支付结果 | **先 query 对账，禁止直接重发**；`NOTPAY`/`USERPAYING` 无缓存时保持待对账、不 create；人工重置/退款另案 |
-| 支付请求失败 vs 订单终止 | 请求失败/未知**不释放 hold**；仅订单终止/取消/失效释放；继续支付必须有有效自有 hold |
+| 支付请求失败 vs 订单终止 | 请求失败/未知**不自动终止有效订单、不释放有效自有 hold**；仅明确订单生命周期动作（取消/预约拒绝/未付款关闭/订单失效，以及存在明确已批准依据的退款）可释放；继续支付必须有有效自有 hold |
 | 通知重放 | `transaction_id` 非空严格校验；跨订单唯一事实；**完整支付事实字段比对**；重复通知零新增（含 audit） |
 | 缓存 prepay 与签名参数 | **分离**：`prepay` 标识与 `clientParams` 各自有效期；不得仅等于订单截止；签名过期本地重签，prepay 过期才失效 |
 | 隐私 | 单一整数 `privacyVersion`；旧数据不自动同意；重新同意不强制重传；已付订单不强制重新下单/缴款；退款独立依据 |
@@ -95,7 +96,7 @@
 
 1. 同订单必须满足 `preparing` 只有一个有效 lease。
 2. 第二并发调用：
-   - 看到有效 `preparing`/`reconciling` lease：**409 PAYMENT_PARAMS_IN_PROGRESS**；不调用 create、不写 audit。
+   - 看到有效 `preparing`/`reconciling` lease：**409 `PAYMENT_PARAMS_IN_PROGRESS`**；不调用 create、不写 audit。
    - 看到有效 `ready`：返回缓存参数；create 0 次。
 3. 接管 CAS：
    - 仅 `none`、`failed`、或 lease 已过期的 `preparing`/`reconciling` 可接管；
@@ -103,7 +104,7 @@
    - CAS 失败返回 409，不重试写入。
 4. `ready` 过期或订单过期：拒绝；不得返回旧参数。
 5. **自有 hold 是继续支付的硬条件**：`hold.orderId === order._id` 且 `hold.until > now`，否则不得 create/返回参数。
-6. **支付请求失败/未知不释放 hold**；只有订单终止/取消/预约拒绝/未付款关闭/退款等订单生命周期动作才释放 hold。请求失败后可继续用同一有效 hold 重试/对账。
+6. **支付请求失败/未知不自动终止有效订单、不释放有效自有 hold**；只有明确订单生命周期动作（取消、预约拒绝、未付款关闭、订单失效，以及存在明确已批准依据的退款，依据清单/审批见 §9.2）才释放 hold。置 `failed` 或保持 `reconciling` 都不是订单生命周期动作，不得借此释放 hold。请求失败后可继续用同一有效 hold 重试/对账。
 7. 旧 attempt/epoch 的 complete/reconcile 写入必须失败；新 epoch 持有者不得被旧结果覆盖。
 
 ### 4.3 商户 query 全状态表
@@ -113,15 +114,24 @@
 | 商户 query 状态 | 处理 |
 |---|---|
 | `SUCCESS` | 校验 appid/mchid/金额/币种/payer/out_trade_no/transaction_id/时间；写真实支付事实；订单有效则按 eligible 留房/paid_held，订单失效/旧单则 `refund_required`；不得新 hold |
-| `REFUND`/`REFUND_SUCCESS` | 写退款事实（独立依据）；按规则释放 hold；不得新 hold；保留原支付事实 |
-| `NOTPAY` | 若有可复用 `ready` 参数则返回缓存；否则保持 `reconciling`，返回 409/503，**不重发 create**；人工重置/退款另案 |
-| `USERPAYING` | 保持 `reconciling`；返回 409/503；不重发 |
-| `CLOSED`/`REVOKED`/`PAYERROR` | 置 `failed`；订单仍有效才允许显式重试；不生成/保留 hold |
-| `ORDER_NOT_EXIST` | 置 `failed`；订单仍有效才允许显式重试；不保留 hold |
-| query 超时/网络错误/未知状态码 | 保持 `reconciling`；返回 503/409；不重发 |
-| 其他未知 | 保持 `reconciling`；不得当作未创建/已失败 |
+| `REFUND`/`REFUND_SUCCESS` | 写退款事实（明确已批准独立依据，§9.2）；仅按该已批准依据释放 hold；不得新 hold；保留原支付事实 |
+| `NOTPAY` | 若有可复用 `ready` 参数则返回缓存；否则保持 `reconciling`，固定 **409 `PAYMENT_PARAMS_IN_PROGRESS`**，**不重发 create**；有效自有 hold 保留；人工重置/退款另案 |
+| `USERPAYING` | 保持 `reconciling`；固定 **409 `PAYMENT_PARAMS_IN_PROGRESS`**；不重发；有效自有 hold 保留 |
+| `CLOSED`/`REVOKED`/`PAYERROR` | 置 `failed`；订单仍有效才允许显式重试；不新增 hold；**已持有的有效自有 hold 保留，置 `failed` 不释放 hold** |
+| `ORDER_NOT_EXIST` | 置 `failed`；订单仍有效才允许显式重试；不新增 hold；**已持有的有效自有 hold 保留，置 `failed` 不释放 hold** |
+| query 超时/网络错误/未知状态码 | 保持 `reconciling`；固定 **503 `PAYMENT_QUERY_UNAVAILABLE`**；不重发；有效自有 hold 保留 |
+| 其他未知 | 保持 `reconciling`；固定 **503 `PAYMENT_QUERY_UNAVAILABLE`**；不得当作未创建/已失败；有效自有 hold 保留 |
 
 `NOTPAY`/`USERPAYING` 且无本地缓存参数时，保持 `reconciling`、不 create；人工重置和退款另案，不在本卡放行重发。
+
+**HTTP 状态与错误码（每状态唯一预期，不得二选一）**：
+
+| 类别 | 唯一状态码 | 适用状态 |
+|---|---|---|
+| 已知处理中/对账中 | **409 `PAYMENT_PARAMS_IN_PROGRESS`** | 有效 `preparing`/`reconciling` 单飞（含第二并发）；query 返回 `NOTPAY`/`USERPAYING` 且无可用缓存 |
+| 查询不可用/结果未知 | **503 `PAYMENT_QUERY_UNAVAILABLE`** | query 超时、网络错误、未知状态码、其他未知状态 |
+
+同一状态只返回上表中的一个固定状态码，不得为同一状态给出候选状态二选一；409 复用 §4.2 同一错误码，不新增第二套并发错误码。
 
 ### 4.4 未知/失败/超时转移表
 
@@ -134,9 +144,9 @@
 | `preparing` | 旧 attempt/epoch 的完成回调 | 当前 epoch 不变 | 409/丢弃旧结果；**旧 attempt 不得覆盖新 epoch** |
 | `preparing`/`reconciling` | lease 过期/进程崩溃 | `reconciling(epoch+1)` | 接管后先 query；禁止 create |
 | `reconciling` | query `SUCCESS` | `ready` 后转支付事实 | 写事实；按订单状态留房/退款；不 create |
-| `reconciling` | query `NOTPAY`/`USERPAYING` 且无缓存 | `reconciling` | 不 create；人工重置/退款另案 |
-| `reconciling` | query `CLOSED/REVOKED/PAYERROR/ORDER_NOT_EXIST` | `failed` | 清除 prepay；订单/自有 hold 有效才可显式重试 |
-| `reconciling` | query 超时/未知 | `reconciling` | 不 create；保留 lastQueryAt |
+| `reconciling` | query `NOTPAY`/`USERPAYING` 且无缓存 | `reconciling` | 不 create；返回 409 `PAYMENT_PARAMS_IN_PROGRESS`；保留有效自有 hold；人工重置/退款另案 |
+| `reconciling` | query `CLOSED/REVOKED/PAYERROR/ORDER_NOT_EXIST` | `failed` | 清除 prepay；不释放有效自有 hold；订单/自有 hold 有效才可显式重试 |
+| `reconciling` | query 超时/未知 | `reconciling` | 不 create；返回 503 `PAYMENT_QUERY_UNAVAILABLE`；保留 lastQueryAt 与有效自有 hold |
 | `failed` | 显式重试 | `preparing(epoch+1)` | 仅 query 确认外部无有效支付且订单/自有 hold 有效；每尝试最多一次 create |
 
 **硬性不变量**：
@@ -144,7 +154,7 @@
 1. `externalRequestSentAt` 非空后，不得回到 `none` 或可重发的 `failed`；只能 `reconciling`/`ready`/支付事实。
 2. `failed` 只能在商户 query 明确无有效支付/无 prepay 后进入。
 3. 任何 complete/reconcile 写入都带 attemptId+epoch 条件；旧 epoch 不得覆盖新 epoch。
-4. 继续支付必须有有效自有 hold；请求失败本身不释放 hold、不改变订单终止状态。
+4. 继续支付必须有有效自有 hold；请求失败/未知本身不自动终止有效订单、不释放有效自有 hold。只有明确订单生命周期动作（含已有明确已批准依据的退款）才释放 hold。
 
 ### 4.5 事务 refs、回滚、审计、外部事实
 
@@ -153,7 +163,7 @@
 - **外部请求已发出**（`externalRequestSentAt` 非空，含超时/响应丢失/complete 失败）：只能进入 `reconciling`，保留待对账事实；不得删除/回滚为 `none`/`failed`/可重发，不得把本地失败当商户未创建。
 - 只有确认 create 从未发出时，才允许清除/恢复 `paymentRequest`；任何“外部可能已发出”的失败不得回滚。
 - 成功：保存 `prepay` + `clientParams` + 一条成功审计。
-- 支付请求失败/未知**不释放 hold**；hold 仅由订单终止/取消/拒绝/未付款关闭/退款等生命周期动作释放；继续支付必须有有效自有 hold。
+- 支付请求失败/未知**不自动终止有效订单、不释放有效自有 hold**；hold 仅由明确订单生命周期动作（取消、拒绝、未付款关闭、订单失效，以及存在明确已批准依据的退款）释放；继续支付必须有有效自有 hold。
 - 内部 `paymentRequest` 的 claim/lease/reconciling 写入是待对账状态，不是支付事实；验收矩阵单列，不伪装成“全库零写”。
 - 真实支付事实是例外：即使订单失效也必须写入 `rental_payment_transactions`，用于退款对账。
 - 外部 exactly-once 不承诺；本地单飞只保证同订单同一时刻最多一个 create。
@@ -236,7 +246,7 @@
    - 隐私变化不是退款依据；
    - 退款必须有独立依据（商户退款决定、重复/超额到账、超时到账等）并单独记录；
    - 不得因 privacyReviewStatus 自动写 refund_required；
-   - 若真发生退款，写独立退款事实、释放 hold，保留原支付/退款事实。
+   - 若真发生退款，写独立退款事实，仅按明确已批准依据（§9.2）释放 hold，保留原支付/退款事实。
 3. 未付款订单（`awaiting_payment`）隐私变化：
    - 按材料变更失效并释放 hold、清除预支付缓存；
    - 用户重新同意后重新 quote/新订单；旧参数到账按真实事实处理。
@@ -255,17 +265,18 @@
 
 | 场景 | create | query | 期望 |
 |---|---:|---:|---|
-| 两并发，第一 preparing | 1 | 0 | 第一 ready；第二 409；无第二份创建 |
+| 两并发，第一 preparing | 1 | 0 | 第一 ready；第二 409 `PAYMENT_PARAMS_IN_PROGRESS`；无第二份创建 |
 | ready 后再调用（prepay+签名有效） | 0 | 0 | 返回缓存；不重复审计/不重签 |
 | ready 但签名过期、prepay 有效 | 0 | 0 | 本地重签 clientParams；不 create |
 | ready 但 prepay 过期 | 0 | 0/≥1 | 缓存失效；不得返回旧参数；按订单/外部状态处理 |
-| 第二方在 ready 前重试 | 0 | 0 | 409；不创建 |
+| 第二方在 ready 前重试 | 0 | 0 | 409 `PAYMENT_PARAMS_IN_PROGRESS`；不创建 |
 | create 成功但 complete 失败（外部可能已发出） | 1 | 0 | 保留 reconciling/待对账；不回滚 none/failed；不返回参数 |
 | 旧 epoch 完成回调 | 0 | 0 | 被拒绝/丢弃；不覆盖新 epoch |
 | lease 过期后接管 | 0→按 query | ≥1 | 先 reconciling/query；不直接 create |
 | create 超时/5xx | 1 | 0 | 进 reconciling；不返回参数；不写 audit |
-| query NOTPAY/USERPAYING（无缓存） | 0 | ≥1 | 保持 reconciling；不重发；人工重置另案 |
-| query CLOSED/REVOKED/PAYERROR/ORDER_NOT_EXIST | 0 | ≥1 | failed；订单/自有 hold 有效才显式重试 |
+| query NOTPAY/USERPAYING（无缓存） | 0 | ≥1 | 保持 reconciling；409 `PAYMENT_PARAMS_IN_PROGRESS`；不重发；有效自有 hold 保留；人工重置另案 |
+| query CLOSED/REVOKED/PAYERROR/ORDER_NOT_EXIST | 0 | ≥1 | failed；不释放有效自有 hold；订单/自有 hold 有效才显式重试 |
+| query 超时/网络错误/未知状态 | 0 | ≥1 | 保持 reconciling；503 `PAYMENT_QUERY_UNAVAILABLE`；不重发；有效自有 hold 保留 |
 | query SUCCESS | 0 | 1 | 支付事实；按状态留房/refund；不新 hold |
 | 继续支付但自有 hold 已释放/非本单 | 0 | 0 | 409；不得 create/返回旧参数 |
 | 崩溃/lease 过期 | 0（先 query） | ≥1 | 禁止恢复即 create |
@@ -290,7 +301,7 @@
 | privacyText 变化 | privacyVersion +1；旧同意失效；quote/pay/finish 需要新同意 |
 | 旧证件/旧数据 | 不自动同意；可显式同意并绑定现有有效证件，不强制重传 |
 | 已付有效订单隐私变化 | 保留支付/占位；privacyReviewStatus=consent_required；不重新下单/缴款；同意后可继续签约 |
-| 已付订单退款 | 仅独立依据；写退款事实；释放 hold；保留原支付事实 |
+| 已付订单退款 | 仅明确已批准独立依据（§9.2）；写退款事实；按该依据释放 hold；保留原支付事实 |
 | 未付款隐私变化 | 失效/释放 hold/清预支付；重新同意后新订单 |
 | 证件失效/更换 | 重新上传/审核；同意绑定新材料 |
 
@@ -307,12 +318,12 @@
 | 缓存命中但签名过期 | 本地重签；不 create；不重复生成 prepay |
 | 继续支付但自有 hold 失效 | 零写（含 audit）；409 |
 | 真实支付事实 | 必须落 `rental_payment_transactions` + 订单事实；外部事实例外 |
-| 退款 | 独立依据 + 退款事实；不得由隐私自动触发 |
+| 退款 | 明确已批准独立依据 + 退款事实；不得由隐私自动触发 |
 | finish 失败 | 零写（含 audit） |
 
 ## 8. 实施文件范围（待批准后才做）
 
-- `cloudfunctions/leasing/domain.js`：paymentRequest CAS/lease/epoch/query；prepay/clientParams 分离；external complete failure→reconciling；transaction_id 严格校验；`rental_payment_transactions` 事实；privacyVersion/consent；各状态绑定。
+- `cloudfunctions/leasing/domain.js`：paymentRequest CAS/lease/epoch/query；prepay/clientParams 分离；external complete failure→reconciling；transaction_id 严格校验；`rental_payment_transactions` 事实；privacyVersion/consent；各状态绑定；409 `PAYMENT_PARAMS_IN_PROGRESS` / 503 `PAYMENT_QUERY_UNAVAILABLE` 固定错误码。
 - `cloudfunctions/leasing/wechat-pay.js`：缓存 prepayId 的本地重签（clientParams），不重新 create；真实商户调用仍走现有适配器。
 - `cloudfunctions/leasing/store.js`：allowed collections 增加 `rental_payment_transactions`、`rental_identity_consents`；仅必要事务字段/选项。
 - `admin-web/lib/store.mjs`：对应集合/事务能力。
@@ -339,9 +350,9 @@
 2. 真实云崩溃/lease 过期：重启后先 `reconciling`/query；create 已发出但 complete 失败必须保留待对账，不得回滚 none/重发；旧 epoch 不得覆盖新 epoch。
 3. 真实商户：create/query 的全部状态（含 `NOTPAY`、`USERPAYING`、`CLOSED`、`REVOKED`、`PAYERROR`、`ORDER_NOT_EXIST`、超时/未知）与时间窗口；确认微信查询语义。
 4. 跨订单同 `transaction_id` 唯一事实：同一流水跨订单 409；同订单同流水完整事实（订单/金额/币种/商户/付款人等）一致才幂等，不一致 409 零写；真实通知重放/并发。
-5. 无缓存 `NOTPAY`/`USERPAYING`：保持 `reconciling`、不 create；人工重置/退款另案。
+5. 无缓存 `NOTPAY`/`USERPAYING`：保持 `reconciling`、固定 409 `PAYMENT_PARAMS_IN_PROGRESS`、不 create、有效自有 hold 保留；人工重置/退款另案。
 6. prepay 与 clientParams 独立有效期：prepay 过期不可用；签名过期本地重签；不得把二者简单设为订单截止；缓存命中/重签/失效路径。
-7. 支付请求失败不释放 hold；订单终止才释放；继续支付必须持有本订单有效 hold。
+7. 支付请求失败/未知不自动终止有效订单、不释放有效自有 hold；只有明确订单生命周期动作（含已批准退款）才释放；继续支付必须持有本订单有效 hold；409 `PAYMENT_PARAMS_IN_PROGRESS` / 503 `PAYMENT_QUERY_UNAVAILABLE` 固定错误码按 §4.3 验证。
 8. 未知结果 query 后的重试/人工处置；不得直接重发；旧单与新占位隔离。
 9. 隐私变化已付订单：保留支付事实与 hold、不强制重新下单/缴款、不自动退款；独立退款依据与退款事实/占位释放。
 10. 非隐私变更（押金/留房/模板文本）不递增 privacyVersion、不触发重传/重新同意。
@@ -352,9 +363,9 @@
 
 ## 11. 验收/证据与边界
 
-- 本轮只改文档：未运行测试、未安装依赖、未改生产/测试/Store、未启动 HTTP/UI、未接真实支付/云/设备。
+- 本轮只改文档（唯一文件 `docs/RENTAL-OPEN-ITEMS-CONTRACT-CARD.md`）：未运行测试、未安装依赖、未改生产/测试/Store、未启动 HTTP/UI、未接真实支付/云/设备。
 - 完整云报告不可读：已检查 `/workspace`、`C:\workspace`、`D:\workspace` 及工作区，未找到可读副本；不声称已读或已关闭完整报告。
-- 目标远端 `refs/heads/codex/rental-contract-decisions` 在 fetch 后 tip=`cfd2519...`，与输入 `HEAD` 0/0（无前移/分叉）。最终推送/ls-remote/GitHub 固定 SHA 文件链接以提交后实测为准。
+- 输入固定 SHA：`95e438939e8d8812dbb9838ac2c4a6e7ac50db24`；fetch 后 `refs/remotes/origin/codex/rental-contract-decisions` 与输入 `HEAD` 一致（0/0，无前移/分叉），`git ls-remote` 实测远端 tip 同为 `95e438939e8d8812dbb9838ac2c4a6e7ac50db24`。输出分支 `docs/rental-contract-v4-review-fixes` 提交后普通 push，最终 ls-remote/GitHub 固定 SHA 文件链接以推送后实测为准。
 - G3/O10 不重复；G4 执行、C1 实现、C2/C3、main/07B、HTTP/UI、部署上线冻结。
 
 ## 12. 停止点

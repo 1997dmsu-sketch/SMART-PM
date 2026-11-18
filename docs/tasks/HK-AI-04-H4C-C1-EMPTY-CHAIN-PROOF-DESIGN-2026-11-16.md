@@ -2,13 +2,17 @@
 
 > 状态：**设计提案，待 Codex 复审。** 本稿只修订设计文档；不实现 C1、不修改任何生产代码/测试/Store、不进入 C2/C3/G4、不注册 HTTP、不调用 Provider/设备/生产云。
 >
-> 输入设计卡：`575d8b63501bec5f9c7211a128baf86d53fbd63a`（父 `fb75cf0`，C1 代码基线 `5dff386`）。
+> 输入设计卡：`3d52ee878362e4db65f15e947174e73db2947d90`（父 `ad8bb47`，C1 代码基线 `5dff386`）。
 >
 > 已批准设计：`docs/hk-face-h4c-reconciliation-design @ b15aceb`；批准/任务卡：`ed7b66f`；C2 前置检查：`42f8970`。
 >
 > 本稿保留 v3/v4 修订，并在 §15 追加 v5 权威章节：K3 marker/维护窗口/旧 writer 撤权、plan 签名保存与防重放、monitor 健康期限/时钟/事务内停写、统一 bootstrap fence 与预算。**v4 正文与 §15 冲突处以 §15 为准。**
 >
-> v5 输入：`3ac5cf9483caebcaf8f5aeb1df8fd4aca9bfb13f`（父 `575d8b6`）。\n>\n> **v6 输入：`3d52ee878362e4db65f15e947174e73db2947d90`（父 `ad8bb47`）；v6 权威修订见 §16，与 v5/v4 冲突处以 §16 为准。** v6 关闭 marker 短 ID、plan 状态签名、recovery source CAS、不可变 K3 marker/可变 writer 授权四项。\n>\n> 完整云报告 `/workspace/artifacts/DEL-AI-01-CONTENT-REVIEW-2026-11-18/REVIEW.md` 未提供可读正文；已查可访问位置均不可读，未声称逐项关闭。G3 已在 `5f1d7a4` 关闭、O10 PASS，本卡不重复派发；G4/C2/C3/合并/HTTP/UI/部署/上线继续冻结。
+> v5 输入：`3ac5cf9483caebcaf8f5aeb1df8fd4aca9bfb13f`（父 `575d8b6`）。
+>
+> **v6 输入：`3d52ee878362e4db65f15e947174e73db2947d90`（父 `ad8bb47`）；v6 权威修订见 §16，与 v5/v4 冲突处以 §16 为准。** v6 关闭 marker 短 ID、plan 状态签名、recovery source CAS、不可变 K3 marker/可变 writer 授权四项。
+>
+> 完整云报告 `/workspace/artifacts/DEL-AI-01-CONTENT-REVIEW-2026-11-18/REVIEW.md` 未提供可读正文；已查可访问位置均不可读，未声称逐项关闭。G3 已在 `5f1d7a4` 关闭、O10 PASS，本卡不重复派发；G4/C2/C3/合并/HTTP/UI/部署/上线继续冻结。
 
 ## 0. 结论摘要
 
@@ -26,7 +30,7 @@
 
 ### 1.1 输入事实
 
-- 唯一工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-design-v4`，分支 `codex/h4c-empty-proof-v4`，HEAD = `3ac5cf9483caebcaf8f5aeb1df8fd4aca9bfb13f`，父 `575d8b6`。
+- 唯一工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-design-v4`，分支 `codex/h4c-empty-proof-v4`，HEAD = `3d52ee878362e4db65f15e947174e73db2947d90`，父 `ad8bb47`。
 - 输入分支 `feat/hk-face-h4c-reconciliation` 本地/origin 跟踪 ref 均为 `5dff386`；本卡不修改输入分支。
 - C1 代码基线 `5dff386`；C2 仅 `42f8970` 前置文档；C3/G4 未开始；调度工作区 `SMART-PM-H3` 未修改。
 - 本稿只改设计卡；不新增生产代码、测试、Store 注册或迁移脚本。完整云报告本机不可读，未声称读取。
@@ -580,11 +584,11 @@ Codex 批准后另发 C1 实现卡；至少含：
 2. K3+Coverage+Fence+two-phase admission+anchor+9 IDs+完整链；
 3. finalWriteSet+唯一 audit+explicit mode+no double audit；
 4. recovery 状态机/独立授权/原子 proof+fence+audit；
-5. v5：C1 16/C2 25/migration 17/7/recovery 7/monitor 5/k3 5/plan 2 ≤90；
-6. N01–N96 实现级测试（N01–N80 沿用 v4；N81–N96 见 §15.6；无 HTTP/外部网络）；
+5. v6：C1 17/C2 26/migration 18/8/recovery 8/monitor 7/k3 5/plan 2/writer rotate 8 ≤90；
+6. N01–N112 实现级测试（N01–N96 沿用 v5；N97–N112 见 §16.6；无 HTTP/外部网络）；
 7. 迁移/恢复/fence/monitor/K3 bootstrap 工具另立卡。
 
-本卡停止；等 Codex 复审 §15.6（Q28–Q31）及 §11；不进入 C1/C2/C3/G4。
+本卡停止；等 Codex 复审 §16.6（Q32–Q35）及 §11；不进入 C1/C2/C3/G4。
 
 ## 15. v5 权威修订（v5 历史；v6 §16 覆盖冲突处）
 
@@ -806,8 +810,6 @@ v5 对 v4 Q5/Q7/Q10/Q17/Q26/Q27 的预算/scope 更新：
 - G3 `5f1d7a4` 关闭/O10 PASS 不重派；G4 执行/C1 实现/C2/C3/main/07B 合并/HTTP/UI/部署上线冻结。
 
 ---
-
-**提交对象：Codex。请复审 v6 §16（Q32–Q35、N97–N112、预算/状态机/失败矩阵）；本稿不声称完整云报告已读或逐项关闭。不自批。**
 
 ## 16. v6 权威修订（覆盖 v5/v4 冲突处）
 

@@ -3,7 +3,7 @@
 - 日期：2026-11-18（Asia/Shanghai）。状态：仅任务卡修订，待独立审批；**不授权合并，也不授权执行本卡步骤**。
 - 修订依据：独立只读复审（2026-11-18，任务B，结论 NEEDS_REVISION）F1–F8；本版只补充执行前置、依赖安装规则、guard 设施、差异边界与记录口径，不改变原范围与冻结边界。
 - 固定生产基线：`8ff350d3f6ec41e67cc8d42639f8c37cf96323da`；分支 `docs/hk-face-queryjob-provenance` 的 tip；直接父 `59a737acf49e249a8e3388867ca605e90a47ca61`。
-- 执行工作树起点：本卡提交（当前 `bd3771283e81c98c6e097e0c5711c0da76017bb2`，父 = 上述基线，相对基线仅新增本卡）。若本卡再次修订，以修订后提交为起点；生产代码始终以 `8ff350d` 为基线，须用 `git diff --stat 8ff350d..HEAD` 证明除本卡（及后续修订）外零差异。
+- 执行工作树起点：本卡所在提交（执行分支 HEAD）。其祖先链为 `bd3771283e81c98c6e097e0c5711c0da76017bb2`（上一版卡）→ `8ff350d3f6ec41e67cc8d42639f8c37cf96323da`（生产基线）；生产代码始终以 `8ff350d` 为基线，须用 `git diff --stat 8ff350d..HEAD` 证明除本卡（及后续修订）外零差异。
 - 参考 main：`282a20fca9f64ab80ead50372c9c3e90bf4aeba7`。执行时必须重新 fetch 并记录 main 实际 SHA；main 前移后不得沿用旧的无冲突结论。
 - 07B 验收指针：07B 终审与里程碑结论以调度方验收记录为准（G3 已于 `5f1d7a4` 验收关闭、O10 PASS，**不重派、不复核**）；本卡不自行认定 07B 通过；本地若无 `5f1d7a4` 对象，只能引用调度方记录，不得用其他 SHA 冒充。
 - 来源登记基线：`docs/backend-provenance.json` 61 个文件、`docs/backend-changes.json` 3 条变更（phoneLogin/getHouses/contentList）、`design/asset-manifest.json` 318 项、`cloudfunctions/` 24 个函数。此前来源哈希在 **blob 级 61/61** 一致；完整 verify-import 曾因缺 wx-server-sdk 未跑完。

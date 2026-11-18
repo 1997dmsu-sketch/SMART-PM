@@ -1,4 +1,4 @@
-# HK-AI-04 H4-c C1 空链证明设计 v7（v6 三项退修稿）
+# HK-AI-04 H4-c C1 空链证明设计 v8（writer epoch 唯一性修订稿）
 
 > 状态：**设计提案，待 Codex 复审。** 本稿只修订设计文档；不实现 C1、不修改任何生产代码/测试/Store、不进入 C2/C3/G4、不注册 HTTP、不调用 Provider/设备/生产云。
 >
@@ -6,13 +6,15 @@
 >
 > 已批准设计：`docs/hk-face-h4c-reconciliation-design @ b15aceb`；批准/任务卡：`ed7b66f`；C2 前置检查：`42f8970`。
 >
-> 本稿保留 v3–v6 修订，并在 §17 追加 v7 权威章节：一次性执行授权/持久运行授权分离、plan 39 字段持久 schema 与 statusTicket 重建、健康过期/显式 halted 分离与唯一恢复流程。**v4/v5/v6 正文与 §17 冲突处以 §17 为准。**
+> 本稿保留 v3–v6 修订，并在 §17 追加 v7 权威章节：一次性执行授权/持久运行授权分离、plan 39 字段持久 schema 与 statusTicket 重建、健康过期/显式 halted 分离与唯一恢复流程；v8 在 §18 追加 writer plan/epoch 唯一性权威章节。**v4/v5/v6 正文与 §17 冲突处以 §17 为准；v8 唯一性相关（plan ID/runId、epoch 作用域、重签/终态、consumed 校验）以 §18 为准。**
 >
 > v5 输入：`3ac5cf9483caebcaf8f5aeb1df8fd4aca9bfb13f`（父 `575d8b6`）。
 >
 > v6 输入：`3d52ee878362e4db65f15e947174e73db2947d90`（父 `ad8bb47`）；v6 权威修订见 §16，与 v5/v4 冲突处以 §16 为准。v6 关闭 marker 短 ID、plan 状态签名、recovery source CAS、不可变 K3 marker/可变 writer 授权四项。
 >
 > **v7 输入：`7f422808f2193a2bec4cb5fe4e32539484c657fb`（父 `3d52ee8`）；v7 权威修订见 §17，与 v6/v5/v4 冲突处以 §17 为准。** v7 关闭三项设计退修：writer 执行/运行授权自锁、statusTicket 持久字段重建、健康过期/halted 恢复矛盾。
+>
+> **v8 输入：`bc80f741981cade3e4e3d65df709c24f31556c06`（父 `7f42280`）；v8 权威修订见 §18，与 §17/v6/v5/v4 冲突处以 §18 为准。** v8 只关闭 writer plan 与 epoch 的唯一性（含 consumed 按 planKind 的校验修正）：冻结 canonical ID/确定性 runId、作用域、撤销/过期重签与终态规则、同 epoch/不同 epoch/终态重签预期，并按 planKind 补全 consumed 的 `runtimeTicket` 校验；**不重开** §17.1 writer 运行授权、§17.2 39 字段票据持久化、§17.3 健康过期恢复。
 >
 > 闸门：G3 已在 `5f1d7a4` 关闭、O10 PASS；G4 通过；07B 离线门禁通过；main/07B 合并、C1 实现、C2/C3、HTTP/UI、部署上线继续冻结，本卡不重复派发。
 >
@@ -28,10 +30,11 @@
 | 最终审计 | 所有最终写字节（业务写 + 唯一 admin_audit）在 final ticket **之前**生成；ticket 覆盖完整 canonical write set；Store 不自动追加/改审计；禁止双审计 |
 | 持续写入约束 | Store gate 覆盖 transact/change/persist/seed/init；runtime/migration/recovery/monitor/k3-bootstrap 分 kind；旧 writer 持续拒绝 |
 | writer 授权 | **v7**：一次性执行授权（`active→consumed`，执行事务内消费）与持久运行授权（`consumed`+`runtimeTicket`+`proof.writerPlanId` 绑定）分离；runtime 不接受 `active` |
-| plan 持久化 | **v7**：39 字段（30 core + 9 状态/运行）；`initialStatusTicket`；各 planKind 空值规则；票据验证 0 新增 refs |
+| plan 持久化 | **v7**：39 字段（30 core + 9 状态/运行）；`initialStatusTicket`；各 planKind 空值规则；票据验证 0 新增 refs；**v8** writer `runId="we-<e>"`/canonical `_id`（§18.2） |
 | 健康/停写 | **v7**：`CLEAR_EXPIRED`（fence clear 但过期，仅 heartbeat 恢复）与 `HALTED`（显式 halted，仅 recovery/rotate）分离 |
 | refs | **v7：C1 17；C2 R1 26；migration anchor 18、finalize 8（writes 5）；recovery 8（writes 5）；monitor 7；k3-bootstrap 5；plan issue 2；writer rotate 8（writes 4）；R2 8+N≤90** |
-| 裁定 | **v7：Q1–Q40；N01–N132**（v5/v6 Q/N 保留历史；预算/Q 以 §17 为准） |
+| epoch 唯一性 | **v8**：`planId(e)=evidence-chain-plan:v1:writer:we-<e>:writer`；每 epoch 至多一条 valid writer plan（`_id` create-only）；重签必须 `e'>e`；0 新增 refs/index（§18.4/§18.8） |
+| 裁定 | **v8：Q1–Q44；N01–N142**（v5–v7 Q/N 保留历史；预算/Q 以 §18 为准；§18 覆盖 §17.1 R7 与 §17.2 consumed 分支） |
 
 ## 1. 输入、基线与问题
 
@@ -593,11 +596,12 @@ Codex 批准后另发 C1 实现卡；至少含：
 2. K3+Coverage+Fence+two-phase admission+anchor+9 IDs+完整链；
 3. finalWriteSet+唯一 audit+explicit mode+no double audit；
 4. recovery/rotate 状态机/独立授权/原子 proof+fence+plan+runtimeTicket+audit；
-5. v7：C1 17/C2 26/migration 18/8/recovery 8/monitor 7/k3 5/plan 2/writer rotate 8；writes 5/5/4；≤90；
-6. N01–N132 实现级测试（N01–N112 沿用 v6；N113–N132 见 §17.6；无 HTTP/外部网络）；
+5. v8：C1 17/C2 26/migration 18/8/recovery 8/monitor 7/k3 5/plan 2/writer rotate 8；writes 5/5/4；≤90；writer canonical ID/create-only 0 新增 refs；
+6. N01–N142 实现级测试（N01–N112 沿用 v6；N113–N132 见 §17.6；N133–N142 见 §18.11；无 HTTP/外部网络）；
 7. 迁移/恢复/fence/monitor/writer-rotate/K3 bootstrap 工具另立卡。
+8. v8：writer plan `runId="we-<e>"`/canonical `_id`、每 epoch 至多一条 valid plan、撤销/过期重签 `e'>e`、consumed 按 planKind 校验（§18.2–§18.7）；Store `_id` create-only 必须验证。
 
-本卡停止；等 Codex 复审 §17（Q36–Q40、N113–N132）及 §11；不进入 C1/C2/C3/G4。
+本卡停止；等 Codex 复审 §18（Q41–Q44、N133–N142）与 §17（Q36–Q40）；不进入 C1/C2/C3/G4。
 
 ## 15. v5 权威修订（v5 历史；v6 §16 覆盖冲突处）
 
@@ -671,7 +675,7 @@ Codex 批准后另发 C1 实现卡；至少含：
 
 #### 15.2.1 plan 记录 schema（23 字段；v7 以 §17.2 的 39 字段为准）
 
-集合 `evidence_chain_plans`；`_id = "evidence-chain-plan:v1:<planKind>:<runId>:<phase>"`；字段：
+集合 `evidence_chain_plans`；`_id = "evidence-chain-plan:v1:<planKind>:<runId>:<phase>"`（v8：writer 的 `runId` 冻结为 `we-<writerEpoch>`，ID 随之确定，见 §18.2）；字段：
 `_id, kind, scope, schemaVersion, planKind, phase, runId, windowStart, windowEnd, targetWriteEpoch, targetAdmissionPolicyVersion, targetWriterSetDigest, targetProofId, finalInventoryDigest, canonicalEvidenceCount, canonicalHeadCount, anchorCount, auditedCollections, issuedAt, status, keyFingerprint, planDigest, planTicket`。
 
 - `kind="plan"`、`scope="global"`、`schemaVersion=1`；`planKind ∈ {"migration","recovery"}`；`phase ∈ {"pre-anchor","final","recovery"}`。
@@ -688,7 +692,7 @@ Codex 批准后另发 C1 实现卡；至少含：
 - **绑定**：plan 的 targetProofId/epoch/policy/writerSet/collections 必须与 marker/audit proof 一致；migration-finalize 把 plan 与 fence/proof 同事务；recovery-finalize 把 recovery plan 与新 proof/fence 同事务。
 - **轮换**：plan 绑定 `keyFingerprint`；K3 换钥后旧 plan 不再有效，必须为新 key 重新签发；不提供历史 key 回退；旧 plan 标记 revoked/expired，不得复用。
 - **防重放**：
-  - plan `_id` 含 runId/phase，create-only；`status=active` 才可使用。
+  - plan `_id` 含 runId/phase，create-only；`status=active` 才可使用。**v8：writer 的 runId 由 epoch 确定，`_id` 即 epoch 索引；同 epoch 至多一条 valid plan（§18.4）。**
   - finalize/recovery 在同一事务把 plan 置 `consumed`；已 consumed 的 plan 再用于 anchor/finalize/recovery → `PLAN_CONSUMED/409`。
   - window 外 → `PLAN_EXPIRED/409`；revoked → `PLAN_REVOKED/409`。
   - targetProofId 已存在 → `PLAN_CONSUMED`/`CONFLICT`；不得生成第二 proof。
@@ -879,7 +883,7 @@ v5 对 v4 Q5/Q7/Q10/Q17/Q26/Q27 的预算/scope 更新：
 - **可变 writer 授权**：`evidence_chain_plans` 的 `planKind="writer"` 记录（v7 39 字段，§17.2）：
   - core：`writerEpoch, targetWriterSetDigest, k3MarkerId, revokedWriterSetDigest, revocationReceiptDigest, sourceKind, sourceHaltedEpoch, sourceFenceDigest, windowStart/End...`；
   - status：`active → consumed`（执行事务内，同事务铸 `runtimeTicket`）或 `active → revoked`（plan-revoke）；
-  - `_id = evidence-chain-plan:v1:writer:<runId>:writer`。
+  - `_id = evidence-chain-plan:v1:writer:<runId>:writer`（v8 冻结 writer `runId="we-<writerEpoch>"`，见 §18.2）。
 - **同 K3 writer 变化/重审/恢复流程**：
   1. **Halt**：monitor 写 fence halted(E0)（若尚未 halt）；或维护窗口内 gate closed。
   2. **新 writer plan**：issue `writerEpoch+1`（同 `k3MarkerId`/`keyFingerprint`，新 writer set/revocation 摘要，`sourceKind="halted-fence"`、source E0/ digest）；写 plan+audit。
@@ -994,8 +998,8 @@ v5 对 v4 Q5/Q7/Q10/Q17/Q26/Q27 的预算/scope 更新：
 - **R3** runtime 的 `WriterPlanValid(plan, proof, marker)` = `PlanRecordValid` ∧ `status="consumed"` ∧ `statusTargetProofId=proof._id` ∧ `proof.writerPlanId=plan._id` ∧ `runtimeTicket` 验签 ∧ `plan.writerEpoch=proof.writeEpoch` ∧ `plan.k3MarkerId=marker._id=proof.k3MarkerId` ∧ `plan.keyFingerprint=当前 K3`。**不要求 `status="active"`，不要求 `now∈plan.window`**（window 只约束执行，不约束运行）。
 - **R4** `status="active"` 只表示“一次性执行授权未使用”；runtime 读到 active plan（未被当前 proof 引用）→ `PROOF_REQUIRED`，不得据此放行。
 - **R5** 旧 writer plan 不写、不改：其 `runtimeTicket.proofId` 绑定旧 proof E0，E0 不再是当前 `CoverageValid` proof，故无运行授权；旧 plan 保持 `consumed` 终态，不复用、不复活。
-- **R6** `consumed`/`revoked` 为终态；只允许一次 `active→consumed` 或 `active→revoked`，无第三状态、无回退。
-- **R7** 同一 `writerEpoch` 至多一个 active plan（`_id` 含 epoch）；同一 epoch 至多一个 proof（`targetProofId` 确定性）。
+- **R6** `consumed`/`revoked` 为终态；只允许一次 `active→consumed` 或 `active→revoked`，无第三状态、无回退。**v8：同 epoch 重签一律 `PLAN_DUPLICATE`，只能 `e'>e`（§18.5）。**
+- **R7** 同一 `writerEpoch` 至多一个 valid writer plan（因而至多一个 active）：`runId="we-<e>"`、`_id="evidence-chain-plan:v1:writer:we-<e>:writer"`，由 `_id` create-only 保证；同一 epoch 至多一个 proof（`targetProofId=f(K3 fp,domainHeadRevision,e)` 确定性）。**v8 更正：v7 原句“`_id` 含 epoch”不成立（v7 `_id` 实际含任意 `runId`）；唯一性证明、作用域、重签/终态见 §18.2–§18.5。**
 
 **writer plan 来源与首次 UNPROVEN**（`W0` = 首个 proof 的 writer plan；`W1` = 新 epoch 的 writer plan）：
 
@@ -1036,13 +1040,13 @@ runtime 权威 = 当前 CoverageValid proof.writerPlanId 指向的 consumed plan
 
 | # | 字段 | 类型 | 归属 | 说明/空值 |
 |---:|---|---|---|---|
-| 1 | `_id` | string | core | `evidence-chain-plan:v1:<planKind>:<runId>:<phase>` |
+| 1 | `_id` | string | core | `evidence-chain-plan:v1:<planKind>:<runId>:<phase>`；writer 必须等于 `evidence-chain-plan:v1:writer:we-<writerEpoch>:writer`（§18.2） |
 | 2 | `kind` | string | core | 固定 `"plan"` |
 | 3 | `scope` | string | core | 固定 `"global"` |
 | 4 | `schemaVersion` | int | core | 固定 `1` |
 | 5 | `planKind` | enum | core | `migration / recovery / writer` |
 | 6 | `phase` | enum | core | `pre-anchor / final / recovery / writer` |
-| 7 | `runId` | string | core | 非空 |
+| 7 | `runId` | string | core | writer：`"we-" + decimal(writerEpoch)`（无前导零）；migration/recovery：非空（§18.2） |
 | 8 | `issuedBy` | string | core | 签发 actor；初始票据的 `actor` |
 | 9 | `issuedAt` | int | core | 安全整数；`windowStart ≤ issuedAt < windowEnd` |
 | 10 | `windowStart` | int | core | 安全整数 |
@@ -1056,7 +1060,7 @@ runtime 权威 = 当前 CoverageValid proof.writerPlanId 指向的 consumed plan
 | 18 | `targetAdmissionPolicyVersion` | string | core | 非空 |
 | 19 | `targetWriterSetDigest` | string | core | 非空 |
 | 20 | `targetProofId` | string | core | 非空；E0/E1 确定性 ID |
-| 21 | `writerEpoch` | int/null | core | writer 非空 |
+| 21 | `writerEpoch` | int/null | core | writer 非空安全正整数 e；且 `targetWriteEpoch=e`（§18.2） |
 | 22 | `revokedWriterSetDigest` | string/null | core | writer 非空 |
 | 23 | `revocationReceiptDigest` | string/null | core | writer 非空 |
 | 24 | `finalInventoryDigest` | string/null | core | 见空值表 |
@@ -1113,10 +1117,11 @@ runtimeTicket = HMAC-SHA256(K3, KEYED_DIGEST/h4-evidence-writer-runtime v1, cano
 | 字段 | migration pre-anchor | migration final | recovery | writer bootstrap（UNPROVEN） | writer rotate（HALTED） |
 |---|---|---|---|---|---|
 | `phase` | `pre-anchor` | `final` | `recovery` | `writer` | `writer` |
+| `runId` | 非空 | 非空 | 非空 | `we-<writerEpoch>`（如 `we-1`） | `we-<writerEpoch>`（如 epoch=4 时 `we-4`） |
 | `sourceKind` | `none` | `none` | `halted-fence` | `bootstrap` | `halted-fence` |
 | `sourceHaltedEpoch` | `null` | `null` | E0 | `null` | E0 |
 | `sourceFenceDigest` | `null` | `null` | `fenceDigest(E0)` | `null` | `fenceDigest(E0)` |
-| `writerEpoch` | `null` | `null` | `null` | 1 | n+1 |
+| `writerEpoch` | `null` | `null` | `null` | 1（首次；重签取 e+1） | n+1（重签取 e+1） |
 | `revokedWriterSetDigest` | `null` | `null` | `null` | 非空 | 非空 |
 | `revocationReceiptDigest` | `null` | `null` | `null` | 非空 | 非空 |
 | `finalInventoryDigest` | `null` | 非空 | 非空 | `null` | `null` |
@@ -1127,7 +1132,7 @@ runtimeTicket = HMAC-SHA256(K3, KEYED_DIGEST/h4-evidence-writer-runtime v1, cano
 
 - writer plan 的 `finalInventoryDigest` 为 `null`：重审 inventory 在执行事务内生成并写入 **proof.inventoryDigest**，由 `runtimeTicket.proofId` 绑定；writer plan 不在签发时预置审计结果。
 - recovery/rotate 未改变 writer 集时，W1 的 `revokedWriterSetDigest/revocationReceiptDigest` 复用当前有效摘要，但必须非空；不得写 `null`。
-- `targetWriteEpoch`/`targetProofId` 全部 planKind 非空（pre-anchor/final/bootstrap writer=E0，recovery/rotate=E1）。
+- `targetWriteEpoch`/`targetProofId` 全部 planKind 非空（pre-anchor/final/bootstrap writer=E0，recovery/rotate=E1）；v8：writer 的 `targetWriteEpoch=writerEpoch`，重签取更大 e（§18.2/§18.5）。
 - 空值规则由 `PlanRecordValid` 逐字段校验；违反 → `PLAN_INVALID`，零写。
 
 **验证 refs（冻结）**：
@@ -1143,13 +1148,22 @@ exact 39 字段（无额外/无缺省/类型正确）
 ∧ planDigest/planTicket 重算通过
 ∧ EmptyValueValid(planKind, phase) 按上表
 ∧ initialStatusTicket 重算通过
+∧ WriterCanonicalId（planKind="writer"；§18.2）：
+   phase="writer" ∧ writerEpoch=e 为安全正整数 ∧ runId="we-"+decimal(e)
+   ∧ _id="evidence-chain-plan:v1:writer:we-"+decimal(e)+":writer"
+   ∧ targetWriteEpoch=e
 ∧ status 分支：
-   active   → statusFrom="none" ∧ statusTargetProofId=null ∧ statusTicket=initialStatusTicket
-   consumed → statusFrom="active" ∧ statusTargetProofId=targetProofId ≠ null
-              ∧ statusTicket 重算通过 ∧ runtimeTicket 重算通过
-   revoked  → statusFrom="active" ∧ statusTargetProofId=null ∧ statusTicket 重算通过
-   （migration/recovery 的 consumed：runtimeTicket 必须为 null）
+   active ∧ planKind 任意 → statusFrom="none" ∧ statusTargetProofId=null
+                            ∧ statusTicket=initialStatusTicket ∧ runtimeTicket=null
+   consumed ∧ planKind="writer" → statusFrom="active" ∧ statusTargetProofId=targetProofId≠null
+                                 ∧ statusTicket 重算通过
+                                 ∧ runtimeTicket≠null ∧ runtimeTicket 重算通过（§17.1 R2）
+   consumed ∧ planKind∈{"migration","recovery"} → statusFrom="active" ∧ statusTargetProofId=targetProofId≠null
+                                 ∧ statusTicket 重算通过 ∧ runtimeTicket=null（显式）
+   revoked → statusFrom="active" ∧ statusTargetProofId=null ∧ statusTicket 重算通过 ∧ runtimeTicket=null
 ```
+
+- `targetProofId=f(当前 K3 fp, domainHeadRevision, writerEpoch)` 由执行事务校验（§18.2），不在 `PlanRecordValid` 内重算（plan-issue refs 2 不含 domain）。
 
 ### 17.3 健康过期 vs 显式 halted：谓词与唯一恢复流程
 
@@ -1248,6 +1262,8 @@ HALTED(E) --plan-issue(W)+recovery-finalize/writer-rotate--> CLEAR_HEALTHY(E1)
 
 不可能转移（显式拒绝）：`HALTED→CLEAR_EXPIRED`、`CLEAR_EXPIRED→recovery/rotate`、`HALTED→heartbeat`、`UNPROVEN→runtime`、`CLEAR→migration-finalize`。
 
+> v8：T2/T8 的 plan-issue 仍 **2/2**；writer plan 的 canonical ID/runId 与每 epoch 唯一性见 §18.2/§18.4（refs/writes 不变）。
+
 **谓词使用矩阵**：
 
 | 事务 | 必过谓词 | 不得使用 |
@@ -1283,6 +1299,8 @@ HALTED(E) --plan-issue(W)+recovery-finalize/writer-rotate--> CLEAR_HEALTHY(E1)
 
 **写入增量相对 v6**：migration-finalize 4→**5**（+W0 consumed/runtimeTicket）；recovery-finalize 4→**5**（+W1）；writer-rotate 5→**4**（不再写旧 W0）。refs 全部不变。
 
+- **v8（§18.8）唯一性成本**：writer plan canonical `_id` 的属性检查是纯本地计算，plan-issue/plan-revoke 仍 **2/2**，finalize/recovery/rotate/C1/C2 预算不变；不新增集合/索引/epoch 计数记录。若未来改用 epoch 索引记录/CAS 计数器（本卡不采用），plan-issue 变 3/3、执行事务 +1 ref，须整体重算后才可实现。
+
 ### 17.6 v7 裁定与矩阵
 
 **新增 Q36–Q40**：
@@ -1294,6 +1312,8 @@ HALTED(E) --plan-issue(W)+recovery-finalize/writer-rotate--> CLEAR_HEALTHY(E1)
 | Q38 | CLEAR_EXPIRED 与 HALTED 分离；FenceRecordValid/FenceStructValid/FenceHealthy/FenceValid/FenceHeartbeatable；新增 FENCE_EXPIRED；唯一恢复流程 | 批准 |
 | Q39 | 每个 proof 消费一个 writer plan；migration-finalize/recovery-finalize 8/5、writer-rotate 8/4；C1 17/C2 26 不变 | 批准 |
 | Q40 | N113–N132 矩阵与 v7 预算 | 批准 |
+
+> v8 追加 Q41–Q44/N133–N142 见 §18.11；§18 覆盖 §17.1 R7 的唯一性表述与 §17.2 的 consumed 分支（不改变 R1–R6、39 字段与 §17.3）。
 
 **新增 N113–N132**：
 
@@ -1328,6 +1348,7 @@ HALTED(E) --plan-issue(W)+recovery-finalize/writer-rotate--> CLEAR_HEALTHY(E1)
 - 同 K3 writer 变化的真实 DB 撤权、维护窗口、monitor 运维证据未验证。
 - 受信时钟、`MONITOR_HEALTH_WINDOW_MS`/`CLOCK_SKEW_MS` 取值与部署环境实际偏差未验证；N129 仅为设计用例。
 - 闸门状态：G3 `5f1d7a4` 关闭/O10 PASS；G4 通过；07B 离线门禁通过；main/07B 合并、C1 实现、C2/C3、HTTP/UI、部署上线冻结。
+- **v8（§18）**：只修 writer plan/epoch 唯一性与 consumed 按 planKind 校验；§17.1 R1–R6、§17.2 39 字段/签名公式、§17.3 health 谓词未重开（§18.10）；新增 Q41–Q44/N133–N142，预算不变。
 - 本稿只改设计文档；未安装/运行测试、未实现、未云事务、未触商户/设备/支付/身份证。
 
 ### 17.8 全文同步对照（移除相反表述）
@@ -1349,4 +1370,238 @@ HALTED(E) --plan-issue(W)+recovery-finalize/writer-rotate--> CLEAR_HEALTHY(E1)
 
 ---
 
-**提交对象：Codex。请复审 v7 §17（Q36–Q40、N113–N132、writer 授权/plan 持久 schema/health 恢复、refs/writes）；本稿不声称完整云报告已读或逐项关闭。不自批。完成即停手，等待独立复审。**
+## 18. v8 权威修订（writer plan ↔ epoch 唯一性；覆盖 §17/§16/§15 冲突处）
+
+> v8 输入：`bc80f741981cade3e4e3d65df709c24f31556c06`（父 `7f42280`）。真实派单：独立任务 A；唯一修改文件为本卡；工作树 `C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-epoch-uniqueness`，分支 `docs/hk-face-c1-epoch-uniqueness`；只追加提交，不 amend/rebase/reset/squash/force/merge。
+>
+> 输入核对：`docs/hk-face-c1-v7-review-fixes` 本地 ref 与 origin tip 均为 `bc80f74…`，无前移/分叉/平行提交；输出分支创建前不存在。**凡与 §18 相反（writer plan ID/runId、epoch 唯一性、重签/终态、consumed 校验）以 §18 为准。** v8 不改变 §17.1 R1–R6、§17.2 39 字段/签名公式、§17.3 健康谓词。
+
+### 18.0 退修项与闭合位置
+
+| # | 退修项 | 原表述/问题 | v8 规则 | 位置 |
+|---:|---|---|---|---|
+| 1 | 同 epoch 至多 1 active 不可证 | §17.1 R7 称“`_id` 含 epoch”，但 §17.2 字段 1 的 `_id` 含**任意** `runId`，字段 7 仅要求“非空”；同 epoch 可用不同 runId 再写一条 active | 冻结 writer plan 与 epoch 一一对应：`runId="we-<e>"`、`planId(e)="evidence-chain-plan:v1:writer:we-<e>:writer"`；每 epoch 至多一条 valid plan，由 `_id` create-only 证明 | §18.2、§18.4 |
+| 2 | plan+audit refs 不能证明唯一 | plan-issue refs=2（目标 plan+audit），不枚举同 epoch 其它 plan；refs 无“至多一条”语义 | 唯一性不依赖 refs/扫描：`planId(e)` 是 e 的纯函数 + Store `_id` create-only；不新增索引 | §18.1、§18.4、§18.8 |
+| 3 | 作用域/重签/终态未定义 | 未说明唯一性跨哪些 K3 世代、撤销/过期后能否重签、consumed/revoked 后同 epoch 能否再签 | 作用域=同一 K3 世代 H4-c 全局；重签必须 `e'>e`；consumed/revoked/expired 同 epoch 重签一律 `PLAN_DUPLICATE`；旧记录不改写 | §18.3、§18.5 |
+| 4 | consumed 校验未按 planKind | §17.2 `:1148-1151` 统一要求 `runtimeTicket` 重算，同处又只允许 migration/recovery 为 null；writer 的 runtimeTicket 校验未显式分派 | `consumed ∧ writer` 必须 `runtimeTicket≠null` 且验签；`consumed ∧ migration/recovery` 必须显式 `null`；active/revoked 一律 `null` | §18.7、§17.2 PlanRecordValid |
+| 5 | 并发/不同 epoch/终态重签无唯一预期 | 未给“同 epoch 不同 runId 并发”“不同 epoch 共存”“终态重签”的确定性结果 | 见 §18.6 预期矩阵；执行由 source 绑定 + target proof create-only 串行化，恰好一个执行胜 | §18.6 |
+
+### 18.1 问题与反例（为什么 refs 不能证明唯一）
+
+- v7 声称“同一 `writerEpoch` 至多一个 active plan（`_id` 含 epoch）”，但：
+  1. `_id` 公式为 `...:<planKind>:<runId>:<phase>`，`runId` 任意非空；
+  2. `writerEpoch` 是独立字段，未进入 `_id`；
+  3. `evidence_chain_plans` 只按声明的 refs 点读，plan-issue refs=2（目标 plan+audit），不读取/枚举同 epoch 其它 plan；
+  4. 因此签发方可用 `runId=A` 与 `runId=B` 在同一 epoch 各写一条 active plan；两条 `_id` 不同、core/ticket 各自有效，v7 规则无法拒绝；`plan+audit` refs 也无法表达“同 epoch 唯一”。
+- 反例（设计级，不执行）：`e=7`，`_id1=...:writer:A:writer`、`_id2=...:writer:B:writer`；两条均 `writerEpoch=7`、`status=active`、`sourceKind=bootstrap`；二者都能通过 v7 `PlanRecordValid`。两个执行事务的 `targetProofId` 相同（确定性）→ proof create-only 只能一胜；但“至多一个 active”已被违反，且失败方重试语义不确定。
+- 结论：必须把 epoch 编入可验证身份（或把 runId 冻结为 epoch 的确定性函数），使“同 epoch 第二条”在 `_id`/`PlanRecordValid` 层即不可表达；不能依赖 refs 数量或调用方自述。
+
+### 18.2 冻结：canonical plan ID 与确定性 runId（planId↔epoch 绑定）
+
+- writer plan 的 epoch 字段：`writerEpoch=e`（安全正整数）。
+- 确定性 runId：`runId = "we-" + decimal(e)`（无前导零、无符号/空白；如 `we-7`）。
+- canonical plan ID：`planId(e) = "evidence-chain-plan:v1:writer:we-" + decimal(e) + ":writer"`（与通用公式 `<planKind>:<runId>:<phase>` 一致，`planKind="writer"`、`phase="writer"`）。
+- 绑定关系：`planId(e)/writerEpoch/targetWriteEpoch` 由 e 唯一确定；`targetProofId` 在给定当前 K3 `keyFingerprint` 与 `domainHeadRevision` 下同样由 e 唯一确定（§4.2/§15.2.1）：
+
+```text
+planId(e)        = evidence-chain-plan:v1:writer:we-<e>:writer
+writerEpoch      = e
+targetWriteEpoch = e
+targetProofId(e) = f(K3 keyFingerprint, domainHeadRevision, e)   // 执行事务校验
+```
+
+- 冻结校验 `WriterCanonicalId`（并入 `PlanRecordValid`）：
+
+```text
+planKind="writer"
+→ phase="writer"
+ ∧ writerEpoch=e 为安全正整数
+ ∧ runId="we-"+decimal(e)
+ ∧ _id="evidence-chain-plan:v1:writer:"+runId+":writer"
+ ∧ targetWriteEpoch=e
+```
+
+  任一不符 → `PLAN_INVALID`，零写；不得执行、不得用于 runtime 绑定。
+- `targetProofId` 校验点：plan-issue refs=2（plan+audit）**不读 K3 domain**，故不在签发事务重算 `f`；执行事务（migration-finalize/recovery-finalize/writer-rotate 已声明 domain2）必须校验 `targetProofId=f(当前 K3 fp, 当前 domainHeadRevision, writerEpoch)`；不等 → `PLAN_INVALID`/`PLAN_STALE`，零写（与 §15.2.2 绑定语义一致；不新增 ref）。
+- `planDigest/planTicket` 覆盖 core（含 `runId/writerEpoch/targetWriteEpoch/targetProofId`），ID/epoch 绑定受签名保护；改任一字段即 digest/ticket 失效。
+- 不新增字段：仍 39 字段（§17.2）；`runId` 语义由“任意非空”收紧为“writer 确定性、migration/recovery 非空”。
+
+### 18.3 作用域
+
+| 维度 | 冻结 |
+|---|---|
+| 适用 planKind | 仅 `writer`；migration/recovery 不做 epoch 一一对应（可多份草案），执行安全由 target proof create-only + plan consumed 保证 |
+| 链范围 | H4-c 全局单链（唯一 global fence/proof），不是 per-job/per-org |
+| K3 世代 | 同一 `k3MarkerId` + `keyFingerprint` 世代内；K3 变化后 `writerEpoch` 必须严格增大（沿用 §4.2 `writeEpoch` 单调），旧 plan 因 `keyFingerprint`/domain 不符 `PLAN_INVALID`，不得复用 |
+| 记录范围 | 唯一性表述为“每个 epoch 至多一条 **valid** writer plan”；非规范历史记录（runId≠`we-<e>`、ID 不符）不是 valid plan，不可执行，不计入唯一性；不得删除/改写历史记录 |
+| 时间范围 | `windowStart ≤ issuedAt < windowEnd`；window 只约束执行，不约束已 consumed 的 runtime（§17.1 R3） |
+
+- 作用域外 plan（不同 `k3MarkerId`/`keyFingerprint`、不同 planKind）不参与该 epoch 唯一性；同一 `planId` 仍受 create-only 保护。
+
+### 18.4 唯一性证明（create-only 即索引，不需要新索引）
+
+**命题 U1**：对任意 `writerEpoch=e`，至多存在一条满足 `PlanRecordValid` 的 writer plan 记录。
+
+**证明**：
+1. 若记录有效，§18.2 强制 `runId="we-"+e` 且 `_id=planId(e)`；`planId(e)` 只依赖 e，与 actor/调用方/时间无关。
+2. `evidence_chain_plans` 对 `_id` 为 exact/create-only（§15.2.1）；Store 在 `_id` 已存在时拒绝写入，不 upsert、不覆盖。
+3. 第二条同 epoch 写入只能使用同一 `_id`，被 create-only 拒绝；使用其它 `_id` 的记录违反 §18.2，`PlanRecordValid` 失败。
+4. 故至多一条有效记录 ⇒ 至多一个 `status="active"`。∎
+
+**推论**：
+- 两个 canonical plan-issue 并发：恰好一个 create 成功；失败方 `PLAN_DUPLICATE/409`，零写（无 plan、无 audit）。并发时两事务都可能先读到“不存在”；胜负由 Store `_id` create-only 裁决（不是先读判定），败者映射 `PLAN_DUPLICATE`。
+- 同 epoch 不同 runId：非 canonical 方在 `PlanRecordValid`/plan-issue 即 `PLAN_INVALID`，零写；canonical 方成功。二者不可能同时成为有效 plan。
+- 证明不使用 refs 枚举、不扫描集合、不需要新索引；`plan+audit` refs 只承担读写与审计，不承担唯一性证明。
+- **实现前提**：Store 必须对 `evidence_chain_plans` 提供 `_id` create-only（不存在才写）；plan-issue 不得用 upsert/change/persist 覆盖。C1 实现卡必须验证；本卡不声称运行时已闭合。
+
+### 18.5 撤销、过期与重签；终态规则
+
+| 概念 | 定义 | 同 epoch 重签 |
+|---|---|---|
+| active | 一次性执行授权未使用（§17.1） | 禁止（记录已存在）→ `PLAN_DUPLICATE` |
+| consumed | 执行事务已消费；终态 | 禁止；只能 `e'>e` |
+| revoked | `plan-revoke` 后终态 | 禁止；只能 `e'>e` |
+| expired | 不是 status；`now ≥ windowEnd` 时读时派生 | 禁止；先 revoke（active→revoked），再 `e'>e` |
+
+- **重签（re-sign）= 新 epoch**：对被重签 plan 的 epoch e，重签必须选择 `e' > e` 且 `planId(e')` 不存在的 epoch（建议 `e+1`；门禁不要求连续，见 §18.6）；重新签发完整 39 字段记录 + `initialStatusTicket`；旧记录保持原状态（过期 active 先 revoke 后为 revoked；consumed/revoked 不变），**不修改、不删除、不复活**；不得用同一 `_id` 覆盖。门禁不扫描“全局最大 epoch”；若 `e'<e` 且 `planId(e')` 从未使用，则它是独立新签发而非重签，仍受 create-only 与执行 source/target 约束。
+- **终态不可逆**：`consumed`/`revoked` 无出边；不得 `→active`、不得互换；status 只允许一次 `active→consumed` 或 `active→revoked`（§17.1 R6 不变）。
+- **撤销**：`plan-revoke` 只允许 `active→revoked`（`statusReason="revoked:plan-revoke"`）；已 consumed/revoked → `PLAN_CONSUMED`/`PLAN_REVOKED`；refs 2/writes 2 不变。
+- **过期**：不改写 status；执行时 `PLAN_EXPIRED/409`；已 consumed 的 plan 不因 window 过期失去运行授权（§17.1 R3）。
+- **来源绑定不变**：bootstrap 重签仍要求 fence 不存在；halted-fence 重签仍要求 source fence halted `E0` 且 digest 匹配；`CLEAR_EXPIRED` 仍不是合法 source（先 halt）。
+- **目标 epoch**：只需 `targetWriteEpoch > sourceEpoch`（bootstrap ≥1）；允许跳号（如 E1 过期撤销后重签 E2）。安全不变量是“每 epoch 至多一条 valid plan + 每 epoch 至多一个 proof”，不是“epoch 连续”；跳号不削弱重审（执行事务仍生成完整 final inventory 并写入 `proof(e')`）。
+- **consumed 后更换 writer 集**：沿用既有 halt→W(e+1)→rotate/recovery 流程；不得在 CLEAR 下直接签发新 writer plan。
+- **为何不覆盖/不复活**：同 epoch 覆盖需 upsert/删除或 epoch 索引+枚举，破坏 create-only 与终态不可逆；本卡选择重签跳号（`e+1`），以 0 新增索引换取可证明唯一性。
+
+### 18.6 唯一预期矩阵（同 epoch 不同 runId / 不同 epoch / 终态重签）
+
+| # | 场景 | 唯一预期 | 结果/零写 |
+|---:|---|---|---|
+| 1 | 同 epoch e，两个 canonical（runId 均 `we-e`）并发签发 | 恰好一条记录、一个 active | 一胜；败者 `PLAN_DUPLICATE/409`；plan+audit 零写 |
+| 2 | 同 epoch e，runId `A`/`B`（非 canonical） | 0 条非 canonical 记录；若 canonical 同时存在，仅它有效 | 非 canonical `PLAN_INVALID`；零写 |
+| 3 | 同 epoch e，串行重签（前一条 active/consumed/revoked/expired） | 不再新增记录 | `PLAN_DUPLICATE`；零写 |
+| 4 | 不同 epoch e1<e2（bootstrap） | 两条可共存；fence 不存在只允许一次执行 | 恰好一个 proof；另一 `PLAN_STALE` |
+| 5 | 不同 epoch e1<e2（halted-fence，同源 E0） | 两条可共存；source CAS+fence 只允许一次执行 | 恰好一个 proof/fence 更新；另一 `PLAN_STALE` |
+| 6 | consumed 后同 epoch 重签 | 禁止；只能 `e'>e` | `PLAN_DUPLICATE` |
+| 7 | revoked 后同 epoch 重签 | 禁止；只能 `e'>e` | `PLAN_DUPLICATE` |
+| 8 | expired（active，`now≥windowEnd`）后同 epoch 重签 | 禁止；先 revoke，再 `e'>e` | `PLAN_EXPIRED`/`PLAN_DUPLICATE`；零写 |
+| 9 | 重签目标 epoch 已有记录（`planId(e')` 存在，含 `e'≤e`） | 拒绝 | `PLAN_DUPLICATE` |
+| 10 | K3 世代变化后复用旧 epoch | 拒绝 | `PLAN_INVALID`；须 `e'>旧 e` |
+
+- 执行串行化：`targetWriteEpoch > sourceEpoch`（bootstrap ≥1）+ `targetProofId` create-only + source fence CAS；竞争集合中**恰好一个**执行事务成功，其余 `PLAN_STALE`/`PLAN_CONSUMED`，无双 proof/fence。
+- 不同 epoch 的 active plan 可共存；唯一性只约束“每 epoch 至多一条 valid plan”，不约束“全局同时至多一条 active”。全局至多一个**当前** proof 由 fence/proof 单例与 `CoverageValid` 保证。
+
+### 18.7 consumed 校验按 planKind（修正 §17.2 `:1148-1151`）
+
+| planKind | status | `runtimeTicket` | 验签 | 失败 |
+|---|---|---|---|---|
+| writer | consumed | 必须非 null | 必须重算通过（`planId/proofId/writerEpoch/targetWriterSetDigest/k3MarkerId/keyFingerprint/activatedAt`，§17.1 R2） | `PLAN_INVALID` |
+| migration | consumed | 必须显式 JSON `null` | 不适用 | `PLAN_INVALID` |
+| recovery | consumed | 必须显式 JSON `null` | 不适用 | `PLAN_INVALID` |
+| 任意 | active | 必须 `null` | 不适用 | `PLAN_INVALID` |
+| 任意 | revoked | 必须 `null` | 不适用 | `PLAN_INVALID` |
+
+- 替换 §17.2 的单一 consumed 式：
+
+```text
+status="consumed" ∧ planKind="writer"
+  → statusFrom="active" ∧ statusTargetProofId=targetProofId≠null
+    ∧ statusTicket 重算通过
+    ∧ runtimeTicket≠null ∧ runtimeTicket 重算通过（proofId 取 statusTargetProofId）
+status="consumed" ∧ planKind∈{"migration","recovery"}
+  → statusFrom="active" ∧ statusTargetProofId=targetProofId≠null
+    ∧ statusTicket 重算通过
+    ∧ runtimeTicket=null（显式写入）
+```
+
+- writer 的 `runtimeTicket.proofId` 必须等于 `statusTargetProofId`，且等于执行事务创建的 proof `_id`；不等 → 读取时 `PLAN_INVALID`，runtime 绑定失败 `PROOF_REQUIRED`。
+- 本补全不改变 39 字段、签名公式与 `runtimeTicket` 定义（§17.1 R2）；只把 v7 的歧义分支按 planKind 拆开。
+
+### 18.8 refs/writes 核算（结论：0 新增）
+
+| 事务 | v7 refs/writes | v8 refs/writes | 说明 |
+|---|---:|---:|---|
+| plan-issue（canonical writer） | 2/2 | **2/2** | `planId(e)` 即索引键；create-only 由 `_id` 语义提供 |
+| plan-issue（重复同 epoch） | — | 2 读 / 0 写 | 读 plan 发现已存在 → `PLAN_DUPLICATE`，不写 audit |
+| plan-revoke | 2/2 | **2/2** | 不变 |
+| migration-finalize | 8/5 | **8/5** | plan ref 已含 |
+| recovery-finalize | 8/5 | **8/5** | 同上 |
+| writer-rotate | 8/4 | **8/4** | 同上 |
+| C1 / C2 R1 | 17 / 26 | **17 / 26** | 不变 |
+
+- 不新增集合/索引/epoch 计数记录；不新增 store ref；`WriterCanonicalId` 是纯本地计算。
+- 若未来新增“epoch 索引记录/CAS 计数器”（本卡不采用），必须重算：plan-issue 3/3（+索引 ref+写）、执行事务 +1 ref（读索引）、C2 R1 27（余量 63）；未重算前不得实现该变体。
+- 唯一性只依赖 `_id` create-only；若 Store 实际为 upsert，则 §18.4 不成立，属实现阻断。
+
+### 18.9 错误码增量
+
+| 情形 | code | HTTP |
+|---|---|---:|
+| plan-issue 同 epoch canonical `_id` 已存在（任意状态） | `PLAN_DUPLICATE` | 409 |
+| writer runId/planId/phase/targetWriteEpoch 非 canonical；执行时 targetProofId≠f(...) | `PLAN_INVALID` | 409 |
+| consumed 的 writer 缺/坏 `runtimeTicket` | `PLAN_INVALID` | 409 |
+| consumed 的 migration/recovery 带非 null `runtimeTicket` | `PLAN_INVALID` | 409 |
+
+- C2 统一投影 409；`PLAN_DUPLICATE`（重复签发/记录已存在）与 `PLAN_CONSUMED`（执行时已被消费）区分。
+
+### 18.10 与已关闭项的一致性（不重开）
+
+| 已关闭项 | v7 位置 | v8 是否改变 | 说明 |
+|---|---|---|---|
+| 一次性执行授权/持久运行授权分离 | §17.1 R1–R6 | 否 | runtime 仍要求 consumed+`runtimeTicket`+`proof.writerPlanId`；active 仍不放行 |
+| 39 字段 schema/`initialStatusTicket`/票据 0 refs | §17.2 | 否（只收紧字段 1/7/21 语义与 consumed 分支） | 字段数/签名公式不变 |
+| `FENCE_EXPIRED` 与 `HALTED` 分离/唯一恢复 | §17.3 | 否 | 谓词/状态机未改 |
+| refs/writes 预算 | §17.5 | 否 | 17/26/18/8/8/8/7/5/2 不变 |
+
+- 只修正 §17.1 R7 的不可证表述与 §17.2 的 planKind 分支；不改变任何已关闭语义。
+
+### 18.11 v8 裁定与矩阵
+
+**新增 Q41–Q44**：
+
+| Q | 事项 | 建议 |
+|---|---|---|
+| Q41 | writer plan canonical ID/runId（`we-<e>`）、planId↔epoch 绑定、作用域 | 批准 |
+| Q42 | 每 epoch 至多一条 valid plan；`_id` create-only 证明；无新索引 | 批准 |
+| Q43 | 撤销/过期/终态重签只能 `e'>e`；同 epoch `PLAN_DUPLICATE`；不同 epoch 执行恰好一胜 | 批准 |
+| Q44 | consumed 按 planKind：writer 必验 `runtimeTicket`，migration/recovery 必 `null`；refs 2/2 不变 | 批准 |
+
+**新增 N133–N142**：
+
+| ID | 场景 | 期望 |
+|---|---|---|
+| N133 | 同 epoch canonical 并发签发 | 一胜；败者 `PLAN_DUPLICATE`；零写 |
+| N134 | 同 epoch 不同 runId（A/B）签发 | `PLAN_INVALID`；无非 canonical 记录 |
+| N135 | 同 epoch 串行重签（active/consumed/revoked/expired） | `PLAN_DUPLICATE`；旧记录不变 |
+| N136 | 不同 epoch（bootstrap）共存并竞争执行 | 恰好一个 proof/fence；另一 `PLAN_STALE` |
+| N137 | 不同 epoch（halted-fence 同源 E0）共存并竞争执行 | 恰好一个 proof/fence；另一 `PLAN_STALE` |
+| N138 | phase/runId/_id/targetWriteEpoch 非 canonical；执行时 targetProofId≠f(...) | `PLAN_INVALID`/`PLAN_STALE`；零写 |
+| N139 | consumed writer 缺/坏 runtimeTicket；migration/recovery runtimeTicket≠null | `PLAN_INVALID`；零写 |
+| N140 | plan-issue 2/2；重复 create 0 写；无新索引 | 预算不变 |
+| N141 | 历史非规范 runId 记录与 canonical 同 epoch | 历史不可执行/不计入 valid；canonical 可签发 |
+| N142 | 重签 `e'>e` | 旧记录保持终态；新 proof/fence 用 `e'`；旧 plan 无运行授权 |
+
+### 18.12 v8 未解决/未验证
+
+- 未实现、未运行测试；U1 依赖 Store `_id` create-only 的实际语义（C1 实现卡必须验证）；本卡不声称运行时闭合。
+- `PlanRecordValid` 的 writer consumed 重算以 `statusTargetProofId` 作为 `proofId`；若执行事务写入 proof `_id` 与之不一致，则拒绝（N139）；该一致性需实现级断言。
+- plan-issue 不重算 `targetProofId`（refs 2 不含 domain）；执行事务校验 `f(当前 fp, domainHeadRevision, e)`，该等式依赖读取时点的 `domainHeadRevision`，需实现级断言（N138）。
+- 历史 v7 plan（runId 非 `we-<e>`）不被视为 valid；是否迁移/清理不在本卡（不新增迁移动作）。
+- canonical `_id` 上若存在不可验证的旧记录（损坏/旧 schema），create-only 会阻挡同 epoch 重签（fail-closed）；本卡不允许删除/覆盖，只能改用更大 epoch 或走维护流程。
+- K3 轮换后的 epoch 命名空间/marker 创建规则仍按既有冻结项；本卡只要求 K3 变化后 epoch 严格增大且旧 plan 失效。
+- 完整云报告仍不可读；不声称逐项关闭。
+- 闸门：G3/O10、G4、07B 离线门禁结论有效；main/07B 合并、C1 实现/C2/C3、HTTP/UI、部署上线冻结。
+
+### 18.13 全文同步对照（v8）
+
+| # | 原位置 | 原表述 | v8 处理 |
+|---:|---|---|---|
+| S13 | §17.1 R7 `:998` | “`_id` 含 epoch”可证唯一 | canonical ID + create-only；§18.4 |
+| S14 | §17.2 字段 1/7 `:1039`/`:1045` | `_id` 含任意 runId；runId 非空 | writer `runId="we-<e>"`；canonical 校验；§18.2 |
+| S15 | §17.2 `:1148-1151` | consumed 统一要求 runtimeTicket 重算 | 按 planKind 拆分；§18.7 |
+| S16 | §17.2 空值表/目标段 | writer epoch 固定 1/n+1 | 重签 `e'>e`，允许跳号；source 规则不变；§18.5 |
+| S17 | §15.2.1 `:674`/§16.4 `:882` | 通用 `_id` 含 runId | 历史表述；writer 以 §18.2 为准 |
+| S18 | §0/§14/末行 | v7 Q1–Q40/N01–N132 | v8 Q1–Q44/N01–N142；§18 |
+
+---
+
+**提交对象：Codex。请复审 v8 §18（Q41–Q44、N133–N142、writer plan canonical ID/epoch 唯一性、作用域、撤销/过期重签与终态、consumed 按 planKind 校验、refs/writes 0 新增）及 §17（Q36–Q40）；本稿不声称完整云报告已读或逐项关闭。不自批。完成即停手，等待独立复审。**

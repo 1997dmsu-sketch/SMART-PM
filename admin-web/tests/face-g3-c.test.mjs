@@ -14,12 +14,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   // guard / 断言 helper
-  expectError, assertZeroWrite, assertSuccessWriteSet, assertSafeError, getViolations,
+  expectError, assertZeroWrite, assertSuccessWriteSet, assertSafeError, assertNoNetworkViolation,
+  getViolations,
   // 真实 claim helper（由 testkit 从 h3aModule guard 安装后动态转发）
   claimDispatchJob, assertLeaseFence,
   // fixture 工厂 / 常量
-  setupG3, makeEnrollJob, putRecord, find, count, deterministicLogId,
-  opContextFor, auditIdFor,
+  setupG3, makeEnrollJob, putRecord, find, count,
+  // 测试侧独立 oracle（P2-3：预期 ID 不得复用生产 operationKey/deterministicLogId/auditIdFor）
+  independentOpKey, independentLogId, independentAuditId,
   ORG, JOB, JOB_REV, NOW, JOBS, LOGS, OP_KEYS, DOMAINS, AUDIT_COLLECTION,
 } from "./face-g3-testkit.mjs";
 
@@ -45,6 +47,14 @@ test("C01：同键两并发 → 两回执 deepEqual，OP_KEYS/LOGS/AUDIT 各仅 
   assert.deepEqual(r1, r2, "同键并发两回执必须逐字段相等");
   // 胜者写集 J+L+O+A 内容级断言（D=0 见下）
   assertSuccessWriteSet(h, { key });
+  // P2-3：独立交叉校验写集 ID（即便 testkit 内部仍用生产 helper，本文件也不漏判）。
+  assert.ok(find(h.store, OP_KEYS, independentOpKey({ env: h.env, idempotencyKey: key })),
+    "op key 必须命中测试侧独立 oracle");
+  assert.ok(find(h.store, LOGS, independentLogId(JOB, "queued", JOB_REV + 1)),
+    "log 必须命中测试侧独立 oracle");
+  assert.ok(find(h.store, AUDIT_COLLECTION,
+    independentAuditId(independentOpKey({ env: h.env, idempotencyKey: key }), { jobId: JOB })),
+    "audit 必须命中测试侧独立 oracle");
   assert.equal(count(h.store, OP_KEYS), 1, "OP_KEYS 仅 1 条（重放零写）");
   assert.equal(count(h.store, LOGS), 1, "LOGS 仅 1 条（确定性 log 去重）");
   assert.equal(count(h.store, AUDIT_COLLECTION) - h.seedAuditCount, 1, "AUDIT 仅新增 1 条");
@@ -77,10 +87,11 @@ test("C02：异键同 revision 两并发 → 一 fulfilled、一 INVALID_STATE/4
   assert.equal(bad[0].reason.status, 409, "败者 status 必须是 409");
 
   // 胜者写集 J+L+O+A 内容级断言（保留）。
-  const ctxA = opContextFor({ env: h.env, idempotencyKey: keyA });
-  const ctxB = opContextFor({ env: h.env, idempotencyKey: keyB });
-  const hasA = !!find(h.store, OP_KEYS, ctxA.opKey);
-  const hasB = !!find(h.store, OP_KEYS, ctxB.opKey);
+  // P2-3：预期 opKey 由测试侧独立 oracle 计算，不复用生产 operationKey()。
+  const opKeyA = independentOpKey({ env: h.env, idempotencyKey: keyA });
+  const opKeyB = independentOpKey({ env: h.env, idempotencyKey: keyB });
+  const hasA = !!find(h.store, OP_KEYS, opKeyA);
+  const hasB = !!find(h.store, OP_KEYS, opKeyB);
   assert.ok(hasA !== hasB, "恰好一个 op key 落库（败者零写）");
   const winnerKey = hasA ? keyA : keyB;
   assertSuccessWriteSet(h, { key: winnerKey });
@@ -91,9 +102,9 @@ test("C02：异键同 revision 两并发 → 一 fulfilled、一 INVALID_STATE/4
 
   // ---- 败者全库零写的【内容级】证据（任务卡 §2.2）----
   // 最终库态 = 初始快照 + 胜者合法写集；败者不得产生任何额外写入。
-  const winnerCtx = opContextFor({ env: h.env, idempotencyKey: winnerKey });
-  const winnerLogId = deterministicLogId(JOB, "queued", JOB_REV + 1);
-  const winnerAuditId = auditIdFor(winnerCtx.opKey, { jobId: JOB });
+  const winnerOpKey = independentOpKey({ env: h.env, idempotencyKey: winnerKey });
+  const winnerLogId = independentLogId(JOB, "queued", JOB_REV + 1);
+  const winnerAuditId = independentAuditId(winnerOpKey, { jobId: JOB });
   const asRows = (v) => structuredClone(v || []);
   const WRITE_SET = new Set([JOBS, LOGS, OP_KEYS, AUDIT_COLLECTION, DOMAINS]);
 
@@ -108,7 +119,7 @@ test("C02：异键同 revision 两并发 → 一 fulfilled、一 INVALID_STATE/4
   //     DOMAINS 为 D=0，winnerId=null 表示应完全零变化。
   for (const [col, winnerId] of [
     [LOGS, winnerLogId],
-    [OP_KEYS, winnerCtx.opKey],
+    [OP_KEYS, winnerOpKey],
     [AUDIT_COLLECTION, winnerAuditId],
     [DOMAINS, null],
   ]) {
@@ -139,6 +150,13 @@ test("C03：retry 先提交（lease 三字段保持 null/原值），随后真�
   const receipt = await h.retry(JOB, JOB_REV, key);
   assert.equal(receipt.state, "queued", "retry 成功推进到 queued");
   assertSuccessWriteSet(h, { key });
+  // P2-3：独立交叉校验写集 ID（即便 testkit 内部仍用生产 helper，本文件也不漏判）。
+  const expOpKey = independentOpKey({ env: h.env, idempotencyKey: key });
+  assert.ok(find(h.store, OP_KEYS, expOpKey), "op key 必须命中测试侧独立 oracle");
+  assert.ok(find(h.store, LOGS, independentLogId(JOB, "queued", JOB_REV + 1)),
+    "log 必须命中测试侧独立 oracle");
+  assert.ok(find(h.store, AUDIT_COLLECTION, independentAuditId(expOpKey, { jobId: JOB })),
+    "audit 必须命中测试侧独立 oracle");
 
   const afterRetry = find(h.store, JOBS, JOB);
   // retry 侧不得改写 lease 三字段（保持 null / 原值）与 attempts
@@ -166,6 +184,8 @@ test("C03：retry 先提交（lease 三字段保持 null/原值），随后真�
   assert.equal(claimed.fence.owner, "worker-g3");
   assert.equal(claimed.fence.generation, pre.leaseGeneration + 1);
   assert.doesNotThrow(() => assertLeaseFence(stored, claimed.fence, NOW), "claim fence 必须通过 fence 校验");
+  // P1：retry 成功写集断言在 claim 之前；claim 之后整条成功路径同样必须零网络/Provider。
+  assertNoNetworkViolation();
 });
 
 // ---------------------------------------------------------------------------
@@ -219,6 +239,7 @@ test("C05：awaiting_result job → INVALID_JOB/409 + Z（裁定1：仅验 retry
 test("C06：其他路径推终态（succeeded/terminal_failed/cancelled）→ 新 key retry INVALID_STATE/409 + Z", async (t) => {
   const h = await setupG3(t);
   await h.retry(JOB, JOB_REV, h.nextKey()); // 先成功一次（queued, revision=5）
+  assertNoNetworkViolation(); // P1：该成功 retry 未走 assertSuccessWriteSet，显式断言零网络违规
 
   for (const terminal of ["succeeded", "terminal_failed", "cancelled"]) {
     const job = find(h.store, JOBS, JOB);
@@ -253,6 +274,8 @@ test("C07：ack loss 同键重放 → 原快照逐字段相等、不新增 op/lo
   assert.equal(count(h.store, LOGS), logBefore, "不新增 log");
   assert.equal(count(h.store, AUDIT_COLLECTION), auditBefore, "不新增 audit");
   assert.deepEqual(h.store.data[DOMAINS], domainBefore, "不新增/改写 domain");
+  // P1：首次成功 retry 与同键合法重放均未走 assertSuccessWriteSet，显式断言零网络违规。
+  assertNoNetworkViolation();
 });
 
 // ---------------------------------------------------------------------------
@@ -260,7 +283,7 @@ test("C07：ack loss 同键重放 → 原快照逐字段相等、不新增 op/lo
 // ---------------------------------------------------------------------------
 test("C08：预占确定性 log ID（哨兵 MUST_SURVIVE）→ retry CONFLICT/409 整事务回滚、哨兵保留、全库 Z", async (t) => {
   const h = await setupG3(t);
-  const logId = deterministicLogId(JOB, "queued", JOB_REV + 1);
+  const logId = independentLogId(JOB, "queued", JOB_REV + 1);
   const squatter = putRecord(h.store, LOGS, logId, {
     orgId: ORG, jobId: JOB, state: "squatter", sentinelMarker: "MUST_SURVIVE",
   });
@@ -270,6 +293,103 @@ test("C08：预占确定性 log ID（哨兵 MUST_SURVIVE）→ retry CONFLICT/40
   const after = find(h.store, LOGS, logId);
   assert.deepEqual(after, squatter, "预占记录必须原样保留（整事务回滚）");
   assert.equal(after.sentinelMarker, "MUST_SURVIVE", "预占哨兵必须存活");
+});
+
+// C08 子场景（不新增矩阵 ID）：事务 callback 被重跑（re-run）时的确定性 / 幂等性。
+// 设计依据：retry-requeue 设计 §4.8「事务 callback 重跑 → 确定性 log/audit ID + create-only，
+// 仅一次提交；预占 ID → 整事务回滚」与 §4.5 原子性「build 在克隆态构建、抛错不落盘」。
+// 实现：测试侧可控桩包裹 store.transact，让 retry 传给 Store 的 build 在同一初始 state 上
+// 被调用两次（模拟 CloudStore.runTransaction 重跑 callback），捕获两次写集对比后只提交第二次。
+// 不改生产 store.mjs / retry.mjs。
+test("C08-RERUN：事务 callback 重跑两次 → 两次确定性写集逐字段相等、只提交一次、全库除合法写集零变化、零网络", async (t) => {
+  const h = await setupG3(t);
+  const key = h.nextKey();
+
+  // P2-3：预期 ID 全部来自测试侧独立 oracle，不调用生产 helper。
+  const expectedOpKey = independentOpKey({ env: h.env, idempotencyKey: key });
+  const expectedLogId = independentLogId(JOB, "queued", JOB_REV + 1);
+  const expectedAuditId = independentAuditId(expectedOpKey, { jobId: JOB });
+
+  const before = structuredClone(h.store.data);
+
+  // 测试侧桩：包裹实例 transact，把 build 包装成「同一 state 连跑两次、捕获写集、只提交第二次」。
+  const realTransact = h.store.transact.bind(h.store);
+  const captured = [];
+  h.store.transact = async (refs, build, audit) => {
+    const rerunBuild = async (state) => {
+      // 两次调用各拿一份独立 state 克隆，避免相互污染；build 内权威校验均为纯读，不改 state。
+      const writes1 = await build(structuredClone(state));
+      const writes2 = await build(structuredClone(state));
+      captured.push({
+        writes1: structuredClone(writes1),
+        writes2: structuredClone(writes2),
+        auditId: audit?.auditId,
+      });
+      return writes2; // 只有第二次写集进入 Store 提交
+    };
+    return realTransact(refs, rerunBuild, audit);
+  };
+  t.after(() => { delete h.store.transact; }); // 还原为原型方法，避免影响后续断言
+
+  const receipt = await h.retry(JOB, JOB_REV, key);
+
+  // ① callback 恰被重跑一次（共两次调用），两次产出逐字段相同的确定性写集。
+  assert.equal(captured.length, 1, "wrapper 必须恰好捕获一次重跑事件");
+  const { writes1, writes2, auditId } = captured[0];
+  assert.deepEqual(writes2, writes1,
+    "callback 重跑两次必须产出逐字段相同的确定性写集（非确定 ID 会在此 FAIL）");
+  assert.ok(Array.isArray(writes1) && writes1.length > 0, "首次 build 必须产出非空写集");
+
+  // 写集内 log ID / op key 与测试侧独立 oracle 一致；audit ID 同理由独立 oracle 校验。
+  const writeIds = writes1.map((w) => `${w.collection}/${w.id}`);
+  assert.ok(writeIds.includes(`${LOGS}/${expectedLogId}`), "重跑写集 log ID 必须等于独立 oracle");
+  assert.ok(writeIds.includes(`${OP_KEYS}/${expectedOpKey}`), "重跑写集 op key 必须等于独立 oracle");
+  assert.equal(auditId, expectedAuditId, "重跑事务 audit ID 必须等于独立 oracle");
+  assert.ok(writes1.every((w) => w.collection !== DOMAINS), "domain 已预建，成功写集 D=0");
+
+  // ② 最终库态只有一条 job / log / audit / op key（幂等去重，无重复写）。
+  assertSuccessWriteSet(h, { key }); // 内含成功写集断言 + 零网络违规断言
+  assert.equal(count(h.store, JOBS), 1, "JOBS 仅 1 条（无重复 job）");
+  assert.equal(count(h.store, LOGS), 1, "LOGS 仅 1 条（无重复 log）");
+  assert.equal(count(h.store, OP_KEYS), 1, "OP_KEYS 仅 1 条（无重复 op key）");
+  assert.equal(count(h.store, AUDIT_COLLECTION) - h.seedAuditCount, 1, "AUDIT 仅新增 1 条（无重复 audit）");
+
+  // ②b：提交完成后 callback 再次被真实驱动（同 key 二次 retry，已卸载桩、走生产 transact）
+  //     → 合法重放零写、返回原回执，进一步证明重跑幂等去重、不产生第二条核心写。
+  delete h.store.transact;
+  const beforeReplay = structuredClone(h.store.data);
+  const replay = await h.retry(JOB, JOB_REV, key);
+  assert.deepEqual(replay, receipt, "重跑提交后同键再次提交必须返回原回执");
+  assertZeroWrite(h.store, beforeReplay, "重跑提交后同键再次提交必须零写（幂等去重）");
+
+  // ③ 全库除合法写集（J+L+O+A，D=0）外内容级零变化。
+  const WRITE_SET = new Set([JOBS, LOGS, OP_KEYS, AUDIT_COLLECTION, DOMAINS]);
+  const rows = (v) => structuredClone(v || []);
+  for (const col of new Set([...Object.keys(before), ...Object.keys(h.store.data)])) {
+    if (WRITE_SET.has(col)) continue;
+    assert.deepEqual(rows(h.store.data[col]), rows(before[col]),
+      `非写集集合 ${col} 内容级零变化（重跑无额外写）`);
+  }
+  for (const [col, id] of [
+    [LOGS, expectedLogId],
+    [OP_KEYS, expectedOpKey],
+    [AUDIT_COLLECTION, expectedAuditId],
+  ]) {
+    const afterRows = rows(h.store.data[col]).filter((r) => r._id !== id);
+    assert.deepEqual(afterRows, rows(before[col]),
+      `写集集合 ${col} 除合法写入外内容级零变化（重跑无重复写）`);
+  }
+  assert.deepEqual(rows(h.store.data[DOMAINS]), rows(before[DOMAINS]), "D=0：Domains 内容级零变化");
+  const jobAfter = structuredClone(find(h.store, JOBS, JOB));
+  const jobBefore = structuredClone(before[JOBS].find((r) => r._id === JOB));
+  for (const field of ["state", "revision", "updatedAt"]) {
+    delete jobAfter[field];
+    delete jobBefore[field];
+  }
+  assert.deepEqual(jobAfter, jobBefore, "job 除 retry 合法改写字段外内容级零变化");
+
+  // ④ 零网络 / Provider。
+  assertNoNetworkViolation();
 });
 
 // ---------------------------------------------------------------------------
@@ -314,4 +434,6 @@ test("C09：旧 worker fence 观察——真实 claim 产生 fence 后复位 ret
     (e) => e && e.code === "LEASE_FENCE_REJECTED",
     "旧 fence 在 retry 后失效（job 回到 queued），未被 retry 消费",
   );
+  // P1：本用例含真实 claim + 成功 retry，均未走 assertSuccessWriteSet，整条路径零网络违规。
+  assertNoNetworkViolation();
 });

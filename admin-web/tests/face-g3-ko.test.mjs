@@ -6,7 +6,8 @@
  *    本文件【不】静态 import 任何被测模块，也不发网络/启动 HTTP。
  *  - 全部 fixture 由 testkit 合成，失败分支统一用 expectError（code+status 双断言 +
  *    全库零写 + Provider/网络 0）。
- *  - O10 整体 BLOCKED：用 expectBlocked 记录取证，不计 PASS、不 throw。
+ *  - O10 用本文件内的动态 gate 判定：三子项全 true → PASS，任一 false → BLOCKED 并登记；
+ *    不硬编码某一子项必须失败，故独立 Q8 清理 routes.mjs 描述行后同一用例自动转 PASS。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -16,18 +17,22 @@ import { fileURLToPath } from "node:url";
 
 import {
   setupG3, expectError, assertZeroWrite, assertSuccessWriteSet, assertReceiptShape,
-  expectBlocked, getBlockedRecords, getViolations, assertSafeError,
+  expectBlocked, getBlockedRecords, getViolations, assertSafeError, assertNoNetworkViolation,
   JOB, JOB_REV, NOW, AUDIT_COLLECTION, JOBS, LOGS, OP_KEYS, DOMAINS,
   ORG, ORG_OTHER, MEMBERSHIP, ACTOR,
   K2_ENV, K2_ENV_B,
-  opContextFor, auditIdFor, digestOf, deterministicLogId,
+  // ID 类预期值一律用测试侧独立 oracle（不复用生产 helper，防「改错生产前缀测试仍过」）。
+  // opContextFor 仅在 K09/K10 取 domain head/version ID（非 opKey/auditId/logId）。
+  opContextFor, digestOf,
+  independentOpKey, independentAuditId, independentLogId,
   putRecord, removeRecord, find, count, semanticKeys,
   makeEnrollJob, makeRevokeJob, StrictRetryService,
   OPKEY_FIELDS, LOG_FIELDS,
 } from "./face-g3-testkit.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const LOG_ID = deterministicLogId(JOB, "queued", JOB_REV + 1);
+// 独立 oracle 重算 queued log ID（occurrence = expectedJobRevision + 1）。
+const LOG_ID = independentLogId(JOB, "queued", JOB_REV + 1);
 const RECEIPT_KEYS = ["attempts", "jobId", "nextAttemptAt", "revision", "state"];
 
 const failureOf = async (action) => {
@@ -86,8 +91,7 @@ test("K03 合法首次 → op key 六字段/回执五字段/摘要绑定/原始 
   const receipt = await h.retry(JOB, JOB_REV, key);
   assertReceiptShape(receipt);
 
-  const ctx = opContextFor({ env: h.env, idempotencyKey: key });
-  const op = find(h.store, OP_KEYS, ctx.opKey);
+  const op = find(h.store, OP_KEYS, independentOpKey({ env: h.env, idempotencyKey: key }));
   assert.ok(op, "op key 必须存在");
   assert.deepEqual(semanticKeys(op), [...OPKEY_FIELDS].sort(), "op key 精确六语义字段");
   assert.deepEqual(Object.keys(op.result).sort(), [...RECEIPT_KEYS].sort(), "result 精确五字段");
@@ -104,6 +108,7 @@ test("K04 同键同摘要重放 → 原回执逐字段相等、audit 不新增�
   const h = await setupG3(t);
   const key = h.nextKey();
   const receipt = await h.retry(JOB, JOB_REV, key);
+  assertNoNetworkViolation(); // P1：成功路径一旦有被 guard 截获的网络调用即失败
   const auditsBefore = count(h.store, AUDIT_COLLECTION);
   const netBefore = getViolations().runtime.length;
   const before = structuredClone(h.store.data);
@@ -114,17 +119,19 @@ test("K04 同键同摘要重放 → 原回执逐字段相等、audit 不新增�
   assert.equal(count(h.store, AUDIT_COLLECTION), auditsBefore, "重放不得新增 audit");
   assertZeroWrite(h.store, before, "全库 Z");
   assert.equal(getViolations().runtime.length, netBefore, "重放零网络/Provider");
+  assertNoNetworkViolation(); // 重放成功路径同样必须零网络违规
 });
 
 test("K05 同键改 expectedJobRevision → CONFLICT/409 且 op key 不变", async (t) => {
   const h = await setupG3(t);
   const key = h.nextKey();
   await h.retry(JOB, JOB_REV, key);
-  const ctx = opContextFor({ env: h.env, idempotencyKey: key });
-  const opBefore = structuredClone(find(h.store, OP_KEYS, ctx.opKey));
+  assertNoNetworkViolation();
+  const opId = independentOpKey({ env: h.env, idempotencyKey: key });
+  const opBefore = structuredClone(find(h.store, OP_KEYS, opId));
 
   await expectError(h.store, () => h.retry(JOB, JOB_REV + 1, key), "CONFLICT", 409);
-  assert.deepEqual(find(h.store, OP_KEYS, ctx.opKey), opBefore, "op key 内容不得被改写");
+  assert.deepEqual(find(h.store, OP_KEYS, opId), opBefore, "op key 内容不得被改写");
 });
 
 test("K06 同键改 jobId → CONFLICT/409", async (t) => {
@@ -132,11 +139,12 @@ test("K06 同键改 jobId → CONFLICT/409", async (t) => {
   const h = await setupG3(t, { jobs: [makeEnrollJob(), makeEnrollJob({ _id: otherJob })] });
   const key = h.nextKey();
   await h.retry(JOB, JOB_REV, key);
-  const ctx = opContextFor({ env: h.env, idempotencyKey: key });
-  const opBefore = structuredClone(find(h.store, OP_KEYS, ctx.opKey));
+  assertNoNetworkViolation();
+  const opId = independentOpKey({ env: h.env, idempotencyKey: key });
+  const opBefore = structuredClone(find(h.store, OP_KEYS, opId));
 
   await expectError(h.store, () => h.retry(otherJob, JOB_REV, key), "CONFLICT", 409);
-  assert.deepEqual(find(h.store, OP_KEYS, ctx.opKey), opBefore, "op key 内容不得被改写");
+  assert.deepEqual(find(h.store, OP_KEYS, opId), opBefore, "op key 内容不得被改写");
 });
 
 test("K07 同键重放但 job 已推进 sending/succeeded → 仍返回原快照、不读当前状态、Z", async (t) => {
@@ -144,6 +152,7 @@ test("K07 同键重放但 job 已推进 sending/succeeded → 仍返回原快照
   const key = h.nextKey();
   const receipt = await h.retry(JOB, JOB_REV, key);
   const netBefore = getViolations().runtime.length;
+  assertNoNetworkViolation();
 
   for (const advanced of ["sending", "succeeded"]) {
     const job = find(h.store, JOBS, JOB);
@@ -187,19 +196,21 @@ test("K09 withDomains:false → 写 head+version(D=2)、audit.target 五条有�
 
   const receipt = await h.retry(JOB, JOB_REV, key);
   assertReceiptShape(receipt);
+  assertNoNetworkViolation();
   assert.equal(count(h.store, DOMAINS), 2, "首次 retry 写入 head+version 两条");
 
-  const ctx = opContextFor({ env: h.env, idempotencyKey: key });
+  const ctx = opContextFor({ env: h.env, idempotencyKey: key }); // 仅取 domain head/version ID
+  const opId = independentOpKey({ env: h.env, idempotencyKey: key });
   assert.ok(find(h.store, DOMAINS, ctx.headId), "head 存在");
   assert.ok(find(h.store, DOMAINS, ctx.versionId), "version 存在");
   const expectedTarget = [
     `${DOMAINS}/${ctx.headId}`,
     `${DOMAINS}/${ctx.versionId}`,
     `${JOBS}/${JOB}`,
-    `${LOGS}/${deterministicLogId(JOB, "queued", JOB_REV + 1)}`,
-    `${OP_KEYS}/${ctx.opKey}`,
+    `${LOGS}/${independentLogId(JOB, "queued", JOB_REV + 1)}`,
+    `${OP_KEYS}/${opId}`,
   ].join(", ");
-  assert.equal(find(h.store, AUDIT_COLLECTION, auditIdFor(ctx.opKey)).target, expectedTarget,
+  assert.equal(find(h.store, AUDIT_COLLECTION, independentAuditId(opId)).target, expectedTarget,
     "audit.target 必须是五条有序引用 join(', ')");
 
   // 该形态的合法重放：仍返回原回执、全库零写（含 domain/audit 不变）
@@ -208,6 +219,7 @@ test("K09 withDomains:false → 写 head+version(D=2)、audit.target 五条有�
   const before = structuredClone(h.store.data);
   const replay = await h.retry(JOB, JOB_REV, key);
   assert.deepEqual(replay, receipt, "五条 target 形态重放返回原回执");
+  assertNoNetworkViolation();
   assertZeroWrite(h.store, before, "五条 target 形态重放全库零写");
   assert.equal(count(h.store, AUDIT_COLLECTION), auditsBefore);
   assert.deepEqual(h.store.data[DOMAINS], domainsBefore);
@@ -241,8 +253,8 @@ test("K12 op key result 12 种损坏 → CONFLICT/409 不修复，每次恢复�
   const h = await setupG3(t);
   const key = h.nextKey();
   await h.retry(JOB, JOB_REV, key);
-  const ctx = opContextFor({ env: h.env, idempotencyKey: key });
-  const opId = ctx.opKey;
+  assertNoNetworkViolation();
+  const opId = independentOpKey({ env: h.env, idempotencyKey: key });
   const original = structuredClone(find(h.store, OP_KEYS, opId).result);
   const good = () => ({ jobId: JOB, state: "queued", revision: JOB_REV + 1, attempts: 2, nextAttemptAt: NOW - 5_000 });
   const variants = [
@@ -274,11 +286,12 @@ test("K13 有 op key 无 audit → CONFLICT/409", async (t) => {
   const h = await setupG3(t);
   const key = h.nextKey();
   await h.retry(JOB, JOB_REV, key);
-  const ctx = opContextFor({ env: h.env, idempotencyKey: key });
-  removeRecord(h.store, AUDIT_COLLECTION, auditIdFor(ctx.opKey));
+  assertNoNetworkViolation();
+  const auditId = independentAuditId(independentOpKey({ env: h.env, idempotencyKey: key }));
+  removeRecord(h.store, AUDIT_COLLECTION, auditId);
 
   await expectError(h.store, () => h.retry(JOB, JOB_REV, key), "CONFLICT", 409);
-  assert.equal(find(h.store, AUDIT_COLLECTION, auditIdFor(ctx.opKey)), undefined,
+  assert.equal(find(h.store, AUDIT_COLLECTION, auditId), undefined,
     "失败不得替 Store 补写 audit");
 });
 
@@ -286,12 +299,14 @@ test("K14 有 audit 无 op key → CONFLICT/409", async (t) => {
   const h = await setupG3(t);
   const key = h.nextKey();
   await h.retry(JOB, JOB_REV, key);
-  const ctx = opContextFor({ env: h.env, idempotencyKey: key });
-  const auditBefore = structuredClone(find(h.store, AUDIT_COLLECTION, auditIdFor(ctx.opKey)));
-  removeRecord(h.store, OP_KEYS, ctx.opKey);
+  assertNoNetworkViolation();
+  const opId = independentOpKey({ env: h.env, idempotencyKey: key });
+  const auditId = independentAuditId(opId);
+  const auditBefore = structuredClone(find(h.store, AUDIT_COLLECTION, auditId));
+  removeRecord(h.store, OP_KEYS, opId);
 
   await expectError(h.store, () => h.retry(JOB, JOB_REV, key), "CONFLICT", 409);
-  assert.deepEqual(find(h.store, AUDIT_COLLECTION, auditIdFor(ctx.opKey)), auditBefore,
+  assert.deepEqual(find(h.store, AUDIT_COLLECTION, auditId), auditBefore,
     "孤立 audit 不得被改写或迁移");
 });
 
@@ -299,6 +314,7 @@ test("K15 同键在 job 再次失败后复用（revision 变）→ CONFLICT/409"
   const h = await setupG3(t);
   const key = h.nextKey();
   await h.retry(JOB, JOB_REV, key);
+  assertNoNetworkViolation();
 
   // 模拟下一次失败：revision 前进、回到 retryable_failed
   const job = find(h.store, JOBS, JOB);
@@ -309,8 +325,7 @@ test("K15 同键在 job 再次失败后复用（revision 变）→ CONFLICT/409"
   job.nextAttemptAt = NOW;
 
   await expectError(h.store, () => h.retry(JOB, JOB_REV + 1, key), "CONFLICT", 409);
-  const ctx = opContextFor({ env: h.env, idempotencyKey: key });
-  assert.equal(find(h.store, OP_KEYS, ctx.opKey).requestDigest,
+  assert.equal(find(h.store, OP_KEYS, independentOpKey({ env: h.env, idempotencyKey: key })).requestDigest,
     digestOf({ jobId: JOB, expectedJobRevision: JOB_REV }), "摘要仍绑定旧 revision，不被覆盖");
 });
 
@@ -318,8 +333,8 @@ test("K16 op.result.revision 篡改为 JOB_REV+2 → CONFLICT/409，不当成功
   const h = await setupG3(t);
   const key = h.nextKey();
   await h.retry(JOB, JOB_REV, key);
-  const ctx = opContextFor({ env: h.env, idempotencyKey: key });
-  const opId = ctx.opKey;
+  assertNoNetworkViolation();
+  const opId = independentOpKey({ env: h.env, idempotencyKey: key });
   const original = structuredClone(find(h.store, OP_KEYS, opId).result);
   const auditsBefore = count(h.store, AUDIT_COLLECTION);
 
@@ -340,6 +355,7 @@ test("K16 op.result.revision 篡改为 JOB_REV+2 → CONFLICT/409，不当成功
 test("O01 成功响应键集合精确 [attempts,jobId,nextAttemptAt,revision,state]", async (t) => {
   const h = await setupG3(t);
   const receipt = await h.retry(JOB, JOB_REV, h.nextKey());
+  assertNoNetworkViolation();
   assert.deepEqual(Object.keys(receipt).sort(), [...RECEIPT_KEYS].sort());
   assertReceiptShape(receipt);
 });
@@ -349,6 +365,7 @@ test("O02 同键重放响应逐字段相等", async (t) => {
   const key = h.nextKey();
   const receipt = await h.retry(JOB, JOB_REV, key);
   const replay = await h.retry(JOB, JOB_REV, key);
+  assertNoNetworkViolation();
   assert.deepEqual(replay, receipt);
   for (const field of RECEIPT_KEYS) assert.equal(replay[field], receipt[field]);
 });
@@ -366,6 +383,7 @@ test("O03 响应 JSON 无 lease/digest/op key/原始 key 痕迹", async (t) => {
   const h = await setupG3(t);
   const key = h.nextKey();
   const receipt = await h.retry(JOB, JOB_REV, key);
+  assertNoNetworkViolation();
   assertResponseClean(receipt, [
     "leaseOwner", "leaseExpiresAt", "leaseGeneration", "lease",
     "requestDigest", "digest", "opKey", "op_key", "op:",
@@ -376,6 +394,7 @@ test("O03 响应 JSON 无 lease/digest/op key/原始 key 痕迹", async (t) => {
 test("O04 响应 JSON 无 result/errorKind/reasonCode/message/stack", async (t) => {
   const h = await setupG3(t);
   const receipt = await h.retry(JOB, JOB_REV, h.nextKey());
+  assertNoNetworkViolation();
   assertResponseClean(receipt, [
     "result", "errorKind", "reasonCode", "message", "stack",
   ]);
@@ -384,6 +403,7 @@ test("O04 响应 JSON 无 result/errorKind/reasonCode/message/stack", async (t) 
 test("O05 响应 JSON 无 org/actor/凭证/设备/人员/文件字段", async (t) => {
   const h = await setupG3(t);
   const receipt = await h.retry(JOB, JOB_REV, h.nextKey());
+  assertNoNetworkViolation();
   assertResponseClean(receipt, [
     "orgId", "actorId", "actorType", "membershipId", "principalId",
     "credentialId", "credentials", "deviceId", "serial", "serialNumber",
@@ -395,6 +415,7 @@ test("O05 响应 JSON 无 org/actor/凭证/设备/人员/文件字段", async (t
 test("O06 响应 JSON 无 auditId/logId/createdAt/updatedAt", async (t) => {
   const h = await setupG3(t);
   const receipt = await h.retry(JOB, JOB_REV, h.nextKey());
+  assertNoNetworkViolation();
   assertResponseClean(receipt, ["auditId", "logId", "createdAt", "updatedAt"]);
 });
 
@@ -548,9 +569,35 @@ test("O09 跨组织 / 不存在 job 的 NOT_FOUND/404 三要素完全同态", as
   assert.deepEqual(tuple(alienJob), tuple(missingJob), "三要素完全同态，不泄漏存在性");
 });
 
-test("O10 整体 BLOCKED：lib 无 requeue 入口、server.mjs 无 /retry 分支，但 routes.mjs 仍留 retry 描述行", async (t) => {
-  // ①②可做局部通过证据；③是 blocked 根因。整体 BLOCKED，不计 PASS、不断言③通过。
-  // 待独立 Q8 清理小提交完成后复验本条。
+/**
+ * O10 专用「动态门禁」helper（本文件内实现，不改 testkit）。
+ * - testkit.expectBlocked 整体永远 blocked；这里 blocked 由三子项实际结果动态推导：
+ *   三子项全 true → PASS（不进 BLOCKED_RECORDS）；任一 false → BLOCKED 并登记。
+ * - 因此「独立 Q8 清理 routes.mjs 的 retry 描述行后，同一用例自动转 PASS」可被证伪。
+ * - 登记时借用 testkit 的 BLOCKED_RECORDS 通道（expectBlocked 恒 blocked），
+ *   仅传入按已算结果重放的 check，避免重复扫描源文件。
+ */
+function o10DynamicGate(name, checks, { register = true } = {}) {
+  const results = [];
+  for (const c of checks) {
+    try { c.fn(); results.push({ label: c.label, ok: true }); }
+    catch (e) { results.push({ label: c.label, ok: false, error: String((e && e.message) || e) }); }
+  }
+  const blocked = results.some((r) => !r.ok);
+  const record = Object.freeze({ name, blocked, results, at: Date.now() });
+  if (blocked && register) {
+    expectBlocked(name, results.map((r) => ({
+      label: r.label,
+      fn: () => assert.ok(r.ok, r.error || `子项未通过：${r.label}`),
+    })));
+  }
+  return record;
+}
+
+test("O10 整体门禁动态判定：lib 无 requeue 入口 / server.mjs 无 /retry 分支 / routes.mjs 无 retry 描述行", async (t) => {
+  // 三子项全部成立 → O10 计 PASS（不进 BLOCKED_RECORDS）；任一不成立 → O10 BLOCKED 并登记。
+  // 不硬编码「③必须失败」：当前 routes.mjs 描述行仍在 → ③=false → BLOCKED；
+  // 一旦 Q8 清理该描述行 → ③=true → 同一用例自动 PASS，而非假失败。
   const listMjs = async (dir) => {
     const out = [];
     for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -570,7 +617,8 @@ test("O10 整体 BLOCKED：lib 无 requeue 入口、server.mjs 无 /retry 分支
   const serverSource = await readFile(join(here, "..", "server.mjs"), "utf8");
   const routesSource = await readFile(join(here, "..", "lib", "face-service", "routes.mjs"), "utf8");
 
-  const record = expectBlocked("O10", [
+  // 三子项判定：routesSource 作为参数注入，便于内存证伪（不改生产文件）。
+  const buildChecks = (routesSrc) => [
     { label: "① grep admin-web/lib：无 requeue 可调用入口", fn: () => {
       for (const { file, source } of libSources)
         assert.doesNotMatch(source, /\brequeue\b/i, `${file} 不得残留 requeue 标识符/入口`);
@@ -579,24 +627,37 @@ test("O10 整体 BLOCKED：lib 无 requeue 入口、server.mjs 无 /retry 分支
       assert.doesNotMatch(serverSource, /\/retry\b/, "server.mjs 不得注册 /retry 分支");
       assert.doesNotMatch(serverSource, /device-operation-job-retry/, "server.mjs 不得引用 retry 路由 id");
     } },
-    { label: "③ routes.mjs 仍含 device-operation-job-retry 描述行（blocked 根因；待独立 Q8 清理小提交完成后复验）", fn: () => {
-      assert.doesNotMatch(routesSource, /["']device-operation-job-retry["']/,
+    { label: "③ routes.mjs 无 device-operation-job-retry 描述行", fn: () => {
+      assert.doesNotMatch(routesSrc, /["']device-operation-job-retry["']/,
         "routes.mjs 应已清理旧 retry 描述行");
     } },
-  ]);
+  ];
 
-  assert.equal(record.blocked, true, "O10 整体必须记为 BLOCKED");
+  const record = o10DynamicGate("O10", buildChecks(routesSource));
+
   assert.equal(record.results.length, 3, "O10 必须记录三个子项");
+  assert.equal(record.blocked, !record.results.every((r) => r.ok),
+    "blocked 判定必须与三子项实际结果一致（全 true → PASS，任一 false → BLOCKED）");
+  // ①②为局部通过证据，当前与清理后都应成立；③不再硬编码真假。
   assert.equal(record.results[0].ok, true, "① 局部通过证据");
   assert.equal(record.results[1].ok, true, "② 局部通过证据");
-  assert.equal(record.results[2].ok, false, "③ 仍未清理：blocked 根因，不计 PASS");
-  assert.ok(getBlockedRecords().some((r) => r.name === "O10" && r.blocked === true),
-    "O10 必须登记进 BLOCKED_RECORDS");
-  t.diagnostic(`O10 BLOCKED（不计 PASS）：${JSON.stringify(record.results.map((r) => [r.label, r.ok]))}；待独立 Q8 清理小提交完成后复验`);
+  // BLOCKED_RECORDS 登记须与 blocked 判定一致：blocked 进、PASS 不进。
+  const registered = getBlockedRecords().some((r) => r.name === "O10" && r.blocked === true);
+  assert.equal(registered, record.blocked, "BLOCKED_RECORDS 登记须与 blocked 判定一致");
+  // 用例本身永远 PASS：成功记录一个动态判定的 blocked（或清理后的 pass），不 throw。
+  t.diagnostic(`O10 动态判定 ${record.blocked ? "BLOCKED" : "PASS"}：${JSON.stringify(record.results.map((r) => [r.label, r.ok]))}`);
+
+  // 可证伪：在内存中把 routes 源码的 retry 描述行替换为「已清理」形态，
+  // 用同一 gate 判定应自动转为 PASS（证明「Q8 清理后同一用例复验通过」）。
+  const cleanedRoutesSource = routesSource.replace(/device-operation-job-retry/g, "g3-falsify-cleaned");
+  const cleaned = o10DynamicGate("O10-falsify", buildChecks(cleanedRoutesSource), { register: false });
+  assert.equal(cleaned.results[2].ok, true, "内存清理后 ③ 应通过");
+  assert.equal(cleaned.blocked, false, "内存清理后 O10 应自动转 PASS（可证伪）");
+  t.diagnostic(`O10 可证伪（内存清理 routes 描述行）：${cleaned.blocked ? "BLOCKED" : "PASS"}，证明 Q8 清理后同一用例自动 PASS`);
 });
 
 test("O11 旧 requeue 遗留 queued job+log+audit + 新 key → INVALID_STATE/409，不误用/反推/迁移（G3 覆盖不替代 G4 独立复核）", async (t) => {
-  const oldLogId = deterministicLogId(JOB, "queued", JOB_REV + 1);
+  const oldLogId = independentLogId(JOB, "queued", JOB_REV + 1);
   const oldAuditId = "audit-legacy-requeue";
   const h = await setupG3(t, {
     job: makeEnrollJob({ state: "queued", nextAttemptAt: null, result: null }),
@@ -614,8 +675,7 @@ test("O11 旧 requeue 遗留 queued job+log+audit + 新 key → INVALID_STATE/40
 
   const key = h.nextKey();
   await expectError(h.store, () => h.retry(JOB, JOB_REV, key), "INVALID_STATE", 409);
-  const ctx = opContextFor({ env: h.env, idempotencyKey: key });
-  assert.equal(find(h.store, OP_KEYS, ctx.opKey), undefined,
+  assert.equal(find(h.store, OP_KEYS, independentOpKey({ env: h.env, idempotencyKey: key })), undefined,
     "不得从旧 log/audit 反推或补写 op key");
   const oldAudit = find(h.store, AUDIT_COLLECTION, oldAuditId);
   assert.ok(oldAudit, "旧 audit 保留");
@@ -629,10 +689,11 @@ test("O12 成功后全载体扫描：无原始 key、digest 原值、手机号/�
   const h = await setupG3(t);
   const key = h.nextKey();
   const receipt = await h.retry(JOB, JOB_REV, key);
-  const ctx = opContextFor({ env: h.env, idempotencyKey: key });
+  assertNoNetworkViolation();
+  const opId = independentOpKey({ env: h.env, idempotencyKey: key });
   const log = find(h.store, LOGS, LOG_ID);
-  const op = find(h.store, OP_KEYS, ctx.opKey);
-  const audit = find(h.store, AUDIT_COLLECTION, auditIdFor(ctx.opKey));
+  const op = find(h.store, OP_KEYS, opId);
+  const audit = find(h.store, AUDIT_COLLECTION, independentAuditId(opId));
   assert.ok(log && op && audit && receipt, "四类载体必须全部存在");
 
   // 原始 key 与合成 PII 字面量：四类载体一律不得出现。
@@ -664,9 +725,10 @@ test("O13 成功写后 log 精确 15 字段（errorKind/reasonCode/alertCode=nul
   const h = await setupG3(t);
   const key = h.nextKey();
   await h.retry(JOB, JOB_REV, key);
-  const ctx = opContextFor({ env: h.env, idempotencyKey: key });
+  assertNoNetworkViolation();
+  const opId = independentOpKey({ env: h.env, idempotencyKey: key });
   const log = find(h.store, LOGS, LOG_ID);
-  const audit = find(h.store, AUDIT_COLLECTION, auditIdFor(ctx.opKey));
+  const audit = find(h.store, AUDIT_COLLECTION, independentAuditId(opId));
 
   assert.deepEqual(semanticKeys(log), [...LOG_FIELDS].sort(), "log 精确 15 语义字段");
   assert.equal(LOG_FIELDS.length, 15);
@@ -684,7 +746,7 @@ test("O13 成功写后 log 精确 15 字段（errorKind/reasonCode/alertCode=nul
 
   for (const [name, carrier] of [["log", log], ["audit", audit]]) {
     const serialized = JSON.stringify(carrier);
-    for (const token of [key, find(h.store, OP_KEYS, ctx.opKey).requestDigest, "message", "stack"])
+    for (const token of [key, find(h.store, OP_KEYS, opId).requestDigest, "message", "stack"])
       assert.ok(!serialized.includes(token), `${name} 不得含 ${token}`);
   }
 });

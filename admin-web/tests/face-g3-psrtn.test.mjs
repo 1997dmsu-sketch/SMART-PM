@@ -18,13 +18,13 @@ import { fileURLToPath } from "node:url";
 
 import {
   setupG3, expectError, assertSuccessWriteSet, assertReceiptShape,
-  getViolations, resetRuntimeViolations,
+  assertNoNetworkViolation, getViolations, resetRuntimeViolations,
   ORG, ORG_OTHER, MEMBERSHIP, ACTOR, ACTOR_B, JOB, JOB_REV, NOW, RETRY_PERMISSION,
   K2_ENV, K2_ENV_B,
   JOBS, DOMAINS, AUDIT_COLLECTION,
   makeEnrollJob, makeRevokeJob, makeDispatchSnapshot,
   find, count, removeRecord,
-  opContextFor, auditIdFor,
+  independentOpKey, independentAuditId,
   StrictRetryService,
 } from "./face-g3-testkit.mjs";
 
@@ -136,6 +136,9 @@ test("P11：成功后再撤权限同键重放 → FORBIDDEN/403 且不命中旧�
   const key = h.nextKey();
   const first = await h.retry(JOB, JOB_REV, key);
   assertReceiptShape(first);
+  // 仅断言 receipt 的成功路径也必须显式证明零网络/Provider 违规，
+  // 不能依赖后续失败分支 expectError 的 netBefore（它只查「无新增」）。
+  assertNoNetworkViolation();
   const member = find(h.store, "org_memberships", MEMBERSHIP);
   member.permissions = [];
   await expectError(h.store, () => h.retry(JOB, JOB_REV, key), "FORBIDDEN", 403);
@@ -557,6 +560,7 @@ test("N07：DOMAIN_MISMATCH/409 与 CONFLICT/409 子场景失败零写", async (
     const h = await setupG3(st);
     const key = h.nextKey();
     await h.retry(JOB, JOB_REV, key);
+    assertNoNetworkViolation(); // 首次成功 retry 也必须零网络/Provider 违规
     await expectError(h.store, () => h.retry(JOB, JOB_REV + 1, key), "CONFLICT", 409);
   });
 });
@@ -570,8 +574,11 @@ test("N08：INVALID_JOB/409 与 CONFLICT/409 子场景失败零写", async (t) =
     const h = await setupG3(st);
     const key = h.nextKey();
     await h.retry(JOB, JOB_REV, key);
-    const ctx = opContextFor({ env: h.env, idempotencyKey: key });
-    removeRecord(h.store, AUDIT_COLLECTION, auditIdFor(ctx.opKey, { jobId: JOB }));
+    assertNoNetworkViolation(); // 首次成功 retry 也必须零网络/Provider 违规
+    // 预期 ID 一律由测试侧独立 oracle 计算，不得复用生产 operationKey/auditIdFor，
+    // 否则生产 op: 前缀被改错时本用例仍全过（循环认证）。
+    const expectedOpKey = independentOpKey({ env: h.env, idempotencyKey: key });
+    removeRecord(h.store, AUDIT_COLLECTION, independentAuditId(expectedOpKey, { jobId: JOB }));
     await expectError(h.store, () => h.retry(JOB, JOB_REV, key), "CONFLICT", 409);
   });
 });

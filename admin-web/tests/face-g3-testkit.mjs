@@ -27,7 +27,8 @@ import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
+import { syncBuiltinESMExports } from "node:module";
 import net from "node:net";
 import http from "node:http";
 import https from "node:https";
@@ -130,6 +131,10 @@ function createNetworkGuard(entriesOverride = null) {
       keys.add(key);
       state.records.push(rec);
     }
+    // CJS 默认导出对象已打桩，但被测代码若用 `import { request } from "node:http"`
+    // 拿到的是 ESM 命名绑定（指向原始函数），必须同步后才能拦截命名入口。
+    // 仅真实内建入口需要同步；独立 mock guard 不得产生全局副作用。
+    if (!entriesOverride) syncBuiltinESMExports();
     state.installed = true;
     state.phase = "load";
     return state.records.map((r) => r.name);
@@ -193,6 +198,8 @@ function createNetworkGuard(entriesOverride = null) {
       else delete rec.obj[rec.key];
       state.active.get(rec.obj)?.delete(rec.key);
     }
+    // 恢复后同样同步，确保 ESM 命名绑定也回到原始函数身份，不留残桩。
+    if (!entriesOverride) syncBuiltinESMExports();
     state.installed = false;
     state.phase = "restored";
     return state.records.length;
@@ -465,6 +472,45 @@ export async function setupG3(t, options = {}) {
 }
 
 // ===========================================================================
+// B2. 测试侧独立 oracle（不调用生产 operationKey / operationKeyFingerprint /
+// deterministicLogId / auditIdFor，按设计文档 §附录 A 冻结公式独立重算）。
+// 合成 fixture 均为 ASCII；segment 编码复刻生产 encodeSegment 语义：
+// Buffer.from(String(value), "utf8").toString("base64url")。
+// ===========================================================================
+const independentEncodeSegment = (value) => Buffer.from(String(value), "utf8").toString("base64url");
+const independentConfig = (env) => ({
+  key: Buffer.from(String(env?.OPERATION_KEY_HMAC_KEY_B64 ?? ""), "base64"),
+  version: Number(env?.OPERATION_KEY_VERSION),
+  realm: String(env?.OPERATION_KEY_REALM ?? ""),
+});
+
+export function independentOpKey({ env, idempotencyKey, orgId = ORG, actorId = ACTOR,
+  method = REQ_METHOD, actorType = "user" } = {}) {
+  const { key, version, realm } = independentConfig(env);
+  const digest = createHmac("sha256", key)
+    .update(JSON.stringify(["KEYED_DIGEST/op", "v1", realm, version, idempotencyKey]))
+    .digest("hex");
+  return `op:${independentEncodeSegment(realm)}:${independentEncodeSegment(orgId)}:${independentEncodeSegment(method)}:${independentEncodeSegment(actorType)}:${independentEncodeSegment(actorId)}:v${version}:${digest}`;
+}
+
+export function independentOpFingerprint(env) {
+  const { key, version, realm } = independentConfig(env);
+  return createHmac("sha256", key)
+    .update(JSON.stringify(["KEYED_DIGEST/op-key-fingerprint", "v1", realm, version]))
+    .digest("hex");
+}
+
+export function independentLogId(jobId, state, occurrence = 1) {
+  return `log:${independentEncodeSegment(jobId)}:${independentEncodeSegment(state)}:${occurrence}`;
+}
+
+export function independentAuditId(opKey, { orgId = ORG, jobId = JOB } = {}) {
+  return `audit-07d-v1:${createHash("sha256")
+    .update(JSON.stringify(["HK-AI-07D/retry-audit", "v1", orgId, jobId, opKey]))
+    .digest("hex").slice(0, 32)}`;
+}
+
+// ===========================================================================
 // C. 断言 helper
 // ===========================================================================
 const SENSITIVE_TOKENS = [ORG, ORG_OTHER, MEMBERSHIP, MEMBERSHIP_B, ACTOR, ACTOR_B, JOB];
@@ -504,6 +550,13 @@ export function assertZeroWrite(store, before) {
   assert.deepEqual(structuredClone(store.data), before, "必须全库内容级零变化");
 }
 
+/** 成功用例可在关键处显式调用：运行期网络违规必须为空数组。 */
+export function assertNoNetworkViolation() {
+  const { runtime } = getViolations();
+  assert.deepEqual(runtime, [],
+    "成功路径不得产生任何网络/Provider 调用（runtime 网络违规必须为空）");
+}
+
 export function assertReceiptShape(receipt, { jobId = JOB, revision = JOB_REV + 1, attempts = 2, nextAttemptAt = NOW - 5_000 } = {}) {
   assert.ok(receipt && typeof receipt === "object" && !Array.isArray(receipt));
   assert.deepEqual(Object.keys(receipt).sort(), ["attempts", "jobId", "nextAttemptAt", "revision", "state"]);
@@ -524,7 +577,12 @@ export const semanticKeys = (record) => Object.keys(record).filter((k) => k !== 
 /** 成功写集 J+L+O+D+A 内容级断言。 */
 export function assertSuccessWriteSet(h, { jobId = JOB, revision = JOB_REV + 1, key, enroll = true,
   expectedAttempts = 2, expectedNextAttemptAt = NOW - 5_000 } = {}) {
+  // 成功路径同样必须零网络：进入时取基线，退出时断言无新增且运行期违规为空。
+  const netBefore = getViolations().runtime.length;
+  // ctx 仅用于取 config（realm/version 等非 ID 字段）；预期 ID 一律由测试侧独立 oracle 重算，
+  // 不用生产 operationKey/deterministicLogId/auditIdFor 当 oracle（P2-3 循环认证）。
   const ctx = opContextFor({ env: h.env, idempotencyKey: key });
+  const opKey = independentOpKey({ env: h.env, idempotencyKey: key });
 
   const job = find(h.store, JOBS, jobId);
   assert.ok(job, "job 必须存在");
@@ -545,7 +603,7 @@ export function assertSuccessWriteSet(h, { jobId = JOB, revision = JOB_REV + 1, 
     assert.doesNotThrow(() => validateRevokeJob(job), "改写后的 revoke job 必须通过 validateRevokeJob");
   }
 
-  const logId = deterministicLogId(jobId, "queued", revision);
+  const logId = independentLogId(jobId, "queued", revision);
   const log = find(h.store, LOGS, logId);
   assert.ok(log, "log 必须存在");
   assert.deepEqual(semanticKeys(log), [...LOG_FIELDS].sort(), "log 精确 15 语义字段");
@@ -558,7 +616,7 @@ export function assertSuccessWriteSet(h, { jobId = JOB, revision = JOB_REV + 1, 
   assert.equal(log.attempt, expectedAttempts);
   assert.equal(log.evidenceScope, "simulated");
 
-  const op = find(h.store, OP_KEYS, ctx.opKey);
+  const op = find(h.store, OP_KEYS, opKey);
   assert.ok(op, "op key 必须存在");
   assert.deepEqual(semanticKeys(op), [...OPKEY_FIELDS].sort(), "op key 精确六语义字段");
   assert.equal(op.orgId, ORG);
@@ -568,7 +626,7 @@ export function assertSuccessWriteSet(h, { jobId = JOB, revision = JOB_REV + 1, 
   assert.equal(op.createdAt, h.now);
   assertReceiptShape(op.result, { jobId, revision, attempts: expectedAttempts, nextAttemptAt: expectedNextAttemptAt });
 
-  const auditId = auditIdFor(ctx.opKey, { jobId });
+  const auditId = independentAuditId(opKey, { jobId });
   const audit = find(h.store, AUDIT_COLLECTION, auditId);
   assert.ok(audit, "新命名空间 audit 必须存在");
   assert.equal(audit.action, AUDIT_ACTION);
@@ -578,6 +636,10 @@ export function assertSuccessWriteSet(h, { jobId = JOB, revision = JOB_REV + 1, 
   assert.equal(count(h.store, AUDIT_COLLECTION) - h.seedAuditCount, 1, "成功只新增 1 条 audit");
   assert.ok(!JSON.stringify(audit).includes(key), "audit 不得含原始 Idempotency-Key");
   assert.ok(!JSON.stringify(audit).includes(op.requestDigest), "audit 不得含 requestDigest 原值");
+
+  assert.equal(getViolations().runtime.length, netBefore,
+    "成功路径不得产生任何网络/Provider 调用（运行期违规无新增）");
+  assertNoNetworkViolation();
 }
 
 /** O10 取证用：记录子项 pass/fail，整体 blocked 不计通过。 */
@@ -724,4 +786,60 @@ test("SELF-CHECK-4：加载期违规负向验证 + 正控桩不转发原始函�
   // 主守卫完全未受污染。
   assert.deepEqual(getViolations().loadTime, [], "主守卫 loadTimeViolations 必须始终为空");
   assert.equal(networkGuard.state.phase, "runtime", "主守卫阶段必须仍为 runtime");
+});
+
+test("SELF-CHECK-5：ESM 命名入口已同步（syncBuiltinESMExports）", async () => {
+  const recReq = networkGuard.state.records.find((r) => r.name === "http.request");
+  const recGet = networkGuard.state.records.find((r) => r.name === "http.get");
+  assert.ok(recReq && recGet, "http.request/http.get 必须被包裹");
+
+  // ESM 命名导出是活绑定；去掉 install() 中的 syncBuiltinESMExports() 本用例必然失败。
+  const httpNamed = await import("node:http");
+  assert.equal(httpNamed.request, recReq.stub, "命名导出 request 必须指向桩");
+  assert.equal(httpNamed.get, recGet.stub, "命名导出 get 必须指向桩");
+  assert.notEqual(httpNamed.request, recReq.original, "命名导出不得指向原始函数");
+
+  resetRuntimeViolations();
+  const beforeReq = recReq.count;
+  const ret = await httpNamed.request();
+  assert.equal(recReq.count, beforeReq + 1, "命名入口 request 调用必须计数 +1");
+  assert.ok(ret && ret.__g3Mock === true && ret.__g3Entry === "http.request",
+    "命名入口调用必须返回安全 sentinel（被拦截、未转发）");
+  assert.equal(getViolations().runtime.length, 1, "命名入口调用必须记为一次运行期违规");
+  resetRuntimeViolations();
+  assert.deepEqual(getViolations().runtime, [], "正控后运行期违规必须归零");
+  // 顺带覆盖 https 命名入口。
+  const httpsNamed = await import("node:https");
+  const recHttps = networkGuard.state.records.find((r) => r.name === "https.request");
+  assert.equal(httpsNamed.request, recHttps.stub, "https 命名导出 request 必须指向桩");
+  resetRuntimeViolations();
+});
+
+test("SELF-CHECK-6：测试侧独立 oracle 与生产 helper 互相印证", () => {
+  const idem = "g3-idem-key-00000042";
+  const config = operationKeyConfig(K2_ENV);
+  const prodOpKey = operationKey({
+    orgId: ORG, method: REQ_METHOD, actorType: "user", actorId: ACTOR,
+    idempotencyKey: idem, config,
+  });
+  // 两套独立实现必须一致；若生产 operationKey 公式被改，此处分叉。
+  assert.equal(independentOpKey({ env: K2_ENV, idempotencyKey: idem }), prodOpKey,
+    "独立 opKey 必须与生产 operationKey 完全一致");
+  assert.equal(independentOpFingerprint(K2_ENV), operationKeyFingerprint(config),
+    "独立 fingerprint 必须与生产 operationKeyFingerprint 完全一致");
+  assert.equal(independentLogId(JOB, "queued", JOB_REV + 1),
+    deterministicLogId(JOB, "queued", JOB_REV + 1),
+    "独立 logId 必须与生产 deterministicLogId 完全一致");
+  assert.equal(independentAuditId(prodOpKey), auditIdFor(prodOpKey),
+    "独立 auditId 必须与现有 auditIdFor 完全一致");
+  // 独立实现不调用生产 helper：结构性证据（定义体内不得出现生产 helper 调用）。
+  const src = independentOpKey.toString() + independentOpFingerprint.toString() +
+    independentLogId.toString() + independentAuditId.toString();
+  assert.doesNotMatch(src, /\b(operationKey|operationKeyFingerprint|deterministicLogId|auditIdFor)\s*\(/,
+    "independent* 不得调用生产 helper（禁止用被测实现当 oracle）");
+  // 换 env 后独立实现同样与生产保持一致（合成配置，非真实凭据）。
+  const configB = operationKeyConfig(K2_ENV_B);
+  assert.equal(independentOpKey({ env: K2_ENV_B, idempotencyKey: idem }),
+    operationKey({ orgId: ORG, method: REQ_METHOD, actorType: "user", actorId: ACTOR,
+      idempotencyKey: idem, config: configB }));
 });

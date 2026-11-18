@@ -1,7 +1,8 @@
-# HK-AI-07D G3 冻结矩阵交付证据（2026-11-17）
+# HK-AI-07D G3 冻结矩阵交付证据（2026-11-17 · 11-18 复审修订版）
 
->  本文档只新增一份 Markdown；不修改生产代码、不注册 HTTP、不启动服务、不监听端口、不发业务网络请求；不 commit / push、不合并、不开始 G4。
+>  本文档为 G3 交付证据；不修改生产代码、不注册 HTTP、不启动服务、不监听端口、不发业务网络请求；不合并、不开始 G4。
 >  所有实测数字均来自测试源码或实际运行结果；90 是**矩阵 ID 数**，不是测试函数数（实际计数见 §3）。
+>  **v2（2026-11-18）**：响应独立复审退回（对远端 `5ceb22a` 的 1 P1 + 5 P2），在测试与证据范围内追加修订。最终提交谱系见 §1；修订取证见 §12。
 
 ## 1. 谱系与范围
 
@@ -12,6 +13,8 @@
 | 分支 | `feat/hk-face-g3-matrix` | `git branch --show-current` |
 | 已提交 1 | `4f1b0d6` test(hk-face-g3): 建立冻结矩阵公共 testkit 与网络 guard — 仅 `admin-web/tests/face-g3-testkit.mjs`（724 行新增） | `git show --stat 4f1b0d6` |
 | 已提交 2 | `2c86b56` test(hk-face-g3): 补导出 h3a claim helper 供 C03/C04/C09 — 仅 testkit（4+/1-），**未改 h3a.mjs 本身** | `git show --stat 2c86b56` |
+| 已提交 3 | `5ceb22a` test(hk-face-g3): 落地 90 条矩阵三文件 + 交付证据文档（4 文件 +1918 行）— 首次交付，已推送远端并核对一致 | `git show --stat 5ceb22a` |
+| 已提交 4 | **本轮复审修订提交（v2）**：4 个测试文件（testkit + psrtn + ko + c）+ 本文档，与本文档一同提交；SHA 即本分支 tip（提交后 `git rev-parse HEAD`） | `git log -1 --stat` |
 | 被测实现 | `admin-web/lib/face-service/retry.mjs`（G2 已验收，G3 零修改） | §9 `git diff` |
 | 矩阵文件 | `face-g3-psrtn.test.mjs`（P/S/R/T/N 共 52 ID）、`face-g3-ko.test.mjs`（K/O 共 29 ID）、`face-g3-c.test.mjs`（C 共 9 ID） | 三文件源码 |
 | 公共基础设施 | `face-g3-testkit.mjs`（guard + fixture + 断言 helper + SELF-CHECK） | 源码 |
@@ -177,18 +180,18 @@
 
 ### 3.2 实际测试函数计数（另报，非 90）
 
-统一非 HTTP 套件实测 **`# tests 313 / # pass 313 / # fail 0`**（见 §10）。按文件（每个文件经传递 import 都会运行 testkit 的 4 个 SELF-CHECK，故逐文件计数含重复自检）：
+统一非 HTTP 套件实测（v2）：首版 `5ceb22a` 为 **`# tests 313 / # pass 313 / # fail 0`**；本轮复审修订后为 **`# tests 322 / # pass 322 / # fail 0`**（见 §10/§12）。按文件（每个文件经传递 import 都会运行 testkit 的 SELF-CHECK，故逐文件计数含重复自检）：
 
-| 文件 | `node --test <file>` 实测 | 其中矩阵 ID 父测试 | 说明 |
-|---|---:|---:|---|
-| `face-strict-retry.test.mjs` | 130 pass | — | G2 既有回归（LC01–LC10 + REG/P1/P2），本次重跑未改 |
-| `face-g3-testkit.mjs` | 4 pass | — | SELF-CHECK-1..4（§6） |
-| `face-g3-psrtn.test.mjs` | 96 pass | 52 | 52 ID 父测试 + 44 个子场景（含传递运行的 4 个自检） |
-| `face-g3-ko.test.mjs` | 70 pass | 29 | 29 ID 父测试 + 37 个子场景（含传递运行的 4 个自检） |
-| `face-g3-c.test.mjs` | 13 pass | 9 | 9 ID 父测试 + 传递运行的 4 个自检 |
-| **统一套件合计** | **313 pass / 0 fail** | **90** | 五文件显式列举，避免 `tests/*.test.mjs` glob 拉入 HTTP 套件 |
+| 文件 | 首版（5ceb22a） | v2 实测 | 其中矩阵 ID 父测试 | 说明 |
+|---|---:|---:|---:|---|
+| `face-strict-retry.test.mjs` | 130 pass | 130 pass | — | G2 既有回归（LC01–LC10 + REG/P1/P2），本次重跑未改 |
+| `face-g3-testkit.mjs` | 4 pass | 6 pass | — | 首版 SELF-CHECK-1..4；v2 增 SELF-CHECK-5（ESM 同步）、SELF-CHECK-6（独立 oracle） |
+| `face-g3-psrtn.test.mjs` | 96 pass | 98 pass | 52 | 52 ID 父测试 + 子场景（含传递运行的自检） |
+| `face-g3-ko.test.mjs` | 70 pass | 73 pass | 29 | 29 ID 父测试 + 子场景（含传递运行的自检） |
+| `face-g3-c.test.mjs` | 13 pass | 16 pass | 9 | 9 ID 父测试 + C08-RERUN 子用例 + 传递自检 |
+| **统一套件合计** | **313 pass** | **322 pass / 0 fail** | **90** | 五文件显式列举，避免 `tests/*.test.mjs` glob 拉入 HTTP 套件 |
 
-> 结论：90 指矩阵 ID；实际测试函数 313（含 G2 回归 130、testkit 自检按文件传递计数、子场景展开）。不以「恰好 90 个 test()」为目标。
+> 结论：90 指矩阵 ID；实际测试函数 v2 为 322（含 G2 回归 130、testkit 自检按文件传递计数、子场景展开）。不以「恰好 90 个 test()」为目标。
 
 ---
 
@@ -204,7 +207,7 @@
 
 ## 5. O10 blocked 取证（三子项，整体不计 PASS）
 
-`O10` 用 `expectBlocked("O10", checks)` 记录三子项（源码 `face-g3-ko.test.mjs:551-596`），整体登记进 `BLOCKED_RECORDS`，**不 throw、不计 PASS**：
+`O10` 用本文件内 `o10DynamicGate()`（v2 修订，源码 `face-g3-ko.test.mjs:580-590`）记录三子项并按实际结果**动态判定**：三子项全 true → PASS 且不登记 blocked；任一 false → BLOCKED 并登记 `BLOCKED_RECORDS`。**v2 修正**：不再硬编码「③ 必须失败」——避免 Q8 清理描述行后同一用例假失败（详见 §12.5）。当前 routes.mjs 描述行仍在，实测 BLOCKED（①②ok=true、③ok=false），O10 用例本身 PASS（成功记录一个 blocked）：
 
 | 子项 | 断言 | 实测 | 说明 |
 |---|---|---|---|
@@ -285,10 +288,10 @@ git -C .tmp-g3-matrix diff --name-status c8290db -- admin-web/lib admin-web/serv
 
 输出为**空白**（exit 0）→ 生产文件零差异。补充核对：
 
-- `git diff --name-status c8290db..HEAD` 仅有 `A admin-web/tests/face-g3-testkit.mjs`；两个已提交 commit（`4f1b0d6`/`2c86b56`）**只改 testkit**，未改 `h3a.mjs` 等生产文件。
-- 工作树现状：`?? admin-web/tests/face-g3-c.test.mjs`、`?? face-g3-ko.test.mjs`、`?? face-g3-psrtn.test.mjs`（三矩阵文件已落盘为未跟踪文件，尚未纳入提交）；本文档为唯一新增文档。**本次未执行任何 git commit / push / add**，未改动其他文件。
+- `git diff --name-status c8290db -- admin-web/lib admin-web/server.mjs admin-web/model.mjs` 输出空白 → 生产文件在全部四个提交后仍零差异；`4f1b0d6`/`2c86b56`/`5ceb22a` 与本轮修订提交**只改测试文件与本文档**，未改 `h3a.mjs`/`collections.mjs`/`retry.mjs` 等任何生产文件。
+- 谱系现状（v2）：`5ceb22a` 已推送远端并 `git ls-remote` 核对一致（首次交付）；本轮复审修订在 `5ceb22a` 之上**追加一个提交**（含 4 个测试文件 + 本文档），同版本树内提交，不 amend/rebase/reset/force。
 
-> 说明：三矩阵文件当前为未跟踪（untracked）状态；提交纳入由后续流程处理，不影响其作为本次实测证据的有效性（§10 命令已实际运行并通过）。
+> 端到端可证伪复核（v2 新增）：临时把生产 `collections.mjs:250` 的 `op:` 前缀改为 `opX:`，G3 跨四文件大量用例（SELF-CHECK-6、C01/C02/C03、K03/K09/K12–K16、P01、S01/S02、R01、T01/T03、N08）随即 FAIL；用备份精确恢复生产文件后回到全绿。证明 ID 类预期值确实来自测试侧独立 oracle，生产公式被篡改时 G3 能捕获。`git status` 确认生产文件零残留改动。
 
 ---
 
@@ -308,16 +311,16 @@ node --test \
 实测输出（TAP 汇总）：
 
 ```
-# tests 313
+# tests 322
 # suites 0
-# pass 313
+# pass 322
 # fail 0
 # cancelled 0
 # skipped 0
 # todo 0
 ```
 
-按文件逐跑（均 0 fail）：`face-strict-retry` 130、`face-g3-testkit` 4、`face-g3-psrtn` 96、`face-g3-ko` 70、`face-g3-c` 13（合计 313，含传递运行的 SELF-CHECK）。`git diff --check` 通过；生产文件零差异（§9）。
+按文件逐跑（v2，均 0 fail）：`face-strict-retry` 130、`face-g3-testkit` 6（新增 SELF-CHECK-5 ESM 同步、SELF-CHECK-6 独立 oracle）、`face-g3-psrtn` 98、`face-g3-ko` 73、`face-g3-c` 16（含 C08-RERUN 子用例）；合计 322（含传递运行的 SELF-CHECK）。首版（5ceb22a）为 313 pass；v2 修订新增用例后为 322 pass。`git diff --check` 通过；生产文件零差异（§9）。
 
 **声明**：本次仅运行上述显式列举的非 HTTP 单元/服务层测试套件，**未运行** `npm test` 全量（避免 glob 拉入 HTTP 套件）、**未启动 HTTP 服务**、**未监听任何端口**、**未发起任何业务网络请求**。网络 guard 已在被测模块加载前安装，25 个入口全覆盖，加载期与运行期网络违规均为 0（§6）。
 
@@ -326,9 +329,50 @@ node --test \
 ## 11. 结论
 
 - 矩阵 **90 个 ID**：**89 条 PASS + 1 条（O10）blocked**。不得宣称 90/90 全通过。
-- 统一非 HTTP 套件 **313 pass / 0 fail**；生产文件零差异；网络 guard 25 入口、加载期零违规、正控与精确恢复自检全过。
+- 统一非 HTTP 套件 v2 **322 pass / 0 fail**（首版 313）；生产文件零差异；网络 guard 25 入口、加载期零违规、正控与精确恢复自检全过。
 - 三项裁定（C05 只验 retry 侧、S09 只验 finalize、O10/O11 计入 G3 且不替代 G4）均按用户批准落实。
-- **G3 未整体关闭**：O10 因 `routes.mjs:47-53` 的 E07 描述行未清理而 blocked，待独立 Q8 小提交清理后用同一用例复验。
-- 本次**不开始 G4**、**不合并任何分支**、**不开 HTTP/UI**、**不上线**、**不 commit/push**、**不改任何生产文件**；如测试暴露服务缺陷，回退 G2 另立任务，不在 G3 修改契约或生产代码。
+- **G3 未整体关闭**：O10 因 `routes.mjs:47-53` 的 E07 描述行未清理而 blocked，待独立 Q8 小提交清理后用同一用例复验（O10 用例已改为动态 gate，清理后自动转 PASS，见 §12）。
+- 本次**不开始 G4**、**不合并任何分支**、**不开 HTTP/UI**、**不上线**、**不改任何生产文件**；如测试暴露服务缺陷，回退 G2 另立任务，不在 G3 修改契约或生产代码。
 
 （本证据文档只新增本 Markdown 一份；所有实测数字来自测试源码与实际运行结果，不含估算。）
+
+---
+
+## 12. 独立复审退回修订取证（2026-11-18，v2）
+
+复审对象：远端 `5ceb22a`（首版交付）。退回 1 P1 + 5 P2，全部在 G3 测试与证据范围内修订，生产代码零改动。逐项如下。
+
+### 12.1 P1 — 成功路径网络违规可漏报（已关闭）
+- 复审实测：成功路径注入一次被 guard 截获的 fetch，仍 96/96 通过。根因：成功用例不查 `getViolations().runtime`，仅失败路径 `expectError` 查。
+- 修订：`assertSuccessWriteSet()` 进入取 `netBefore`、退出断言 runtime 无新增（testkit L581/L640）+ `assertNoNetworkViolation()`（L642）；新增导出 `assertNoNetworkViolation()`；psrtn/ko/c 的对未走该 helper 的成功用例（P11/N07/N08、K04–K16/O01–O13、C03/C06/C07/C09）在 retry 后显式调用。
+- **可证伪（team-lead 独立复核）**：在 P01 成功断言前注入 `await globalThis.fetch("https://example.invalid")`，`node --test --test-name-pattern=P01` → P01 `not ok`，报"成功路径不得产生任何网络/Provider 调用"；恢复后 P01 全绿。
+
+### 12.2 P2-2 — ESM 命名网络入口未同步拦截（已关闭）
+- 根因：guard 用 `obj[key]=stub` 打桩 CJS 默认导出对象；被测代码若用 `import { request } from "node:http"` 拿 ESM 活绑定，指向原函数绕过桩。实测 Node v22.22.2：`http.request=stub` 后 `namedRequest===stub` 为 false，调用 `syncBuiltinESMExports()` 后为 true。
+- 修订：testkit 顶层 `import { syncBuiltinESMExports } from "node:module"`；`install()` 打桩后（L137）与 `restore()` 恢复后（L202）各调用一次（均加 `if (!entriesOverride)` 防止独立 mock guard 产生全局副作用掩盖缺陷）；新增 SELF-CHECK-5 动态 `await import("node:http")` 验证命名导出同步。
+- 可证伪：临时禁用 `install()` 的 `syncBuiltinESMExports()` → SELF-CHECK-5 FAIL；恢复后全绿。
+
+### 12.3 P2-3 — ID 预期值复用生产 helper（已关闭）
+- 复审实测：把生产 `operationKey` 的 `op:` 前缀改错，G3 仍 183/183 通过。根因：`opContextFor()` 与 `assertSuccessWriteSet()` 用生产 `operationKey`/`deterministicLogId`/`auditIdFor` 算预期 ID，循环认证。
+- 修订：testkit 新增 B2 节测试侧独立 oracle（§独立重算，`createHmac`/`createHash`，segment 复刻生产 `encodeSegment` 的 base64url 语义）：`independentOpKey`/`independentOpFingerprint`/`independentLogId`/`independentAuditId`。`assertSuccessWriteSet()` L585/L606/L629 与 `find(OP_KEYS, opKey)` L619 全换 independent 版本；psrtn/ko/c 三文件断言生产写入的预期 ID 全换 independent 版本，并各自加独立交叉校验。
+- **端到端可证伪（team-lead 独立复核）**：备份后临时把生产 `collections.mjs:250` 的 `op:` 改为 `opX:`，跨四文件大量用例 FAIL（SELF-CHECK-6、C01/C02/C03、K03/K09/K12–K16、P01、S01/S02、R01、T01/T03、N08）；精确恢复生产文件后 322/322 全绿，`git status` 确认生产零残留。
+
+### 12.4 P2-4 — C08 未覆盖事务 callback 重跑（已关闭）
+- 修订：新增 C08-RERUN 子用例（归属 C08，不增矩阵 ID）。测试侧桩包裹 `store.transact`，使 `retry` 的 build callback 在同一 state 两份克隆上各执行一次（模拟 `CloudStore.runTransaction` 重跑 callback），捕获两次写集比对后只提交第二次；校验两次写集 deepEqual（log/audit/op key 命中独立 oracle）、只一条 job/log/audit/opkey、卸载桩后同键二次真实 retry 零写重放、全库除合法写集零变化、零网络。
+- 可证伪：临时把第二次写集 log ID 改为 `...:5-NONDET` → C08-RERUN FAIL（"callback 重跑两次必须产出逐字段相同的确定性写集"）；恢复后全绿。
+- 覆盖局限：`StrictRetryService` 构造器仅允许 LocalStore，无法用真 `CloudStore.runTransaction`；采用测试侧桩模拟 build 双次调用，"只提交一次"由桩保证，追加"提交后同键二次真实 retry 零写重放"补强幂等证据。未改生产 `store.mjs`/`retry.mjs`。
+
+### 12.5 P2-5 — O10 固定要求描述行存在、清理后反失败（已关闭；O10 仍 blocked）
+- 根因：原 O10 硬编码断言 `record.results[2].ok === false`（routes.mjs 描述行必须仍在），Q8 清理后会假失败。
+- 修订：ko 文件新增本文件内 `o10DynamicGate()`，blocked 由三子项实际结果动态推导（全 true→PASS 不登记 blocked；任一 false→BLOCKED 并登记），断言 `record.blocked === !results.every(r=>r.ok)`，不再硬编码③失败。三子项判定函数以 routesSource 注入便于内存证伪。
+- **当前状态**：`routes.mjs:47-53` 描述行仍在 → ③=false → O10 判 **BLOCKED**（符合"O10 继续 blocked"），O10 用例本身 PASS（成功记录一个 blocked）。
+- 可证伪：内存中把 routes 源码 `device-operation-job-retry` 替换为已清理形态喂给同一 gate → `cleaned.blocked === false`（自动转 PASS），证明 Q8 清理后同一用例不会假失败。全程未改生产 `routes.mjs`。
+
+### 12.6 P2-6 — 证据文档未提交状态（本修订关闭）
+- 首版证据文档 §1/§9/§10/§11 描述 `5ceb22a` 之前"三矩阵文件 untracked、未提交"的 313-pass 状态。本 v2 已更新：谱系表补入 `5ceb22a`（已推送并核对一致）与本轮修订提交；计数更新为 322 pass；§9 改为"已提交"口径；新增本节记录 6 项修订取证。
+
+### 12.7 v2 统一验证
+- 统一非 HTTP 套件 `node --test tests/face-strict-retry.test.mjs tests/face-g3-testkit.mjs tests/face-g3-psrtn.test.mjs tests/face-g3-ko.test.mjs tests/face-g3-c.test.mjs` → **322 pass / 0 fail**。
+- 生产文件零差异；FALSIFY-TEMP/临时补丁零残留；`git diff --check` 通过。
+- 三项独立可证伪（P1 注入 fetch、P2-3 改生产 op: 前缀、P2-5 内存清理 routes）均由 team-lead 独立复核通过；P2-2、P2-4 由实现 worker 反向补丁验证通过。
+- 结论口径不变：90 ID 中 89 PASS + 1（O10）blocked，G3 整体未关闭；O10 待 Q8 独立清理后用同一用例复验；G4/合并/HTTP/UI/上线继续冻结。

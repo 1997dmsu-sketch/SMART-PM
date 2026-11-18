@@ -1,4 +1,4 @@
-# HK-AI-04 H4-c C1 空链证明设计 v4（剩余阻断关闭稿）
+# HK-AI-04 H4-c C1 空链证明设计 v5（v4 追加修订稿）
 
 > 状态：**设计提案，待 Codex 复审。** 本稿只修订设计文档；不实现 C1、不修改任何生产代码/测试/Store、不进入 C2/C3/G4、不注册 HTTP、不调用 Provider/设备/生产云。
 >
@@ -6,7 +6,9 @@
 >
 > 已批准设计：`docs/hk-face-h4c-reconciliation-design @ b15aceb`；批准/任务卡：`ed7b66f`；C2 前置检查：`42f8970`。
 >
-> 本稿保留 v3 五项修订，并按用户独立复审关闭三项剩余阻断：halt 恢复的独立授权/线性状态机、bootstrap fence 读集合/refs 预算、最终票据与 Store 自动审计边界。**未读取完整云报告；只依据本轮消息给出的裁定。** G3 已在 `5f1d7a4` 验收关闭、O10 PASS，本卡不重复派发；G4/C2/C3/合并/HTTP/UI/部署/上线继续冻结。
+> 本稿保留 v3/v4 修订，并在 §15 追加 v5 权威章节：K3 marker/维护窗口/旧 writer 撤权、plan 签名保存与防重放、monitor 健康期限/时钟/事务内停写、统一 bootstrap fence 与预算。**v4 正文与 §15 冲突处以 §15 为准。**
+>
+> v5 输入：`3ac5cf9483caebcaf8f5aeb1df8fd4aca9bfb13f`（父 `575d8b6`）。完整云报告 `/workspace/artifacts/DEL-AI-01-CONTENT-REVIEW-2026-11-18/REVIEW.md` 未提供可读正文；已查可访问位置均不可读，未声称逐项关闭。G3 已在 `5f1d7a4` 关闭、O10 PASS，本卡不重复派发；G4/C2/C3/合并/HTTP/UI/部署/上线继续冻结。
 
 ## 0. 结论摘要
 
@@ -17,14 +19,14 @@
 | bootstrap | 首次 bootstrap 检查 fence **不存在**；fence 纳入 refs（读集合 domain head/version + fence + audit），K3 bootstrap 4 refs/3 writes；无 fence 时才允许 |
 | 最终审计 | 所有最终写字节（业务写 + 唯一 admin_audit）在 final ticket **之前**生成；ticket 覆盖完整 canonical write set；Store 不自动追加/改审计；禁止双审计 |
 | 持续写入约束 | Store gate 覆盖 transact/change/persist/seed/init；runtime/migration/recovery/monitor/k3-bootstrap 分 kind；旧 writer 持续拒绝 |
-| refs | C1 15；C2 R1 24；migration anchor 15、finalize 5；recovery 5；monitor 5；k3-bootstrap 4；R2 8+N≤90 |
-| 裁定 | Q1–Q27；N01–N80 |
+| refs | **v5：C1 16；C2 R1 25；migration anchor 17、finalize 7；recovery 7；monitor 5；k3-bootstrap 5；plan issue 2；R2 8+N≤90** |
+| 裁定 | **v5：Q1–Q31；N01–N96**（v4 Q/N 保留历史；预算/Q 以 §15 为准） |
 
 ## 1. 输入、基线与问题
 
 ### 1.1 输入事实
 
-- 唯一工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-design-v4`，分支 `codex/h4c-empty-proof-v4`，HEAD = `575d8b63501bec5f9c7211a128baf86d53fbd63a`，父 `fb75cf0`。
+- 唯一工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-design-v4`，分支 `codex/h4c-empty-proof-v4`，HEAD = `3ac5cf9483caebcaf8f5aeb1df8fd4aca9bfb13f`，父 `575d8b6`。
 - 输入分支 `feat/hk-face-h4c-reconciliation` 本地/origin 跟踪 ref 均为 `5dff386`；本卡不修改输入分支。
 - C1 代码基线 `5dff386`；C2 仅 `42f8970` 前置文档；C3/G4 未开始；调度工作区 `SMART-PM-H3` 未修改。
 - 本稿只改设计卡；不新增生产代码、测试、Store 注册或迁移脚本。完整云报告本机不可读，未声称读取。
@@ -135,10 +137,10 @@ ChainProof(job) =
 ### 4.1 job anchor
 `_id h4c-evidence-anchor-v1:<sha256([orgId,jobId])[:32]>`；字段 `_id, orgId, jobId, schemaVersion, firstEvidenceId, createdAt`（6）；仅首条 append create-only；不更新/修复。
 
-### 4.2 audit proof
+### 4.2 audit proof（v4 22 字段；v5 以 §15.1.4 的 23 字段为准）
 `_id evidence-chain-audit:v1:<keyFingerprint>:<domainHeadRevision>:<writeEpoch>`；22 字段：`_id, kind, scope, schemaVersion, realm, keyVersion, keyFingerprint, domainHeadId, domainHeadRevision, writeEpoch, admissionPolicyVersion, writerSetDigest, auditedCollections, status, canonicalEvidenceCount, canonicalHeadCount, anchorCount, legacyCount, inventoryDigest, checkedAt, checkedBy, auditDigest`。`writeEpoch` 每次重审/代码/集合/K3 变化提升；仅 migration finalize/recovery 写；runtime 只读。
 
-### 4.3 fence
+### 4.3 fence（v4 10 字段；v5 以 §15.1.1 的 12 字段为准）
 `_id evidence-chain-fence:v1:global`；10 字段：`_id, kind, scope, schemaVersion, status, epoch, reasonCode, monitorId, updatedAt, fenceDigest`。`status clear|halted`；`epoch` 必须等于当前 proof writeEpoch；`fenceDigest` K3 HMAC `KEYED_DIGEST/h4-evidence-chain-fence` v1。初始 clear 与首个 proof 在 migration finalize 同事务创建；halt 由 monitor 写；clear 仅 recovery finalize 写。缺失/损坏/epoch 不符 → HALTED。
 
 ### 4.4 Store 写路径
@@ -153,7 +155,7 @@ ChainProof(job) =
 | `list/get` | 只读 | 无 gate |
 | 直连 DB/旧 Store | 绕过 gate | P0 撤凭据/权限；monitor 报警 |
 
-### 4.5 K3 domain 写入门与 bootstrap（fence 纳入 refs）
+### 4.5 K3 domain 写入门与 bootstrap（v4 refs 4/writes 3；v5 以 §15.1.3 的 5/4 为准）
 
 - `evidence_digest_domains` 纳入 gate；runtime/migration/recovery 对 domain 写一律拒绝；C1 保持只读。
 - 唯一例外 `kind="k3-bootstrap"`：
@@ -244,7 +246,7 @@ final inventory = anchor backfill 后、fence+proof 创建前完整快照；proo
 
 C2 统一 409（K3 config 503）；不混用 PROOF/ADMISSION/HALTED。
 
-### 4.12 halt 状态机与独立恢复授权
+### 4.12 halt 状态机与独立恢复授权（v4；v5 §15 增补 marker/plan/health）
 
 **状态**：
 | 状态 | 条件 | 可写 |
@@ -287,7 +289,7 @@ recoveryPlan = { kind:"recovery-plan", scope:"global", schemaVersion:1,
   * K3 换钥/domain 变化：recovery 先 `DOMAIN_MISMATCH`，零写。
 - 失败全库零写见 §9.2 R01–R10。
 
-### 4.13 finalWriteSet 与 Store 审计边界（无双审计）
+### 4.13 finalWriteSet 与 Store 审计边界（v4；v5 §15 增补 plan/marker/control audit）
 
 所有 H4-c gate 事务在 final ticket 前生成完整 `finalWriteSet`：
 
@@ -355,7 +357,7 @@ H=null/A=null/E2..E9 任一：9 IDs 失败 → BROKEN；不写 E1/head/anchor/fe
 | fence 失效 | Fence | HALTED |
 | halt 恢复 | recoveryPlan | CLEAR(E+1)/HALTED |
 
-## 7. refs / writes 预算
+## 7. refs / writes 预算（v4 历史；v5 §15.4 覆盖）
 
 ### 7.1 C1 helper
 | 事务 | refs | writes |
@@ -444,9 +446,9 @@ proof/fence/admission/chain/audit 生成在写前；build 抛错不持久化；g
 | final ticket/audit | writes 未含 Store 自动 audit | finalWriteSet 先物化（业务+唯一 audit）；ticket 覆盖；Store explicit；无双审计 |
 | refs | v3：C1 15/C2 24/migration 14/4/monitor 4/k3 2 | v4：C1 15/C2 24/migration 15/5/recovery 5/monitor 5/k3 4 |
 | 错误码 | 无 recovery 区分 | HALTED/ADMISSION/PROOF；Q25/Q26 |
-| 矩阵 | N01–N70 | N01–N80 |
+| 矩阵 | N01–N70 | N01–N96（v5 §15.6 增 N81–N96） |
 
-## 11. 待 Codex 裁定 Q1–Q27
+## 11. 待 Codex 裁定 Q1–Q27（v4 历史；v5 §15.6 增 Q28–Q31）
 | Q | 事项 | 建议 |
 |---|---|---|
 | Q1 | anchor/audit/fence 三集合、Store 注册/exact/create-only | 批准 |
@@ -477,7 +479,7 @@ proof/fence/admission/chain/audit 生成在写前；build 抛错不持久化；g
 | Q26 | finalWriteSet + 唯一 audit + Store explicit 边界 | 批准 |
 | Q27 | 控制事务 audit 预算（migration/recovery/monitor/k3） | 批准 |
 
-## 12. 防御性矩阵 N01–N80
+## 12. 防御性矩阵 N01–N80（v4 历史；预算 N26/N48/N66 按 v5；N81–N96 见 §15.6）
 > 设计矩阵，不执行；Z/X 同前；无 HTTP/外部网络。
 | ID | 场景 | 期望 |
 |---|---|---|
@@ -577,7 +579,230 @@ Codex 批准后另发 C1 实现卡；至少含：
 3. finalWriteSet+唯一 audit+explicit mode+no double audit；
 4. recovery 状态机/独立授权/原子 proof+fence+audit；
 5. C1 15/C2 24/migration 15/5/recovery 5/monitor 5/k3 4 ≤90；
-6. N01–N80 实现级测试（LocalStore+fake CloudStore，无 HTTP/外部网络）；
+6. N01–N96 实现级测试（N01–N80 沿用 v4；N81–N96 见 §15.6；无 HTTP/外部网络）；
 7. 迁移/恢复/fence/monitor/K3 bootstrap 工具另立卡。
 
-本卡停止；等 Codex 复审 §11；不进入 C1/C2/C3/G4。
+本卡停止；等 Codex 复审 §15.6（Q28–Q31）及 §11；不进入 C1/C2/C3/G4。
+
+## 15. v5 权威修订（覆盖 v4 冲突处）
+
+> v5 输入：`3ac5cf9483caebcaf8f5aeb1df8fd4aca9bfb13f`（父 `575d8b6`）。v4 正文保留作历史；**凡 v4 与 §15 冲突（schema、refs、预算、Q/N、状态机、monitor/fence、plan、bootstrap）以 §15 为准。**
+>
+> 完整云报告 `/workspace/artifacts/DEL-AI-01-CONTENT-REVIEW-2026-11-18/REVIEW.md` 未提供可读正文。已检查 `/workspace/...`、`C:\workspace\...`、`\\wsl$\workspace\...` 及本仓库 `REVIEW.md` 搜索，均不可读/不存在；**不声称已逐项关闭该报告**。本稿只依据本轮消息裁定，未列明项列待裁。
+
+### 15.1 K3 marker、维护窗口、旧 writer 撤权与 fencing
+
+#### 15.1.1 fence 身份统一（唯一公式/查找 ID）
+
+- 常量：`EVIDENCE_CHAIN_FENCE_ID = "evidence-chain-fence:v1:global"`。
+- 所有层（bootstrap、migration、recovery、monitor、runtime、Store gate）**只用该字面 ID 查找**；不得从 epoch/realm/runId 重新计算 fence ID。
+- fence schema（12 字段，v5 增加健康字段）：
+  `_id, kind, scope, schemaVersion, status, epoch, reasonCode, monitorId, heartbeatAt, validUntil, updatedAt, fenceDigest`
+  - `_id = EVIDENCE_CHAIN_FENCE_ID`；`kind="fence"`、`scope="global"`、`schemaVersion=1`。
+  - `status ∈ {"clear","halted"}`；`epoch` 必须等于当前 CoverageValid proof 的 `writeEpoch`。
+  - `heartbeatAt/validUntil` 为安全整数；`validUntil > heartbeatAt`；`validUntil - heartbeatAt ≤ MONITOR_HEALTH_WINDOW_MS`。
+  - `fenceDigest` = K3 HMAC-SHA256，domain `KEYED_DIGEST/h4-evidence-chain-fence` v1，覆盖除自身外全部字段。
+- 初始 clear fence 与首个 proof 在 migration-finalize 同事务创建；bootstrap 阶段 fence 必须不存在；halt 仅 monitor 写；clear 仅 recovery-finalize 写。
+
+#### 15.1.2 K3 marker schema（21 字段）
+
+`_id = "evidence-chain-k3-marker:v1:global"`；字段：
+`_id, kind, scope, schemaVersion, fenceId, k3DomainHeadId, k3DomainVersionId, k3DomainHeadRevision, realm, keyVersion, keyFingerprint, bootstrapRunId, maintenanceId, maintenanceManifestDigest, windowStart, windowEnd, writerSetDigest, revokedWriterSetDigest, revocationReceiptDigest, createdAt, markerDigest`。
+
+- `kind="k3-marker"`、`scope="global"`、`schemaVersion=1`；`fenceId` 固定等于 `EVIDENCE_CHAIN_FENCE_ID`。
+- `k3DomainHeadId/VersionId/HeadRevision` 必须与当前 K3 domain 完全一致；`realm/keyVersion/keyFingerprint` 与 K3 config 一致。
+- `maintenanceId/maintenanceManifestDigest/windowStart/windowEnd` 来自签名 maintenance manifest；`windowStart ≤ createdAt ≤ windowEnd`。
+- `writerSetDigest` = 允许的新 writer 清单摘要；`revokedWriterSetDigest` = 已撤销旧 writer 清单摘要；`revocationReceiptDigest` = 撤权回执摘要。
+- `markerDigest` = K3 HMAC-SHA256，domain `KEYED_DIGEST/h4-evidence-k3-marker` v1，覆盖除自身外全部字段。
+- create-only；仅 `k3-bootstrap` 事务创建；不更新/删除。
+
+**maintenance manifest（离线签名对象，保存于维护报告）**：
+`maintenanceId, windowStart, windowEnd, oldWriterSetDigest, newWriterSetDigest, revokedWriterSetDigest, revocationReceiptDigest, bootstrapRunId, authorizedAt, expiresAt, maintenanceTicket`。
+`maintenanceTicket` = K3 HMAC-SHA256，domain `KEYED_DIGEST/h4-maintenance-manifest` v1；manifest 正文/签名与撤权回执作为维护证据保存；marker 绑定 `maintenanceManifestDigest`。
+
+#### 15.1.3 K3 bootstrap 读集合/refs/writes（统一）
+
+- 触发条件：`BOOTSTRAP` 状态（无 domain/marker/fence/proof），且 `now ∈ [windowStart,windowEnd]`，maintenance manifest/ticket 有效，旧 writer 撤权回执摘要匹配。
+- **读集合（refs 5）**：domain fixed head、domain version、`EVIDENCE_CHAIN_FENCE_ID`、`k3-marker:v1:global`、`admin_audit/<auditId>`。
+- **写集合（writes 4）**：domain head、domain version、K3 marker、唯一 explicit admin_audit；H4-c 子集恰好 head+version+marker，不得写 evidence/head/anchor/audit proof/fence。
+- gate 校验：fence 必须不存在（存在任意状态 → `K3_BOOTSTRAP_DENIED`）；marker 必须不存在；domain head/version 必须都不存在（部分 → `DOMAIN_INCOMPLETE`/denied）；maintenance window 当前；旧 writer 撤权摘要有效；无 proof 要求。
+- 旧 `initializeEvidenceDomain`（90e4189）无 k3-bootstrap admission → 拒绝；K3 轮换不是 bootstrap，domain 已存在时禁止。
+- `k3BootstrapTicket` + maintenance manifest ticket + final ticket 覆盖 finalWriteSet（domain2+marker+audit）；Store gate 逐字节校验。
+
+#### 15.1.4 K3 marker 运行时验证与 audit proof 绑定
+
+- C1/C2 runtime 读 marker ref；`K3MarkerValid` 校验 exact 21 字段、markerDigest HMAC、fenceId 常量、K3 domain ID/revision/realm/version/fingerprint、window 字段完整、writer/revocation digests 格式。
+- audit proof 增至 **23 字段**：v4 22 字段 + `k3MarkerDigest`；`k3MarkerDigest` 必须等于 marker.markerDigest。runtime `CoverageValid` 同时校验 proof 的 `k3MarkerDigest` 与 marker 当前摘要；缺失/不匹配 → `PROOF_REQUIRED`。
+- marker 缺失/损坏/epoch/K3 不匹配 → `PROOF_REQUIRED`/`HALTED`；不得 fallback 到仅 audit proof。
+- marker 是 K3 启动/维护/撤权的可验证凭证；audit proof 不能脱离 marker 单独成立。
+
+#### 15.1.5 可验证维护流程（bootstrap → fence → audit → runtime）
+
+| 阶段 | 动作 | 可验证证据 |
+|---|---|---|
+| M0 | 冻结流量；停止旧 C1/legacy 进程/脚本；撤销旧 DB 凭证/权限 | 维护窗口 manifest（含 oldWriterSetDigest、revocationReceiptDigest）；撤权回执 |
+| M1 | 部署 gate（closed）+ migration/k3-bootstrap admission | gate 版本、policy/epoch；旧 writer 无 admission |
+| M2 | 若 K3 domain 不存在：k3-bootstrap 写 domain+marker+audit | marker 绑定 manifest/window/fenceId/K3 domain；refs 5/writes 4 |
+| M3 | 生成 prePlan/finalPlan/plan 记录；anchor 补齐；final inventory | plan 记录签名/状态；inventory digest/counts |
+| M4 | migration-finalize 原子写 clear fence（含健康字段）+ audit proof（含 k3MarkerDigest）+ plan consumed + audit | fence/proof/plan/audit 同事务；refs 7/writes 4 |
+| M5 | 启动 runtime，校验 K3MarkerValid/CoverageValid/FenceValid/gate | 失败不就绪；旧 writer 仍被 gate 拒绝 |
+| M6 | monitor heartbeat/halt；异常 halt | fence 健康字段/心跳；事务内停写 |
+
+- 旧 writer 停写/撤权是 **运维+DB 权限+gate** 的组合：manifest 的 revokedWriterSetDigest/revocationReceiptDigest 由部署方签名，marker 绑定；应用不能验证真实 DB 凭证撤销，残余直连 DB 由权限/inventory/monitor 兜底，明确为已知边界。
+- 维护窗口过期（`now > windowEnd`）→ `MAINTENANCE_WINDOW_EXPIRED/409`，所有 bootstrap/plan/finalize 零写；需重新签发 manifest/plan，不得延长旧 marker。
+- fencing 顺序：bootstrap 前 fence 缺失；finalize 创建 clear fence；monitor 可 halt；recovery 才 clear；fence ID 全层固定。
+
+### 15.2 plan 签名保存、验证/绑定/轮换/防重放
+
+#### 15.2.1 plan 记录 schema（23 字段）
+
+集合 `evidence_chain_plans`；`_id = "evidence-chain-plan:v1:<planKind>:<runId>:<phase>"`；字段：
+`_id, kind, scope, schemaVersion, planKind, phase, runId, windowStart, windowEnd, targetWriteEpoch, targetAdmissionPolicyVersion, targetWriterSetDigest, targetProofId, finalInventoryDigest, canonicalEvidenceCount, canonicalHeadCount, anchorCount, auditedCollections, issuedAt, status, keyFingerprint, planDigest, planTicket`。
+
+- `kind="plan"`、`scope="global"`、`schemaVersion=1`；`planKind ∈ {"migration","recovery"}`；`phase ∈ {"pre-anchor","final","recovery"}`。
+- `windowStart ≤ issuedAt < windowEnd`；plan 仅在该窗口有效；`status ∈ {"active","consumed","revoked"}`。
+- `targetWriteEpoch`/`targetAdmissionPolicyVersion`/`targetWriterSetDigest`/`targetProofId` 冻结目标；`targetProofId` 由 K3 fp+domainHeadRevision+targetEpoch 确定性计算。
+- `finalInventoryDigest/counts/auditedCollections` 为 final inventory 摘要；pre-anchor plan 以 `null/0` 占位，final/recovery plan 必须非空（Q29）。
+- `keyFingerprint` 绑定签发 K3 key；`planDigest` = SHA-256 canonical plan（除 planDigest/planTicket）；`planTicket` = K3 HMAC-SHA256，domain `KEYED_DIGEST/h4-evidence-plan` v1。
+- 集合 exact/create-only；status 仅 consumed/revoked 精确更新；plan 记录是签名的持久化，不依赖调用方内存对象。
+
+#### 15.2.2 签发/验证/绑定
+
+- `plan-issue` admission：kind=plan，operation=plan-issue；refs `plan`+`admin_audit` = **2**；writes plan+audit=2；maintenance/recovery window 有效；无同 ID plan。
+- migration-anchor/finalize/recovery 读 plan ref；gate 校验 exact schema、planDigest/ticket、status=active、`now ∈ window`、keyFingerprint=当前 K3、target 字段与 marker/fence/proof/inventory 一致。
+- **绑定**：plan 的 targetProofId/epoch/policy/writerSet/collections 必须与 marker/audit proof 一致；migration-finalize 把 plan 与 fence/proof 同事务；recovery-finalize 把 recovery plan 与新 proof/fence 同事务。
+- **轮换**：plan 绑定 `keyFingerprint`；K3 换钥后旧 plan 不再有效，必须为新 key 重新签发；不提供历史 key 回退；旧 plan 标记 revoked/expired，不得复用。
+- **防重放**：
+  - plan `_id` 含 runId/phase，create-only；`status=active` 才可使用。
+  - finalize/recovery 在同一事务把 plan 置 `consumed`；已 consumed 的 plan 再用于 anchor/finalize/recovery → `PLAN_CONSUMED/409`。
+  - window 外 → `PLAN_EXPIRED/409`；revoked → `PLAN_REVOKED/409`。
+  - targetProofId 已存在 → `PLAN_CONSUMED`/`CONFLICT`；不得生成第二 proof。
+  - 两 migration/recovery 同 plan 并发：plan status/proof create-only 一胜；失败方零写。
+- `plan-revoke` admission：refs 2/writes 2；只允许 active→revoked；revoked plan 不可恢复。
+- plan 记录/签名持久化解决“plan 只存在离线对象”的不可验证问题；Codex 可读取 plan 记录/摘要。
+
+### 15.3 monitor 健康期限、时钟与事务内权威停写
+
+- fence 12 字段（§15.1.1）；健康常量（建议，Q30）：`MONITOR_HEALTH_WINDOW_MS = 300_000`、`CLOCK_SKEW_MS = 30_000`。
+- 初始/恢复 clear fence 由 migration-finalize / recovery-finalize 设置 `heartbeatAt = proof.checkedAt`、`validUntil = heartbeatAt + MONITOR_HEALTH_WINDOW_MS`；否则 FenceValid 失败 → HALTED。
+- `FenceValid(now)`：
+  ```text
+  status="clear" ∧ epoch=proof.writeEpoch ∧ fenceDigest HMAC
+  ∧ heartbeatAt/validUntil 安全整数 ∧ validUntil>heartbeatAt
+  ∧ validUntil-heartbeatAt ≤ MONITOR_HEALTH_WINDOW_MS
+  ∧ now ≥ heartbeatAt - CLOCK_SKEW_MS
+  ∧ now ≤ validUntil
+  ∧ monitorId 有效
+  ```
+  任一失败/过期 → `EVIDENCE_CHAIN_HALTED/409`，在事务内构造写之前返回；Store gate 写阶段复查 state[fence]。
+- monitor 操作（均 fence+唯一 audit，refs 5）：
+  - `fence-heartbeat`：status clear；proof/fence epoch 有效；更新 heartbeatAt=now、validUntil=now+window，audit；**允许在健康已过期时刷新**（否则无法从超时恢复），但不得越过 proof/coverage。
+  - `fence-halt`：status halted，reasonCode/monitorId/updatedAt；heartbeat/validUntil 保留；不依赖 proof 有效；audit。
+  - `fence-clear`：**不允许 monitor**；仅 recovery-finalize 新 epoch proof 原子写 clear。
+- 时钟：`now` 由受信服务提供且安全整数；若 `now < heartbeatAt - skew`（回拨/未来心跳）或 `now > validUntil`（过期）或窗口超上限 → HALTED；不得用非法时钟继续。
+- 事务内权威停写：runtime/Store gate 在 **读 fence 后、构造 finalWriteSet 前**判断 `FenceValid(now)`；过期/时钟异常立即 HALTED；gate 在写阶段用 state[fence] 复查；在途事务若已过 gate 且 fence 在提交前变 halted/expired，按 Store 事务冲突/下一事务停写；monitor 同时停流量。
+- 状态：`CLEAR_HEALTHY(E)`、`CLEAR_EXPIRED(E)`（fence status 仍 clear 但 runtime 视为停写）、`HALTED(E)`、`RECOVERY`；heartbeat 可 CLEAR_EXPIRED→CLEAR_HEALTHY；monitor halt → HALTED；recovery → CLEAR_HEALTHY(E1)。
+
+### 15.4 v5 预算/schema/refs（覆盖 v4 §7）
+
+| 事务 | refs | writes |
+|---|---:|---|
+| C1 首条/非首条 | domain2 + audit1 + fence1 + marker1 + anchor1 + head1 + E1..9 = **16** | 3 / 2 |
+| C2 R1 | C1 16 + org/member/job/grant4 + op key/opdomain3 + log/admin audit2 = **25** | job/evidence/head/anchor/log/op/domain/audit |
+| migration-anchor | domain2+fence1+marker1+plan1+head1+E9+anchor1+audit1 = **17** | anchor+audit |
+| migration-finalize | domain2+fence1+marker1+plan1+proof1+audit1 = **7** | fence+proof+plan+audit |
+| recovery-finalize | domain2+fence1+marker1+plan1+proof1+audit1 = **7** | fence+proof+plan+audit |
+| monitor heartbeat/halt | domain2+proof1+fence1+audit1 = **5** | fence+audit |
+| k3-bootstrap | domain2+fence1+marker1+audit1 = **5** | domain2+marker+audit |
+| plan-issue/revoke | plan1+audit1 = **2** | plan+audit |
+| C2 R2 | H4-b 8+N≤90 | 独立事务 |
+
+- C2 R1 25 距 90 余 65；所有 refs 去重；admission/plan ticket 0 新增 refs。
+- 8 个 H4-c 集合：evidence/head/domains/anchor/audit/fence/k3-markers/plans；Store gate 全部覆盖。
+
+### 15.5 状态机、并发、失败零写（v5 增量）
+
+**状态**：
+`BOOTSTRAP（无 domain/marker/fence/proof） → UNPROVEN（domain+marker，无 proof/fence） → PLAN_ACTIVE → CLEAR_HEALTHY(E)/CLEAR_EXPIRED(E) → HALTED(E) → RECOVERY → CLEAR_HEALTHY(E1)`。
+
+- K3 marker 缺失/无效：UNPROVEN 前不可 runtime；audit 前不可 runtime。
+- plan active 仅 migration；finalize 后 consumed；recovery plan 仅 HALTED。
+- monitor halt 只能 CLEAR→HALTED；heartbeat 只能 clear→healthy（含过期恢复）；recovery 才能 HALTED→clear。
+- K3 换钥：marker/proof/fence/plan 全部失效；重新维护/审计，不复用旧对象。
+
+**并发**：
+| 竞争 | 结果 |
+|---|---|
+| 两 k3-bootstrap | domain/marker create-only 一胜 |
+| 两 plan-issue 同 ID | create-only 一胜；另一 409 |
+| 两 migration/anchor 同 plan | plan active；anchor 幂等；finalize 一胜 |
+| plan 重放（consumed/expired/revoked） | PLAN_CONSUMED/PLAN_EXPIRED/PLAN_REVOKED；零写 |
+| 两 recovery 同 HALTED(E) | plan/proof create-only 一胜；无双 fence/proof |
+| monitor heartbeat vs halt | fence exact/epoch；halt 后 heartbeat 拒绝；clear 后旧 halt 需 observedEpoch |
+| health 过期 vs append | 事务内 FenceValid 失败 HALTED；gate 复查 |
+| clock 回拨/未来 | HALTED；不得继续 |
+| K3 换钥 vs marker/plan | DOMAIN/PROOF/HALTED；零写 |
+
+**失败零写增量**：
+| ID | 失败 | 结果 | 范围 |
+|---|---|---|---|
+| F22 | K3 marker 缺失/字段/HMAC/绑定错 | PROOF_REQUIRED/HALTED | Z_all |
+| F23 | maintenance window 过期 | MAINTENANCE_WINDOW_EXPIRED | Z_all |
+| F24 | 旧 writer 撤权摘要缺失/不匹配 | MAINTENANCE_MANIFEST_INVALID | Z_all |
+| F25 | plan 缺失/签名/字段/window 错 | PLAN_INVALID | Z_all/Z_chain |
+| F26 | plan consumed/expired/revoked 重放 | PLAN_CONSUMED/PLAN_EXPIRED/PLAN_REVOKED | Z_all |
+| F27 | plan keyFingerprint/K3 轮换不符 | PLAN_INVALID | Z_all |
+| F28 | monitor health 过期 | HALTED | Z_all |
+| F29 | clock 回拨/未来/非法 | HALTED | Z_all |
+| F30 | heartbeat 写入失败/并发 | HALTED/回滚 | Z_all |
+| F31 | audit finalWriteSet 注入/双审计 | ADMISSION | Z_all |
+| F32 | fence ID/schema/查找 ID 不一致 | HALTED/PROOF | Z_all |
+
+### 15.6 v5 裁定与矩阵
+
+**新增 Q28–Q31**：
+| Q | 事项 | 建议 |
+|---|---|---|
+| Q28 | K3 marker/maintenance manifest/fence ID/schema/refs/writes（5/4） | 批准 |
+| Q29 | plan 记录持久化、签名/绑定/轮换/防重放/plan-issue 2 refs | 批准 |
+| Q30 | monitor 健康窗口 300s、时钟偏差 30s、heartbeat/halt/clear 权限 | 批准 |
+| Q31 | v5 预算 C1 16/C2 25/migration 17/7/recovery 7/monitor 5/k3 5/plan 2 | 批准 |
+
+v5 对 v4 Q5/Q7/Q10/Q17/Q26/Q27 的预算/scope 更新：
+- Q5：C1 16/C2 25/migration 17/7/recovery 7/monitor 5/k3 5/plan issue 2；
+- Q7：k3-bootstrap 5 refs/4 writes（domain2+fence+marker+audit）；
+- Q17：C2 R1 25；
+- Q26/Q27：finalWriteSet/audit 覆盖 marker/plan/fence 控制事务；
+- Q10：全局 halt 范围含 8 集合；health 过期同样停写。
+
+**新增 N81–N96**（N01–N80 保留 v4 逐项矩阵；其预算行 N26/N48/N66 按 v5 替换）：
+| ID | 场景 | 期望 |
+|---|---|---|
+| N81 | K3 marker 21 字段/HMAC/fenceId/K3 绑定；C1 16 refs | 通过/拒绝 |
+| N82 | maintenance window 过期 bootstrap/plan/finalize | MAINTENANCE_WINDOW_EXPIRED；零写 |
+| N83 | 旧 writer 撤权摘要缺失/不匹配 | MAINTENANCE_MANIFEST_INVALID；拒绝 |
+| N84 | plan-issue 2 refs/writes、签名/digest/目标字段 | 通过 |
+| N85 | plan consumed/expired/revoked 重放 | PLAN_*；零写 |
+| N86 | K3 换钥/plan keyFingerprint/旧 marker | PLAN_INVALID/PROOF；零写 |
+| N87 | monitor heartbeat 刷新健康/审计 | 成功；fence+audit |
+| N88 | monitor health 过期后 runtime append | HALTED；零写 |
+| N89 | clock 回拨/未来/非安全整数 | HALTED；零写 |
+| N90 | fence ID 固定公式/查找 ID/schema | 通过；无第二个 fence ID |
+| N91 | k3-bootstrap 5 refs/4 writes（domain2+marker+audit） | 成功；fence 缺失才允许 |
+| N92 | audit proof k3MarkerDigest 缺失/不匹配 | PROOF_REQUIRED |
+| N93 | C1 16/C2 25 refs | ≤90；无未声明写 |
+| N94 | migration 17/7/recovery 7/plan 2 refs | ≤90 |
+| N95 | F22–F32 失败矩阵 | Z_all/Z_chain 按表 |
+| N96 | 完整云报告不可读/未列项 | 明确缺失，不声称关闭 |
+
+### 15.7 v5 未解决/未验证
+
+- 完整云报告正文不可读（路径如 §15 开头）；报告内逐项结论、未在本消息列明的裁定仍是**缺失项/待裁**，不猜测关闭。
+- Q28–Q31 待 Codex 裁定；v4 Q1–Q27 中与 §15 冲突的预算/scope 以 §15 为准。
+- 未运行测试；N01–N96 设计矩阵未执行；无 C1/C2/C3 实现。
+- 旧 writer 真实撤权、DB 权限、monitor 运维可用性无法由本地设计验证；需部署/DB 证据。
+- G3 `5f1d7a4` 关闭/O10 PASS 不重派；G4 执行/C1 实现/C2/C3/main/07B 合并/HTTP/UI/部署上线冻结。
+
+---
+
+**提交对象：Codex。请复审 v5 §15（Q28–Q31、N81–N96、预算/状态机/失败矩阵）；本稿不声称完整云报告已读或逐项关闭。不自批。**

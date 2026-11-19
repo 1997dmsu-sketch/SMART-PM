@@ -251,6 +251,7 @@ a82fe6e442a814fb9880d3b21c63c95be2a1a87e  docs: DB-01 current state, data model,
 ## 13. 交付与本卡自身提交
 
 - 本卡与证据缺口文档为本分支相对 `1be517e` 的**唯一新增**（两份文档），不改任何既有文件。
+- 含本卡提交后的分支 tip 相对 main 为 **135 提交 / 95 文件 / +30618 −512**；候选范围定义仍是 `origin/main..1be517e` = 134 提交 / 93 文件 / +30288 −512，**不因本卡提交而变化**。
 - 提交方式：普通 `git commit` 追加；推送目标精确为 `refs/heads/docs/hk-face-07b-integration-candidate-task`（**不推 `origin/main`**，不推其他跟踪 ref）。
 - 推送后以 `git ls-remote` 核对远端完整 SHA 与本地一致；本卡自身提交 SHA、父提交与 GitHub 固定 SHA 链接见调度回报（避免在文档内预写未生成的值）。
 - 本卡不自批：交付后由 Codex 独立复审；复审通过前不得据此执行或合并。

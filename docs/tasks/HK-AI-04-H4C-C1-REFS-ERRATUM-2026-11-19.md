@@ -1,14 +1,16 @@
-# HK-AI-04 H4-c C1 refs 勘误与接口补全（r3）
+# HK-AI-04 H4-c C1 refs 勘误与接口补全（r4）
 
-> 状态：**设计勘误，待 Codex 审批；不授权实施。** 本勘误只新增/修订文档并同步任务卡；不实现 C1、不运行测试、不修改已验设计正文/生产代码/测试/Store/迁移脚本，不进入 C2/C3、HTTP/UI、部署上线，不安装依赖、不连接设备、不调用 Provider/生产云/支付。
+> 状态：**设计勘误，D4a/D4b/D5 已按本轮明确裁定回写；待 Codex 复审，不授权实施。** 本勘误只新增/修订文档并同步任务卡；不实现 C1、不运行测试、不修改已验设计正文/生产代码/测试/Store/迁移脚本，不进入 C2/C3、HTTP/UI、部署上线，不安装依赖、不连接设备、不调用 Provider/生产云/支付。
 >
-> 输入：`09f559dcbd3f69bcec1f0a15487d2fc5bcf42b97`（父 `96d1bc94f388fe51c99114fa6f1647b3c7665314`；tree `ece98224ce5475de4cb23203f517f52fa81085d9`）；工作树 `C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-staged-task`；分支 `docs/h4c-c1-staged-implementation-task`；开始工作时 HEAD = 输入提交，工作区干净。
+> 输入：`d095a1888a2efba7ac8bfea76dfe120a3a74bf08`（父 `09f559dcbd3f69bcec1f0a15487d2fc5bcf42b97`；tree `c96640ae33a5d51f6dc6981cde1fa8d389481ea6`）；工作树 `C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-staged-task`；分支 `docs/h4c-c1-staged-implementation-task`；开始工作时 HEAD = 输入提交，工作区干净。
+>
+> 执行 run：`hrun-mwn0lqcp-02816b`（DSH `session-59b359d6-bd54-4f32-a4ab-244a4c0a79f9`；本修订 2026-11-19T11:53+08:00）。
 >
 > 设计基线：`docs/tasks/HK-AI-04-H4C-C1-EMPTY-CHAIN-PROOF-DESIGN-2026-11-16.md`（1607 行，v8；blob `c4feffa5831f5bf0e04e8e902865cb8e1f1b0183`，sha256 `d769da93c4880409c946e316f2414ca6b1135a96361934abc188111ca6dcbec7`）。冲突优先级：**§18 > §17 > §16 > §15 > §4–§14 历史正文**。
 >
 > 代码基线：`5dff386fe5c9648b04d1623d3e1898c59332639e`；`fcae246` 是其后代（10 个 docs-only 提交），`git diff --stat 5dff386..fcae246 -- . ':(exclude)docs'` 为空。
 >
-> 云指令/审查：`/workspace/artifacts/FIVE-FOLLOWUPS-REVIEW-2026-11-19/DISPATCH.md` 与 `REVIEW.md` **本机未取得**。已检查并均不可读/不存在：`C:\workspace\artifacts\FIVE-FOLLOWUPS-REVIEW-2026-11-19\DISPATCH.md`、同目录 `REVIEW.md`、`/workspace/artifacts/...`、`\\wsl$\workspace\artifacts\...`、`C:\workspace` 根；仓库 `.tmp` 与 `docs` 下也未发现同名 `DISPATCH.md`/`REVIEW.md` 副本。**未读，不声称完整闭合，不据此声称任何云端裁定**；只按本轮用户明确要求修订，未明处列 §5/§6 待裁。
+> 云指令/审查：`/workspace/artifacts/FIVE-FOLLOWUPS-REVIEW-2026-11-19/DISPATCH.md` 与 `REVIEW.md` 本轮仍未取得本机可读正文；已检查并均不可读/不存在：`C:\workspace\artifacts\...`、`/workspace/artifacts/...`、`\\wsl$\workspace\...`、`C:\workspace` 根；仓库 `.tmp` 与 `docs` 下也未发现同名副本。**未读，不声称完整闭合，不据此声称任何云端裁定**。派单背景：D 关闭；C/G 不重派；Git 偏差 OPEN 未恢复；E/F 等外部材料。
 >
 > 本勘误不是对已验设计的静默重开：它把“proof 漏算”作为**显式 E1 勘误**记录，逐条重算 refs/writes、列出受影响条款与审批要求；设计正文不改，审批后以本勘误与任务卡为准。
 
@@ -21,8 +23,8 @@
 | 预算影响 | 单事务上限 90；C2 R1 27，余量 **63**；C1 18；无新增集合计数（按 E2 解释，proof 属于 8 集合之一）、无新增索引/epoch 计数记录、无新增写 |
 | E2 集合名 | 8 个 H4-c 集合建议冻结为：`device_operation_evidence`、`device_operation_evidence_heads`、`evidence_digest_domains`、`evidence_chain_anchors`、`evidence_chain_audits`、`evidence_chain_fences`、`evidence_chain_k3_markers`、`evidence_chain_plans`；`admin_audit` 为通用 7 字段审计，单独 explicit 门禁，不计入 8 |
 | E3 接口/DI | 冻结 `transactFinal`、`createH4cGate`、`h4cGate` 构造注入、`#persist` 私有、8 集合常量模块；**集合门禁用私有 Set + 只读 `isH4cCollection` + 冻结枚举快照，不导出 Set**；Store 不读环境、不 import face-service；详见 §3 |
-| D4/D5 | D4a `proof.status/legacyCount` 仅能证“字段存在且必须校验”，枚举/计算缺失；D4b audit ID 仅能证前缀/32hex/scopeKey/targetList，`action/revision` 缺失；D5 runtime `operationAuthDigest` 无批准值。详见 §3.5–§3.7；禁止把候选当批准 |
-| 审批 | **18/27 预算按本轮口径保留（可采纳）**；E1/E2/E3、P9 集合门禁、P10–P12（D4a/D4b/D5）、任务卡 §3.7 清单、§3.3b/D10 persist 影响，均交 Codex 复审；未批准前 S1/S3/S5 对应正向验收不得冻结 |
+| D4/D5 | **D4a/D4b/D5 已按本轮明确裁定关闭**：`status="verified"`/`legacyCount=0`/snapshot；C1 audit `scopeKey=job._id`、genesis/append、revision=新 evidence.sequence、targetList；runtime `operationAuthDigest=null` + ticket 签名该键 + runtime 白名单。详见 §3.5–§3.7；不倒推为旧设计已明确 |
+| 审批 | **18/27 预算保留**；E1/E2/E3、P9 集合门禁、任务卡 §3.7 清单、§3.3b/D10 persist 影响仍交 Codex 复审；P10–P12 已由本轮裁定关闭（D4a/D4b/D5） |
 | 当前状态 | 只写勘误与卡片；无代码、无测试执行、无设计正文修改、无安装、无云/设备/支付/业务网络 |
 
 ## 1. E1：C1 少算 audit proof ref（核心勘误）
@@ -293,60 +295,62 @@ const store = await new LocalStore(dir, { h4cGate: gate }).init();
 - 必须覆盖 `transactFinal/transact/change/#persist/seed/init` 全路径负向与零写（完整矩阵见任务卡 §3.3f）。
 - `verification.test.mjs:381` 直接 `store.persist(store.data)` 模拟 legacy 数据；`#persist` 私有后会失败。见 §5 P5/D10：建议把该测试改为在 `init()` 前直接写 `demo-data.json`，不改 identity 断言；需批准将该测试纳入 S4 允许文件。
 
-### 3.5 D4a：proof.status / legacyCount（可证明约束与缺失枚举）
+### 3.5 D4a：proof.status / legacyCount（本轮裁定，已关闭）
 
-> 阅读证据：v8 §3.2 `:126`、§4.2 `:159`、§16.4 `:894`、N07 `:510`、F02 `:436`；b15aceb 设计 §8.4 `:451` 与 `.tmp/hk-h4c-c1-review-3fce9b0/.review-refs/H4C-APPROVAL.md`（Q1–Q9 不含 proof.status/legacy）；C2 preflight Q19 `:845`；v3 历史草稿 `.tmp/c1-design-v3/...:108/:160`、`.tmp/parallel-c1/...:111/:180`。当前 v8 未给枚举/规则。
+> **裁定来源：本轮用户明确裁定；新增契约，不写成旧设计早已明确。** 设计原文只要求 exact 字段与 `CoverageValid` 校验（§3.2 `:126`、§4.2 `:159`、§16.4 `:894`、N07 `:510`、F02 `:436`），未给枚举/计算；本裁定补齐。
 
-| 项 | 可证明内容（引用） | 唯一验收预期 | 缺失/待裁 |
-|---|---|---|---|
-| 字段存在/精确 | proof 为 exact 24 字段，含 `status`、`legacyCount`；多/缺字段非法（§3.2 `:126`、§4.2 `:159`、§16.4 `:894`） | 缺/多 `status`/`legacyCount` → `EVIDENCE_CHAIN_PROOF_REQUIRED`；零写 | 字段类型未逐项枚举（是否 string/int） |
-| 覆盖一致性 | `CoverageValid` 要求 `status/legacyCount` 与当前一致（§3.2 `:126`） | 与当前不一致 → `PROOF_REQUIRED`；零写 | “当前”值/枚举未定义 |
-| 非法值 | N07/F02：proof `status/legacyCount` 非法 → `PROOF_REQUIRED`，Z_all（N07 `:510`、F02 `:436`） | 非法值 → `PROOF_REQUIRED`；零写 | 何为“合法值”未定义 |
-| 写权限 | proof 仅 migration finalize/recovery 写；runtime 只读（§4.2 `:159`） | C1 不得写 proof；写即失败 | — |
+| 项 | 裁定 | 验收 |
+|---|---|---|
+| `proof.status` | 唯一字符串 `"verified"`；其他字符串、缺失、非字符串 → `EVIDENCE_CHAIN_PROOF_REQUIRED/409` | 正例 `"verified"` 通过；`"valid"`/`"empty"`/`""`/缺/非字符串 → PROOF_REQUIRED，零写 |
+| `legacyCount` | 安全非负整数；`CoverageValid` **只接受 0**；负数/非整数/非安全整数/非 0 → PROOF_REQUIRED/409 | 正例 0；`-1`/`1`/`1.5`/`"0"`/超安全整数 → PROOF_REQUIRED，零写 |
+| 含义 | 可信全量盘点后仍未满足当前 canonical schema/K3/链/anchor 约束的 evidence/head 记录数 | 盘点未完成/存在未知记录/非 0 → 不得可运行 proof |
+| 快照 | `counts`/`inventoryDigest` 为 epoch 激活前快照；append 不每次全扫 | 证明使用 proof 快照；不要求每次 append 全库扫描 |
+| 失败 | 缺失/类型错误/status 非法/非零 legacyCount → `PROOF_REQUIRED`/409 零写 | 全库零写 |
 
-- **可证明的唯一正向契约只有“字段存在且必须校验”**；`status` 的允许值、`legacyCount` 的计算/期望值、字段类型，在当前 v8 中均无定义（v8 只写 `status/legacyCount`）。
-- **历史草稿证据（不是当前批准值）**：`.tmp/c1-design-v3/...:108/:160` 与 `.tmp/parallel-c1/...:111/:180` 的 v3 草稿曾定义 `status ∈ {"empty","backfilled"}` 且 `legacyCount=0`；v4 起删除该枚举，v8 未恢复。该历史值只说明“曾经有人定义”，**不得当批准**；需 Codex 明确是否沿用 `empty/backfilled`/`legacyCount=0` 或给出新规则。
-- **不得**把 `status="valid"`、`legacyCount=0`、`empty/backfilled` 等候选当批准；在本轮材料中找不到当前 v8 的这些字面值，禁止猜测。
-- 因此 C1 S1 只能实现字段存在/类型占位，不能冻结语义；S5 的 `CoverageValid` 正向验收被阻断，直到 Codex 给出枚举/规则。负向可先验“缺/多/明显非字符串/非计数 → PROOF_REQUIRED”。
+- **正例**：`status="verified"`、`legacyCount=0`、snapshot counts/inventoryDigest 与 proof 一致 → `CoverageValid` 通过。
+- **负例**：status 缺失/非 `"verified"`；legacyCount 缺失/负数/非安全整数/非 0；盘点未完成/未知记录；任一 → `PROOF_REQUIRED`，零写。
+- proof 仅 migration finalize/recovery 写；C1 runtime 只读，不得写 proof。
+- 该裁定不依赖 v3 草稿的 `empty/backfilled`；v3 值不再作为候选引用。
 
-### 3.6 D4b：audit ID 的 revision / action / scopeKey（可证明部分与缺失）
+### 3.6 D4b：audit ID（C1 本轮裁定，已关闭）
 
-| 项 | 可证明内容（引用） | 唯一验收预期 | 缺失/待裁 |
-|---|---|---|---|
-| v8 公式 | `_id = "audit-h4c-v1:" + sha256(stable([orgId, scopeKey, action, targetList, revision])).slice(0,32)`；targetList 为排序 `collection/id`（不含 audit 自身）（§4.13 `:316`） | 前缀/32 位小写 hex/targetList 排序可验；不符 → `ADMISSION_REQUIRED` | `action` 字面、`revision` 取值未定义 |
-| scopeKey | C2 的 `scopeKey=jobId`；control 的 `scopeKey="operation:<op>"`（§4.13 `:316`） | jobId/`operation:<op>` 可验；其他值拒绝 | C1 的 scopeKey 未定义（C1 测试 audit 不要求生产公式） |
-| C1 audit 边界 | C1 helper 只返回业务写；C1 单测用显式 test audit（§4.13 第 7 条 `:324`） | C1 只验 `audit-h4c-v1:`+32hex+7 字段+在 refs；**不得**断言生产公式 | C1 test audit 的具体 ID 可测试自造，但须标 `test-only` |
-| b15aceb 已批准公式 | `audit-h4c-v1:${sha256(stable([orgId,jobId,decision,sequence,jobRevision])).slice(0,32)}`（b15aceb §8.4 `:451`，`H4C-APPROVAL.md` 批准） | 已批准 C2 公式；v8 §4.13 未明确取代 | 与 v8 的 `targetList/revision` 不兼容，何者优先未定义 |
-| C2 Q19 | audit `action` 文本、`jobRevision` 取迁移前/后未冻结；选项 A/B/C（C2 preflight Q19 `:845`） | 不能冻结 C2 audit 正向 ID | 需 Codex 裁定 |
+> **裁定来源：本轮用户明确裁定；新增 C1 契约。** C1 helper 只返回业务写；C1 验收使用 **test-only 显式 audit**（不是 C2 生产公式）；C2/control 生产公式另卡，不替换或阻断 C1 helper 验收。
 
-- **可证明**：前缀、SHA-256 规范化、32 位小写 hex、`orgId`、`scopeKey`（C2=jobId；control=`operation:<op>`）、`targetList` 排序且不含 audit、7 字段、C1 用 test-only audit。
-- **不可确定**：`action` 的精确文本（`decision`? `reconcile`? 其他）、`revision` 取 job revision 迁移前/后、是否保留 b15aceb 的 `sequence/jobRevision`、v8 与 b15aceb 谁优先。禁止把 `decision`/`jobRevision`/`sequence` 直接当批准值。
-- 验收：C1 仅按 test-only audit 验前缀/长度/字段/ref；C2/control 的 audit ID 正向验收阻断，直到 Codex 裁定 `action`/`revision` 与公式优先级。
+```text
+scopeKey = job._id
+action   = 首条 ? "h4c.evidence.genesis" : "h4c.evidence.append"
+revision = 本次新 evidence.sequence          // 非 jobRevision/domainHeadRevision/旧 sequence
+targetList = 业务写 collection/id 排序，不含 audit；重复业务目标拒绝
+auditId = "audit-h4c-v1:" + sha256(stable([orgId, scopeKey, action, targetList, revision])).slice(0,32)
+```
 
-### 3.7 D5：runtime 的 operationAuthDigest（缺失值）
+- `admin_audit` exact 7 字段；`createdAt` 使用同一可信 `now`；`target = targetList.join(", ")`。
+- **正例**：首条 action=genesis/revision=1；非首条 action=append/revision=N；targetList 排序、无 audit、无重复；ID/7 字段/createdAt/target 全匹配 → 通过。
+- **负例**：scopeKey≠job._id；action 错；revision 用 jobRevision/domainHeadRevision/旧 sequence；targetList 未排序/含 audit/重复业务目标；`createdAt` 不同 `now`；字段多/缺 → `ADMISSION_REQUIRED/409`，零写。
+- C2/control 的 `action`/`revision` 生产公式不在本轮 C1 验收内；不得据此阻塞 C1。
 
-| 项 | 可证明内容（引用） | 唯一验收预期 | 缺失/待裁 |
-|---|---|---|---|
-| ticket 字段 | final ticket 的 HMAC 输入包含 `operationAuthDigest`（§4.6 `:205-208`） | ticket 必须绑定该字段；缺失即非法 | runtime 取值未定义 |
-| 绑定对象 | `operationAuthDigest` 绑定 migrationPlan/recoveryPlan/monitorAuth/k3BootstrapTicket（按 kind）（§4.6 `:212`） | 四种 control kind 各自绑定对应对象；不一致 → ADMISSION | runtime 无对应对象 |
-| runtime 授权 | runtime 仅 precheck+final ticket，无 plan/auth 对象（§4.6 `:216-218`）；`proofId` 必须为当前 proof（§4.6 `:212`） | runtime 必须有当前 proof 的 ticket；proof 不符 → ADMISSION/PROOF | `operationAuthDigest` 对 runtime 取什么值未写 |
-| 候选 | 无批准文本 | — | `null`、`HMAC(precheck)`、空串等均为**未批准候选**；不得实现/断言 |
+### 3.7 D5：runtime operationAuthDigest（本轮裁定，已关闭）
 
-- **可证明**：ticket 必须包含并绑定 `operationAuthDigest`；四种 control kind 的绑定对象已列；runtime 没有 plan/auth 对象，`proofId` 必须为当前 proof。
-- **不可确定**：runtime 的 `operationAuthDigest` 精确值。设计未列 runtime 绑定对象，也未规定“无对象即 null”；`null` 只是候选，不是批准契约。
-- 验收：在 Codex 给出 runtime 值前，**没有 runtime final ticket 的正向验收**；S3 被阻断。负向只能验“ticket 中该字段与批准值不符 → ADMISSION”，但批准值本身缺失。
+> **裁定来源：本轮用户明确裁定；新增 runtime 契约。**
+
+- runtime `operationAuthDigest` = **显式 JSON `null`**；final ticket **必须包含并签名该键**，不可省略。
+- 缺失/`undefined`/空串/任意非 null 摘要 → `EVIDENCE_CHAIN_ADMISSION_REQUIRED/409`，零写。
+- ticket 的 `proofId/precheck/epoch/refsDigest/writesDigest` 保持原设计；`null` 只表示 runtime 无 control 授权对象，不绕过控制授权。
+- C1 工厂仅接受 runtime 操作白名单：`kind="runtime"` 且 `operation ∈ {"genesis","append"}`；任何 control kind/operation 默认拒绝（即使 `operationAuthDigest=null`）。
+- **正例**：runtime genesis/append，ticket 含 `operationAuthDigest:null` 且签名覆盖该键 → 通过。
+- **负例**：键缺失/undefined/`""`/任意摘要；control kind/operation；proof/precheck/epoch/refsDigest/writesDigest 不符 → `ADMISSION_REQUIRED/409`，零写。
 
 ## 4. 对任务卡的具体修订
 
-任务卡 r4 将同步（**18/27 预算按本轮口径保留，可采纳**）：
+任务卡 r5 将同步（**18/27 预算保留**）：
 
-1. C1 17→**18**、C2 26→**27**；writes 3/2 不变；余量 64→63；本轮明确可采纳。
+1. C1 17→**18**、C2 26→**27**；writes 3/2 不变；余量 64→63。
 2. 8 集合表改为“audit proof”并补字面名；`admin_audit` 单列为通用 explicit 审计，不计入 8。
 3. 增加 `admin-web/lib/h4c-collections.mjs`（**私有 Set + `isH4cCollection` + 冻结枚举快照，不导出 Set**）、`transactFinal`/`createH4cGate`/`h4cGate` 构造注入/`#persist` 私有的阶段允许文件、签名、权限、错误契约、显式写集与 **M01–M30 全路径验收矩阵**。
 4. 删除 r1 中会启动 loopback 监听的全量 glob 命令；改为 **33 个非 HTTP 文件显式清单 + 7 个根文件显式清单**，并加“加载前 guard”要求；8 个会 `listen` 的 HTTP 文件明确不跑。
 5. D2/D3/D7 标记为“勘误 E1/E2/E3，待审批”；新增 D10（persist 私有化对 `verification.test.mjs:381` 的影响）。
 6. S2/S3/S5 的 refs 全部按 18；S6 按 18/27 验收。
-7. **D4a/D4b/D5 按 §3.5–§3.7 处理**：可证明的字段/公式/边界写入卡；缺失的 `proof.status/legacyCount` 枚举、audit `action`/`revision`、runtime `operationAuthDigest` 明确标记“缺裁定”，不写猜测值；S1/S3/S5 对应阻断。
+7. **D4a/D4b/D5 已按本轮明确裁定关闭**：proof `status="verified"`/`legacyCount=0`/snapshot；C1 audit `scopeKey=job._id`/genesis|append/revision=新 sequence/targetList；runtime `operationAuthDigest=null` + ticket 签名该键 + runtime 白名单；正负用例写入卡 §3.3g/§3.3h，S1/S3/S5 门禁恢复；不倒推为旧设计已明确。
 
 ## 5. 审批要求（问题 → 位置 → 审批）
 
@@ -361,20 +365,20 @@ const store = await new LocalStore(dir, { h4cGate: gate }).init();
 | P7 | 设计页首自述“待 Codex 复审” | 设计 `:3` | 明确批准文/批准 SHA 与实施分支；本勘误不代替批准 |
 | P8 | 云 DISPATCH/REVIEW 不可读 | 本机路径（§页首） | 提供可读副本，或确认本轮只按用户明确要求修订、不声称逐项闭合 |
 | P9 | 集合门禁若导出可变 Set，可被 import 方 `add` 绕过 | `h4c-collections.mjs` 设计 | 批准“私有 Set + 只读 `isH4cCollection` + 冻结枚举快照”；不得导出 Set，不得把 `Object.freeze(Set)` 当不可变 |
-| P10 | proof.status/legacyCount 的允许值、类型/计算规则未定义 | 设计 §3.2 `:126`、§4.2 `:159`、N07 `:510`、F02 `:436` | 裁定 `status` 枚举与 `legacyCount` 计算/期望；未裁定前 S1/S5 不得做正向 `CoverageValid` 验收 |
-| P11 | audit ID 的 `action` 文本、`revision` 取值/新旧公式优先级未定义 | 设计 §4.13 `:316`、b15aceb §8.4 `:451`、C2 Q19 `:845` | 裁定 action/revision 与 v8/b15aceb 公式优先级；C1 仅用 test-only audit，不据此断言生产公式；C2/control 正向验收阻断 |
-| P12 | runtime `operationAuthDigest` 精确值未定义 | 设计 §4.6 `:205-222` | 裁定 runtime 值；未裁定前没有 runtime final ticket 正向验收，S3 阻断；`null`/`HMAC(precheck)` 均不是批准值 |
+| P10 | proof.status/legacyCount 契约 | 卡 §3.3g/§3.3h、勘误 §3.5 | **本轮已关闭**：status 唯一 `"verified"`；legacyCount 安全非负整数且仅接受 0；snapshot；非法 → PROOF_REQUIRED/409 零写 |
+| P11 | audit ID 的 action/revision/scopeKey/targetList | 卡 §3.3g/§3.3h、勘误 §3.6 | **本轮 C1 已关闭**：scopeKey=job._id；genesis/append；revision=新 evidence.sequence；targetList 排序去重不含 audit；auditId 公式；C2/control 另卡 |
+| P12 | runtime `operationAuthDigest` | 卡 §3.3g/§3.3h、勘误 §3.7 | **本轮已关闭**：显式 JSON null；ticket 必须签名该键；缺失/undefined/空串/摘要 → ADMISSION/409；runtime 白名单，control 默认拒绝 |
 
 ## 6. 未验证 / 未做
 
 - 未实现任何代码；未运行任何测试；未修改设计正文/生产代码/测试/Store。
 - 未验证真实 Cloud 并发、真实 K3/设备/Provider/支付/业务网络。
 - 未取得 `/workspace/artifacts/FIVE-FOLLOWUPS-REVIEW-2026-11-19/DISPATCH.md` 与 `REVIEW.md`；未读，不声称闭合。
-- P1–P12 均待 Codex 复审；**18/27 预算按本轮口径保留**；D10/P5 未决前 S4 不得开工；P10/P11/P12 未决前 S1/S3/S5 对应正向验收不得冻结。
+- **D4a/D4b/D5（P10–P12）已按本轮明确裁定关闭**；P1–P9、D8/D9/D10 仍待 Codex 复审/材料；**18/27 预算保留**；D10/P5 未决前 S4 不得开工。
 - 本勘误不自批、不宣称 C1/G1 通过、不授权合并/实施。
 
 ## 7. 交付
 
-- 本勘误（r3）与任务卡 r4 将在同一提交追加；提交后由交付回报给出完整 SHA、父、diff、远端 SHA 与固定 SHA 链接。
+- 本勘误（r4）与任务卡 r5 将在同一提交追加；提交后由交付回报给出完整 SHA、父、diff、远端 SHA 与固定 SHA 链接。
 - 普通 push；不 amend/rebase/reset/squash/force/cherry-pick/merge；远端前移/分叉即停止报告。
-- 交 Codex 复审 P1–P12；未批准前不进入实现。
+- 交 Codex 复审 D4a/D4b/D5 回写与 P1–P9/D10；未批准前不进入实现。

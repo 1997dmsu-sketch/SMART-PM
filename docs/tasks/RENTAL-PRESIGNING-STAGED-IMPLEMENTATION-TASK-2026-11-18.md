@@ -1,35 +1,35 @@
-# 预签约分阶段实施任务卡（修订 v3 · 离线 · 待 Codex 独立复审）
+# 预签约分阶段实施任务卡（修订 v4 · 离线 · 待 Codex 独立复审）
 
-- 日期：2026-11-19（v3 修订，Asia/Shanghai）；初版 2026-11-18 起草、2026-11-19 提交
+- 日期：2026-11-19（v4 修订，Asia/Shanghai）；初版 2026-11-18 起草、2026-11-19 提交
 - 执行者：DSH 根代理 `lead`（`deepseek-flash`）；Windows PowerShell 5.1 / Git `2.55.0.windows.3` / Node `v24.19.0`
 - 工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\rental-staged-task`
 - 分支：`docs/rental-staged-implementation-task`
-- 本版输入基线：`eabe7804f8530cf80016bb148ebd9ca75b8d9613`；初版输入：`5d56dead460220d3409fa80bcaea8b1fa3a5c9a3`
+- 本版输入基线：`fe300bdfa44a9d9996cc7c5b935fccce47f09332`；初版输入：`5d56dead460220d3409fa80bcaea8b1fa3a5c9a3`
 - 已批准契约：`docs/RENTAL-OPEN-ITEMS-CONTRACT-CARD.md`（第五版；427 行；blob `94d61ed1c3d44bdb02249aa96e10d57422d5225d`）；辅助口径：`docs/RENTAL-PRESIGNING.md`、`docs/RENTAL-IDENTITY-PAYMENT-REVIEW-FIX-2026-11-16.md`
 - 代码基线：`3bf595140088bc71a3939fb67880807965e9c566`；自该基线至本版输入基线，运行时代码/测试/Store 零 diff（仅 `docs/tasks` 卡文）
-- 状态：**仅卡文修订（v3）；不实施、不运行测试、不改契约/生产代码/测试/Store；待 Codex 独立复审（不自批）**
-- 云评审材料：`/workspace/artifacts/SEVEN-TASKS-REVIEW-2026-11-19/DISPATCH.md` 与 `REVIEW.md` 未取得本机可读副本（具体核对路径见 §9）；**不声称已读、已逐项闭合或已获批准**。本版只按本轮明确要求修订，未明处列入 §8/§13。
-- 初版云指令 `C1-epoch-RENTAL-retry-review/DISPATCH.md` 与 v2 的 `STAGED-CARDS-REVIEW-2026-11-19/DISPATCH.md`/`REVIEW.md` 均不在本机；不声称读过。
-- 派单背景（不改变）：18/27 预算可采纳；E 文档/F 缺口登记通过、不重派；G3/O10/G4/07B 门禁验收有效，其余冻结有效。本卡不改上述状态或授权范围。
+- 状态：**仅卡文修订（v4）；不实施、不运行测试、不改契约/生产代码/测试/Store；待 Codex 独立复审（不自批）**
+- 云评审材料：`/workspace/artifacts/FIVE-FOLLOWUPS-REVIEW-2026-11-19/DISPATCH.md` 与 `REVIEW.md` 未取得本机可读副本（具体核对路径见 §9）；**不声称已读、已逐项闭合或已获批准**。本版只做不依赖该正文的文档修订；缺失材料单列 §13。
+- 初版 `C1-epoch-RENTAL-retry-review`、v2 `STAGED-CARDS-REVIEW-2026-11-19`、v3 `SEVEN-TASKS-REVIEW-2026-11-19` 的云材料均不在本机；不声称读过。
+- 派单背景（不改变）：18/27 预算可采纳；C 文档方案/G 准备文档通过收口；Git 偏差 OPEN、不恢复；E/F 待外部材料、不重派；G3/O10/G4/07B 门禁验收有效，其余冻结有效。本卡不改上述状态或授权范围。
 
 ## 0. 状态与输入核对（本轮实测）
 
 | 项 | 值 | 核验方式 |
 |---|---|---|
-| 本版输入基线 | `eabe7804f8530cf80016bb148ebd9ca75b8d9613` | 修订开始时 `git rev-parse HEAD` |
-| 输入基线的父 | `ba832b0813f134cf7876c6f83cffea9fbacbbac8` | `git log -1 --format=%P eabe780` |
+| 本版输入基线 | `fe300bdfa44a9d9996cc7c5b935fccce47f09332` | 修订开始时 `git rev-parse HEAD` |
+| 输入基线的父 | `f300dc694632ba0e53fcc43d3780be0d84925aef` | `git log -1 --format=%P fe300bd` |
 | 初版输入 | `5d56dead460220d3409fa80bcaea8b1fa3a5c9a3` | 初版父提交，链上仍可达 |
 | 工作树 | 干净 | `git status --porcelain=v1` 空 |
 | 分支 / 上游 | `docs/rental-staged-implementation-task` → `origin/docs/rental-staged-implementation-task` | `git status -sb` |
-| 远端 tip（fetch 后） | `eabe780…`，与本地 HEAD 一致；无前移/分叉 | `git fetch` + `ls-remote` + `rev-parse origin/…` |
+| 远端 tip（fetch 后） | `fe300bd…`，与本地 HEAD 一致；无前移/分叉 | `git fetch` + `ls-remote` + `rev-parse origin/…` |
 | 契约 blob / 行数 | `94d61ed1…` / 427（未变） | `git rev-parse HEAD:docs/…` + 字节/LF 计数 |
 | 运行时代码 | `3bf5951..本版输入基线` 零 diff | `git diff --name-only 3bf5951..HEAD` |
 | 本版改动 | 仅本卡文 | 提交后 `git show --stat` 核对 |
-| 云评审材料 | 未取得本地副本 | 见 §9 路径核对 |
-| 派单背景 | 18/27 预算可采纳；E/F 不重派；G3/O10/G4/07B 门禁有效；其余冻结 | 本轮不触碰 |
+| 云评审材料 | 未取得本地副本 | 见 §9/§13 路径核对 |
+| 派单背景 | 18/27；C/G 收口；Git OPEN 不恢复；E/F 待外部不重派；G3/O10/G4/07B 有效；其余冻结 | 本轮不触碰 |
 | 冻结项 | 合并、实施、C2/C3、HTTP/UI、部署上线、真实支付、设备、业务云 | 本轮均未触碰 |
 
-本版只修改本卡文一个文件；以普通追加提交推送到同一分支，推送后以 `git ls-remote` 核对远端 tip。初版新增文件为 `c49a0e1`，v2 为 `eabe780`；本版为 `eabe780` 之后的追加提交，不改写既有提交。
+本版只修改本卡文一个文件；以普通追加提交推送到同一分支，推送后以 `git ls-remote` 核对远端 tip。初版新增文件为 `c49a0e1`，v2 为 `eabe780`，v3 为 `fe300bd`；本版为 `fe300bd` 之后的追加提交，不改写既有提交。
 
 ## 1. 本卡地位与硬性不变量
 
@@ -47,7 +47,7 @@
 | I8 | 押金/留房/模板文本等非隐私变更不递增 `privacyVersion`、不触发重传/重新同意；隐私变化不是退款依据，退款须独立已批准依据 | §6.1、§6.4-2 |
 | I9 | **缺同意不是退款依据**：真实到账必须落账；订单/hold 独立有效时仅置 `privacyReviewStatus=consent_required` 并保留现有有效 hold（不新 hold），不得转 `refund_required`；退款/释放 hold 须独立已批准依据（§9.2）或独立订单失效事实 | §6.4-1、§6.4-2、§5.1 |
 | I10 | **旧客户端判定可验证**：只比较请求显式提交的整数 `privacyVersion` 与当前 `settings.privacyVersion`；禁止以 `templateVersion`、UA、客户端版本号、发布渠道或缺失字段猜版本；旧客户端必须显式刷新/重新同意，服务端不静默放行 | §6.3、§6.5 |
-| I11 | **逐段独立批准**：本卡 PASS 不自动批准任何阶段，Sn PASS 不自动批准 S(n+1)；§8/§13 待裁项未裁定前该段保持 BLOCKED，不得以默认值/占位实现/稍后补裁放行 | §8、§13、§10 |
+| I11 | **逐段独立批准**：本卡 PASS 不自动批准任何阶段，Sn PASS 不自动批准 S(n+1)；§8 业务待裁未裁定前该段保持 BLOCKED，§13 材料不足不构成放行；不得以默认值/占位实现/稍后补裁放行 | §8、§13、§10 |
 | I12 | **错误唯一**：每场景只按契约 §4.3 表断言一个 code/status；不得 409/503 二选一，不得为过渡实现新增固定错误码 | §4.3、§7.1 |
 
 ## 2. 六段总览、依赖与执行顺序
@@ -73,7 +73,7 @@
 - 每段只允许**追加提交**；禁止 `amend`/`rebase`/`reset`/`squash`/`force`/`cherry-pick`/合并。普通 push 后以 `ls-remote` 核对。
 - 实施分支不得修改契约卡、本卡、`docs/RENTAL-PRESIGNING.md`；契约 §8 的部署清单/索引/权限更新随部署门禁执行，部署冻结期间不改该文档，避免把未执行的部署写成事实。不得写入任何全局 Git 配置；网络命令逐命令带 `safe.directory` 与 TLS 后端。
 - **逐段独立批准**：本卡复审 PASS 不自动批准 S1；Sn 的 PASS 不自动批准 S(n+1)。每段开始前须有该段单独的书面批准（批准范围 + 批准时 tip SHA）；未获该段批准不得改代码/测试。
-- 每段完成后**停手**等 Codex 独立复审；未获该段 PASS 不进入下一段；不自批。§8/§13 任一与某段相关的待裁项未裁定前，该段保持 BLOCKED，不得以“默认口径/占位实现/稍后补裁”自动放行。
+- 每段完成后**停手**等 Codex 独立复审；未获该段 PASS 不进入下一段；不自批。§8 任一与某段相关的业务待裁未裁定前，该段保持 BLOCKED，不得以“默认口径/占位实现/稍后补裁”自动放行；§13 材料不足不构成放行。
 
 ## 3. 公共口径：适配器计数、全库零写、审计例外
 
@@ -167,11 +167,33 @@ tests/rental-network-guard.cjs   # 仅测试 guard；同样不得监听
 - S4 的 eligible 口径是 S5 之前的基线（订单/hold/证件）；S5 引入同意绑定后，必须显式更新受影响的 S4 回归并重跑，不得静默改变 S4 已验收断言；更新须在该段证据中列出。
 - 禁止 `skip`/`todo`/`only`/条件跳过计入通过；未执行的场景 = FAIL/BLOCKED。每段 PASS 必须列出：执行数、通过数、失败数、跳过数（必须为 0）、`DEFERRED` 清单、guard 自检结果。
 
+### 3.11 阶段过渡路径错误断言（本段自有，逐项唯一）
+
+本表只列各段自有、可在本段闭环的过渡/错误路径；未列路径不得作为本段 PASS。写集“无”= 全库零写（含 audit）；其他写集只允许列出字段，其余文档 `deepEqual`。
+
+| 阶段 | 过渡/错误路径 | 唯一 code/status | 写集 | audit | create | query |
+|---|---|---|---|---:|---:|---:|
+| S1 | 有效 lease 内第二方 claim | 409 `PAYMENT_PARAMS_IN_PROGRESS` | 无 | 0 | 0 | 0 |
+| S1 | 订单过期/hold 非本单/已释放/材料变化 | 409（现有订单/材料不可支付；不新增码） | 无 | 0 | 0 | 0 |
+| S1 | create 超时/5xx | 503（现有支付适配器失败；非查询 503） | `paymentRequest=reconciling` + `externalRequestSentAt` | 0 | 1 | 0 |
+| S2 | hold/order 失效 | 409（现有） | 无 | 0 | 0 | 0 |
+| S3 | 空/非法 txid、同单异流水、跨订单流水、事实不一致 | 409 | 无 | 0 | 0 | 0 |
+| S4 | 有效 lease/NOTPAY 无缓存/USERPAYING | 409 `PAYMENT_PARAMS_IN_PROGRESS` | `paymentRequest=reconciling` + `lastQueryAt` | 0 | 0 | 1 |
+| S4 | query 超时/网络/验签失败/未知/绑定不符 | 503 `PAYMENT_QUERY_UNAVAILABLE` | `paymentRequest=reconciling` + `lastQueryAt` | 0 | 0 | 1 |
+| S4 | CLOSED/REVOKED/PAYERROR/ORDER_NOT_EXIST | 409（failed 后现有不可支付） | `paymentRequest=failed` + `queryEvidence` | 0 | 0 | 1 |
+| S5 | `privacyVersion` 缺失/非整数/旧值/冒充 | 409（现有；不新增码） | 无 | 0 | 0 | 0 |
+| S5 | 显式整数 `privacyVersion` = 当前值 | 成功（领域返回；云函数 `code:0`） | 无新增（材料/同意已有） | 0 | 0 | 0 |
+| S6 | 旧 settings 无同意/旧客户端不符 | 409（现有） | 无 | 0 | 0 | 0 |
+| S6 | 升级后显式当前整数 | 成功（领域返回；云函数 `code:0`） | 无新增 | 0 | 0 | 0 |
+
+- `prepay` 过期/损坏缓存不在 S2 表内；S4 由 S4-5/S4-7/S4-9 的 query 结果覆盖，触发条件不另设占位码。
+- 本表与各段回归表冲突时，以本表为准并先停手报 Codex；不得用 `DEFERRED` 行充数。
+
 ## 4. 阶段卡
 
 ### 4.1 S1 持久单飞与 CAS
 
-**入口**：本卡 v3 最终提交为父（SHA 以交付报告为准）；契约 blob 未变；工作树干净；无额外文件。
+**入口**：本卡 v4 最终提交为父（SHA 以交付报告为准）；契约 blob 未变；工作树干净；无额外文件。
 
 **允许文件（唯一）**：
 
@@ -241,9 +263,9 @@ tests/leasing.test.cjs
 1. `prepay.prepayExpiresAt` 与 `clientParams.signatureExpiresAt` **各自有效期**，来自可配置 TTL（§9.7 取值在 S2 入口记录），**不得**直接等于订单 `paymentDeadline`。
 2. 两者均有效且订单/自有 hold 有效：返回缓存 `clientParams`；create 0 次、query 0 次、**0 新增 audit**。
 3. `prepay` 有效但签名过期：用缓存 `prepayId` **本地重签**，create 0 次、query 0 次、0 audit；`package` 中 prepay 标识不变。
-4. `prepay` 过期：缓存失效，不返回旧参数、不 create；query 结果与 HTTP code/status **DEFERRED(S4)**，不得在 S2 断言或计入 S2 PASS。
+4. `prepay` 过期：缓存失效，不返回旧参数、不 create；该路径**不属于 S2 验收**，由 S4 以 query 表覆盖；S2 不得以临时 503 或占位断言计入 PASS。
 5. 订单失效或自有 hold 失效：缓存不可用，409，不 create、不返回参数、0 audit。
-6. `clientParams.package` 内 prepay 标识必须等于 `prepay.prepayId`；不一致按损坏缓存处理：不返回、不 create、0 audit；query 结果与 HTTP code/status **DEFERRED(S4)**。
+6. `clientParams.package` 内 prepay 标识必须等于 `prepay.prepayId`；不一致按损坏缓存处理：不返回、不 create、0 audit；该路径**不属于 S2 验收**，由 S4 覆盖。
 7. 并发重签允许两者都成功（本地签名、无外部 create）；仅一份 `prepay`，`clientParams` 后写者生效；不得因此新增 prepay 或审计。
 8. 永不因签名/缓存问题回退为 create；不得复用旧 `out_trade_no` 发起第二次 create。
 
@@ -253,12 +275,10 @@ tests/leasing.test.cjs
 |---|---|---:|---:|---|---:|
 | S2-1 | 正：prepay 与签名均有效 | 0 | 0 | 返回同一组参数；全库零写 | 0 |
 | S2-2 | 正：签名过期、prepay 有效 | 0 | 0 | 本地重签；`prepayId` 不变；仅 `clientParams` 变化 | 0 |
-| S2-3 | 负：prepay 过期 | 0 | 0 | 不返回；缓存失效；不 create；query 结果/code **DEFERRED(S4)**，不计入 S2 PASS | 0 |
-| S2-4 | 负：`package` 与 `prepayId` 不一致 | 0 | 0 | 不返回；不 create；query 结果/code **DEFERRED(S4)**，不计入 S2 PASS | 0 |
-| S2-5 | 负：hold 已释放/非本单 | 0 | 0 | 409；不返回参数；全库零写 | 0 |
-| S2-6 | 负：订单支付截止已过 | 0 | 0 | 409；不返回参数；全库零写 | 0 |
-| S2-7 | 正：两并发重签 | 0 | 0 | 两者均得有效参数；单一 prepay；无新增审计 | 0 |
-| S2-8 | 负：TTL 误设为订单截止 | 0 | 0 | 断言 `prepayExpiresAt`/`signatureExpiresAt` 不等于 `paymentDeadline` 来源 | 0 |
+| S2-3 | 负：hold 已释放/非本单 | 0 | 0 | 409；不返回参数；全库零写 | 0 |
+| S2-4 | 负：订单支付截止已过 | 0 | 0 | 409；不返回参数；全库零写 | 0 |
+| S2-5 | 正：两并发重签 | 0 | 0 | 两者均得有效参数；单一 prepay；无新增审计 | 0 |
+| S2-6 | 负：TTL 误设为订单截止 | 0 | 0 | 断言 `prepayExpiresAt`/`signatureExpiresAt` 不等于 `paymentDeadline` 来源 | 0 |
 
 **审计/零写**：缓存命中与本地重签 0 audit；失败/409 全库零写；仅 S1 的 create 成功路径有成功审计。
 
@@ -347,6 +367,7 @@ tests/leasing.test.cjs
 8. 支付事实优先：已有验签 `SUCCESS` 事实/`transactionId` 时，`CLOSED`/`REVOKED`/`PAYERROR`/`ORDER_NOT_EXIST` 不得覆盖/删除事实或写成 `failed` 掩盖；按既有事实/退款对账处理。
 9. 不定义第二次 create、不生成新商户订单号、不复用旧 `out_trade_no` 重发；不对 `failed` 做自动/定时重试。
 10. 关闭 S1/S2 标记为 `DEFERRED(S4)` 的场景：以 §4.3 唯一 code/status 断言替换其 fail-closed 占位，并在 S4 证据中列出闭环清单；不得把 `DEFERRED` 场景重新标记为通过而不执行。
+11. `prepay` 过期/损坏缓存触发 query 后，分别由 S4-5（`NOTPAY` 无缓存 409）、S4-7（`CLOSED` 等 409）、S4-9（未知 503）覆盖；不新增“触发专用”错误码。
 
 **正/负回归**：
 
@@ -404,7 +425,7 @@ tests/leasing.test.cjs
 5. `uploadIdentity`：上传新材料时在同一事务写“材料 + 当前版本同意记录”，绑定新 front/back；输入 `privacyVersion` 必须等于当前值；不得再以 `templateVersion` 充当隐私同意。
 6. `quote`/`createOrder`/`paymentParams`/`applyPayment`/`finishOrder`/`reviewAppointment` 同时满足：原材料审核绑定（documents/IDs/side/owner/expiry）**且** 当前 `privacyVersion` 的同意记录绑定相同 front/back。
 7. `applyPayment` 的同意检查只影响 eligible/hold 判定**不阻止事实落账**：事实必须写（S3/I6）；**缺同意本身不得触发 `refund_required`**：订单/hold 独立有效时置 `privacyReviewStatus=consent_required` 并保留现有有效 hold（不新 hold）；只有独立失效事实（订单过期/旧单/占位被替换/证件独立失效）才走 `refund_required`，且退款/释放 hold 仍须 §9.2 已批准依据。
-8. 小程序读取 `settings.privacyVersion` 并上传该值；提供“重新同意”入口展示当前 privacyText；旧客户端不得静默放行。服务端判定仅比较显式整数 `privacyVersion` 与当前值（I10），不得推断客户端版本。
+8. 小程序读取 `settings.privacyVersion` 并上传该值；提供“重新同意”入口展示当前 privacyText；旧客户端不得静默放行。服务端判定仅比较显式整数 `privacyVersion` 与当前值（I10），不得推断客户端版本。**正例**：显式整数 `privacyVersion === settings.privacyVersion` 是唯一合法输入；通过时保留原有有效材料绑定与同意记录，不要求重传/重新同意，并据其继续资格判定（quote/createOrder/paymentParams/finishOrder）。
 9. 后台展示同意/待复核状态（`admin-web/public/leasing-ui.js`），不返回证件图片/密文。
 10. 隐私变化不是退款依据；不得由 `privacyReviewStatus` 自动写 `refund_required`。
 11. S5 引入同意绑定后，显式更新并重跑受影响的 S4 回归（eligible/`paid_held`/`refund_required` 判定），在证据中列出变更；不得静默改变 S4 已验收断言。
@@ -420,6 +441,7 @@ tests/leasing.test.cjs
 | S5-5 | 负：旧版本同意后 quote/createOrder/paymentParams/finish | 0 | 0 | 409；全库零写 | 0 |
 | S5-6 | 负：同意绑定旧证件（材料已更换） | 0 | 0 | 409；不写同意 | 0 |
 | S5-7 | 负：证件过期/缺失下同意 | 0 | 0 | 409；不写同意 | 0 |
+| S5-0 | 正：显式整数 `privacyVersion` = 当前值（资格校验） | 0 | 0 | 通过；有效材料绑定/同意/资格保留；不重传、不新增同意、无 409 | 0 |
 | S5-8 | 负：客户端 `privacyVersion` 不符 | 0 | 0 | 409；全库零写 | 0 |
 | S5-9 | 正：两并发同版本同意 | 0 | 0 | 单条同意记录；重复方幂等零写 | 首个 1；幂等方 0 |
 | S5-10a | 正：缺同意、订单/hold 独立有效时真实到账 | 0 | 0 | 事实保留；保留现有有效 hold（不新 hold）；`privacyReviewStatus=consent_required`；不转 `refund_required`；**不退款** | 1 |
@@ -479,6 +501,7 @@ tests/leasing.test.cjs
 | S6-9 | 正：旧缓存参数到账 | 0 | 0 | 事实 + `refund_required`；新 hold 不变 | 1 |
 | S6-10 | 负：迁移式回填/改写旧记录 | — | — | 静态断言无迁移写路径；旧记录原样 | 0 |
 | S6-11 | 负：旧已付缺同意被转退款 | — | — | 静态断言：`consent_required` 路径不写 `refund_required`；退款仅独立依据 | 0 |
+| S6-12 | 正：旧数据升级后显式整数 `privacyVersion` = 当前值 | 0 | 0 | 通过；不判为旧客户端；有效材料绑定/同意/资格保留 | 0 |
 
 **审计/零写**：拒绝/读取 0；同意 1；旧付款事实按 S3；不得在 GET/失败路径写库。
 
@@ -496,14 +519,14 @@ tests/leasing.test.cjs
 | G6 | 追加提交、普通 push、`ls-remote` 核对；无 amend/rebase/reset/squash/force/cherry-pick/merge；无全局 Git 配置写入 |
 | G7 | 不部署、不接真实支付、不开 HTTP/UI、不连设备/业务云、不安装依赖 |
 | G8 | 证据含完整 SHA/父/文件范围/命令/exit/计数/适配器计数/零写断言/远端状态/未验证 |
-| G9 | **逐段独立批准**：本卡 PASS 不自动批准任何阶段；每段须单独书面批准（范围 + tip SHA）；§8/§13 相关待裁未裁定前该段 BLOCKED，不得默认放行；执行者不自批 |
+| G9 | **逐段独立批准**：本卡 PASS 不自动批准任何阶段；每段须单独书面批准（范围 + tip SHA）；§8 相关业务待裁未裁定前该段 BLOCKED，§13 材料不足不构成放行；执行者不自批 |
 | G10 | 错误唯一：逐用例只断言 §4.3 一个 code/status；无 409/503 二选一；无过渡错误码；无新增固定码 |
 | G11 | 缺同意不退款：真实到账落账；订单/hold 独立有效时 `consent_required` 且保留现有有效 hold（不新 hold）；`refund_required` 只由独立依据触发 |
 | G12 | 旧客户端判定可验证：仅显式整数 `privacyVersion` 比较；无版本/UA/渠道/`templateVersion` 推断；兼容策略无静默分支 |
 | G13 | Guard 闭合：加载前安装、加载期违规 0、逐入口负控全过、必要依赖正控全过、ESM 命名绑定被拦截、子进程继承 1/1、非监听清单全过、环境失败口径已记录 |
 | G14 | 无占位 PASS：每段自包含；`DEFERRED` 不计入通过；无 skip/todo/only/条件跳过；PASS 含执行/通过/失败/跳过（0）与 deferred 清单 |
 | G15 | 预期闭合：每个运行场景（静态/`DEFERRED` 除外）有唯一 code/status、零写/允许写集（含 audit）、audit 次数、适配器 create/query 次数；不得用“—/0/1/409/503/待定”等含糊值；计数 0 必须对应明确断言 |
-| G16 | §13 未明测试预期已由 Codex 确认或书面裁定；仅测试断言口径，不改业务裁定 |
+| G16 | §13 材料不足已登记；T1–T13 技术项按已裁定执行、不重推；业务门禁仍见 §8；不得把未取得正文写成已闭合 |
 
 ## 6. 每段交付格式（缺项视为未完成）
 
@@ -523,45 +546,43 @@ tests/leasing.test.cjs
 - 全程禁止 `amend`/`rebase`/`reset`/`squash`/`force`/`cherry-pick`/合并；只允许普通追加提交与普通 push。
 - 不定义第二次 create/新商户订单号；不放行“确认后重发”；人工重置/退款另案。
 
-## 8. 待裁（未裁定即阻塞相应阶段；不得默认放行）
+## 8. 待裁（仅业务门禁；未裁定即阻塞相应阶段，不得默认放行）
 
-| # | 事项 | 阻塞阶段 | 说明 |
+| # | 业务事项 | 阻塞阶段 | 说明 |
 |---|---|---|---|
 | 1 | 人工重置/退款流程 | S4（`failed` 人工处置）、S3（退款事实） | 契约 §9.1；本卡不放行重发 |
 | 2 | 退款独立依据清单与审批 | S3/S4 | 契约 §9.2；未批准前不实现退款事实/不声称通过 |
-| 3 | 隐私变化是否还需后台重审原材料 | S5/S6 | 契约 §9.3；未裁定前 S5/S6 不得实现该分支，不得以“审核可保留”默认放行 |
+| 3 | 隐私变化是否还需后台重审原材料 | S5/S6 | 契约 §9.3；未裁定前不得以“审核可保留”默认放行 |
 | 4 | 旧 settings/旧证件 `privacyVersion=0` 的迁移展示与升级窗口 | S6 | 契约 §9.4 |
-| 5 | 两个新集合的部署/索引/权限与真实云验证 | S3/S5 | 契约 §9.5；离线只能验证 Store 层 |
-| 6 | 商户 query 全部状态的真实语义 | S4 | 契约 §9.6；未验证不得声称线上通过 |
-| 7 | prepay/签名 TTL 具体值 | S2/S4 | 契约 §9.7；S2 入口记录取值 |
-| 8 | 已付订单退款操作规范 | S3/S4 | 契约 §9.8 |
-| 9 | 确认后重发（新商户订单号） | 不授权 | 契约 §9.9；本卡明确不放行 |
-| 10 | `privacyReviewStatus` 持久化时机（派生 vs 既有写事务） | S6 | 禁止读路径/失败路径写库；S6 入口确认 |
-| 11 | 旧客户端兼容窗口/提示文案/强制升级策略 | S6 | 兼容策略须明确且可验证；未裁定前不得声称兼容或上线 |
-| 12 | 已付但待同意期间 hold 到期后的展期/处理 | S6 | 契约未明确；未裁定前不得自动退还/自动延期/自动改写订单 |
-| 13 | 缺同意到账后是否补建 `paid_held`/新 hold 与同意后的状态恢复 | S5/S6 | 本卡只要求保留事实与现有有效 hold、置 `consent_required`，不自动退款；补建/展期另裁 |
+| 5 | 已付订单退款操作规范 | S3/S4 | 契约 §9.8 |
+| 6 | 确认后重发（新商户订单号） | 不授权 | 契约 §9.9；本卡明确不放行 |
+| 7 | 旧客户端兼容窗口/提示文案/强制升级策略 | S6 | 兼容策略须明确且可验证；未裁定前不得声称兼容或上线 |
+| 8 | 已付但待同意期间 hold 到期后的展期/处理 | S6 | 契约未明确；未裁定前不得自动退还/自动延期/自动改写订单 |
+| 9 | 缺同意到账后是否补建 `paid_held`/新 hold 与同意后的状态恢复 | S5/S6 | 本卡只保留事实与现有有效 hold、不新 hold、不自动退款；补建/展期另裁 |
+
+技术项 T1–T13 已由派单裁定（正文未取得，见 §13），不再列为业务待裁；部署/索引/权限、真实商户 query 语义、TTL、`privacyReviewStatus` 持久化等按裁定执行，不重开、不重复列技术待裁。
 
 ## 9. 未验证与不可验证（本卡）
 
-- 本轮只做卡文修订（v3）：未运行任何测试、未改代码/测试/Store、未安装依赖、未开 HTTP/UI、未接真实支付/云/设备。
-- 契约行为逐条来自静态阅读；`domain.js`/`wechat-pay.js`/Store 行号均以基线 `3bf5951`（与输入基线 `eabe780` 运行时代码零 diff）为准。
+- 本轮只做卡文修订（v4）：未运行任何测试、未改代码/测试/Store、未安装依赖、未开 HTTP/UI、未接真实支付/云/设备。
+- 契约行为逐条来自静态阅读；`domain.js`/`wechat-pay.js`/Store 行号均以基线 `3bf5951`（与输入基线 `fe300bd` 运行时代码零 diff）为准。
 - 离线只能验证 `LocalStore` 事务语义；真实云事务冲突/CAS/权限/索引/20000 条上限、真实商户 query 状态、真机与 HTTP 均不可验证。
-- 云评审材料未取得本机可读副本：`/workspace/artifacts/SEVEN-TASKS-REVIEW-2026-11-19/DISPATCH.md`、`REVIEW.md`；已核对 `/workspace/…`（及 `C:\workspace\…`、`D:\workspace\…`）、`D:`–`L:` 的 `\workspace\artifacts\SEVEN-TASKS-REVIEW-2026-11-19`、项目目录递归、`C:\artifacts`/`D:\artifacts`/`E:\artifacts`/`F:\artifacts`、`%TEMP%\codex-artifact-session-*`、`C:\Users\Administrator\.dsh`/`AppData\Roaming`/`ProgramData`，以及本仓库全 refs 路径检索；均无。**不声称已读、已逐项闭合或已获批准**。
-- v2 的 `STAGED-CARDS-REVIEW-2026-11-19` 与 v1 的 `C1-epoch-RENTAL-retry-review` 云材料同样缺失；不声称读过。
-- §8/§13 未决项未裁定前，相应阶段不得实现、不得默认放行、不得声称通过。
+- 云评审材料未取得本机可读副本：`/workspace/artifacts/FIVE-FOLLOWUPS-REVIEW-2026-11-19/DISPATCH.md`、`REVIEW.md`；已核对 `/workspace/…`（及 `C:\workspace\…`、`D:\workspace\…`）、`D:`–`L:` 的 `\workspace\artifacts\FIVE-FOLLOWUPS-REVIEW-2026-11-19`、项目目录递归、`C:\artifacts`/`D:\artifacts`/`E:\artifacts`/`F:\artifacts`、`%TEMP%\codex-artifact-session-*`、`C:\Users\Administrator\.dsh`/`AppData\Roaming`/`ProgramData`，以及本仓库全 refs 路径检索；均无。**不声称已读、已逐项闭合或已获批准**。
+- v1 `C1-epoch-RENTAL-retry-review`、v2 `STAGED-CARDS-REVIEW-2026-11-19`、v3 `SEVEN-TASKS-REVIEW-2026-11-19` 云材料同样缺失；不声称读过。
+- §8 业务待裁未裁定前，相应阶段不得实现、不得默认放行；§13 材料不足不构成放行，也不得写成已闭合。
 
 ## 10. 当前停止点
 
-本版卡文提交并普通 push 后即停手，交 Codex 独立复审；**不进入 S1、不自批、不合并、不部署、不开 HTTP/UI、不接真实支付/云/设备**。**本卡（含 v3）PASS 不等于任何阶段批准**；S1–S6 每段须另行独立书面批准（范围 + tip SHA），§8/§13 相关待裁未裁定前相应阶段保持 BLOCKED，且每段结束再次停手复审。
+本版卡文提交并普通 push 后即停手，交 Codex 独立复审；**不进入 S1、不自批、不合并、不部署、不开 HTTP/UI、不接真实支付/云/设备**。**本卡（含 v4）PASS 不等于任何阶段批准**；S1–S6 每段须另行独立书面批准（范围 + tip SHA），§8 业务待裁未裁定前相应阶段保持 BLOCKED；§13 材料不足不构成放行，且每段结束再次停手复审。
 
 ## 11. v2 修订记录（问题 → 位置 → 审批要求）
 
 | # | 问题 | 修订位置 | 审批要求 |
 |---|---|---|---|
-| 1 | 缺同意被一律退款待处理，未保留真实到账/有效占位，未区分 `consent_required` 与独立退款依据 | I9、§3.3、S5 第 7 项、S5-10a/10b/12、S6 第 5/6 项、S6-11 | Codex 确认：缺同意仅 `consent_required`、保留事实与现有有效 hold；`refund_required` 仅由独立失效/已批准退款依据触发；补建 `paid_held`/展期另裁（§8 第 13 项） |
-| 2 | 旧客户端判断依赖 `templateVersion`/可能猜客户端版本，兼容策略不明确 | I10、S5 第 8 项、S5-13、S6 第 4 项、S6-6a/6b/6c、§8 第 11 项 | Codex 批准：仅显式整数 `privacyVersion` 比较；禁止 UA/版本号/渠道/`templateVersion` 推断；旧客户端显式刷新/重同意，无静默分支 |
+| 1 | 缺同意被一律退款待处理，未保留真实到账/有效占位，未区分 `consent_required` 与独立退款依据 | I9、§3.3、S5 第 7 项、S5-10a/10b/12、S6 第 5/6 项、S6-11 | Codex 确认：缺同意仅 `consent_required`、保留事实与现有有效 hold；`refund_required` 仅由独立失效/已批准退款依据触发；补建 `paid_held`/展期另裁（§8 业务门禁：缺同意补建/展期） |
+| 2 | 旧客户端判断依赖 `templateVersion`/可能猜客户端版本，兼容策略不明确 | I10、S5 第 8 项、S5-13、S6 第 4 项、S6-6a/6b/6c、§8 业务门禁：旧客户端兼容窗口 | Codex 批准：仅显式整数 `privacyVersion` 比较；禁止 UA/版本号/渠道/`templateVersion` 推断；旧客户端显式刷新/重同意，无静默分支 |
 | 3 | 错误断言出现 409/503 二选一与过渡 503，未按契约唯一 code/status 收敛 | I12、§3.4、S1-5、S2-3/S2-4、S4 第 5 项、S4-14a/14b/16、G10 | Codex 确认：S1–S3 不断言 query 路径 HTTP 码；S4 按 §4.3 表唯一 code/status；无过渡码、无新增固定码 |
-| 4 | 阶段门禁可被整卡批准或上一段 PASS 自动放行，待裁可能默认通过 | I11、§2.1、§5 G9、§8 标题/第 3/11/12 项、§10 | Codex 书面确认逐段独立批准（范围 + tip SHA）；相关待裁未裁定前该段 BLOCKED，不得默认放行 |
+| 4 | 阶段门禁可被整卡批准或上一段 PASS 自动放行，待裁可能默认通过 | I11、§2.1、§5 G9、§8 业务门禁项、§10 | Codex 书面确认逐段独立批准（范围 + tip SHA）；相关待裁未裁定前该段 BLOCKED，不得默认放行 |
 | 5 | 需保留已批准单飞/query/no-resend/独立同意契约 | I1–I8 未改；本记录与 §9 声明 | Codex 确认 v2 未放宽 I1–I8，无新增重发/自动重试/强制重传/强制重缴路径 |
 
 ## 12. v3 修订记录（问题 → 位置 → 验收要求）
@@ -569,27 +590,26 @@ tests/leasing.test.cjs
 | # | 问题 | 修改位置 | 验收要求 |
 |---|---|---|---|
 | 1 | guard 与测试预期未闭合：未明确加载前禁止监听/业务网络、逐入口负控、必要依赖正控、ESM/子进程继承、环境失败口径、非监听文件清单 | §3.5–3.9、S1 允许文件/第 10 项/证据、§6 第 3 项、G13 | Codex 确认 guard 在业务模块加载前安装；逐入口负控全过、必要依赖正控全过、ESM 命名绑定被拦截、子进程继承 1/1、非监听清单全过、环境失败一律 BLOCKED；guard 仅测试文件，不在生产代码内 |
-| 2 | 存在未实现阶段依赖与占位 PASS：S1/S2 用“S4 收敛”占位、`DEFERRED` 可能被计入通过 | §3.4、§3.10、S2 第 4/6 项与 S2-3/S2-4、S4 第 10 项、S5 第 11 项、G14 | 每段只断言本段已实现行为；`DEFERRED(Sn)` 不计入 PASS；无 skip/todo/only；PASS 必须列出执行/通过/失败/跳过（0）与 deferred 清单；S5 显式更新并重跑受影响的 S4 回归 |
+| 2 | 存在未实现阶段依赖与占位 PASS：S1/S2 用“S4 收敛”占位、`DEFERRED` 可能被计入通过 | §3.4、§3.10、S2 原第 4/6 项与原 S2-3/S2-4（v3 时编号）、S4 第 10 项、S5 第 11 项、G14 | 每段只断言本段已实现行为；`DEFERRED(Sn)` 不计入 PASS；无 skip/todo/only；PASS 必须列出执行/通过/失败/跳过（0）与 deferred 清单；S5 显式更新并重跑受影响的 S4 回归 |
 | 3 | 逐场景唯一 code/status、全库零写/审计例外、适配器次数未完全闭合 | §3.10、S1–S6 回归表、G15 | 每个运行场景必须同时给出唯一 code/status、零写/允许写集（含 audit）、audit 次数、create/query 次数；运行场景不得出现“—/0/1/409/503/待定” |
 | 4 | 完整报告中的具体未明测试预期未集中列出 | §13、G16 | Codex 逐项确认或书面裁定 §13；确认前不得作为 PASS 依据；仅测试断言口径，不改业务裁定 |
 | 5 | 需保留主要已落实契约（单飞/query/no-resend/独立同意/缺同意不退款） | I1–I12 未改；§9 声明 | Codex 确认 v3 未放宽 I1–I12，无重发/自动重试/强制重传/强制重缴/缺同意自动退款路径 |
 
-## 13. 待核对测试预期（仅断言口径，不改业务裁定）
+## 13. 材料不足与已裁定技术项边界
 
-以下为批准契约未逐字规定、但实施与测试必须固定的口径。**未获 Codex 确认前不得作为 PASS 依据**；本卡不擅自改变业务裁定。
+- 派单称 T1–T13 技术项已裁定；**完整裁定正文未取得**。本卡不重新推断 T 项、不重复列技术待裁、不声称已逐项闭合。
+- 未取得材料：`/workspace/artifacts/FIVE-FOLLOWUPS-REVIEW-2026-11-19/DISPATCH.md`、`REVIEW.md`；已核对 `/workspace/…`（及 `C:\workspace\…`、`D:\workspace\…`）、`D:`–`L:` 的 `\workspace\artifacts\FIVE-FOLLOWUPS-REVIEW-2026-11-19`、项目目录递归、`C:\artifacts`/`D:\artifacts`/`E:\artifacts`/`F:\artifacts`、`%TEMP%\codex-artifact-session-*`、`.dsh`/`AppData\Roaming`/`ProgramData` 及本仓库全 refs；均无。**具体挂载位置未知，不猜测已闭合**。
+- 本版只完成不依赖该正文的修订：S5-0/S6-12 显式当前整数正例、§3.11 各段过渡错误断言、§8 仅保留业务门禁、S2 不保留未来阶段占位行。
+- v3 已列的技术值（缓存/重签/同意 audit、query 次数、guard 命名等）按“已裁定”保留原值；本版不重推、不改写；正文缺失时不得据此声称已核对。
+- 若后续取得正文，Codex 可按裁定补记；执行者不得重推 T 项结论，也不得把“未取得正文”写成“已关闭”。
+- 业务门禁仍见 §8；技术实现/测试按已裁定执行，正文到手前不得声称已验证。
 
-| # | 待核对项 | 本卡临时口径 | 需确认 |
+## 14. v4 修订记录（问题 → 修改位置 → 验收要求）
+
+| # | 问题 | 修改位置 | 验收要求 |
 |---|---|---|---|
-| T1 | 缓存命中（prepay + 签名均有效）的 audit 次数 | 0（§7.4“不重复审计”） | 是否允许 0；若要求 1 条幂等审计需明确 |
-| T2 | 本地重签（prepay 有效、签名过期）的 audit 次数 | 0（无新 prepay） | 是否允许 0 |
-| T3 | 同意记录创建（`consentIdentity`/上传同事务）的 audit 次数 | 1（用户动作） | 是否计入成功审计 |
-| T4 | `privacyReviewStatus=consent_required` 的持久化方式 | DTO 派生，或既有成功写事务持久化；读/失败路径不写 | 选择派生还是持久化 |
-| T5 | 缺同意到账后是否补 `paid_held`/新 hold | 保留现有有效 hold；不新 hold；不退款；补建另裁（§8-13） | 补建与状态恢复口径 |
-| T6 | 隐私 `privacyVersion` 不符的 409 具体 message/code | 沿用现有 409 语义，不新增固定 code；只断言 status 409 + 刷新/重同意提示 | 是否接受不新增固定 code |
-| T7 | 两并发接手时 query 次数 | CAS 胜者 1、败者 0（先 CAS 后 query） | 实现顺序与计数 |
-| T8 | 真实到账但订单独立失效（`refund_required`）的 audit 次数 | 1（真实事实） | 是否允许 1 |
-| T9 | guard 违规错误码/名称 | 建议 `RENTAL_GUARD_NETWORK_VIOLATION`（加载期/运行期可区分） | 命名与错误码 |
-| T10 | 子进程继承负控是否必须真实 spawn | 必须至少 1 次真实子进程负控；环境不允许则 BLOCKED | 是否允许静态替代（默认不允许） |
-| T11 | 特定 Node 版本缺少 guard 入口 | 默认 BLOCKED；仅 Codex 书面豁免可登记且须替代覆盖 | 豁免范围 |
-| T12 | 非监听句柄检查方法 | guard `listen` 计数 0 + 无真实 TCP/UDP 句柄；可用 `process._getActiveHandles()` 辅助 | 是否接受辅助检查 |
-| T13 | S5 对 S4 已验收断言的更新范围 | 仅更新受同意绑定影响的 eligible/`paid_held`/`refund_required` 断言，并列出 diff | 允许更新的边界 |
+| 1 | 缺“显式整数 `privacyVersion` = 当前值”的合法正例，未证明保留材料绑定/同意/资格 | S5 第 8 项、S5-0、S6-12、§3.11 | Codex 确认：合法当前整数通过；有效材料绑定/同意/资格保留；不重传、不新增同意、无 409；旧数据升级后同样通过 |
+| 2 | 各阶段过渡路径缺唯一 code/status/写集/audit/adapter 计数，且 S2 可能依赖 S4 占位 | §3.11、S2 第 4/6 项（标为非 S2 验收）、原 S2-3/S2-4 query 行移除、S4 第 11 项、G15 | 每个自有过渡路径按 §3.11 唯一断言；S2 不保留 query 依赖行；S4 覆盖 prepay 过期/损坏缓存的 query 结果；无占位 PASS |
+| 3 | T1–T13 已裁定但正文缺失，不应重推/重列技术待裁 | §8、§13、§9、G16 | 仅保留 §8 业务门禁；§13 单列材料不足；不重推 T 项、不声称闭合；取得正文后由 Codex 补记 |
+| 4 | guard 已在 v3 关闭，不应重开 | §3.5–3.9 未改 | Codex 确认 v4 未改 guard 规则、未新增 guard 待裁 |
+| 5 | 需保留主要已落实契约 | I1–I12 未改；§9 声明 | Codex 确认 v4 未放宽单飞/query/no-resend/独立同意/缺同意不退款/逐段独立批准 |

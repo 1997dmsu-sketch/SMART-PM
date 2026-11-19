@@ -904,7 +904,7 @@ finalWriteSet = C1 业务写（anchor+E+head 或 E+head）+ 唯一 admin_audit�
 | **F42** | **集合门禁导出可变 Set / 成员判定可被 add 绕过** | **S1/S4** | **断言失败/拒绝** | **N/A** |
 | **F43** | **proof.status/legacyCount 缺失或非法** | **S1/S5** | **PROOF_REQUIRED** | **Z_all** |
 | **F44** | **audit ID 前缀/长度/scopeKey/targetList 错（C1 test-only）** | **S3/S4** | **ADMISSION_REQUIRED** | **Z_all** |
-| **F45** | **runtime ticket 缺/错 operationAuthDigest（D5 未裁定）** | **S3** | **ADMISSION_REQUIRED；无正向验收** | **Z_all** |
+| **F45** | **runtime ticket 缺/错 operationAuthDigest 或未签名该键（D5 已裁定：显式 `null` + 签名该键 + runtime 白名单）** | **S3** | **ADMISSION_REQUIRED；V10 正向、V11–V12 负向** | **Z_all** |
 
 ### 11.2 N 矩阵归属（不重开设计；只划 C1 与另卡）
 

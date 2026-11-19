@@ -1,28 +1,28 @@
-# HK-AI-04 H4-c C1 分阶段实施任务卡（r2）
+# HK-AI-04 H4-c C1 分阶段实施任务卡（r3）
 
-> 状态：**任务卡修订 + 设计勘误，待 Codex 审批；不授权实施。** 本修订只追加本卡与勘误文档；不实现 C1、不运行测试、不修改已验设计正文/生产代码/测试/Store/迁移脚本，不进入 C2/C3、HTTP/UI、部署上线，不安装依赖、不连接设备、不调用 Provider/生产云/支付。
+> 状态：**任务卡修订 + 设计勘误，待 Codex 复审；不授权实施。** 本修订只修订本卡与勘误文档；不实现 C1、不运行测试、不修改已验设计正文/生产代码/测试/Store/迁移脚本，不进入 C2/C3、HTTP/UI、部署上线，不安装依赖、不连接设备、不调用 Provider/生产云/支付。
 >
-> 本修订输入：`d7a4e363c2145dafc6d2ed30c271dcbdc00c8767`（父 `fcae2460ab0a239c54463530b0b5001f34b1f302`）。工作树 `C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-staged-task`；分支 `docs/h4c-c1-staged-implementation-task`；开始工作时 HEAD = 输入提交，工作区干净。
+> 本修订输入：`96d1bc94f388fe51c99114fa6f1647b3c7665314`（父 `d7a4e363c2145dafc6d2ed30c271dcbdc00c8767`；tree `8af356d7d6b9712f837221c8d0d0d8cd2f4f46ed`）。工作树 `C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-staged-task`；分支 `docs/h4c-c1-staged-implementation-task`；开始工作时 HEAD = 输入提交，工作区干净。
 >
 > 设计输入：`docs/tasks/HK-AI-04-H4C-C1-EMPTY-CHAIN-PROOF-DESIGN-2026-11-16.md`（1607 行，v8；blob `c4feffa5831f5bf0e04e8e902865cb8e1f1b0183`，sha256 `d769da93c4880409c946e316f2414ca6b1135a96361934abc188111ca6dcbec7`）。冲突优先级：**§18 > §17 > §16 > §15 > §4–§14 历史正文**。
 >
-> 勘误输入：`docs/tasks/HK-AI-04-H4C-C1-REFS-ERRATUM-2026-11-19.md`（本修订新增；E1 proof 漏算、E2 集合字面名、E3 Store 接口/DI）。**本卡按勘误草案的 C1 18 / C2 27 编写；勘误未获 Codex 批准前不得实施；批准后以勘误表覆盖设计对应行。**
+> 勘误输入：`docs/tasks/HK-AI-04-H4C-C1-REFS-ERRATUM-2026-11-19.md`（本修订同步修订 r2；E1 proof 漏算、E2 集合字面名、E3 Store 接口/DI + 不可变集合门禁）。**18/27 预算按本轮口径保留（可采纳）；其他契约未获 Codex 批准前不得实施；批准后以勘误表覆盖设计对应行。**
 >
 > 代码基线：`5dff386fe5c9648b04d1623d3e1898c59332639e`（C1 final，`feat/hk-face-h4c-reconciliation`）。`fcae246` 是 `5dff386` 的后代（10 个 docs-only 提交）；`git diff --stat 5dff386..fcae246 -- . ':(exclude)docs'` 为空。
 >
-> 云指令/审查：`/workspace/artifacts/STAGED-CARDS-REVIEW-2026-11-19/DISPATCH.md` 与 `REVIEW.md` **本机未取得**。已检查并均不可读/不存在：`C:\workspace\artifacts\STAGED-CARDS-REVIEW-2026-11-19\DISPATCH.md`、同目录 `REVIEW.md`、`/workspace/artifacts/...`、`\\wsl$\workspace\artifacts\...`、`C:\workspace` 根；仓库 `.tmp`/`docs` 下也未发现同名副本。**未读，不声称完整闭合**；只按本轮用户明确要求修订，未明处列 §13 待裁。
+> 云指令/审查：`/workspace/artifacts/SEVEN-TASKS-REVIEW-2026-11-19/DISPATCH.md` 与 `REVIEW.md` **本机未取得**。已检查并均不可读/不存在：`C:\workspace\artifacts\SEVEN-TASKS-REVIEW-2026-11-19\DISPATCH.md`、同目录 `REVIEW.md`、`/workspace/artifacts/...`、`\\wsl$\workspace\artifacts\...`、`C:\workspace` 根；仓库 `.tmp`/`docs` 下也未发现同名副本。**未读，不声称完整闭合**；只按本轮用户明确要求修订，未明处列 §13 待裁。
 
 ## 0. 结论摘要
 
 | 项 | 结论 |
 |---|---|
 | 本卡目的 | 把 C1 设计拆成 6 个可独立复审、串行推进的实施阶段（S0–S6），每段有依赖、允许文件、精确输入、实现/测试范围、refs/writes 预算、负向/并发/全库零写验收和复审停止点 |
-| 核心修订 | 按勘误 E1：**C1 refs 17→18**（补 `proof1`），**C2 R1 26→27**；writes 3/2 不变；余量 64→63。C1 17 的 `audit1` 是 `admin_audit`，不是 proof |
+| 核心修订 | 按勘误 E1：**C1 refs 17→18**（补 `proof1`），**C2 R1 26→27**；writes 3/2 不变；余量 64→63。**18/27 按本轮口径保留（可采纳）**。C1 17 的 `audit1` 是 `admin_audit`，不是 proof |
 | 集合修订 | 按勘误 E2：8 个 H4-c 集合含 **audit proof**；`admin_audit` 是通用 7 字段审计，单独 explicit 门禁，不计入 8。补全全部字面名 |
-| 接口修订 | 按勘误 E3：`h4c-collections.mjs` 共享常量；`createH4cGate` + 构造注入；`transactFinal` explicit 入口；`#persist` 私有；`change/seed/init` 全路径拒绝 H4-c 记录写 |
+| 接口修订 | 按勘误 E3：`h4c-collections.mjs` **私有 Set + 只读 `isH4cCollection` + 冻结枚举快照（不导出 Set）**；`createH4cGate` + 构造注入；`transactFinal` explicit 入口；`#persist` 私有；`transact/change/seed/init` 全路径拒绝 H4-c 记录写；补全签名/权限/错误契约/显式写集/验收矩阵 |
 | 测试修订 | 删除会启动 loopback 监听的 r1 全量 glob；改为 **33 个非 HTTP 文件 + 7 个根文件显式清单**；必须“加载前 guard”；8 个 HTTP 文件不跑 |
 | 当前状态 | 只写卡与勘误；无代码、无测试执行、无设计修改、无依赖安装、无云/设备/支付/业务网络 |
-| 实施前阻断 | §13 的 D1–D10 未清零/未明确延后前，S1 及之后不得开工；勘误 E1/E2/E3 未批准前，S2 及之后不得开工 |
+| 实施前阻断 | §13 的 D1–D10 未清零/未明确延后前，S1 及之后不得开工；E2/E3/P9 未获复审前，S1/S4 不得开工；E1 的 18/27 已按本轮口径保留 |
 | 复审 | 每段结束交 Codex 独立复审；本卡与任何阶段均不自批、不合并、不宣称 G1/C1 已通过 |
 
 ## 1. 输入、基线与只读核对
@@ -31,15 +31,15 @@
 
 | # | 事实 | 结果/证据 |
 |---:|---|---|
-| 1 | 本修订输入 SHA | `d7a4e363c2145dafc6d2ed30c271dcbdc00c8767` |
-| 2 | 直接父 | `fcae2460ab0a239c54463530b0b5001f34b1f302` |
-| 3 | 本修订输入 tree | `0b2ca1b0c02e92a8fd731c31cf00567e0d670a3e`（d7a4e36 的 tree） |
+| 1 | 本修订输入 SHA | `96d1bc94f388fe51c99114fa6f1647b3c7665314` |
+| 2 | 直接父 | `d7a4e363c2145dafc6d2ed30c271dcbdc00c8767` |
+| 3 | 本修订输入 tree | `8af356d7d6b9712f837221c8d0d0d8cd2f4f46ed`（96d1bc9 的 tree） |
 | 4 | 工作树/分支/HEAD | `.tmp/c1-staged-task`；`docs/h4c-c1-staged-implementation-task`；HEAD 等于输入 SHA；无 upstream |
 | 5 | 工作区 | `git status --porcelain` 为空（开始工作时） |
-| 6 | 远端 | `origin https://github.com/1997dmsu-sketch/SMART-PM.git`；`origin/docs/h4c-c1-staged-implementation-task` = `d7a4e36…`；`origin/docs/hk-face-c1-epoch-uniqueness` = `fcae246…`；无前移/分叉 |
+| 6 | 远端 | `origin https://github.com/1997dmsu-sketch/SMART-PM.git`；`origin/docs/h4c-c1-staged-implementation-task` = `96d1bc9…`；`origin/docs/hk-face-c1-epoch-uniqueness` = `fcae246…`；无前移/分叉 |
 | 7 | TLS/凭据 | 逐命令 `-c http.sslBackend=openssl` 可完成 `ls-remote`/`fetch`；`schannel` 报 `SEC_E_NO_CREDENTIALS`；不写任何全局配置 |
 | 8 | 设计文档 | 1607 行；blob/sha256 见页首；原卡已逐段阅读 §0–§18.13；本修订复核 §17.5/§18.8/§18.10 与受影响行 |
-| 9 | 勘误文档 | 本次新增 E1/E2/E3；未获批准前仅为草案 |
+| 9 | 勘误文档 | 本修订同步修订 r2（E1/E2/E3 + 不可变集合门禁）；未获复审前不得实施 |
 | 10 | 审查证据 | `docs/tasks/HK-AI-04-H4C-C1-REVIEW-EVIDENCE-2026-11-14.md`（305 行）已读；31/581/51 是 5dff386 历史结果，本卡未重跑 |
 | 11 | 代码基线 | `5dff386`；`h4c-evidence.mjs` 471 行、`index.mjs` 60 行、`store.mjs` 524 行、C1 测试 1342 行 |
 | 12 | 代码差异 | `5dff386..fcae246` 非 docs 差异为空；`fcae246` 仅改设计文档 |
@@ -85,7 +85,7 @@
 
 ### 1.4 本卡与后续实施卡的 Git 规则
 
-- 本修订：修改本卡 + 新增勘误文档；父 = `d7a4e36`；普通 push 到同一分支；不 amend/rebase/reset/squash/force/cherry-pick/merge。
+- 本修订：修改本卡 + 同步修订勘误文档；父 = `96d1bc9`；普通 push 到同一分支；不 amend/rebase/reset/squash/force/cherry-pick/merge。
 - 后续实施分支：建议 `feat/hk-face-h4c-c1-staged`，起点 = 本修订提交（保证设计+勘误+卡在同一祖先链）；分支名待调度方确认（D9）。
 - 所有 git 命令逐命令带 `-c safe.directory="<绝对路径>"` 与 `-c http.sslBackend=openssl`；不写全局/系统 git 配置；不使用替代 SHA 或强制推送。
 - push 前 `ls-remote` 确认目标分支与本地一致；若远端前移/分叉/出现平行提交，**停止并报告**，不 reset/merge/force。
@@ -97,10 +97,10 @@
 | 阶段 | 产出 | 依赖 | 允许文件（生产/测试） | refs/writes | 停止点 |
 |---|---|---|---|---|---|
 | S0 | 基线冻结 + 勘误审批 + 待裁清零；证据 §0 | 无 | 无代码；仅证据文档 | 0/0 | Stop-0 |
-| S1 | 契约层：常量、8 集合字面名、exact schema、canonical ID、摘要、谓词 | S0；E1/E2/E3 待批项至少给出可编码结论 | `h4c-collections.mjs`（新）、`h4c-evidence.mjs`、`index.mjs`、C1 测试 | 0/0 | Stop-1 |
-| S2 | 链层：18 refs、anchor、`1..9`、完整链、无布尔 | S1；E1 批准 | 同上 | **18 / 3\|2** | Stop-2 |
+| S1 | 契约层：常量、8 集合字面名、**私有 Set + `isH4cCollection` + 冻结枚举快照**、exact schema、canonical ID、摘要、谓词 | S0；E1 18/27 已按口径保留；E2/E3/P9 待批项至少给出可编码结论 | `h4c-collections.mjs`（新）、`h4c-evidence.mjs`、`index.mjs`、C1 测试 | 0/0 | Stop-1 |
+| S2 | 链层：18 refs、anchor、`1..9`、完整链、无布尔 | S1；E1 18/27 已按口径保留 | 同上 | **18 / 3\|2** | Stop-2 |
 | S3 | 授权层：precheck、final ticket、唯一 audit、explicit finalWriteSet | S2；D4/D5 | 同上 | **18 / 3\|2（0 新增）** | Stop-3 |
-| S4 | Store 门禁：8 集合 + `admin_audit`、全路径、create-only/exact、explicit 模式、gate 注入 | S3；E2/E3 批准 | `store.mjs`、`h4c-collections.mjs`、`h4c-evidence.mjs`、`index.mjs`、C1 测试、（条件）`store-deterministic-audit.test.mjs`、（条件）`verification.test.mjs` | 不改变预算；≤90 | Stop-4 |
+| S4 | Store 门禁：8 集合 + `admin_audit`、全路径、create-only/exact、explicit 模式、gate 注入、M01–M30 | S3；E2/E3/P9 批准 | `store.mjs`、`h4c-collections.mjs`、`h4c-evidence.mjs`、`index.mjs`、C1 测试、（条件）`store-deterministic-audit.test.mjs`、（条件）`verification.test.mjs` | 不改变预算；≤90 | Stop-4 |
 | S5 | 运行时覆盖：K3/marker/proof/writer plan/fence、健康与错误分层 | S1/S2/S4；D3/D4 | `h4c-evidence.mjs`、`index.mjs`、C1 测试 | **18 / 0（只读）** | Stop-5 |
 | S6 | 验收：F/N 矩阵、并发、零写、静态扫描、33+7 显式回归、证据 | S1–S5 全部 Stop 通过 | C1 测试（仅补断言）、证据文档 | 只验证 | Stop-6 |
 
@@ -217,10 +217,10 @@ export function appendEvidenceWrites(state, {
 - C1 helper 只返回业务写；finalWriteSet 的唯一 audit 由 S3 的 final ticket helper/调用方加入。
 - 不允许把 proof/fence/marker/plan 作为“调用方布尔/自述”传入；必须按 refs 从 `state` 读取并校验。
 
-### 3.3b Store 接口与依赖注入（本卡冻结，随勘误 E3 审批）
+### 3.3b 集合门禁：封闭私有集合与只读成员判定（P9）
 
 ```js
-// admin-web/lib/h4c-collections.mjs（新，纯常量）
+// admin-web/lib/h4c-collections.mjs（新，纯常量，无 import/副作用）
 export const H4C = Object.freeze({
   evidence: "device_operation_evidence",
   evidenceHeads: "device_operation_evidence_heads",
@@ -231,40 +231,137 @@ export const H4C = Object.freeze({
   k3Markers: "evidence_chain_k3_markers",
   plans: "evidence_chain_plans",
 });
-export const H4C_COLLECTION_SET = new Set(Object.values(H4C));
+
+// 不可变枚举快照：冻结数组，仅用于枚举/断言
+export const H4C_COLLECTION_NAMES = Object.freeze([
+  H4C.evidence, H4C.evidenceHeads, H4C.domains, H4C.anchors,
+  H4C.auditProofs, H4C.fences, H4C.k3Markers, H4C.plans,
+]);
+
 export const H4C_AUDIT_COLLECTION = "admin_audit";
+
+// 封闭私有集合：模块作用域，绝不导出；无 add/delete/clear 外部入口
+const H4C_COLLECTION_SET = new Set(H4C_COLLECTION_NAMES);
+// 捕获原型方法，避免运行期替换 Set.prototype.has 绕过判定
+const setHas = Set.prototype.has;
+
+// 只读成员判定：只接受字符串；不返回集合/遍历器
+export function isH4cCollection(name) {
+  return typeof name === "string" && setHas.call(H4C_COLLECTION_SET, name);
+}
 ```
+
+- **不得导出 `H4C_COLLECTION_SET`**；`H4C_COLLECTION_NAMES` 是冻结数组；`H4C` 是冻结对象；`isH4cCollection` 是唯一成员判定入口。
+- `isH4cCollection` 必须捕获模块加载时的 `Set.prototype.has` 并用 `setHas.call(privateSet, name)`，避免运行期替换原型方法绕过；不得暴露 private Set 或 `setHas`。
+- **不得把 `Object.freeze(new Set(...))` 当不可变**：`Object.freeze` 不阻止 `Set.prototype.add/delete/clear`；因此本方案不导出任何 Set。
+- `store.mjs` 只 import `isH4cCollection` 与 `H4C_AUDIT_COLLECTION`；不得 import Set，也不得在 Store 内另建第二份集合字面量。
+- 不提供 `addH4cCollection`/`removeH4cCollection`/`setH4cCollections`/`getH4cCollectionSet` 等 API。
+- 验收：命名空间无 `H4C_COLLECTION_SET`；`Object.isFrozen(H4C)`/`H4C_COLLECTION_NAMES` 为真；`push`/下标/属性赋值抛错；`isH4cCollection` 对 `admin_audit`、`__proto__`、`constructor`、空串、null/对象/Symbol 返回 false，对 8 个字面量返回 true。
+
+### 3.3c Gate 签名、调用权限与错误契约
 
 ```js
 // h4c-evidence.mjs
 export function createH4cGate({ config, health = {} } = {})
-// config = evidenceKeyConfig() result; health = { windowMs, skewMs }
-// returns { verify({ state, refs, writes, admission, now }) }; throws on failure
+// 返回 Object.freeze({ verify({ state, refs, writes, admission, now }) })
+// verify 成功返回 undefined；失败抛 HttpError；不得返回布尔
+```
 
-// store.mjs
+- `config` 必须是 `evidenceKeyConfig()` 结果（key Buffer、realm、version、fingerprint）；gate 不读 `process.env`。
+- `health = { windowMs: 300000, skewMs: 30000 }`（安全整数，window>0，skew≥0）；非法 → `NOT_CONFIGURED`/`EVIDENCE_INVALID`。
+- `now` 为受信服务时钟的安全整数；gate 不调用 `Date.now()`。
+- 返回 gate 必须冻结，只暴露 `verify`；不暴露 key/config/health/Set；无 `setConfig`/`replace` 等 mutator。
+- `verify` 必须同步、无 I/O、无 Store 访问；不得修改 `state/refs/writes/admission/now`（测试用 `structuredClone` 前后 `deepEqual`）。
+- **调用权限**：只有 Store 的 `transactFinal` 在 `build(state)` 之后、任何写入之前调用一次；调用方可以预检，但不能替代这次调用；gate 可跨事务复用（无状态）。
+- **错误契约**：`NOT_CONFIGURED` 503；`DOMAIN_INCOMPLETE`/`DOMAIN_MISMATCH` 409；`EVIDENCE_CHAIN_PROOF_REQUIRED` 409；`EVIDENCE_CHAIN_HALTED`/`EVIDENCE_CHAIN_FENCE_EXPIRED` 409；`EVIDENCE_CHAIN_ADMISSION_REQUIRED` 409；`EVIDENCE_CHAIN_BROKEN`/`EVIDENCE_INVALID` 409。失败必须零写。
+- 检查顺序：admission 形状 → refs 去重/≤90/18 shape → writes 声明/唯一 audit → refsDigest/writesDigest/ticket → fence `FenceValid(now)`/epoch → proof/marker/writer plan 绑定 → 返回。
+
+### 3.3d Store 构造、全路径签名、权限与错误
+
+```js
 export class LocalStore {
+  #h4cGate;
   constructor(directory, { h4cGate = null } = {}) { ... }
-  async transactFinal(refs, build, admission, { now } = {}) { ... }
+  async transactFinal(refs, build, admission, { now, auditMode = "explicit" } = {}) { ... }
+  async transact(refs, build, audit) { ... }       // legacy，仅非 H4-c
+  async change(name, id, build, audit) { ... }     // legacy，仅非 H4-c
+  async #persist(data) { ... }                     // 私有
 }
 export class CloudStore {
+  #h4cGate;
   constructor(app, { h4cGate = null } = {}) { ... }
-  async transactFinal(refs, build, admission, { now } = {}) { ... }
+  async transactFinal(refs, build, admission, { now, auditMode = "explicit" } = {}) { ... }
 }
 ```
 
-- `transactFinal` 流程：检查 gate/admission → 按 refs 读 state → `build(state)` 得 finalWriteSet → 校验声明/唯一 audit → `h4cGate.verify` → 只写 finalWriteSet → 失败整事务回滚。
-- `transact` 旧签名保留；refs 含 8 集合任一 → `ADMISSION_REQUIRED`（不 build、不写）。
-- `change` 对 8 集合任一 → `ADMISSION_REQUIRED`。
-- `#persist` 私有；仅内部调用。
-- `gate.verify` 的检查顺序：admission 形状 → refs 去重/≤90/18 shape → writes 声明/唯一 audit → refsDigest/writesDigest/ticket → fence `FenceValid(now)`/epoch → proof/marker/writer plan 绑定 → 通过。
-- 构造注入示例（测试）：
-  ```js
-  const gate = createH4cGate({ config: TEST_K3_CONFIG });
-  const store = await new LocalStore(dir, { h4cGate: gate }).init();
-  ```
-- Store 不读 `process.env`、不 import face-service、不持有全局 key；生产由 C2 注入 gate（C1 不改 `server.mjs`）。
-- 无 gate 时的 H4-c 写一律 fail closed；`init`/`seed` 不需要 gate（不写 H4-c 记录）。
-- `verification.test.mjs:381` 直调 `store.persist` 与 `#persist` 私有冲突（D10）：建议 S4 把该测试改为 `init()` 前直接写 `demo-data.json`，仅改 fixture，不改 identity 断言；需批准。
+- `#h4cGate` 私有：构造后不可替换；无 getter/setter；不通过 `store.h4cGate` 暴露；非 null 但缺 `verify` 的对象 → 构造时 `TypeError`（编程错误，零写）。
+- **`transactFinal` 唯一 H4-c 写入口**：
+  1. `auditMode !== "explicit"` → `ADMISSION_REQUIRED`（不 build）。
+  2. `#h4cGate == null` → `ADMISSION_REQUIRED`（不 build）。
+  3. `admission` 形状错 → `ADMISSION_REQUIRED`（不 build）。
+  4. `now` 非安全整数 → `EVIDENCE_INVALID`（不 build）。
+  5. refs 形状/重复 → `EVIDENCE_INVALID`；>90 → 400 容量错误（不 build/不写）。
+  6. 按 refs 读 state；`await build(state)` 必须返回数组；抛错原样上抛、零写。
+  7. 校验 finalWriteSet：声明、字段、H4-c 子集、唯一 audit、无未声明写；失败 → `ADMISSION_REQUIRED`/`EVIDENCE_INVALID`。
+  8. `#h4cGate.verify({ state, refs, writes, admission, now })`。
+  9. 只写 finalWriteSet；不自动追加 audit、不随机 audit、不改 `_id/createdAt/target`。
+  10. 失败整事务回滚；LocalStore 成功才落文件，CloudStore 成功才提交。
+- **同一时钟**：调用方必须把同一 `now` 传给 C1 builder 上下文与 `transactFinal` options；Store 只用 `options.now` 调 gate；不得出现两个时钟或 gate 自取时间。
+- **`transact`（legacy）**：refs 中任一 collection 使 `isH4cCollection` 为真 → `ADMISSION_REQUIRED`，**不 build、不写**；若 refs 不含 H4-c 但 `build` 返回 H4-c 写，按未声明写/`ADMISSION_REQUIRED` 拒绝（不得作为绕过）；非 H4-c 行为/确定性审计不变。
+- **`change`（legacy）**：`isH4cCollection(name)` 为真 → `ADMISSION_REQUIRED`，**不 build、不写**；非 H4-c 行为不变。
+- **`#persist`**：私有；仅 `init`/`transact`/`transactFinal` 内部调用；不暴露 `persist` 别名；外部无法触发全量持久化。
+- **`seed()`**：8 个 H4-c 集合只允许空数组；任一非空 → `ADMISSION_REQUIRED`；非 H4-c 默认值不变。
+- **`init()`**：缺失的 H4-c 集合补空数组（仅内存）；已有 H4-c 值不是数组 → `EVIDENCE_INVALID`（不修复）；已有非空 H4-c 数组 → 原样保留、不写/不改；不写任何 H4-c 记录；仅在数据文件不存在时持久化 seed（H4-c 为空数组）。
+- LocalStore/CloudStore 语义一致；Cloud fake 事务失败整批回滚；不改 `server.mjs`/`routes.mjs`；C1 不注入生产 gate。
+
+### 3.3e 显式写集与审计契约（`transactFinal` 唯一）
+
+- `finalWriteSet = await build(state)` 必须为数组；每项 `{collection,id,data}`；`data._id===id`；字段 exact。
+- 恰好一条 `collection===H4C_AUDIT_COLLECTION` 的写；不得 0 条/2 条；不得 Store 自动追加/随机 UUID。
+- `admin_audit` 恰好 7 字段：`_id, orgId, actorId, actorType, action, target, createdAt`；`_id = "audit-h4c-v1:" + 32 位小写 hex`；`target` 为排序后的业务写 `collection/id`（不含 audit 自身）以 `", "` 连接；`createdAt` 安全整数。
+- audit 的 `_id` 必须已在 refs 声明；`target` 必须与实际业务写目标逐项一致；`orgId/actorId/actorType/action` 为非空 opaque 字符串。
+- C1 只写 anchor/E/head + audit；不得写 domain/proof/fence/marker/plan；shape 不符 → `ADMISSION_REQUIRED`。
+- `writesDigest` 覆盖含 audit 的最终字节；终检后不得追加/修改任何写。
+- 缺失/重复/未声明/字段错/目标不一致 → `ADMISSION_REQUIRED`，零写；`build` 抛错 → 原错误，零写。
+
+### 3.3f 全路径验收矩阵（S4 必跑；LocalStore 与 CloudStore 各跑一遍）
+
+| ID | 路径 | 场景 | 期望 | 零写 |
+|---|---|---|---|---|
+| M01 | `transactFinal` | 合法 C1 首条 | 成功；anchor+E1+head+audit | — |
+| M02 | `transactFinal` | 合法 append | 成功；E+head+audit | — |
+| M03 | `transactFinal` | 无 gate | `ADMISSION_REQUIRED` | Z_all |
+| M04 | `transactFinal` | admission 缺失/字段错 | `ADMISSION_REQUIRED` | Z_all |
+| M05 | `transactFinal` | `auditMode≠explicit` | `ADMISSION_REQUIRED` | Z_all |
+| M06 | `transactFinal` | `now` 缺失/非安全整数 | `EVIDENCE_INVALID` | Z_all |
+| M07 | `transactFinal` | ticket/HMAC/digest 不符 | `ADMISSION_REQUIRED` | Z_all |
+| M08 | `transactFinal` | 0 条 audit | `ADMISSION_REQUIRED` | Z_all |
+| M09 | `transactFinal` | 2 条 audit | `ADMISSION_REQUIRED` | Z_all |
+| M10 | `transactFinal` | audit 不在 refs / ID 不符 | `ADMISSION_REQUIRED` | Z_all |
+| M11 | `transactFinal` | audit 字段/target/createdAt 错 | `ADMISSION_REQUIRED` | Z_all |
+| M12 | `transactFinal` | 未声明写 | `ADMISSION_REQUIRED` | Z_all |
+| M13 | `transactFinal` | runtime 写 domain/proof/fence/marker/plan | `ADMISSION_REQUIRED` | Z_all |
+| M14 | `transactFinal` | proof/fence/marker/plan 无效 | `PROOF_REQUIRED`/`HALTED`/`FENCE_EXPIRED` | Z_all |
+| M15 | `transactFinal` | create-only 冲突 | `CONFLICT` | Z_all |
+| M16 | `transactFinal` | refs >90 | 400 容量错误 | Z_all |
+| M17 | `transactFinal` | build 抛错 | 原错误 | Z_all |
+| M18 | `transact` | refs 含 H4-c / build 返回 H4-c 未声明写 | `ADMISSION_REQUIRED`；build 前拒绝或未声明写拒绝 | Z_all |
+| M19 | `transact` | 非 H4-c | 成功/旧审计行为不变 | — |
+| M20 | `change` | H4-c name | `ADMISSION_REQUIRED`；build 不被调用 | Z_all |
+| M21 | `change` | 非 H4-c | 成功/行为不变 | — |
+| M22 | `#persist` | 外部调用 | 无 public 入口/`TypeError` | 无写 |
+| M23 | `seed` | H4-c 非空 | `ADMISSION_REQUIRED` | Z_all |
+| M24 | `seed` | H4-c 空数组 | 成功；无记录 | — |
+| M25 | `init` | 缺 H4-c 数组 | 仅内存 `[]`；无记录 | 无记录写 |
+| M26 | `init` | 已有非空 H4-c | 原样保留；不写 | 无写 |
+| M27 | `init` | H4-c 非数组/损坏 | `EVIDENCE_INVALID`；不修复 | Z_all |
+| M28 | gate | verify 修改入参/读环境/读时钟 | 断言失败 | — |
+| M29 | 集合门禁 | 无 Set 导出/冻结快照/谓词边界 | 通过 | — |
+| M30 | 并发 | 两 `transactFinal` 同 head | 一胜；败者零写 | Z_all |
+
+- M01–M30 的每条负向都按 §3.5 全库零写；M18/M20 另需证明 `build` 未被调用（计数器/抛错哨兵）。
+- M29 另需证明 `Object.freeze(new Set()).add` 仍改变内容，故本模块不导出 Set。
+- M22 以 `store.persist === undefined` 与静态扫描共同证明；`verification.test.mjs` 的 fixture 改造见 D10。
 
 ### 3.4 错误码（C1 使用面）
 
@@ -410,6 +507,7 @@ tests/wxml.test.cjs
 | K3 初始化/bootstrap/create-domain token | 0 命中（沿用 C1 既有 43 文件扫描并更新文件数） |
 | marker 短 ID `k3-marker:v1:global` | 0 命中（完整 ID 除外说明条款） |
 | H4-c 集合字面名 | 只出现于 `h4c-collections.mjs` 与必要引用；无第二套字面量 |
+| 集合门禁导出面 | 无 `H4C_COLLECTION_SET`/任何 Set 导出；无 `add/remove/clear` API；`isH4cCollection` 为唯一成员判定 |
 | H4-c 集合写入点 | 仅 `transactFinal` 的 gate 路径；`transact/change/persist/seed/init` 无 H4-c 记录写 |
 | `server.mjs` / `routes.mjs` | 零 diff |
 | 未授权集合/新索引/epoch 计数记录 | 0 |
@@ -432,9 +530,9 @@ tests/wxml.test.cjs
 **精确输入**：
 
 - 本修订输入 SHA/父/tree、工作树/分支、`git status --porcelain`。
-- 远端实际 ref：目标分支 = `d7a4e36…`，父设计分支 = `fcae246…`；前移/分叉即停。
+- 远端实际 ref：目标分支 = `96d1bc9…`，父设计分支 = `fcae246…`；前移/分叉即停。
 - 设计文档 blob/sha256；`git diff --stat 5dff386..HEAD -- . ':(exclude)docs'` 为空。
-- 勘误 E1/E2/E3 的审批状态：必须明确批准/拒绝/延后条件；C1 18/C2 27 只在批准后生效。
+- 勘误 E1/E2/E3 与 P9 的复审状态；**18/27 预算按本轮口径保留（可采纳）**；其余契约未批准前不得实施。
 - 基线代码文件 hash：`git hash-object` 记录 `h4c-evidence.mjs`、`index.mjs`、`store.mjs`、C1 测试。
 - 历史测试计数仅引用 5dff386 证据（33 文件 521 项、根 51 项、全量 581 项含 loopback），不重跑。
 
@@ -450,11 +548,11 @@ tests/wxml.test.cjs
 - 勘误未批准而提前按 18/27 实施：停止；不得把草案当批准。
 - 不访问 Store，不产生数据写。
 
-**停止点 Stop-0**：Codex 确认基线、审批勘误 E1/E2/E3（或明确延后条件）、确认 D1–D10 处置；未通过不得进 S1。
+**停止点 Stop-0**：Codex 确认基线、复审勘误 E1/E2/E3 与 P9（或明确延后条件）、确认 D1–D10 处置；未通过不得进 S1。
 
 ## 5. S1：契约层（纯函数）
 
-**依赖**：S0 通过；E1/E2/E3 至少给出可编码结论（C1 18、集合字面名、Store 接口方向）。
+**依赖**：S0 通过；E1/E2/E3/P9 至少给出可编码结论（C1 18、集合字面名、门禁不可变、Store 接口方向）。
 
 **允许文件**：
 
@@ -476,7 +574,7 @@ tests/wxml.test.cjs
 **实现范围**：
 
 - 只加纯函数/常量/validator/摘要/谓词；不改任何调用方，不改 Store，不写记录。
-- `h4c-collections.mjs` 只含字面名/集合集，无 import、无副作用；`store.mjs` 与 `h4c-evidence.mjs` 必须从它取名字。
+- `h4c-collections.mjs` 只含字面名、**模块私有 Set**、`isH4cCollection`、冻结 `H4C`/`H4C_COLLECTION_NAMES`；无 import、无副作用；**不导出 Set**；`store.mjs` 与 `h4c-evidence.mjs` 必须从它取名字/谓词。
 - 保留现有 26 个 C1 导出及其行为；index 只增不删；仍无任何 initialization/bootstrap/create-domain 入口。
 - 所有 validator 必须 exact（多/缺/类型错都拒绝）；所有摘要必须可从持久字段重建（不依赖内存 plan 对象）。
 - `PlanRecordValid` 必须实现 §17.2 + §18.2/§18.7：writer canonical ID、空值表、initialStatusTicket、statusTicket、consumed 按 planKind、runtimeTicket 验签。
@@ -488,6 +586,7 @@ tests/wxml.test.cjs
 
 - 每个 schema 的正例/反例；多字段、缺字段、错类型、非 plain object。
 - 集合字面名精确断言（8 个字面量 + `admin_audit`）；无第二套常量。
+- 集合门禁（M29）：命名空间无 `H4C_COLLECTION_SET`；`H4C`/`H4C_COLLECTION_NAMES` 冻结；`push`/下标/属性赋值抛错；`isH4cCollection` 对 `admin_audit`/`__proto__`/`constructor`/空串/非字符串 false；对 8 字面量 true；`Object.freeze(new Set()).add` 仍生效（证明不能导出 Set）；替换 `Set.prototype.has` 后判定仍不变（捕获原型方法）。
 - canonical ID 例：`e=1`→`we-1`、`e=7`→`we-7`、`e=10`→`we-10`；拒绝 `we-07`、`we-0`、`WE-7`、空串、非正整数。
 - proof ID 公式/24 字段；anchor 6/head 9/fence 12/marker 18/plan 39 的 exact。
 - HMAC 向量：用测试 K3 key 对固定输入计算并断言；不得用生产 key。
@@ -600,7 +699,7 @@ finalWriteSet = C1 业务写（anchor+E+head 或 E+head）+ 唯一 admin_audit�
 
 ## 8. S4：Store 全路径门禁（8 集合 + admin_audit、explicit、≤90）
 
-**依赖**：S3 通过；**E2/E3 批准**；D10（persist 私有影响）有明确处置。
+**依赖**：S3 通过；**E2/E3 批准 + P9 集合门禁不可变性批准**；D10（persist 私有影响）有明确处置。
 
 **允许文件**：
 
@@ -633,9 +732,12 @@ finalWriteSet = C1 业务写（anchor+E+head 或 E+head）+ 唯一 admin_audit�
 
 **测试范围**：
 
+- 按 §3.3f **M01–M30 全路径矩阵**逐条跑（LocalStore 与 CloudStore 各一遍）；每条负向全库零写。
+- 集合门禁不可变性 M29：命名空间无 `H4C_COLLECTION_SET`；`H4C`/`H4C_COLLECTION_NAMES` 冻结；`push`/下标/属性赋值抛错；`isH4cCollection` 边界（`admin_audit`/`__proto__`/`constructor`/空串/非字符串）；
+- gate 冻结/不暴露 config/key；`verify` 不修改入参、不读环境/时钟（M28）。
 - LocalStore/CloudStore 各路径正/负：`transactFinal`/`transact`/`change`/`#persist`/`seed`/`init`。
 - 8 集合 exact 字段；evidence/domain/anchor/audit proof/marker/plan create-only；head CAS 可更新；fence 可更新。
-- H4-c 经 `transact`/`change` → 拒绝；`#persist` 外部不可调；`seed` 非空 → 拒绝；`init` 非空不补记录。
+- H4-c 经 `transact`/`change` → 拒绝且 build 不被调用；`#persist` 外部不可调；`seed` 非空 → 拒绝；`init` 非空不补记录。
 - 90/91 refs；未声明写；重复 `_id`；exact 字段多/缺；explicit audit 7 字段；无双审计；旧 writer ADMISSION。
 - 每个负向全库零写 + LocalStore 文件 hash 不变 + Cloud fake 回滚。
 - 并发：同 anchor/plan `_id` create-only 一胜；同 head 两 append 一胜。
@@ -643,7 +745,7 @@ finalWriteSet = C1 业务写（anchor+E+head 或 E+head）+ 唯一 admin_audit�
 
 **refs/writes**：不改变任何预算；gate 0 新增 refs；≤90；C1 18 / C2 27 的 shape 校验。
 
-**停止点 Stop-4**：Codex 审 Store diff、gate 放置点、构造注入、explicit 模式、全路径拒绝、无双重审计、D10 处置、非 H4-c 零回归；未通过不得进 S5。
+**停止点 Stop-4**：Codex 审 Store diff、gate 放置点、构造注入、explicit 模式、M01–M30 全路径、私有 Set/谓词/冻结快照、D10 处置、非 H4-c 零回归；未通过不得进 S5。
 
 ## 9. S5：运行时覆盖（K3/marker/proof/writer plan/fence）
 
@@ -708,6 +810,7 @@ finalWriteSet = C1 业务写（anchor+E+head 或 E+head）+ 唯一 admin_audit�
 
 - C1 定向全绿；带 guard 0/0/0。
 - 33 个非 HTTP 文件显式运行全绿；7 个根文件显式运行全绿；**不运行 8 个 HTTP 文件**；guard 必须加载前生效且 `listen_calls=0`。
+- §3.3f **M01–M30** 全绿（LocalStore + CloudStore），含私有 Set/谓词/冻结快照、transactFinal/transact/change/#persist/seed/init 全路径。
 - 并发对 10 轮全胜；每轮记录。
 - 全部 F/N C1 行逐项 PASS/FAIL/未测；不允许“部分通过”概括。
 - 静态扫描 §3.8 全 0。
@@ -757,6 +860,7 @@ finalWriteSet = C1 业务写（anchor+E+head 或 E+head）+ 唯一 admin_audit�
 | F39 | rotate 原子失败 | 另卡 | Z_chain | Z_chain |
 | F40 | proof writerPlanId 缺失/不符 | S5 | PROOF_REQUIRED | Z_all |
 | **F41** | **C1 只声明 17 refs/缺 proof ref** | **S2/S4** | **ADMISSION_REQUIRED/PROOF_REQUIRED** | **Z_all** |
+| **F42** | **集合门禁导出可变 Set / 成员判定可被 add 绕过** | **S1/S4** | **断言失败/拒绝** | **N/A** |
 
 ### 11.2 N 矩阵归属（不重开设计；只划 C1 与另卡）
 
@@ -784,11 +888,11 @@ finalWriteSet = C1 业务写（anchor+E+head 或 E+head）+ 唯一 admin_audit�
 
 | Stop | 阶段 | 复审输入 | 通过条件 | 失败处置 |
 |---|---|---|---|---|
-| Stop-0 | S0 | 基线报告、勘误 E1–E3、D1–D10 处置 | SHA/父/远端/设计 blob/代码零 diff 一致；C1 18/C2 27 获批准或明确延后；集合名/Store 接口有结论 | 停止报告；不改写历史；不猜合同 |
+| Stop-0 | S0 | 基线报告、勘误 E1–E3、P9、D1–D10 处置 | SHA/父/远端/设计 blob/代码零 diff 一致；18/27 按口径保留；集合名/Store 接口/门禁不可变有结论 | 停止报告；不改写历史；不猜合同 |
 | Stop-1 | S1 | diff + 测试 + 证据 | schema/ID/集合名/谓词/签名与 E1/E2/§18.2/§18.7 一致；0 Store 改动；0 写 | 同阶段追加修复 |
 | Stop-2 | S2 | diff + refs/链测试 + 零写 | **18 refs**（含 proof1）；anchor/1..9/完整链；无布尔；缺 proof 负向拒绝；零写 | 同阶段追加修复 |
 | Stop-3 | S3 | diff + ticket/audit 测试 | finalWriteSet 字节绑定；唯一 audit；explicit；0 新增 refs | 同阶段追加修复 |
-| Stop-4 | S4 | Store diff + 全路径测试 | 8 集合+admin_audit/全路径/explicit/≤90/无双审计；gate 注入；D10 处置；非 H4-c 零回归 | 同阶段追加修复 |
+| Stop-4 | S4 | Store diff + M01–M30 + 全路径测试 | 8 集合+admin_audit/全路径/explicit/≤90/无双审计；gate 注入；私有 Set/谓词/冻结快照；D10 处置；非 H4-c 零回归 | 同阶段追加修复 |
 | Stop-5 | S5 | diff + 运行时谓词测试 | K3/marker/proof/writer plan/fence/健康/错误顺序正确；只读；旧 W0 无授权；proof ref 实际使用 | 同阶段追加修复 |
 | Stop-6 | S6 | 全量证据 | 33+7 全绿 + F/N 逐项 + 10 轮并发 + 静态 0 + 预算 18/27 + 白名单 + guard 0；8 HTTP 未跑单列 | 退回对应阶段；不得 S6 直接修 |
 
@@ -812,12 +916,12 @@ F/N 逐项（PASS/FAIL/未测）：
 | ID | 缺失/歧义 | 证据 | 阻断阶段 | 建议/需要 Codex 裁定 |
 |---|---|---|---|---|
 | D1 | 云派单/审查 `DISPATCH.md`/`REVIEW.md` 本机未取得 | 页首检查路径；仓库无副本 | S0 | 提供可读副本，或确认本轮只按用户明确要求修订、不声称逐项闭合 |
-| D2 | C1 17 refs 缺 audit proof；`CoverageValid` 无法成立 | 设计 §17.5 `:1283`、§16.5 `:901`、§17.5 `:1298` | **S2** | **勘误 E1：C1 18、C2 27；writes 不变；待批准** |
-| D3 | 集合字面名缺失；8 集合中 “audit” 所指 | 设计 §15.4 `:740`、§16.5 `:912`、§17.5 `:1297` | S1/S4 | **勘误 E2：8 个字面名 + admin_audit 通用边界；待批准** |
+| D2 | C1 17 refs 缺 audit proof；`CoverageValid` 无法成立 | 设计 §17.5 `:1283`、§16.5 `:901`、§17.5 `:1298` | S2 | **勘误 E1：C1 18、C2 27；writes 不变；18/27 按本轮口径保留（可采纳）** |
+| D3 | 集合字面名缺失；8 集合中 “audit” 所指 | 设计 §15.4 `:740`、§16.5 `:912`、§17.5 `:1297` | S1/S4 | **勘误 E2：8 个字面名 + admin_audit 通用边界；待复审** |
 | D4 | proof `status` 允许值、`legacyCount` 规则未枚举；admin_audit `_id` 的 `revision`/`action/scopeKey` 未定义 | 设计 §4.2 `:159`、§4.13 `:316` | S1/S3 | 冻结 proof.status/legacyCount；明确 audit `revision` 与 C1 action/scopeKey |
 | D5 | runtime 的 `operationAuthDigest` 取值未定义 | 设计 §4.6 `:212` | S3 | 建议 runtime 显式 `null`；确认不得自造 digest |
 | D6 | C1 API 形状未定义 | 原卡 §3.3；现 `h4c-evidence.mjs:322` | — | **本卡 §3.3a 已冻结**（`evidenceAppendRefs`/`appendEvidenceWrites` 参数、proofId/auditId 来源）；随卡审批 |
-| D7 | Store 接口/依赖注入未定义 | 设计 §4.4 `:166`、§4.13 `:322` | S4 | **勘误 E3/§3.3b：`createH4cGate`、`h4cGate` 构造注入、`transactFinal`、`#persist` 私有、`h4c-collections.mjs`；待批准** |
+| D7 | Store 接口/依赖注入/集合门禁未定义 | 设计 §4.4 `:166`、§4.13 `:322` | S4 | **勘误 E3 + 本卡 §3.3b–§3.3f：私有 Set + `isH4cCollection` + 冻结枚举快照（不导出 Set）、`createH4cGate`、构造注入、`transactFinal`、`#persist` 私有、全路径错误契约与 M01–M30 矩阵；待复审** |
 | D8 | N01–N142 与“工具另立卡”的测试归属 | 设计 §14 第 6/7 条 `:600-601` | S6 | 确认 §11.2 划界；若要求 C1 全覆盖，明确合成记录边界 |
 | D9 | 设计页首自述“待 Codex 复审”与“已批准”口径不一致；实施分支名/起点未派单 | 设计页首 `:3`；本卡 §1.4 | S0 | 明确批准文/批准 SHA 与实施分支；本卡不代替批准 |
 | D10 | `#persist` 私有会破坏 `verification.test.mjs:381` 的直调 | `admin-web/tests/verification.test.mjs:381` | S4 | 建议 S4 改该测试为 `init()` 前写 `demo-data.json`（仅 fixture）；或批准其他等价方案 |
@@ -828,17 +932,18 @@ F/N 逐项（PASS/FAIL/未测）：
 - 未实现任何 C1 代码；未修改 `h4c-evidence.mjs`/`index.mjs`/`store.mjs`/测试/设计正文。
 - 未运行任何测试；33 文件 521 项、根 51 项、全量 581 项均为 5dff386 历史证据，不是本卡结果。
 - 未安装依赖；未访问真实 Cloud/K3/设备/Provider/支付/业务网络；未注册 HTTP/UI；未部署。
-- 未读 `/workspace/artifacts/STAGED-CARDS-REVIEW-2026-11-19/DISPATCH.md` 与 `REVIEW.md`（本机未取得）；不声称与云端派单/审查逐项一致。
+- 未读 `/workspace/artifacts/SEVEN-TASKS-REVIEW-2026-11-19/DISPATCH.md` 与 `REVIEW.md`（本机未取得）；不声称与云端派单/审查逐项一致。
 - 8 个 HTTP/loopback 测试文件明确不跑；C1 验收不含它们；其 60 项 loopback 历史结果不是 C1 证据。
 - 未验证真实 Cloud 并发事务；归 C3。
-- D2/D3/D7 的修正（E1/E2/E3）仍是待批草案；D4/D5/D8/D9/D10 未决；不得把草案当批准。
+- C1 18/C2 27 按本轮口径保留（可采纳）；E2/E3/P9 仍待 Codex 复审；D4/D5/D8/D9/D10 未决；不得把未批项当批准。
+- 未验证集合门禁实现（仅文档方案）；不得声称已证明不可变。
 - 本卡不自批、不宣称 C1/G1 通过、不授权合并/实施。
 
 ## 15. 本修订交付
 
-- 分支：`docs/h4c-c1-staged-implementation-task`；父：`d7a4e363c2145dafc6d2ed30c271dcbdc00c8767`。
-- 文件范围：本卡修订 + 新增 `docs/tasks/HK-AI-04-H4C-C1-REFS-ERRATUM-2026-11-19.md`；不处理其他文件。
+- 分支：`docs/h4c-c1-staged-implementation-task`；父：`96d1bc94f388fe51c99114fa6f1647b3c7665314`。
+- 文件范围：本卡修订 + 同步修订 `docs/tasks/HK-AI-04-H4C-C1-REFS-ERRATUM-2026-11-19.md`；不处理其他文件。
 - 提交后由交付回报给出：完整 SHA、`git show --stat`、`git ls-remote` 远端 SHA、固定 SHA 文件 URL（卡与勘误各一）。
 - 普通 push；不 amend/rebase/reset/squash/force/cherry-pick/merge；push 前若远端目标分支前移/分叉，停止报告。
-- 交 Codex 独立审批：重点为勘误 E1 的 C1 18/C2 27 与受影响行、E2 的 8 集合字面名、E3 的 Store 接口/DI、§3.7 的 33+7 显式清单与 guard、D10 的 persist 影响。
-- 审批前不开始 S1；不自批。
+- 交 Codex 独立复审：重点为勘误 E1 的 C1 18/C2 27 与受影响行、E2 的 8 集合字面名、E3 的 Store 接口/DI/不可变集合门禁（P9）、§3.3d–§3.3f 的签名/权限/错误/显式写集/M01–M30、§3.7 的 33+7 显式清单与 guard、D10 的 persist 影响。
+- 复审前不开始 S1；不自批。

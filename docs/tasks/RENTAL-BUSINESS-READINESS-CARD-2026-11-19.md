@@ -6,7 +6,7 @@
 - 工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\rental-business-readiness`
 - 分支：`docs/rental-business-readiness`
 - 输入 SHA：`5d56dead460220d3409fa80bcaea8b1fa3a5c9a3`
-- 本卡父提交：`bcacadbe6ada35c9cac17722fd054deafe341f82`
+- 本卡父提交：`5d56dead460220d3409fa80bcaea8b1fa3a5c9a3`
 - 代码基线：`5d56dead460220d3409fa80bcaea8b1fa3a5c9a3`（与输入相同；本卡只做只读调查，不改实现）
 - 状态：**仅准备 / 只读调查；未实现、未验收、未接商户、未上线；待 Codex 独立复审（不自批）**
 
@@ -30,13 +30,13 @@
 | main 与输入差距 | 输入领先 main 10 个提交，main 没有输入之外的提交 | `git rev-list --left-right --count origin/main...<输入SHA>` → `0 10` |
 | 工作树状态 | 干净（`## docs/rental-business-readiness`） | `git status --short --branch` |
 
-说明：远端当前没有 `refs/heads/docs/rental-business-readiness`；该分支为本地新分支，首次推送时才在 GitHub 创建。上述 10 个提交均为 2026-11-16 至 11-18 的租赁文档提交（`RENTAL-PRESIGNING`、`RENTAL-OPEN-ITEMS-CONTRACT-CARD` 等），不是实现代码改动。
+说明：推送前远端没有 `refs/heads/docs/rental-business-readiness`；该分支为本地新分支，本卡提交后首次推送创建远端分支。上述 10 个提交中 `8df281b`（功能实现）、`922c4ab`、`3bf5951`（修复）是代码提交，其余为 2026-11-16 至 11-18 的租赁文档提交（`RENTAL-PRESIGNING`、`RENTAL-OPEN-ITEMS-CONTRACT-CARD` 等）；本分支 F 不修改这些实现。
 
 ## 2. 合同模板实查（用户称“有模板”，实查结论：没有可用租赁模板）
 
 ### 2.1 仓库内
 
-- 代码 `templateText` 默认为空字符串（`cloudfunctions/leasing/domain.js:44-53`），`templateVersion` 默认 0；`RENTAL-PRESIGNING.md:44` 明确“现阶段未收到你们的实际模板，产品没有放入虚构的示例合同，默认不启用预签约及证件收集”。
+- 代码 `templateText` 默认为空字符串（`cloudfunctions/leasing/domain.js:44-53`），`templateVersion` 默认 0；`RENTAL-PRESIGNING.md:32` 明确“现阶段未收到你们的实际模板，产品没有放入虚构的示例合同，默认不启用预签约及证件收集”。
 - 本分支 `docs/`、`design/`、`miniprogram/`、`admin-web/` 中**没有**住宅租赁合同模板文件；模板只能由后台“押金规则与自有合同模板”页粘贴纯文本或导入 UTF-8 `.txt`（`admin-web/public/leasing-ui.js:37`）。
 
 ### 2.2 工作区内的候选文档（只读查看，未复制敏感内容）
@@ -45,7 +45,7 @@
 |---|---|---|---|---|---|
 | `场地使用协议书-碳嘻【2026】085号（完善稿）.docx` | 48,568 B / `4ECA7958DFE1D3A976513F3480D325527753BA51EAA1E8091159BD8D3BB499E7` | `C:\Users\Administrator\Documents\ChatGPT\宇宙智联\` 根目录；同源文本见 `task_085\final_text.txt`（10,652 B / `D22BCB53DC457306347C349B376CFA2B7BDE1A095C4DE01145F54EC7290D88EE`） | 商业**场地（停车场）临时用地**使用协议；甲方为深圳公司、乙方为深圳公司；含面积、期限、每平方米单价、月费、2 个月保证金、付款账户、违约/终止/安全责任条款 | 面积（㎡）、单价、月费、大写金额、起止日期、签章日期、承诺人姓名/身份证号/电话 | 不是住宅租赁；无租客姓名、房号、月租、押金总额、留房时长、超时规则、身份证收集条款；含真实主体名称、统一社会信用代码、联系电话、银行账号（**本卡未复制**）。**不能直接作为预签约合同模板** |
 | `产品服务模板_免费设备+年费.docx` | 61,168 B / `EEB5E35DE1FB40BB11CA5D9A8CEBDCF15D0C0B65C80239B01EAAD4CEF6E79383` | 同上根目录 | 产品服务方案模板（免费投放设备 + 年费），189 段 / 22 表 | 公司名称、设备、年费、账期等 | 与住宅租赁无关。**不可用** |
-| 仓库模板槽位 | 空 | `domain.js` 默认值；`RENTAL-PRESIGNING.md:44` | 只有变量渲染机制，没有正文 | 见 2.3 | **缺实际模板正文、条款、法务审查** |
+| 仓库模板槽位 | 空 | `domain.js` 默认值；`RENTAL-PRESIGNING.md:32` | 只有变量渲染机制，没有正文 | 见 2.3 | **缺实际模板正文、条款、法务审查** |
 
 ### 2.3 模板机制（代码事实）
 

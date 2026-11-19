@@ -24,7 +24,7 @@
 
 仓库与工作树：
 
-- 基线：`origin/main = 282a20fca9f64ab80ead50372c9c3e90bf4aeba7`。`git fetch` 因 `.git/worktrees/SMART-PM-H3/FETCH_HEAD` 写入受限（`Permission denied`，沙箱在 `workspace-write` 下拒绝工作区外写入）而失败；改用只读 `git ls-remote` 核对远端 tip（未前移/未分叉），失败已如实记录。
+- 基线：`origin/main = 282a20fca9f64ab80ead50372c9c3e90bf4aeba7`。首次 `git fetch` 在 `workspace-write` 沙箱下因 `.git/worktrees/SMART-PM-H3/FETCH_HEAD` 写入受限失败（`Permission denied`，已如实记录）；权限放开后重试 `git fetch origin --prune` 成功，`origin/main` 仍为 `282a20f`（未前移/未分叉），并以只读 `ls-remote` 交叉核对。
 - 本分支：`docs/git-config-deviation-evidence`，自上述 main tip 新建。
 - 独立工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\git-config-evidence`（不污染调度区 `SMART-PM-H3`）。
 - 全局配置写入：**零**。所有 git 命令均以逐命令 `-c safe.directory=… -c http.sslBackend=openssl` 方式执行。

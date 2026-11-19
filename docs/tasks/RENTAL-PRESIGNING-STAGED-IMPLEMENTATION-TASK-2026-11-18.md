@@ -49,7 +49,7 @@
 |---|---|---|---:|---|---|
 | S1 | 持久单飞 / CAS | 1 | 本卡提交 | §4.1、§4.2、§4.4、§4.5、§7.1 | `domain.js`、两份测试 |
 | S2 | 缓存签名（prepay 与 clientParams 分离） | 2 | S1 | §4.1.1、§4.5、§7.1 | `domain.js`、`wechat-pay.js`、两份测试 |
-| S3 | 流水事实唯一幂等 | 3 | S1（审计/状态口径） | §5、§7.2、§7.4 | `domain.js`、两份 Store、两份测试 |
+| S3 | 流水事实唯一幂等 | 3 | S1（语义；线性前置 S2） | §5、§7.2、§7.4 | `domain.js`、两份 Store、两份测试 |
 | S4 | 查询对账与 `failed` 终态 | 4 | S1、S2、S3 | §4.3、§4.3.1、§4.3.2、§4.4、§7.1 | `domain.js`、`wechat-pay.js`、两份测试 |
 | S5 | 独立隐私同意 | 5 | S1、S3、S4 | §6.1、§6.2、§6.5、§7.3 | `domain.js`、两份 Store、小程序页、后台 UI、两份测试 |
 | S6 | 旧数据兼容 | 6 | S4、S5（S3 口径） | §6.3、§6.4、§7.3 | `domain.js`、小程序页、后台 UI、两份测试 |
@@ -196,7 +196,7 @@ tests/leasing.test.cjs
 
 ### 4.3 S3 流水事实唯一幂等
 
-**入口**：S1 PASS；其余同 §4.1 入口。
+**入口**：S2 PASS（S3 语义上只依赖 S1 的审计/状态口径；按 §2 的线性分支仍以 S2 的 PASS tip 为父）；其余同 §4.1 入口。
 
 **允许文件（唯一）**：
 
@@ -267,7 +267,7 @@ tests/leasing.test.cjs
    - `REFUND`/`REFUND_SUCCESS`：待 §9.2，不覆盖支付事实、不释放 hold、不自动退款；标记人工，**不声称通过**。
    - `NOTPAY`：有可复用 `ready` 参数则返回缓存（create 0）；否则保持 `reconciling`，固定 409 `PAYMENT_PARAMS_IN_PROGRESS`，不重发。
    - `USERPAYING`：保持 `reconciling`，固定 409，不重发。
-   - `CLOSED`/`REVOKED`/`PAYERROR`/`ORDER_NOT_EXIST`：权威确认无有效支付 → `failed` 终态 + `queryEvidence`（与 `failed` 同一事务 CAS、绑定当前 `attemptId`+`epoch`）；CAS 失败保持 `reconciling`；不 create、不自动重试、**不释放有效自有 hold**、0 audit。
+   - `CLOSED`/`REVOKED`/`PAYERROR`/`ORDER_NOT_EXIST`：权威确认无有效支付（`ORDER_NOT_EXIST` 无订单体时以验签响应 + 原请求绑定为准）→ `failed` 终态 + `queryEvidence`（与 `failed` 同一事务 CAS、绑定当前 `attemptId`+`epoch`）；CAS 失败保持 `reconciling`；不 create、不自动重试、**不释放有效自有 hold**、0 audit。
    - query 超时/网络错误/未知状态码/其他未知：保持 `reconciling`、固定 503 `PAYMENT_QUERY_UNAVAILABLE`、记录 `lastQueryAt`、不 create、hold 保留。
 4. **不得**在 `CLOSED` 等路径调用 `closeUnpaid`（其释放 hold 属订单生命周期动作，与终态保留 hold 冲突）；`failed` 也不释放 hold。
 5. 唯一错误码：处理中/对账中 409 `PAYMENT_PARAMS_IN_PROGRESS`；查询不可用 503 `PAYMENT_QUERY_UNAVAILABLE`；`failed` 再次支付请求沿用现有订单不可支付 409（不新增固定码）。
@@ -303,7 +303,7 @@ tests/leasing.test.cjs
 
 ### 4.5 S5 独立隐私同意
 
-**入口**：S1、S3、S4 PASS；其余同 §4.1 入口。
+**入口**：S4 PASS（S1–S4 全部 PASS）；其余同 §4.1 入口。
 
 **允许文件（唯一）**：
 
@@ -357,7 +357,7 @@ tests/leasing.test.cjs
 
 ### 4.6 S6 旧数据兼容
 
-**入口**：S4、S5 PASS；其余同 §4.1 入口。
+**入口**：S5 PASS（S1–S5 全部 PASS）；其余同 §4.1 入口。
 
 **允许文件（唯一）**：
 

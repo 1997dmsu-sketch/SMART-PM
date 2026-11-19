@@ -17,10 +17,11 @@
 
 | 输入 | 结果 |
 |---|---|
-| `C:\workspace\artifacts\STAGED-CARDS-REVIEW-2026-11-19\DISPATCH.md` | **本机不存在**（`C:\workspace` 整个目录不存在），未取得可读副本 |
-| 同目录 `REVIEW.md` | 同上，**不存在** |
-| 检索范围 | `C:\workspace`、`...\宇宙智联`（递归深度 3）、`Desktop`、`Downloads`，均未发现 `DISPATCH.md` / `REVIEW.md` |
-| 结论 | 不声称完整云指令已读、不声称逐项闭合；本报告仅覆盖当前明确要求，缺失细节见 §11 待裁 |
+| `C:\workspace\artifacts\SEVEN-TASKS-REVIEW-2026-11-19\DISPATCH.md` | **本机不存在**（`C:\workspace` 整个目录不存在），未取得可读副本 |
+| `C:\workspace\artifacts\SEVEN-TASKS-REVIEW-2026-11-19\REVIEW.md` | 同上，**不存在** |
+| `C:\workspace\artifacts\STAGED-CARDS-REVIEW-2026-11-19\`（前序派单引用） | 同上，**不存在** |
+| 检索范围 | `C:\workspace`、`...\宇宙智联`（递归深度 4）、`Desktop`、`Downloads`、`Documents`，均未发现 `DISPATCH.md` / `REVIEW.md`，也无 `SEVEN-TASKS` 命名的文件 |
+| 结论 | 不声称完整云指令已读、不声称逐项闭合；缺失的具体定位见 §10 P4、§11；本报告仅覆盖当前明确要求 |
 
 仓库与工作树：
 
@@ -39,6 +40,7 @@
 2. 写入动作可定位到执行者会话中的一条命令：`2026-11-18T22:25:53.118+08:00` 的 `git config --global --add safe.directory '*'; git config --global http.sslBackend openssl`，job `pwsh-d417d2a935f64c0e` 于 `22:25:53.675+08:00` 以 `exit code: 0` 结束；文件时间戳落在此窗口内（证据 E6、E8）。
 3. **修改前值未证实**：无修改前字节级副本（无 `.bak`、无 `~`/`.orig`、无 XDG 配置、回收站与 `%TEMP%` 无副本、VSS 无读取权限、无 PSReadLine 历史）。现有最强证据为行为观察（E1、E3）与机制复现（E7），只能支持"**推断为未设置**"（推断级别 L3），**不作为已证明的原值**。
 4. 因此：`safe.directory` 与 `http.sslBackend` 的"原值"一栏记为 **未证实（推断：unset）**，偏差保持 **OPEN**。
+5. 恢复建议只处理**已识别的两处新增**（§9）；不承诺"回到原始状态"，也不删除其它 `safe.directory` 值。未知历史继续保持未证实。
 
 ---
 
@@ -145,29 +147,74 @@
 
 ---
 
-## 9. 最小恢复建议（**未执行**；配置变更仍冻结）
+## 9. 恢复建议（精确、仅针对已识别的新增项；**未执行**；配置变更仍冻结）
 
-前置：先对 `C:\Users\Administrator\.gitconfig` 做只读快照（复制为带时间戳备份），并记录 SHA-256；恢复动作需独立授权。
+### 9.0 边界
 
-| 步骤 | 命令 | 预期 | 风险/前置 |
+- 本报告不执行任何恢复；以下为候选步骤，须按 §10 授权后由有权者执行。
+- 恢复目标**不是**"还原到某个原始状态"（原值未证实，见 §2.3 与 §11），而是**撤销本次已识别的两处新增**：`safe.directory=*` 与 `http.sslBackend=openssl`。
+- **禁止**无差别 `--unset-all`：会把其它既有的 `safe.directory` 可信路径一并删除，也无法保证不覆盖未知历史值。
+- **禁止**手工编辑配置文件；**禁止**用 system/local 的未知值"覆盖恢复"（那是新增值，不是撤销新增）。
+
+### 9.1 执行前：快照、读取、变化检测（任一项不通过即停止）
+
+1. **备份并记哈希**：把 `C:\Users\Administrator\.gitconfig` 复制为 `.gitconfig.bak-<UTC时间戳>`，分别记录源文件与备份的 SHA-256、大小；两者必须相等。
+2. **读取现状（保留 scope/origin）**：
+   - `git config --show-origin --show-scope --get-all safe.directory`
+   - `git config --show-origin --show-scope --get-all http.sslBackend`
+3. **变化检测（硬门槛）**：源文件 SHA-256 必须仍为 `E35ED0E33E532660A0E4034B04B790BF1C7C9192C8E7CA1E7764E220CAB20549`（237 B，mtime `2026-11-18T22:25:53.5243+08:00`）。若已变化 → **停止**，重新调查后再定，不得套用本方案。
+4. **多值核对**：global 作用域下两键必须各只有 1 条，值分别为 `*`、`openssl`。出现额外值或值不同 → **停止**，把实际值（不含敏感内容）交所有者裁定，不猜测来源与可信度。
+5. **基线记录**：`git config --global --list --show-origin` 的键名/scope/origin 清单（不输出 credential 等敏感值），作为后验"只删除两条"的比对基线。
+
+### 9.2 精确删除（仅 9.1 全部通过时；先数目标值出现次数，再选项）
+
+| 步骤 | 条件 | 命令（字面量精确匹配） | 预期 |
 |---|---|---|---|
-| R1 | `git config --global --unset http.sslBackend` | 生效值回落 system `schannel` | 沙箱内 schannel 仍报 `SEC_E_NO_CREDENTIALS` 时，相关任务须改用逐命令 `-c http.sslBackend=openssl` |
-| R2 | `git config --global --unset-all safe.directory` | 无全局 `safe.directory` | 之后以 `Administrator` 操作 `CodexSandboxOffline` 拥有的仓库会再次报 dubious ownership；须改用 `-c safe.directory=<repo>` |
-| R3（可选收窄） | `git config --global --add safe.directory <具体仓库路径>` | 仅放行必要仓库 | 优于 `*`；仍需批准 |
-| 验证 | `git config --show-origin --show-scope --get-all safe.directory` / `--get http.sslBackend` | 均为空 | — |
+| S1 | `safe.directory` 中 `*` 恰出现 1 次 | `git config --global --unset --fixed-value safe.directory '*'` | exit 0；仅删该条；其它路径保留 |
+| S1' | `*` 出现 ≥2 次 | `git config --global --unset-all --fixed-value safe.directory '*'` | exit 0；删除所有 `*`；其它路径逐条保留并列出 |
+| S2 | `http.sslBackend` 中 `openssl` 恰 1 次 | `git config --global --unset --fixed-value http.sslBackend 'openssl'` | exit 0；仅删该条 |
+| S2' | `openssl` ≥2 次 | `git config --global --unset-all --fixed-value http.sslBackend 'openssl'` | exit 0；删除所有 `openssl` |
 
-不建议：将 `*` + `openssl` 作为常设全局基线长期保留（当前无任何基线记录或批准）。
+计数（先只读）：
+
+```powershell
+(git config --global --get-all safe.directory | Where-Object { $_ -ceq '*' }).Count
+(git config --global --get-all http.sslBackend | Where-Object { $_ -ceq 'openssl' }).Count
+```
+
+判定要点（2026-11-19 在临时文件实测，非推测）：
+
+- `--unset --fixed-value` 在目标值出现多次时以 **exit 5** 失败且**不删除**（`warning: … has multiple values`）；此时才改用 `--unset-all --fixed-value`。
+- 目标值出现 0 次时两条命令均 exit 5、无变更 → **停止**核对实际值，**不得**改用不带 `--fixed-value` 的 `--unset-all`。
+- `--unset-all --fixed-value` 只删除完全相同的字面值；实测其它路径（如 `C:/trusted/one`）保留，`[safe]` 段与顺序不变。
+- 当前快照下两键各仅 1 条，故 S1/S2 适用；若与快照不符，回到 9.1 第 4 步停止。
+
+### 9.3 执行后：后验（缺一不可）
+
+1. `git config --global --get-all safe.directory` → 无输出（或仅剩 9.2 中列出的非目标值）。
+2. `git config --global --get-all http.sslBackend` → 无输出；`git config --get http.sslBackend` → `schannel`（system）。
+3. `git config --show-origin --show-scope --get-all <两键>` → 仅剩 system `schannel`，无 local/worktree 定义。
+4. **文件级差异**：`.gitconfig` 与备份逐行比较，确认仅 `[safe]`、`[http]` 两段被移除，`[filter "lfs"]` 与 `[user]` 原样；记录新 SHA-256/mtime/大小。
+5. **功能核验（只读）**：在目标仓库执行 `git -C <repo> status`，预期重新出现 `dubious ownership`（说明校验已恢复）；相关任务改用逐命令 `-c safe.directory=<repo>`（以及必要时的 `-c http.sslBackend=openssl`）。
+6. 任一步与预期不符 → 停止，按备份回滚并记录；回滚动作同样需授权。
+
+### 9.4 明确不做
+
+- 不删除任何非 `*` 的 `safe.directory` 值（可能是既有可信路径）。
+- 不把 `http.sslBackend` 改写为 `schannel` 当作"恢复"。
+- 不以任何作用域的未知历史值充当"原值"。
+- 不在未授权时执行上述任何命令。
 
 ---
 
 ## 10. 问题 → 位置 → 审批要求
 
-| # | 问题 | 位置 | 审批要求 |
+| # | 问题 | 位置 | 授权要求 |
 |---|---|---|---|
-| P1 | 全局 `safe.directory=*` 关闭所有权校验 | `C:\Users\Administrator\.gitconfig` 第 9–10 行 | 原主机所有者 + 安全负责人书面批准后方可 `--unset-all`；执行前先快照 |
-| P2 | 全局 `http.sslBackend=openssl` 覆盖系统 `schannel` | 同文件第 11–12 行 | 同上；或批准保留并登记为环境基线（当前无登记） |
-| P3 | 危险权限切换（workspace-write → danger-full-access, policy=never）后 5.1 s 发生"仅改目标文档"范围外写入 | DSH `session-002d5a96…` seq 122–139 | 作为流程缺陷提交复审：危险权限必须与任务卡允许路径绑定，或要求显式二次确认 |
-| P4 | 云指令 `DISPATCH.md` / `REVIEW.md` 不可读 | `C:\workspace\artifacts\STAGED-CARDS-REVIEW-2026-11-19\` | 提供可读副本或在卡中明确豁免；否则不得判定证据齐全 |
+| P1 | 全局 `safe.directory=*` 关闭所有权校验 | `C:\Users\Administrator\.gitconfig` 第 9–10 行 | 按现行授权链由用户/主机所有者明确授权后，方可按 §9.2 S1/S1' **仅撤销该条**；本报告不新增安全角色、审批层级或硬性政策 |
+| P2 | 全局 `http.sslBackend=openssl` 覆盖系统 `schannel` | 同文件第 11–12 行 | 同上（§9.2 S2/S2'）；是否保留由所有者决定，本报告不预设政策 |
+| P3 | 危险权限切换（workspace-write → danger-full-access, policy=never）后 5.1 s 发生"仅改目标文档"范围外写入 | DSH `session-002d5a96…` seq 122–139 | 作为流程事实提交复审；是否形成新规则由所有者/评审方裁定，本报告不预设必须绑定或二次确认 |
+| P4 | 云指令 `DISPATCH.md` / `REVIEW.md` 不可读 | `C:\workspace\artifacts\SEVEN-TASKS-REVIEW-2026-11-19\`（以及 `…\STAGED-CARDS-REVIEW-2026-11-19\`；`C:\workspace` 整个不存在） | 需提供可读副本或由派单方明确豁免；本报告不替派单方决定 |
 
 ---
 
@@ -179,6 +226,8 @@
 4. 未查询系统还原点/卷影副本（需提权）；未检查其它主机与其它用户 profile。
 5. 未验证移除全局键后各编排任务（Codex/DSH）是否回归失败——属实施，冻结中。
 6. 未对 `openssl` 后端下的企业 CA 场景做连通性验证（无此类环境，且网络测试属测试范畴）。
+7. §9 恢复方案以执行时 `.gitconfig` 仍为 `E35ED0E3…`（237 B，mtime `2026-11-18T22:25:53.5243+08:00`）为前提；文件一旦变化，方案整体失效，须重新调查，不得沿用。
+8. 恢复的授权主体与流程沿用现行授权链（用户/主机所有者）；本报告不新增审批角色、层级或硬性政策，是否要求额外评审由所有者决定。
 
 ---
 
@@ -202,3 +251,4 @@
 - 本次交付仅新增文档（本文件 + 附录），未改代码、未改配置、未跑测试、未触设备/支付/业务云/部署；实施/测试/HTTP/UI/部署上线继续冻结。
 - 未自批：证据链与"未证实"口径待 Codex 独立复审；复审通过前不得将"修改前值"标记为已证实，也不得宣称偏差已关闭。
 - 分支：`docs/git-config-deviation-evidence`（自 `origin/main 282a20f`），普通 push；最终 commit SHA、diff 与固定 SHA 链接由交付说明给出。
+- 修订记录：2026-11-19 第二轮仅修订 §1（云指令定位）、§2.5、§9（精确恢复方案）、§10（授权表述）、§11.7–8；E1–E10 摘录与哈希未变（仍为已核验的 10/10 匹配）。

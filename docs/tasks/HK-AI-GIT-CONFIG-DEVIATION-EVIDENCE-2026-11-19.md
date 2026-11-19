@@ -24,7 +24,7 @@
 
 仓库与工作树：
 
-- 基线：`origin/main = 282a20fca9f64ab80ead50372c9c3e90bf4aeba7`（fetch 前已用 `ls-remote` 核对，未前移/未分叉）。
+- 基线：`origin/main = 282a20fca9f64ab80ead50372c9c3e90bf4aeba7`。`git fetch` 因 `.git/worktrees/SMART-PM-H3/FETCH_HEAD` 写入受限（`Permission denied`，沙箱在 `workspace-write` 下拒绝工作区外写入）而失败；改用只读 `git ls-remote` 核对远端 tip（未前移/未分叉），失败已如实记录。
 - 本分支：`docs/git-config-deviation-evidence`，自上述 main tip 新建。
 - 独立工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\git-config-evidence`（不污染调度区 `SMART-PM-H3`）。
 - 全局配置写入：**零**。所有 git 命令均以逐命令 `-c safe.directory=… -c http.sslBackend=openssl` 方式执行。
@@ -86,7 +86,7 @@
 | 22:25:08 | 模型决定改用 `GIT_CONFIG_COUNT` / `git -c` 逐命令覆盖 | 会话 reasoning |
 | 22:25:15.282 | `ls-remote` 走 schannel → `SEC_E_NO_CREDENTIALS`，失败 | E3 |
 | 22:25:43.382 | `git -c http.sslBackend=openssl ls-remote` 成功（main = 282a20f） | E4 |
-| 22:25:48.032 | `/permission danger-full-access`（source=user）；0.2 s 后 `approval/policy=never` | E5 |
+| 22:25:48.032 | `/permission danger-full-access`（source=user）；2 ms 后 `approval/policy=never` | E5 |
 | **22:25:53.118** | `git config --global --add safe.directory '*'; git config --global http.sslBackend openssl` | E6 |
 | 22:25:53.502 / .524 | `.gitconfig` 创建/最后写入（237 B） | E8 |
 | 22:34:09 | 执行者复读确认 `openssl` / `*` | 会话 seq 483–485 |

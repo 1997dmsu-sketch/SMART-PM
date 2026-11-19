@@ -1,6 +1,7 @@
 # HK-AI-07B 集成候选任务卡（只读调查 · 2026-11-19）
 
 - 日期：2026-11-19（Asia/Shanghai）。任务：独立任务 D，只读调查 + 新增本卡；**不授权执行、不授权集成、不授权合并**。main 与 07B 的合并、实现维持冻结。
+- 修订 r2（2026-11-19）：按独立复审意见只修**依赖安装 / guard 自检 / 测试顺序**三处执行口径；§0.4 与 C3 的已复现无冲突预演事实（tree `0ced1e1…`）**保留不变**。本次仍为**文档修订，不是执行**：未安装依赖、未跑测试、未跑 verifier/guard、未做集成。
 - 本卡是“候选卡”，不是执行卡：给出候选分支起点、拟纳入提交、逐文件非监听回归、guard、来源校验与验收停止点；执行须由调度方另发明确派单。
 - 固定输入（门禁）：`1be517e48cadd810caa4f44df9e38e14c8b2c764`（**固定，不替换**）。
 - 历史参考 main：`282a20fca9f64ab80ead50372c9c3e90bf4aeba7`。
@@ -165,19 +166,34 @@ a82fe6e442a814fb9880d3b21c63c95be2a1a87e  docs: DB-01 current state, data model,
 
 另：07B 定向 `admin-web/tests/face-service.test.mjs`（静态 `test(` = 20）与 H1 `admin-web/tests/face-service-h1-regression.test.mjs`（静态 = 8）属服务层非监听回归，必须逐文件运行；前序证据称 20/20 与 8/8，本轮未复验。
 
-## 7. guard（隔离验证设施）复用与重建
+## 7. 执行顺序：安装、guard 自检、正控、运行期禁网（r2 修订）
 
-前序证据（`HK-AI-07B-OFFLINE-INTEGRATION-GATE-EVIDENCE-2026-11-18.md`）记录：
+**原则**：registry 访问只允许发生在**安装阶段**；运行期（`verify-import` 与全部测试）必须**零网络**。两阶段不得混跑：安装阶段不预加载 guard（否则 npm 访问 registry 会被拦截），运行阶段必须预加载 guard 且网络计数为 0。P0–P5 为强制顺序，**顺序倒置即该轮证据作废**。
 
-- 实现位于工作树外 `%TEMP%\07b-guard\r3\guard.cjs`，`sha256=4c84a87d83a4151e06e9b974a297eabd45a83ed073b125e66941d516376ae2d3`；对照脚本 `controls.cjs`，`sha256=7203bdccf2db5583c7ae5c6302f5c91a62c94f8c0a6f63023194d858134b3922`。
-- 入口 **79 个** = G3 已验收 49 + `dns.Resolver` 30；经 `NODE_OPTIONS=--require` 预加载；打补丁后 `syncBuiltinESMExports()`；逐入口负控 79/79 均抛 `NETWORK_BLOCKED`；正控含 `wx-server-sdk` 加载、`sharp` 真实解码、`spawnSync` 管道、`fs`/`crypto`；子进程继承经 CJS/ESM 探针证明。
+| 阶段 | 做什么 | guard | 网络 | 通过条件 |
+|---|---|---|---|---|
+| P0 前置 | 记录 OS/Node/npm/`core.autocrlf`/`git ls-files --eol`；确认 **LF** 检出；记录 24 个云函数与 admin-web 的 manifest/lock 哈希，并确认相对固定输入 `1be517e` 零差异 | 未加载 | 不访问 | 非 LF → BLOCKED；manifest/lock 已有差异 → 停止 |
+| P1 安装 | 按前序门禁卡第 3 节规则安装（`dbInit`/`unlock` 用 `npm ci`；`addTuyaDevice` 与 21 个无 lock 函数用 `npm install --package-lock=false`；admin-web 用 `npm ci`）；记录 registry URL、时间、代理、`npm_config_cache` 与每包解析版本 | **不加载**（`NODE_OPTIONS` 不得挂 guard） | **仅 npm registry** | 24/24 与 admin-web exit 0；无新生 lock；manifest/lock 零改动；`sharp@0.35.5` 真实安装 |
+| P2 guard 构建与独立自检 | 在工作树外重建 `guard.cjs`/`controls.cjs`；跑 `controls.cjs`：逐入口负控、ESM 命名绑定、子进程继承；断言入口数 = **G3 49 + Resolver 30 = 79** | 仅 guard 自身 | 0 | 79/79 均抛 `NETWORK_BLOCKED`，`failed=0`、`missing=0`；入口计数断言失败即 BLOCKED |
+| P3 安装后正控 | 在 guard 预加载下：`require("wx-server-sdk")`、`sharp` 真实生成+解码、`spawnSync` 管道、`fs`/`crypto`；记录网络计数增量 | 预加载 | 0 | 全部可用且网络增量 **0**；任一网络命中 → 停止 |
+| P4 运行期校验 | **先** `verify-import`，**再** 07B/H1 定向，**再** 7 个非监听文件逐个；每个测试文件独立进程、独立 guard 报告；对 `node --check` 子进程与 `node --test` worker 做继承探针 | 预加载 | 0 | 见 C8–C11 |
+| P5 收尾 | blob 复算、manifest/lock/来源零 diff、`git status`、敏感扫描 | — | 0 | 见 C9/C12 |
 
-**缺口与执行要求**：
+**顺序要点（本次修订核心）**：
 
-1. `guard.cjs` / `controls.cjs` **不在仓库内**，只有 sha256 记录。执行时必须重建 guard；重建件与旧 sha256 是否一致**未知**，不得把“sha256 相同”当作复用证明（本轮无法核对）。
-2. 重建后必须重新跑 79/79 负控、ESM 命名绑定探针、子进程继承探针与全部正控；任入口缺失 → guard 不合格，记 BLOCKED，不得摘除 guard 继续。
-3. `sharp` 必须真实安装并加载（禁止 stub/排除/以 guard 禁止）；`sharp` 安装或加载失败 → BLOCKED。
-4. guard 工作目录、文件清单与执行前后两次 sha256 必须写入证据；`NODE_OPTIONS` 原文入证据。
+1. **安装先于 verify-import**：`scripts/verify-import.mjs:25-29` 会对 24 个函数的依赖执行 `require()`，未安装时必然失败；该失败**不得**记为“来源篡改”。verifier 必须在 P1 完成后运行；安装前只允许做不含依赖加载的静态检查。
+2. **guard 自检先于任何业务模块加载**：P2 必须在 P3/P4 之前完成；自检未通过不得进入 P3/P4，不得“摘掉 guard 继续跑”。
+3. **正控先于测试**：P3 在业务模块加载前证明 `sharp`/`wx-server-sdk` 不被 guard 误伤；`sharp` 是 H1 回归的真实依赖（`face-service-h1-regression.test.mjs:8` → `files.mjs:65-69` → `face-image.mjs:15`），禁止 stub、排除或以 guard 禁止。
+4. **运行期禁网**：P3/P4 的每个进程都必须 `NODE_OPTIONS=--require <guard.cjs>` 预加载；guard 报告的网络调用合计必须为 0。安装期 registry 访问单独记录，**不得**计入运行期网络，也不得作为“运行期已联网”的解释。
+5. **子进程继承实证**：`node --check` 子进程与 `node --test` worker 必须证明继承 `NODE_OPTIONS`（环境回显 + 子进程内 `net.connect` 被拦截并计数）；仅做 `--check` 的子进程不执行业务代码，但仍须记录继承事实。
+6. **verify-import 与 blob 复算口径分开**：verify-import 是工作树字节 + 依赖加载 + 语法 + 资产的整体校验；blob 复算是 `git cat-file` 对象级 61/61。两者分别报告，任一不能替代另一；**安装前不得用 blob 通过冒充 verifier 通过**，也不得把 verifier 的依赖加载失败写成来源不符。
+
+**guard 自身要求（沿用前序证据口径）**：
+
+- 前序 guard 仅存 sha256：`guard.cjs` `4c84a87d83a4151e06e9b974a297eabd45a83ed073b125e66941d516376ae2d3`、`controls.cjs` `7203bdccf2db5583c7ae5c6302f5c91a62c94f8c0a6f63023194d858134b3922`；文件不在仓库内，重建件与旧 sha 是否一致**未知**，不得以“sha256 相同”作为复用证明。
+- 入口集合必须覆盖 G3 已验收 49 项与 `dns.Resolver` 30 项（合计 79）；缺一即不合格，记 BLOCKED。
+- 打补丁后调用 `syncBuiltinESMExports()`，并用 ESM 哨兵证明命名导入拿到被替换实现（不能只验 CJS `require`）。
+- guard/controls 存放于**工作树之外**；记录绝对路径、文件清单、执行前后两次 sha256 与完整 `NODE_OPTIONS` 原文。
 
 ## 8. 来源校验与候选验收停止点
 
@@ -186,16 +202,17 @@ a82fe6e442a814fb9880d3b21c63c95be2a1a87e  docs: DB-01 current state, data model,
 | 序号 | 校验 | 通过条件 | 失败处理 |
 |---|---|---|---|
 | C1 | 输入/父链/origin ref | HEAD=`1be517e`，父=`cc4ec7b`；目标 ref 未前移 | 停止报告 |
-| C2 | main 与差异 | fetch 后 main 记录实际 SHA；`git diff --stat` 与 §3/§4 重算一致 | 差异不一致即停止 |
-| C3 | merge-tree 只读 | exit 0 且如实记录 tree/冲突；不得 merge/cherry-pick | 有冲突即停止（不作“已解决”声明） |
-| C4 | `verify-import` | exit 0，原文含 61/24/318 | BLOCKED |
-| C5 | blob 级复算 | 61/61 一致（与 C4 分开报告） | 不一致即停止 |
-| C6 | 依赖安装 | 24 函数 + admin-web 按规则安装成功；`sharp` 真实可用 | 任一失败 BLOCKED |
-| C7 | 07B/H1 定向 | `face-service.test.mjs` 20/20、`face-service-h1-regression.test.mjs` 8/8，exit 0，guard 网络计数 0 | FAIL 即停止 |
-| C8 | 逐文件非监听 | §6 的 7 个文件逐个 exit 0、全通过、guard 网络 0、无 listen | 任一失败即停止 |
-| C9 | guard | §7 全部负控/正控/继承通过 | 不合格 BLOCKED |
-| C10 | 范围零 diff | 生产、manifest/lock、来源文件、已验收测试相对执行起点零 diff；`git status` 仅证据文件 | 超出即停止 |
-| C11 | 敏感输出 | 证据不含手机号/openid/密钥/云凭据 | 发现即撤回重写 |
+| C2 | main 与差异 | fetch 后记录 main 实际 SHA；`git diff --stat` 与 §3/§4 重算一致 | 差异不一致即停止 |
+| C3 | merge-tree 只读 | exit 0 且如实记录 tree/冲突；保留已复现事实（main 未前移时 tree `0ced1e17…` 有效）；不得 merge/cherry-pick | 有冲突即停止（不作“已解决”声明） |
+| C4 | 环境与 LF/基线 | 记录 OS/Node/npm/autocrlf/EOL；工作树为 LF；24 函数与 admin-web 的 manifest/lock 哈希入证，并确认相对 `1be517e` 零差异 | 非 LF 或已有差异 → 停止 |
+| C5 | 依赖安装（registry 阶段） | 24 函数 + admin-web 按规则安装 exit 0；guard **未加载**；registry/缓存/解析版本入证；无新生 lock、manifest/lock 零改动 | 任一失败 BLOCKED |
+| C6 | guard 构建与独立自检 | 入口 **79 = G3 49 + Resolver 30**；79/79 负控、ESM 命名绑定、子进程继承全通过；工作树外存放，sha256 双记 | 不合格 BLOCKED |
+| C7 | 安装后正控 | `wx-server-sdk` 加载、`sharp` 真实生成+解码、`spawnSync` 管道、`fs`/`crypto` 正常；网络增量 0 | 任一网络命中即停止 |
+| C8 | `verify-import`（安装后、guard 下） | exit 0，原文含 61/24/318；完整 stdout/stderr 与 guard 报告 | BLOCKED |
+| C9 | blob 级复算 | `git cat-file` 61/61 一致；与 C8 分开报告 | 不一致即停止 |
+| C10 | 07B/H1 定向 | `face-service.test.mjs` 20/20、`face-service-h1-regression.test.mjs` 8/8，exit 0，guard 网络计数 0 | FAIL 即停止 |
+| C11 | 逐文件非监听 | §6 的 7 个文件逐个 exit 0、全通过、guard 网络 0、无 listen | 任一失败即停止 |
+| C12 | 范围与敏感 | 生产、manifest/lock、来源文件、已验收测试相对执行起点零 diff；`git status` 仅证据文件；无手机号/openid/密钥/云凭据 | 超出即停止 |
 
 **验收停止点（任一命中即停，不得继续、不得自批）**：
 
@@ -204,11 +221,12 @@ a82fe6e442a814fb9880d3b21c63c95be2a1a87e  docs: DB-01 current state, data model,
 - S3 merge-tree 出现冲突或非零；
 - S4 工作树非 LF（本卡实测当前检出即 CRLF）；
 - S5 `verify-import` 非 0 或计数不是 61/24/318，或 blob 复算不足 61/61；
-- S6 依赖安装失败、`sharp` 缺失、`wx-server-sdk` 加载失败；
+- S6 依赖安装失败、`sharp` 缺失、`wx-server-sdk` 加载失败，或安装阶段被预加载 guard 导致 registry 不可达；
 - S7 07B 非 20/20、H1 非 8/8、7 个非监听文件任一失败；
-- S8 guard 入口缺失、负控未拦截或正控触发网络；
-- S9 范围核对出现生产/manifest/lock/来源/已验收测试 diff；
-- S10 任何要求“合并 main / 合并 07B / 启动 HTTP/UI / 接 Provider 或设备 / 部署上线”的动作——超出授权，直接停止。
+- S8 guard 入口不足 79（G3 49 + Resolver 30）、负控未拦截、ESM 绑定或子进程继承未证明、或正控触发网络；
+- S9 范围核对出现生产/manifest/lock/来源/已验收测试 diff，或安装产生新 lock；
+- S10 任何要求“合并 main / 合并 07B / 启动 HTTP/UI / 接 Provider 或设备 / 部署上线”的动作——超出授权，直接停止；
+- S11 顺序倒置：先跑 `verify-import` 再安装、guard 自检晚于业务模块加载、或运行期出现 registry/网络访问——该轮证据**作废并重跑**，不得以“重试后通过”覆盖。
 
 ## 9. main 前移矩阵（哪些旧证据必须重跑）
 
@@ -217,10 +235,10 @@ a82fe6e442a814fb9880d3b21c63c95be2a1a87e  docs: DB-01 current state, data model,
 | main 前移触及 | 必须重跑 | 不得沿用 |
 |---|---|---|
 | 任意新提交 | C1 输入核对、C2 差异统计、C3 merge-tree（新 merge-base） | 旧 merge-tree tree/“无冲突”、旧提交/文件数 |
-| `cloudfunctions/`、`design/`、`docs/backend-provenance.json`、`docs/backend-changes.json` | C4 `verify-import`、C5 blob 复算、61/24/318/3 计数 | 旧 61/24/318 计数与旧来源结论 |
-| `admin-web/package.json`、`admin-web/package-lock.json` | C6 安装与解析版本、`sharp` 正控 | 旧 0.35.5/3.18.7 版本结论 |
-| `admin-web/lib/`、`admin-web/server.mjs` | C7 07B/H1、C8 逐文件非监听 | 旧 20/20、8/8、51/51 |
-| `tests/`（仓库根） | C8 逐文件非监听 | 旧逐文件计数 |
+| `cloudfunctions/`、`design/`、`docs/backend-provenance.json`、`docs/backend-changes.json` | C8 `verify-import`（安装后）、C9 blob 复算、61/24/318/3 计数 | 旧 61/24/318 计数与旧来源结论 |
+| `admin-web/package.json`、`admin-web/package-lock.json` | C5 安装与解析版本、C7 `sharp`/`wx-server-sdk` 正控 | 旧 0.35.5/3.18.7 版本结论 |
+| `admin-web/lib/`、`admin-web/server.mjs` | C10 07B/H1、C11 逐文件非监听 | 旧 20/20、8/8、51/51 |
+| `tests/`（仓库根） | C11 逐文件非监听 | 旧逐文件计数 |
 | `docs/` | 仅证据文本与差异统计；不改变门禁计数 | 旧差异统计 |
 | 任何情况 | 重新 fetch 并记录实际 SHA | 任何“可快进/已通过/已恢复”结论 |
 

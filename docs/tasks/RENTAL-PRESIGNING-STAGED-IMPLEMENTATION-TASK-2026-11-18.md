@@ -4,9 +4,9 @@
 - 执行者：DSH 根代理 `lead`（`deepseek-flash`）；Windows PowerShell 5.1 / Git `2.55.0.windows.3` / Node `v24.19.0`
 - 工作树：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\rental-staged-task`
 - 分支：`docs/rental-staged-implementation-task`
-- 本版输入 / 父提交：`eabe7804f8530cf80016bb148ebd9ca75b8d9613`（父 `ba832b0813f134cf7876c6f83cffea9fbacbbac8`）；初版输入：`5d56dead460220d3409fa80bcaea8b1fa3a5c9a3`
+- 本版输入基线：`eabe7804f8530cf80016bb148ebd9ca75b8d9613`；初版输入：`5d56dead460220d3409fa80bcaea8b1fa3a5c9a3`
 - 已批准契约：`docs/RENTAL-OPEN-ITEMS-CONTRACT-CARD.md`（第五版；427 行；blob `94d61ed1c3d44bdb02249aa96e10d57422d5225d`）；辅助口径：`docs/RENTAL-PRESIGNING.md`、`docs/RENTAL-IDENTITY-PAYMENT-REVIEW-FIX-2026-11-16.md`
-- 代码基线：`3bf595140088bc71a3939fb67880807965e9c566`；自该基线至本版父提交，运行时代码/测试/Store 零 diff（仅 `docs/tasks` 卡文）
+- 代码基线：`3bf595140088bc71a3939fb67880807965e9c566`；自该基线至本版输入基线，运行时代码/测试/Store 零 diff（仅 `docs/tasks` 卡文）
 - 状态：**仅卡文修订（v3）；不实施、不运行测试、不改契约/生产代码/测试/Store；待 Codex 独立复审（不自批）**
 - 云评审材料：`/workspace/artifacts/SEVEN-TASKS-REVIEW-2026-11-19/DISPATCH.md` 与 `REVIEW.md` 未取得本机可读副本（具体核对路径见 §9）；**不声称已读、已逐项闭合或已获批准**。本版只按本轮明确要求修订，未明处列入 §8/§13。
 - 初版云指令 `C1-epoch-RENTAL-retry-review/DISPATCH.md` 与 v2 的 `STAGED-CARDS-REVIEW-2026-11-19/DISPATCH.md`/`REVIEW.md` 均不在本机；不声称读过。
@@ -16,20 +16,20 @@
 
 | 项 | 值 | 核验方式 |
 |---|---|---|
-| 本版父提交 | `eabe7804f8530cf80016bb148ebd9ca75b8d9613` | `git rev-parse HEAD` |
-| 父提交的父 | `ba832b0813f134cf7876c6f83cffea9fbacbbac8` | `git log -1 --format=%P` |
+| 本版输入基线 | `eabe7804f8530cf80016bb148ebd9ca75b8d9613` | 修订开始时 `git rev-parse HEAD` |
+| 输入基线的父 | `ba832b0813f134cf7876c6f83cffea9fbacbbac8` | `git log -1 --format=%P eabe780` |
 | 初版输入 | `5d56dead460220d3409fa80bcaea8b1fa3a5c9a3` | 初版父提交，链上仍可达 |
 | 工作树 | 干净 | `git status --porcelain=v1` 空 |
 | 分支 / 上游 | `docs/rental-staged-implementation-task` → `origin/docs/rental-staged-implementation-task` | `git status -sb` |
 | 远端 tip（fetch 后） | `eabe780…`，与本地 HEAD 一致；无前移/分叉 | `git fetch` + `ls-remote` + `rev-parse origin/…` |
 | 契约 blob / 行数 | `94d61ed1…` / 427（未变） | `git rev-parse HEAD:docs/…` + 字节/LF 计数 |
-| 运行时代码 | `3bf5951..本版父提交` 零 diff | `git diff --name-only 3bf5951..HEAD` |
+| 运行时代码 | `3bf5951..本版输入基线` 零 diff | `git diff --name-only 3bf5951..HEAD` |
 | 本版改动 | 仅本卡文 | 提交后 `git show --stat` 核对 |
 | 云评审材料 | 未取得本地副本 | 见 §9 路径核对 |
 | 派单背景 | 18/27 预算可采纳；E/F 不重派；G3/O10/G4/07B 门禁有效；其余冻结 | 本轮不触碰 |
 | 冻结项 | 合并、实施、C2/C3、HTTP/UI、部署上线、真实支付、设备、业务云 | 本轮均未触碰 |
 
-本版只修改本卡文一个文件；以普通追加提交推送到同一分支，推送后以 `git ls-remote` 核对远端 tip。初版新增文件为 `c49a0e1`，v2 为 `eabe780`；本版为第四个追加提交，不改写既有提交。
+本版只修改本卡文一个文件；以普通追加提交推送到同一分支，推送后以 `git ls-remote` 核对远端 tip。初版新增文件为 `c49a0e1`，v2 为 `eabe780`；本版为 `eabe780` 之后的追加提交，不改写既有提交。
 
 ## 1. 本卡地位与硬性不变量
 
@@ -161,6 +161,7 @@ tests/rental-network-guard.cjs   # 仅测试 guard；同样不得监听
 ### 3.10 测试预期闭合与禁止占位 PASS
 
 - 每个运行场景（`DEFERRED(Sn)` 除外）必须同时给出并断言：唯一 HTTP code/status、允许写集或全库零写（含 audit）、audit 次数、适配器 create/query 次数。运行场景出现“—”“0/1”“409/503”“待定/TBD”即未闭合，不得 PASS；纯静态断言必须显式标注“静态/非 HTTP”；`DEFERRED` 必须显式标注且不计入 PASS。
+- 成功路径：领域服务断言正常返回（不抛错）；云函数层断言 `code:0`。错误路径：领域服务断言 `error.status` 与唯一 code；云函数层断言同一 `code`。错误码只用 §4.3 固定值（409 `PAYMENT_PARAMS_IN_PROGRESS`、503 `PAYMENT_QUERY_UNAVAILABLE`、`failed` 后 409 现有不可支付）及其余既有 401/403/404/409；不得只断言“抛错”或只断言 message。
 - 全库零写：`before = structuredClone(store.data)`、`after = structuredClone(store.data)`、`deepEqual`，含 `admin_audit`；允许写集必须逐文档逐字段列明，其余集合/文档 `deepEqual`。
 - 阶段自包含：每段测试只断言本段已实现行为；依赖后续段的行为必须标 `DEFERRED(Sn)`，不计入 PASS，也不得用临时/占位实现使其通过。语义依赖见 §2 表；线性分支父只用于无合并历史，不构成测试依赖。
 - S4 的 eligible 口径是 S5 之前的基线（订单/hold/证件）；S5 引入同意绑定后，必须显式更新受影响的 S4 回归并重跑，不得静默改变 S4 已验收断言；更新须在该段证据中列出。
@@ -170,7 +171,7 @@ tests/rental-network-guard.cjs   # 仅测试 guard；同样不得监听
 
 ### 4.1 S1 持久单飞与 CAS
 
-**入口**：本卡 v3 提交为父；契约 blob 未变；工作树干净；无额外文件。
+**入口**：本卡 v3 最终提交为父（SHA 以交付报告为准）；契约 blob 未变；工作树干净；无额外文件。
 
 **允许文件（唯一）**：
 
@@ -543,7 +544,7 @@ tests/leasing.test.cjs
 ## 9. 未验证与不可验证（本卡）
 
 - 本轮只做卡文修订（v3）：未运行任何测试、未改代码/测试/Store、未安装依赖、未开 HTTP/UI、未接真实支付/云/设备。
-- 契约行为逐条来自静态阅读；`domain.js`/`wechat-pay.js`/Store 行号均以基线 `3bf5951`（与 v3 父提交 `eabe780` 运行时代码零 diff）为准。
+- 契约行为逐条来自静态阅读；`domain.js`/`wechat-pay.js`/Store 行号均以基线 `3bf5951`（与输入基线 `eabe780` 运行时代码零 diff）为准。
 - 离线只能验证 `LocalStore` 事务语义；真实云事务冲突/CAS/权限/索引/20000 条上限、真实商户 query 状态、真机与 HTTP 均不可验证。
 - 云评审材料未取得本机可读副本：`/workspace/artifacts/SEVEN-TASKS-REVIEW-2026-11-19/DISPATCH.md`、`REVIEW.md`；已核对 `/workspace/…`（及 `C:\workspace\…`、`D:\workspace\…`）、`D:`–`L:` 的 `\workspace\artifacts\SEVEN-TASKS-REVIEW-2026-11-19`、项目目录递归、`C:\artifacts`/`D:\artifacts`/`E:\artifacts`/`F:\artifacts`、`%TEMP%\codex-artifact-session-*`、`C:\Users\Administrator\.dsh`/`AppData\Roaming`/`ProgramData`，以及本仓库全 refs 路径检索；均无。**不声称已读、已逐项闭合或已获批准**。
 - v2 的 `STAGED-CARDS-REVIEW-2026-11-19` 与 v1 的 `C1-epoch-RENTAL-retry-review` 云材料同样缺失；不声称读过。

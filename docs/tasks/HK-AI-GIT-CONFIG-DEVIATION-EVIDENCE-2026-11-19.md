@@ -184,7 +184,7 @@
 
 ## 12. 独立复核指引
 
-1. **哈希复核**：`Get-FileHash <file> -Algorithm SHA256`；摘录哈希对象为附录围栏内原文（UTF-8，不含围栏行）。
+1. **哈希复核**：`Get-FileHash <file> -Algorithm SHA256`；摘录哈希对象为附录围栏内原文（UTF-8，不含围栏行，行尾以仓库 blob 的 LF 为准；本机 `core.autocrlf=true`，检出可能变 CRLF，哈希前需归一化）。
 2. **现状复核**（只读）：
    ```powershell
    git config --show-origin --show-scope --get-all safe.directory

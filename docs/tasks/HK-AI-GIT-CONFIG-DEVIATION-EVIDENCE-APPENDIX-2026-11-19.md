@@ -5,6 +5,7 @@
 - 调查性质：只读；未修改/回退任何 Git 配置；未提交、未运行测试、未触碰设备/支付/业务云。
 - 脱敏规则：不输出任何 credential/token/密码/私钥值；不输出用户身份键（`user.name`/`user.email`）的具体值；`credential.helper` 仅保留机制名。
 - 哈希对象：每节围栏内**原文**（UTF-8 字节，不含围栏行）。复核：`Get-FileHash <摘录文件> -Algorithm SHA256`。
+- 行尾：仓库 blob 内为 LF；Windows 检出因 `core.autocrlf=true`（system 默认）可能变为 CRLF。**摘录哈希以仓库 blob（LF）为准**；在检出工作树上直接哈希前，请先按 LF 归一化。
 - 推断级别：L0 字节快照 / L1 直接输出 / L2 行为观察 / L3 机制推断 / L4 推测（不采用），定义见主报告 §6。
 
 ---

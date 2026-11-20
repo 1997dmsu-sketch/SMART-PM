@@ -84,29 +84,39 @@ fetch 告警的处置：远端事实一律以 `git ls-remote`（网络权威）�
 
 A 轮已通过，不重派；本清单不重复 A 的内容。
 
-## 2. 唯一文件白名单（S1 实施提交的允许集）
+## 2. 文件白名单（S1 实施提交的允许集：4 个必需 + 2 个条件）
 
-S1 实施提交（可多个追加提交，但累计 diff）只允许命中以下文件；`git diff --name-only <X>..tip` 必须与下表完全一致（缺一或多一即 BLOCKED）：
+S1 实施提交（可多个追加提交，但累计 diff）只允许命中下表文件；判定分两类，**不得把“白名单”等同于“全部必须改动”**：
+
+- **必需改动（4 个）**：`cloudfunctions/leasing/domain.js`、`admin-web/tests/leasing.test.mjs`、`tests/leasing.test.cjs`、新增 `tests/rental-network-guard.cjs`。累计 diff 缺任一即未完成（BLOCKED）。
+- **条件允许（2 个）**：`cloudfunctions/leasing/store.js`、`admin-web/lib/store.mjs`。**未改动不构成缺件**，不得因这两份 Store 零 diff 判为缺件/未完成；只有现有 `transact` 语义确实不足时才允许改，且必须先在 S1 入口取得书面理由与批准（范围 + tip SHA）。
+- 除下表文件外，任何文件出现在 `git diff --name-only <X>..tip` 即 BLOCKED（白名单是**上限**，不是必须集）。
 
 ```text
+# 必需（4；缺一即未完成）
 cloudfunctions/leasing/domain.js
-cloudfunctions/leasing/store.js        # 默认零改动；改则须先书面说明理由并获批
-admin-web/lib/store.mjs                # 默认零改动；同上
 admin-web/tests/leasing.test.mjs
 tests/leasing.test.cjs
 tests/rental-network-guard.cjs         # 新增；仅测试 guard
+
+# 条件允许（2；默认零改动，未改不算缺件；改则须书面理由 + 批准）
+cloudfunctions/leasing/store.js
+admin-web/lib/store.mjs
 ```
 
-| 文件 | 允许改动 | 默认预期 |
-|---|---|---|
-| `cloudfunctions/leasing/domain.js` | `paymentRequest` 状态机、单事务 claim+sent、complete CAS、失败关闭、内部 helper | 必改 |
-| `cloudfunctions/leasing/store.js` | 仅当 `transact` 选项/写入形状确需 | **零改动**（现有 `writeAudit:false` 已够用） |
-| `admin-web/lib/store.mjs` | 仅同上 | **零改动** |
-| `admin-web/tests/leasing.test.mjs` | guard 先装 + S1 用例 + 既有用例改造 | 必改 |
-| `tests/leasing.test.cjs` | guard 先装（现有 3 个断言不变） | 必改 |
-| `tests/rental-network-guard.cjs` | 新增 guard（加载期/运行期网络拦截） | 新增 |
+| 文件 | 类别 | 允许改动 | 默认预期 |
+|---|---|---|---|
+| `cloudfunctions/leasing/domain.js` | **必需** | `paymentRequest` 状态机、单事务 claim+sent、complete CAS、失败关闭、内部 helper | 必改 |
+| `cloudfunctions/leasing/store.js` | **条件** | 仅当 `transact` 选项/写入形状确需 | **零改动；未改不算缺件** |
+| `admin-web/lib/store.mjs` | **条件** | 仅同上 | **零改动；未改不算缺件** |
+| `admin-web/tests/leasing.test.mjs` | **必需** | guard 先装 + S1 用例 + 既有用例改造 | 必改 |
+| `tests/leasing.test.cjs` | **必需** | guard 先装（现有 3 个断言不变） | 必改 |
+| `tests/rental-network-guard.cjs` | **必需（新增）** | 新增 guard（加载期/运行期网络拦截） | 新增 |
 
-`store.js` / `admin-web/lib/store.mjs` 若被改动，S1 证据必须给出“为什么现有 transact/CAS 语义不足”的具体失败证据，否则视为超范围（G4 FAIL）。**不得**以“顺手统一”改动这两份 Store。
+两份 Store 的判定口径（S1 证据必须**按名**列出 `git diff --name-only` 结果并注明状态）：
+
+- **未改**：合法，记为“条件允许/未改”，**不得判缺件**、不得阻塞 PASS。
+- **已改**：必须同时给出“现有 transact/CAS 语义不足”的具体失败证据 + 书面理由 + 批准记录（范围 + tip SHA），否则视为超范围（G4 FAIL）；**不得**以“顺手统一”改动这两份 Store。
 
 ## 3. S1 必须实现的行为（逐条落位）
 
@@ -368,7 +378,7 @@ node --test tests/leasing.test.cjs
 ### 9.3 交付报告必须包含
 
 1. run ID、完整 SHA、父 SHA、分支、`ls-remote` 实测远端 tip；
-2. `git diff --stat`、`git diff --name-only`（逐项对照 §2 白名单）；
+2. `git diff --stat`、`git diff --name-only`（逐项对照 §2：4 个必需 + 2 个条件；两份 Store 按名注明“未改（条件允许）”或“已改（附理由/批准）”）；
 3. 逐文件命令、工作目录、exit code、执行/通过/失败/跳过计数；
 4. 每个用例的唯一 code/status、写集、audit、适配器计数；
 5. 契约锚点逐项对照（§4.1/§4.2/§4.4/§4.5/§7.1，以契约 blob `94d61ed…` 为准）；
@@ -382,7 +392,7 @@ node --test tests/leasing.test.cjs
 | G1 | I1–I8 相关不变量成立：确认失败禁止重发、sent 保留、有效 hold 保留 |
 | G2 | create/query 计数与 §4 表逐项一致；无隐藏 create/重试循环；create 只在 commit 后一次 |
 | G3 | W0/WP/WP\* 逐项成立；`admin_audit` 与写集一致（WP\* 才允许 +1） |
-| G4 | 仅改 §2 白名单；契约卡/任务卡/`index.js`/`wechat-pay.js`/UI 零 diff |
+| G4 | 仅改 §2 白名单（上限）：4 个必需文件齐备；两份 Store **未改视为“条件允许/未改”不判缺件**；若改须附失败证据 + 书面理由 + 批准；契约卡/任务卡/`index.js`/`wechat-pay.js`/UI 零 diff |
 | G5 | 只运行 §9.1 两条命令；无 glob/`npm test`/HTTP |
 | G6 | 追加提交、普通 push、`ls-remote` 核对；无 amend/rebase/reset/squash/force/merge；无全局 Git 配置 |
 | G7 | 不部署、不接真实支付、不开 HTTP/UI、不连设备/业务云、不安装依赖 |

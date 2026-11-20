@@ -2,6 +2,8 @@
 
 > 状态：**前置核对/文档准备；不授权实施 S2；不改 `403970a` 实现；待 Codex 独立复审。**
 >
+> 本轮修订（2026-11-20）：Codex 已独立复审前置清单通过；本文件仅修正 `observedAt` 引用并关闭原 `OPEN-S2-1`，不重开设计、不实施 S2、不重跑 S1。本轮 run `hrun-mwoh29xx-355eeb`（同 session），固定输入 `3c3e439ae98b29f525972d993141af454a657d8d`（父 `d9ef8d2bfbc91b248fd57e5a629722d4f7a97720`；原起点 `6f96fed9bd478192c8bbffeb52f47c90df89939e`）。
+>
 > 文件性质：**执行清单，不是审批卡/授权书**。不重开设计，不要求重复批准 E1/E2/E3/P9/D4/D5/D6；只核对 S2 原定范围、依赖、准确白名单、逐例验收、guard 复用/预加载/控制与未决项。
 >
 > 执行者：DSH agent `lead`（deepseek-flash）；调度工作区 `SMART-PM-H3`。
@@ -20,13 +22,13 @@
 
 | 项 | 结论 |
 |---|---|
-| 前置核对结果 | **READY（可交 Codex 复审）**：固定对象/父链/远端一致；S2 原卡契约可落地；白名单、预算、guard 复用方式明确。 |
+| 前置核对结果 | **PASS（Codex 本轮独立复审通过）**；本轮仅回写 `observedAt` 裁定并关闭 `OPEN-S2-1`，待 Codex 确认本轮引用修正。固定对象/父链/远端一致；S2 原卡契约可落地；白名单、预算、guard 复用方式明确。 |
 | 已批准规则 | E1 18/27、E2、E3、P9、D4a/D4b/D5、D6 按授权 r2 §3.1 视为已批准/冻结；本文件不重开、不要求重复批准。 |
 | Stop-1 | 按调度方陈述：Codex 已独立复现 guard 8/8、定向 43/43 后通过；本任务**不重复验收、不重跑测试**。仓库内 `S1证据:L645–657` 仍为“待复审/不进入 S2”的历史状态，本轮不改写。 |
 | S2 状态 | **未开工**。本文件不是 S2 授权；S2 实施须另获“本轮单独 S2 授权”并明确起点。 |
-| 当前阻断 | 无 **BLOCKED**。有 1 个非阻断待确认项（`observedAt` 相等语义/Q15 引用偏差）与若干条件性阻断（§6）。 |
-| 本任务改动 | 仅新增本文件；未改代码/测试/设计/任务卡/勘误/Store/package。 |
-| 复审请求 | 请 Codex 只审本清单与 S2 前置条件；不重审 G1/G2/G3/O10/G4/07B，不重审已批准设计。 |
+| 当前阻断 | 无 **BLOCKED**；原 `OPEN-S2-1` 已按本轮 Codex 裁定关闭：**相等允许、递减禁止**，沿用现有非递减语义；`Q15` 是 halt/恢复规则，不作为时间相等依据。其余 D1/D8/D10/D11/D9 仍按 §6 记录（不阻断 S2 或属后续阶段）。 |
+| 本任务改动 | 首轮仅新增本文件；本轮仅修改本文件；未改代码/测试/设计/任务卡/勘误/Store/package。 |
+| 复审请求 | 请 Codex 复审本轮引用修正（§3.2/§3.5/§4 S2-14/§6.1）；不重审已通过的清单主体、不重审 G1/G2/G3/O10/G4/07B、不重审已批准设计。 |
 
 ## 1. 固定输入、父链与远端（只读核对）
 
@@ -53,9 +55,11 @@
 | `84a9a555aca72bb8c60646c1eef8f408f234004f` | `a1885092d389681a73bc99e15ba9946da283adbd` | S0 状态记录 |
 | `403970a035be44bb04d0ce5c01154a103a5ec5c5` | `84a9a555aca72bb8c60646c1eef8f408f234004f` | S1 契约层实现 |
 | `6f96fed9bd478192c8bbffeb52f47c90df89939e` | `403970a035be44bb04d0ce5c01154a103a5ec5c5` | Stop-1 guard 补证 |
+| `d9ef8d2bfbc91b248fd57e5a629722d4f7a97720` | `6f96fed9bd478192c8bbffeb52f47c90df89939e` | 首轮 preflight 文档提交 |
+| `3c3e439ae98b29f525972d993141af454a657d8d` | `d9ef8d2bfbc91b248fd57e5a629722d4f7a97720` | 本轮固定输入（全 SHA 精确化） |
 
 - `git merge-base --is-ancestor` 三项均 exit 0：`8e15960 → 6f96fed`、`ed6f862 → 6f96fed`、`403970a → 6f96fed`。
-- `git rev-list --count --merges 8e15960..6f96fed` = **0**；`--count` = **6**，全部线性追加。
+- `git rev-list --count --merges 8e15960..6f96fed` = **0**；`--count` = **6**。本轮固定输入 `3c3e439` 继续该链：`6f96fed → d9ef8d2 → 3c3e439`，`--merges` 仍为 **0**、`--count` = **8**，全部线性追加。
 
 ### 1.3 远端与工作树
 
@@ -65,10 +69,10 @@
 | `refs/heads/codex/h4c-c1-stop1-guard-evidence` | `6f96fed9bd478192c8bbffeb52f47c90df89939e` | 与补证一致 |
 | `refs/heads/docs/h4c-c1-s0-s1-authorization` | `ed6f862dac5307b0f027a83570fd8a0cb8da1a09` | 与授权清单一致 |
 | `refs/heads/docs/h4c-c1-staged-implementation-task` | `8e15960d3b2bc87a6dec7a5f267907f646713547` | 与任务卡输入一致 |
-| `refs/heads/codex/h4c-c1-s2-preflight` | 推送前不存在 | 本任务新建 |
+| `refs/heads/codex/h4c-c1-s2-preflight` | `3c3e439ae98b29f525972d993141af454a657d8d`（本轮修订前 tip） | 初始推送后 tip；父 `d9ef8d2bfbc91b248fd57e5a629722d4f7a97720` |
 
 - `git -c http.sslBackend=openssl fetch origin`：**exit 0**（见 §7 的首次 exit 255 说明）；fetch 后上述远端值未变，无前移/分叉。
-- 工作树：`HEAD=6f96fed…`；`branch=codex/h4c-c1-s2-preflight`；`HEAD` 父 = `403970a…`；`git status --porcelain` 为空；无 upstream。
+- 工作树：初始 `HEAD=6f96fed…`；本轮修订前 `HEAD=3c3e439…`（父 `d9ef8d2bfbc91b248fd57e5a629722d4f7a97720`）；`branch=codex/h4c-c1-s2-preflight`；`git status --porcelain` 为空；upstream `+0/-0`。
 - 同目标重复运行检查：`~/.dsh-baton/host-runs` 中仅 `hrun-mwog6c51-07fec0` 命中本任务；未发现其他 running/queued 同目标 run；创建前无同名本地/远端分支、无同名 worktree、无相关定时任务。
 
 ### 1.4 文档身份（文件字节 = 固定 blob）
@@ -122,6 +126,7 @@
 - **链规则**：`EmptyProof`（head=null/anchor=null/E1..9=null）；`ChainProof`（anchor valid、head valid、1..N canonical、`previous` 正确、N+1..9 null）；N=9 再 append → `EVIDENCE_INVALID`（`卡:L658`）。
 - **删除调用方布尔**：`hasExistingEvidence` 删除，测试/production 静态扫描 0 命中（`卡:L659`）。
 - **CAS 保留**：现有 `expectedHead` 语义保留；首条不再依赖调用方布尔（`卡:L660`）。
+- **时间语义（本轮 Codex 裁定）**：`observedAt` **允许相等**、**禁止递减**；沿用现有实现非递减语义；越界（`>now` 或 `<floor`）→ `EVIDENCE_STALE`。原卡 `L677` 的“递减/越界 → STALE”保留；其括号中的 Q15 引用按本轮裁定更正——Q15 是 halt/恢复规则，不作为时间相等依据（`卡:L677`；`代码:L417`）。
 - **事务内重读 head**；首条要求 anchor/head/E1..9 全空；非首条要求 anchor/head/1..N 完整、N+1..9 空；`previous` 全字段复核（schema/ID/org/job/seq/observedAt/K3/HMAC）（`卡:L665`）。
 - **不写 domain**；不 adopt/重编号/删除孤儿；任一失败在返回写之前抛错（`卡:L666`）。
 - **错误码**：孤儿/断链/anchor 不配 → `EVIDENCE_CHAIN_BROKEN`；CAS → `EVIDENCE_HEAD_CONFLICT`；seq 预占 → `CONFLICT`；N=9 → `EVIDENCE_INVALID`（`卡:L668`、`卡:L403–425`）。
@@ -162,13 +167,14 @@
 
 - `evidenceAppendRefs(job, head, domainHead, config)` 仍为旧签名，返回 **4–5** refs（domain2 + head + 下一条 evidence + 可选 previous），不是 18（`代码:L323–344`）。
 - `appendEvidenceWrites` 仍接受 `hasExistingEvidence`（3 处：`代码:L354`、`L382`、`L395`）；无 anchor 写集、无 proof/audit/fence/marker/plan refs。
+- 现有 `appendEvidenceWrites` 仅在 `observedAt < previous.observedAt` 时判 `STALE`（相等允许、递减拒绝），与本轮裁定一致；S2 保留该非递减语义（`代码:L417`）。
 - C1 测试 **43** 项（`^test(` 计数）；`face-h4c-evidence.test.mjs` 中 `.listen(`=0、`fetch(`=0。
 - 两个 helper 仅被 C1 测试调用；`store.mjs`/`server.mjs`/`routes.mjs` 无调用点。
 - 因此 S2 是**helper + 测试的定向重写**，不是新增 Store 路径；S2 测试改动须在证据中列出保留/改写/新增项，不得只报最终绿灯（`卡:L552–557`）。
 
 ## 4. 逐例验收清单（Stop-2）
 
-> 依据：原卡 §6 测试范围、§3.4 错误码、§3.5 零写、§3.6 并发、§11.1 F 矩阵、§12 Stop-2、授权 §7–§8。S2 实施时逐条给出 PASS/FAIL/未测，不得只写“已通过”。
+> 依据：原卡 §6 测试范围、§3.4 错误码、§3.5 零写、§3.6 并发、§11.1 F 矩阵、§12 Stop-2、授权 §7–§8、§6.1 本轮时间裁定。S2 实施时逐条给出 PASS/FAIL/未测，不得只写“已通过”。
 
 | ID | 验收项 | 通过标准 | 依据 |
 |---|---|---|---|
@@ -185,7 +191,7 @@
 | S2-11 | N=9 再 append | `EVIDENCE_INVALID` | `卡:L676`、`卡:L415` |
 | S2-12 | `still_unknown` 第 8 条后 | E9 仍为 null（`STILL_UNKNOWN_MAX_SEQUENCE=8`） | `卡:L676`、`代码:L34` |
 | S2-13 | `previous` 全字段复核 | schema/ID/org/job/seq/observedAt/K3/HMAC 任一损坏 → `EVIDENCE_CHAIN_BROKEN` | `卡:L665`、`卡:L677` |
-| S2-14 | observedAt 递减/越界 | `EVIDENCE_STALE`；**相等是否允许见 §6 OPEN-S2-1，不得自行裁定** | `卡:L677` |
+| S2-14 | observedAt 非递减 | **相等允许**；**递减 → `EVIDENCE_STALE`**；越界（`>now` 或 `<floor`）→ `EVIDENCE_STALE`；S2 保留现有非递减语义 | 本轮 Codex 裁定；`卡:L677`；`代码:L417` |
 | S2-15 | expectedHead 过期 / head 被删 | 过期 → `EVIDENCE_HEAD_CONFLICT`；head 删除但仍带 expectedHead → `EVIDENCE_CHAIN_BROKEN` | `卡:L678` |
 | S2-16 | 每个负向零写（helper 层） | 对输入 `state` 做 `structuredClone`，调用前后 deepEqual；抛错前不返回任何 write；错误码一致；断言无半批写。Store/LocalStore 文件级零写归 S4 M 矩阵 | `卡:L429–436`（第 2/6 项）、`卡:L680` |
 | S2-17 | 无布尔残留 | production/测试静态扫描 `hasExistingEvidence` 0 命中 | `卡:L659`、`卡:L541`、`卡:L680` |
@@ -235,15 +241,25 @@
 
 ## 6. 未决项、条件性阻断与报告规则
 
+原 `OPEN-S2-1` 已关闭（§6.1）；下表只列仍未决/范围外项。
+
 | ID | 事项 | 状态/处置 |
 |---|---|---|
-| OPEN-S2-1 | `observedAt` 相等（`==`）是否允许。原卡括号写“按已冻结 Q15”，但 `设计:L486` 的 Q15 是 **halt 状态机/恢复授权**，不是 observedAt；本次只读检索未检得 observedAt 相等裁定 | **非阻断待确认**。S2 不得自行选择断言；授权时请 Codex 明确。若视为契约缺口 → 该项升级为 BLOCKED，先裁定再写测试。原卡已允许“若未冻结列待裁”（`卡:L677`）。 |
 | STATE-1 | 仓库内 `S1证据:L645–657` 仍写 Stop-1 待复审；调度方陈述 Codex 已独立复现 8/8 + 43/43 后通过 | **记录差异，不重开**。本任务按外部结论引用，不重跑、不补写通过记录；需要入库时另行授权。 |
 | D1 | 云 `PARALLEL-DISPATCH.md`/`REVIEW.md` 本机不可读 | 不阻断 S2；保持 UNKNOWN，不声称已闭合（`卡:L962`） |
 | D8 | N01–N142 与“工具另立卡”的测试归属 | 阻断 S6，不阻断 S2（`卡:L970`） |
 | D10 | `#persist` 私有会破坏 `verification.test.mjs:381` | 阻断 S4，不阻断 S2（`卡:L972`） |
 | D11 | 真实 Cloud 并发未验证 | C3；S2 证据须标注“未验证”（`卡:L973`） |
 | D9 | S2 实施分支名/起点未派单 | 本 preflight 分支**不得**复用为 S2 实施分支；S2 起点以单独授权写明的完整 SHA 为准 |
+
+### 6.1 本轮 Codex 裁定（关闭原 `OPEN-S2-1`）
+
+| 项 | 内容 |
+|---|---|
+| 裁定 | `observedAt` **允许相等**；**禁止递减**；沿用现有实现非递减语义。 |
+| 依据 | 本轮 Codex 独立复审前置清单通过后的明确裁定；`Q15` 是 halt/恢复规则，**不能**用作时间相等依据（`设计:L486`）。 |
+| 落点 | §3.2 时间语义；§3.5 基线；§4 `S2-14`。S2 实施时唯一时间断言：相等接受、递减拒绝、越界 `STALE`。 |
+| 边界 | 不重开既有设计；不改 `403970a`；不重跑 S1；不实施 S2。 |
 
 **条件性阻断（出现即停手/报告）：**
 
@@ -253,7 +269,7 @@
 | CB2 | 固定对象/远端前移或分叉 | 停手报告；不 reset/merge/rebase/force，不替换固定对象 |
 | CB3 | Stop-1 通过结论不可用/被撤回 | 停手；不重复验收、不自行判定 |
 | CB4 | E1/E2/D6 被改判或重开 | 停手待裁；不自行改 17/18 或集合名 |
-| CB5 | OPEN-S2-1 被 Codex 认定为契约缺口 | 该项 BLOCKED；先裁定再写断言 |
+| CB5 | `observedAt` 语义被后续改判 | 停手待裁；不自行改“相等允许、递减禁止”的裁定 |
 | CB6 | 实施中发现新的实质契约矛盾 | **BLOCKED**：提交最小反例与影响，交 Codex 裁定；不改设计/裁定 |
 | CB7 | guard 不可用、哈希不符或 8/8 控制失败 | **BLOCKED**；不得无 guard 重跑 |
 | CB8 | 新增被加载文件未进非监听集 | Stop-2 失败；先补授权范围 |
@@ -317,9 +333,9 @@ git -C <REPO> ls-remote origin refs/heads/<S2_BRANCH>
 
 ## 8. 停止点与交接
 
-- **本任务停止点**：提交并普通推送本文件 → 交 Codex 独立复审 → 停手。**不实施 S2、不改 `403970a`、不进入 S3。**
+- **本任务停止点**：本轮仅改引用并关闭 `OPEN-S2-1`；提交并普通推送本文件 → 交 Codex 复审 → 停手。**不实施 S2、不改 `403970a`、不重跑 S1、不进入 S3。**
 - **Stop-2 通过条件**（原卡）：18 refs（含 proof1）；anchor/1..9/完整链；无布尔；缺 proof 负向拒绝；零写（`卡:L937`）。授权清单同款（`授权:L497`）。
-- **Stop-2 复审输入**：S2 diff + refs/链测试 + 零写 + guard 计数 + 证据小节 + 未验证单列。
+- **Stop-2 复审输入**：S2 diff + refs/链测试 + 零写 + `observedAt` 非递减用例 + guard 计数 + 证据小节 + 未验证单列。
 - **下一段**：Stop-2 通过后，只能“申请”S3 的本轮单独授权；没有该授权不得开工（`授权:L503`）。本文件不自批、不宣称 C1/G1 通过。
 - **不重复验收**：G1/G2/G3/O10/G4/07B 门禁不在本任务范围；Stop-1 已由 Codex 独立复现，不重跑。
 
@@ -330,9 +346,9 @@ git -C <REPO> ls-remote origin refs/heads/<S2_BRANCH>
 - 未访问真实 Cloud/K3/设备/Provider/支付/生产网络；未启动 HTTP/UI；未部署；未处置风险。
 - 未读云 `PARALLEL-DISPATCH.md`/`REVIEW.md` 正文；不声称与云端派单逐项一致。
 - 未验证真实 Cloud 并发（D11/C3）；未验证 S2 的 18 refs 实现（尚未写）。
-- Stop-1 的 8/8、43/43 是外部结论/历史证据，本任务未重跑、未独立复现。
+- Stop-1 的 8/8、43/43 是外部结论/历史证据，本任务未重跑、未独立复现；本轮亦未重跑 S1/guard。
 - `fetch` 首次因文件权限失败（exit 255），文件策略调整后重跑成功；该环境事实已如实记录，不影响固定 SHA 核对。
-- 未对 `6f96fed` 之后的远端做“未来变化”保证；复审前应以 `ls-remote` 再核对一次。
+- 未对 `3c3e439` 之后的远端做“未来变化”保证；复审前应以 `ls-remote` 再核对一次。
 
 ## 10. 固定 SHA 文件链接
 
@@ -351,14 +367,14 @@ git -C <REPO> ls-remote origin refs/heads/<S2_BRANCH>
 ## 11. 交付回报字段（提交后由最终回复填写）
 
 ```text
-任务：HK-AI-04-H4C-C1-S2-PREFLIGHT-2026-11-20（仅文档准备）
+任务：HK-AI-04-H4C-C1-S2-PREFLIGHT-2026-11-20（仅文档准备；本轮仅引用修正/关闭 OPEN-S2-1）
 执行者：DSH agent lead（deepseek-flash）
-run/session：hrun-mwog6c51-07fec0 / session-fde65175-f9f9-41e1-9735-e4c4006578e3
+run/session：hrun-mwoh29xx-355eeb / session-fde65175-f9f9-41e1-9735-e4c4006578e3
 工作树/分支：宇宙智联/.tmp/c1-s2-preflight / codex/h4c-c1-s2-preflight
-固定输入/父：403970a035be44bb04d0ce5c01154a103a5ec5c5 / 6f96fed9bd478192c8bbffeb52f47c90df89939e
+固定输入/父：3c3e439ae98b29f525972d993141af454a657d8d / d9ef8d2bfbc91b248fd57e5a629722d4f7a97720（原实现/补证：403970a035be44bb04d0ce5c01154a103a5ec5c5 / 6f96fed9bd478192c8bbffeb52f47c90df89939e）
 最终提交：<fill-after-commit>
 文件清单：docs/tasks/HK-AI-04-H4C-C1-S2-PREFLIGHT-2026-11-20.md（仅此一个）
-命令/exit：见 §7.1（fetch 首次 255、重跑 0；worktree add 0；diff/show --check 0）
-未验证：S2 代码、guard 重跑、测试、真实 Cloud/设备/支付/HTTP/UI
+命令/exit：见 §7.1；本轮 fetch 0、ls-remote 0、diff/show --check 0、push 0
+未验证：S2 代码、S1/guard 重跑、测试、真实 Cloud/设备/支付/HTTP/UI
 停止点：本文件推送后停手，交 Codex 独立复审；不实施 S2、不进入 S3、不自批
 ```

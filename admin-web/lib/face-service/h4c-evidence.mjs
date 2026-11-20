@@ -1354,6 +1354,310 @@ export function AdmissionValid(admission, refs, writes, config) {
   }
 }
 
+/* ---- S3 authorization layer: precheck -> finalWriteSet -> final ticket ---- */
+
+const PRECHECK_FIELDS = Object.freeze([
+  "kind", "operation", "writeEpoch", "admissionPolicyVersion", "writerSetDigest", "proofId",
+]);
+const RUNTIME_OPERATIONS = Object.freeze(["genesis", "append"]);
+const C1_GENESIS_COLLECTIONS = Object.freeze([
+  H4C.anchors, H4C.evidence, H4C.evidenceHeads,
+]);
+const C1_APPEND_COLLECTIONS = Object.freeze([H4C.evidence, H4C.evidenceHeads]);
+const AUDIT_ACTION_GENESIS = "h4c.evidence.genesis";
+const AUDIT_ACTION_APPEND = "h4c.evidence.append";
+
+/**
+ * S3 stage 1: the exact six-field precheck. It carries no digest, is checked
+ * before any final write is built and is restricted to the C1 runtime
+ * whitelist (`kind="runtime"`, `operation in {genesis, append}`).
+ */
+export function validateH4cPrecheck(precheck) {
+  if (!isPlainObject(precheck)) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  const keys = Reflect.ownKeys(precheck);
+  if (keys.length !== PRECHECK_FIELDS.length) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  for (const field of PRECHECK_FIELDS) {
+    if (!Object.hasOwn(precheck, field)) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  for (const key of keys) {
+    if (typeof key !== "string" || !PRECHECK_FIELDS.includes(key)) {
+      fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+    }
+  }
+  if (precheck.kind !== "runtime") fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  if (!RUNTIME_OPERATIONS.includes(precheck.operation)) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  if (!integer(precheck.writeEpoch, 1) ||
+      !opaque(precheck.admissionPolicyVersion) ||
+      !hex(precheck.writerSetDigest) ||
+      typeof precheck.proofId !== "string" || precheck.proofId.length === 0) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  return undefined;
+}
+
+/** Re-run the D4b audit formula and force every failure to ADMISSION. */
+function assertC1AuditRecord(record, context) {
+  try {
+    validateEvidenceC1AuditRecord(record, context);
+  } catch {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+}
+
+/**
+ * Internal C1 finalWriteSet shape check. It inspects the business writes plus
+ * the one explicit audit but deliberately does not re-run the chain builder:
+ * S2 remains the single owner of anchor/head/1..9 semantics.
+ */
+function inspectC1FinalWriteSet(writes, { operation } = {}) {
+  if (!Array.isArray(writes) || ![3, 4].includes(writes.length)) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  if (!RUNTIME_OPERATIONS.includes(operation)) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  const business = [];
+  const audits = [];
+  const seen = new Set();
+  for (const item of writes) {
+    if (!isPlainObject(item)) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+    const keys = Reflect.ownKeys(item);
+    if (keys.length !== 3 || !Object.hasOwn(item, "collection") ||
+        !Object.hasOwn(item, "id") || !Object.hasOwn(item, "data")) {
+      fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+    }
+    if (typeof item.collection !== "string" || item.collection.length === 0 ||
+        typeof item.id !== "string" || item.id.length === 0 ||
+        !isPlainObject(item.data) || item.data._id !== item.id) {
+      fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+    }
+    const key = `${item.collection}/${item.id}`;
+    if (seen.has(key)) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+    seen.add(key);
+    if (item.collection === H4C_AUDIT_COLLECTION) audits.push(item);
+    else business.push(item);
+  }
+  if (audits.length !== 1) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  const expectedBusinessCount = operation === "genesis" ? 3 : 2;
+  if (business.length !== expectedBusinessCount ||
+      writes.length !== expectedBusinessCount + 1) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  const expectedCollections = operation === "genesis"
+    ? C1_GENESIS_COLLECTIONS : C1_APPEND_COLLECTIONS;
+  if (business.length !== expectedCollections.length ||
+      new Set(business.map((item) => item.collection)).size !== expectedCollections.length ||
+      business.some((item) => !expectedCollections.includes(item.collection))) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  const evidence = business.find((item) => item.collection === H4C.evidence)?.data;
+  const head = business.find((item) => item.collection === H4C.evidenceHeads)?.data;
+  if (!isPlainObject(evidence) || !isPlainObject(head) ||
+      !opaque(evidence.orgId) || !opaque(evidence.jobId) ||
+      !integer(evidence.sequence, 1, EVIDENCE_MAX_SEQUENCE) ||
+      !integer(head.lastSequence, 1) || head.lastSequence !== evidence.sequence) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  if (operation === "genesis" ? evidence.sequence !== 1 : evidence.sequence <= 1) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  const targetList = business.map((item) => `${item.collection}/${item.id}`).sort();
+  const audit = audits[0];
+  try {
+    validateH4cAuditRecord(audit.data);
+  } catch {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  const expectedAction = evidence.sequence === 1
+    ? AUDIT_ACTION_GENESIS : AUDIT_ACTION_APPEND;
+  if (audit.data.action !== expectedAction ||
+      audit.data.target !== targetList.join(", ")) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  return { business, audit, evidence, targetList, sequence: evidence.sequence };
+}
+
+/**
+ * S3 stage 2a: materialise `finalWriteSet` as the C1 business writes (3 for
+ * genesis / 2 for append) plus exactly one test-only explicit `admin_audit`.
+ * The audit must already be built by `evidenceC1AuditRecord` for this
+ * business target list, current sequence and trusted `now`; the helper never
+ * fabricates or appends an audit. It returns new item objects and mutates no
+ * input.
+ */
+export function h4cFinalWriteSet({
+  businessWrites, audit, orgId, jobId, sequence, now,
+} = {}) {
+  if (!opaque(orgId) || !opaque(jobId) || !integer(sequence, 1, EVIDENCE_MAX_SEQUENCE) ||
+      !integer(now)) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  if (!isPlainObject(audit) || typeof audit._id !== "string") {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  const operation = sequence === 1 ? "genesis" : "append";
+  if (!Array.isArray(businessWrites) ||
+      businessWrites.length !== (operation === "genesis" ? 3 : 2)) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  const combined = [
+    ...businessWrites,
+    { collection: H4C_AUDIT_COLLECTION, id: audit._id, data: audit },
+  ];
+  const inspected = inspectC1FinalWriteSet(combined, { operation });
+  if (inspected.evidence.orgId !== orgId || inspected.evidence.jobId !== jobId ||
+      inspected.sequence !== sequence) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  assertC1AuditRecord(audit, {
+    orgId, jobId, targetList: inspected.targetList, sequence, now,
+  });
+  return combined.map((item) => ({
+    collection: item.collection, id: item.id, data: item.data,
+  }));
+}
+
+/**
+ * Rebuild the exact 18-ref C1 set from the precheck + audit inputs and compare
+ * it to the caller's refs. `h4cRefsDigest` sorts without de-duplicating; this
+ * comparison is where a removed, added, replaced or duplicated ref is refused.
+ */
+function assertCanonicalC1Refs(refs, { job, proofId, writeEpoch, auditId, config }) {
+  assertC1AppendRefs(refs);
+  for (const item of refs) {
+    if (Reflect.ownKeys(item).length !== 2 ||
+        !Object.hasOwn(item, "collection") || !Object.hasOwn(item, "id")) {
+      fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+    }
+  }
+  const expected = evidenceAppendRefs({
+    job, expectedHead: null, proofId, writeEpoch, auditId, config,
+  });
+  const expectedKeys = new Set(expected.map((item) => `${item.collection}/${item.id}`));
+  if (refs.length !== expected.length) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  for (const item of refs) {
+    if (!expectedKeys.has(`${item.collection}/${item.id}`)) {
+      fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+    }
+  }
+  return refs;
+}
+
+/**
+ * S3 stage 2b: mint the final ten-field admission after `finalWriteSet` is
+ * fixed. The ticket signs the six precheck fields, both digests and the
+ * explicit JSON `operationAuthDigest:null`; it never contains itself.
+ */
+export function mintH4cAdmission({ precheck, refs, writes, config, now } = {}) {
+  const cfg = normalizedConfig(config);
+  if (!integer(now)) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  validateH4cPrecheck(precheck);
+  const inspected = inspectC1FinalWriteSet(writes, { operation: precheck.operation });
+  assertC1AuditRecord(inspected.audit.data, {
+    orgId: inspected.evidence.orgId,
+    jobId: inspected.evidence.jobId,
+    targetList: inspected.targetList,
+    sequence: inspected.sequence,
+    now,
+  });
+  assertCanonicalC1Refs(refs, {
+    job: { orgId: inspected.evidence.orgId, _id: inspected.evidence.jobId },
+    proofId: precheck.proofId,
+    writeEpoch: precheck.writeEpoch,
+    auditId: inspected.audit.id,
+    config: cfg,
+  });
+  const refKeys = new Set(refs.map((item) => `${item.collection}/${item.id}`));
+  for (const item of writes) {
+    if (!refKeys.has(`${item.collection}/${item.id}`)) {
+      fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+    }
+  }
+  const admission = {
+    kind: precheck.kind,
+    operation: precheck.operation,
+    writeEpoch: precheck.writeEpoch,
+    admissionPolicyVersion: precheck.admissionPolicyVersion,
+    writerSetDigest: precheck.writerSetDigest,
+    proofId: precheck.proofId,
+    refsDigest: h4cRefsDigest(refs),
+    writesDigest: h4cWritesDigest(writes),
+    operationAuthDigest: null,
+    ticket: "",
+  };
+  admission.ticket = h4cAdmissionTicketDigest(admission, cfg);
+  if (!AdmissionValid(admission, refs, writes, cfg)) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  return admission;
+}
+
+/**
+ * Verify a final admission against the refs and finalWriteSet bytes it claims.
+ * All shape/binding/digest/ticket/target-list errors are ADMISSION errors; an
+ * independently supplied precheck, when present, must match the six signed
+ * fields exactly (a proofId drift is therefore an admission error, not PROOF).
+ */
+export function validateH4cAdmission({
+  admission, refs, writes, config, precheck,
+} = {}) {
+  const cfg = normalizedConfig(config);
+  if (!isPlainObject(admission)) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  if (precheck !== undefined) {
+    validateH4cPrecheck(precheck);
+    for (const field of PRECHECK_FIELDS) {
+      if (admission[field] !== precheck[field]) {
+        fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+      }
+    }
+  }
+  const inspected = inspectC1FinalWriteSet(writes, { operation: admission.operation });
+  assertC1AuditRecord(inspected.audit.data, {
+    orgId: inspected.evidence.orgId,
+    jobId: inspected.evidence.jobId,
+    targetList: inspected.targetList,
+    sequence: inspected.sequence,
+    now: inspected.audit.data.createdAt,
+  });
+  if (!AdmissionValid(admission, refs, writes, cfg)) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  assertCanonicalC1Refs(refs, {
+    job: { orgId: inspected.evidence.orgId, _id: inspected.evidence.jobId },
+    proofId: admission.proofId,
+    writeEpoch: admission.writeEpoch,
+    auditId: inspected.audit.id,
+    config: cfg,
+  });
+  return undefined;
+}
+
+/**
+ * S3 proof/admission separation: validate the admission first (ADMISSION), then
+ * the proof record itself (PROOF_REQUIRED), then the admission-to-proof target
+ * binding (ADMISSION). Fence/marker/writer-plan coverage remains S5.
+ */
+export function validateH4cAdmissionProof({
+  admission, refs, writes, state, config, precheck,
+} = {}) {
+  const cfg = normalizedConfig(config);
+  validateH4cAdmission({ admission, refs, writes, config: cfg, precheck });
+  if (!isPlainObject(state)) fail("EVIDENCE_INVALID");
+  const proof = read(state, H4C.auditProofs, admission.proofId);
+  if (!proof || proof._id !== admission.proofId) {
+    fail("EVIDENCE_CHAIN_PROOF_REQUIRED");
+  }
+  validateH4cAuditProofRecord(proof, cfg);
+  if (proof.writeEpoch !== admission.writeEpoch ||
+      proof.writerSetDigest !== admission.writerSetDigest ||
+      proof.admissionPolicyVersion !== admission.admissionPolicyVersion) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  return undefined;
+}
+
 export function createH4cGate({ config, health = {} } = {}) {
   const cfg = normalizedConfig(config);
   if (!isPlainObject(health)) fail("NOT_CONFIGURED", 503);

@@ -1066,3 +1066,179 @@ stat   1 file changed, 477 insertions(+)
 
 - 分支 `feat/h4c-c1-s2`，起点 `0b7eca2…`；普通追加提交，不改写历史；push 前后 `ls-remote` 核对完整 40 位 SHA。
 - `git diff --check` / `git show --check` 在提交时复核；最终提交 SHA、远端 tip、`git show --stat` 由交付回报给出。
+
+## S3.1 授权、身份、起点与远端（只读核对）
+
+- 本轮用户明确授权：**仅 S3**；不扩 S4，不进入 S5/S6，不推进 C2/C3/HTTP/UI/支付/设备/云/部署。
+- 执行者：DSH agent `lead`（`deepseek-flash`）。
+- 本轮真实 run/session：`hrun-mwopskb4-713cfb` / `session-d3ae4bd9-2a32-4c18-8f97-aaffd7cfa006`（2026-11-20T16:25:56+08:00 起）。
+- 独立 worktree / 分支：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-s3-implementation` / `codex/h4c-c1-s3-implementation`（推送前无本地/远端同名分支、无同名 worktree）。
+- 固定输入 / 父：`13298d4b90a2de6b8e32a6de4d14cec37eeaa2b1` / `6acceb0d354780560dfd95d9b1f0d7690e94f127`。
+  - `13298d4` 的父为 `6acceb0`；`6acceb0` 的父为 `923dbf10317798aa82a146c58173a15c0590aa6e`；父链线性，无 merge。
+  - `923dbf1` 的父为 `0b7eca2a676a337b656afcfa89f1a92490828ff1`；`923dbf1` tree `372fbadf1adfeeb800625ae0660938433b878d2a`。
+- 代码与 S2 验收一致性：`git diff --name-status 923dbf1 13298d4` 仅 `A docs/tasks/HK-AI-04-H4C-C1-S3-PREFLIGHT-2026-11-20.md`（+358 行）；`admin-web` 代码/测试/设计/卡零差异。
+- 远端核对（`git fetch origin --prune` exit **0**）：
+  - `origin/codex/h4c-c1-s3-preflight-review` = `13298d4b90a2de6b8e32a6de4d14cec37eeaa2b1`（与固定起点一致）。
+  - `origin/feat/h4c-c1-s2` = `923dbf10317798aa82a146c58173a15c0590aa6e`；`origin/codex/h4c-c1-s3-preflight` = `6acceb0d354780560dfd95d9b1f0d7690e94f127`；`origin/main` = `282a20fca9f64ab80ead50372c9c3e90bf4aeba7`。
+  - 固定对象未前移/分叉，未替换输入。
+- 重复运行/排队检查：`schedule_list` 无 S3 实施定时任务；`list_agents` 仅 root；`~/.dsh-baton/host-runs` 中仅本 run `hrun-mwopskb4-713cfb`（running）命中 C1 S3 实施；前一前置/修订 run 已完成；无其他同目标 queued/running、无既有实施分支/worktree。本任务只跟踪本 run，未重复创建。
+- 工作树初始：`HEAD=13298d4…`；`branch=codex/h4c-c1-s3-implementation`；无 upstream；`git status --porcelain` 为空。
+
+## S3.2 变更文件、diff 与白名单
+
+| 动作 | 文件 | 结果 |
+|---|---|---|
+| 修改 | `admin-web/lib/face-service/h4c-evidence.mjs` | +304 行，仅新增 S3 纯 helper，无删除 |
+| 修改 | `admin-web/lib/face-service/index.mjs` | +9 行，只增 S3 re-export |
+| 修改 | `admin-web/tests/face-h4c-evidence.test.mjs` | +703 行，仅新增 S3 用例与 import |
+| 追加 | `docs/tasks/HK-AI-04-H4C-C1-STAGED-IMPLEMENTATION-EVIDENCE-2026-11-19.md` | 本节（S3） |
+
+- 代码/测试 diff（本节追加前）：`3 files changed, 1016 insertions(+), 0 deletions(-)`；无重排/删除既有代码，S2 链层与 S1 契约层原逻辑未改。
+- `git diff --check`：exit **0**，无空白错误。
+- 禁止文件零 diff（逐路径核对，均 0）：`admin-web/lib/store.mjs`、`admin-web/server.mjs`、`admin-web/lib/face-service/routes.mjs`、`admin-web/lib/h4c-collections.mjs`、设计/勘误/任务卡/授权清单、`admin-web/package.json`、lockfile/wrapper。
+- 新增入口检查：未新增 bootstrap / create-domain / initialize / Store / HTTP / 路由入口；`index.mjs` 只增 5 个纯 helper re-export。
+
+## S3.3 实现内容（纯 helper；不接 Store）
+
+| helper | 职责 | 关键约束 |
+|---|---|---|
+| `validateH4cPrecheck` | 两阶段第 1 阶段：六字段精确校验 | exact `kind, operation, writeEpoch, admissionPolicyVersion, writerSetDigest, proofId`；无 digest；缺/多/类型错/未知 operation/control kind → `ADMISSION`；fail-fast |
+| `h4cFinalWriteSet` | 两阶段第 2a 阶段：业务写 + 唯一 audit 物化 | `businessWrites` 3（genesis）/2（append）；恰好 1 条 `admin_audit`（总 4/3）；audit exact 7 字段；C1 D4b 公式；`createdAt===now`；`targetList` 排序、不含 audit、无重复；不写 domain/proof/fence/marker/plan |
+| `mintH4cAdmission` | 两阶段第 2b 阶段：finalWriteSet 固定后 mint 十字段 admission | 要求受信 `now` 与 audit.createdAt 一致；复用 `h4cRefsDigest`/`h4cWritesDigest`/`h4cAdmissionTicketDigest`/`AdmissionValid`；ticket 不含自身；`operationAuthDigest` 显式 `null` 且被签名 |
+| `validateH4cAdmission` | 终检：形状/绑定/digest/ticket/refs 18-shape | 全部失败 → `ADMISSION`；refs 每项 exact `{collection,id}`；支持独立 precheck 对比（proofId 漂移按票据/绑定错误） |
+| `validateH4cAdmissionProof` | proof 本体与 admission 错误分离 | 先 admission（`ADMISSION`）→ proof 记录缺失/`_id` 不符/HMAC/本体 → `PROOF_REQUIRED`；proof 字段与 admission 目标不符 → `ADMISSION`；不实现 fence/marker/plan 完整 CoverageValid |
+
+- 代码位置（S3 实施树）：`validateH4cPrecheck` L1375、`inspectC1FinalWriteSet` L1414、`h4cFinalWriteSet` L1490、`assertCanonicalC1Refs` L1527、`mintH4cAdmission` L1553、`validateH4cAdmission` L1603、`validateH4cAdmissionProof` L1642；`index.mjs` S3 re-export L115–L122。
+- 复用而不另造：`evidenceC1AuditId`/`evidenceC1AuditRecord`/`validateEvidenceC1AuditRecord`/`h4cAdmissionTicketDigest`/`h4cRefsDigest`/`h4cWritesDigest`/`AdmissionValid`/`assertC1AppendRefs`/`evidenceAppendRefs`。
+- 未改 S2 链语义：`evidenceAppendRefs` 仍 exact 18；`appendEvidenceWrites` 仍 3/2 业务写；anchor/1..9/head/CAS/observedAt 非递减逻辑零改动。
+- `refsDigest` 保持“只排序、不去重”；重复 ref 由 `assertC1AppendRefs`/`AdmissionValid` 拒绝，未在 digest 内静默去重；audit `targetList` 排序要求独立保留（由 `evidenceC1AuditId`/`validateEvidenceC1AuditRecord` 校验）。
+
+## S3.4 命令、测试与 guard（本轮实测）
+
+环境：Node `v24.19.0`，`win32`；PowerShell 5.1。guard 从固定提交 `6f96fed9bd478192c8bbffeb52f47c90df89939e` 以 `git archive` 提取到工作树之外临时目录（`%TEMP%\c1-s3-guard-<random>`），未修改原 guard 证据。
+
+1. 七脚本 SHA-256 校验：`SHA256SUMS` 9 行全部 **OK / 0 mismatches**：
+   - `guard.cjs` `2d013d808e8b78214db835ada611c9700d966ba07624342e26fcd637a900a8f5`
+   - `run-controls.cjs` `3fd2507aabd8eb8a7abdb284e3b59061843d9e70ad081e902d291bbe25e73643`
+   - `entry-negative.cjs` `36f8d53326ab4f270928e294ba9ec517d6efffa935ddf8145cbecfc70f2124a6`
+   - `load-negative.cjs` `ca89b38c351abcb026c71c5cd3d8fdd784acc192cb804468b29d650c49f7570f`
+   - `child-net.cjs` `3afa02dec336a12c34114ef4083f87f3b05806dec97b007587faa42aa5c158ef`
+   - `esm-sentinel.mjs` `b3fb4bef441b1b6aa4f53879af5c1dc712a8dbbb2764d7ddc77379726a671b0c`
+   - `positive.cjs` `c34225ccc8854a1720ee51985d777ad29e1c7d85860e293bebeb2f3f7268bad2`
+2. 预加载命令（加载前生效）：
+   - `NODE_OPTIONS=--require "<temp>\docs\evidence\h4c-c1-stop1-guard\guard.cjs"`
+   - `H4C_ADMIN_WEB="<S3 worktree>\admin-web"`，`H4C_GUARD_REPORT="<temp>\wrapper.report.json"`
+   - cwd `admin-web`；`node "<temp>\docs\evidence\h4c-c1-stop1-guard\run-controls.cjs"`；exit **0**。
+3. 8/8 控制全过（wrapper `total:8 failed:0`）：
+   - `negative:no-guard` exit 3；`positive:preload-sentinel` exit 0；
+   - `negative:esm-named-import` exit 0，`http.request=1`；
+   - `negative:per-entry` exit 0，63/63 入口，`blocked_calls=63`；
+   - `negative:load-before-runtime` exit 1，`load_violations=1`；
+   - `negative:subprocess-inheritance` exit 0，真实子进程 `blocked=true`、`active=true`、`network_attempts=1`、`listen_calls=0`；
+   - `positive:crypto-fs-k3-localstore` exit 0；
+   - `test:c1-targeted` exit 0，**tests 65 / pass 65 / fail 0 / cancelled 0 / skipped 0**。
+4. 实际 C1 测试进程计数器（不是控制故意拦截计数）：`listen_calls=0`、`network_attempts=0`、`dns_calls=0`、`dgram_calls=0`、`provider_calls=0`、`load_violations=0`、`blocked_calls=0`、`real_leaks=0`。
+   - 控制项自身的非零计数是负控预期（如 `http.request=1`、`blocked_calls=63`、`load_violations=1`、子进程 `network_attempts=1`），不并入测试进程。
+5. 测试范围：仅 `node --test --test-isolation=none tests/face-h4c-evidence.test.mjs`（cwd `admin-web`，guard 内）；未跑 33 个非 HTTP 全量、7 个根文件、8 个 HTTP 文件、`npm test`、任何 glob 或服务。
+6. 其他命令：`node --check`（模块/index/测试）exit 0；`git diff --check` exit 0。
+
+## S3.5 refs/writes 实测与预算
+
+| 项 | 实测 | 证据 |
+|---|---:|---|
+| C1 refs | **18** | `mintH4cAdmission`/`validateH4cAdmission` 经 `assertC1AppendRefs` + `evidenceAppendRefs` 比对；S3 正例 18 unique；S2 既有 18 用例仍通过 |
+| 首条业务写 | **3** | `S3 finalWriteSet…`：anchor+evidence+head |
+| 非首条业务写 | **2** | `S3 finalWriteSet…`：evidence+head |
+| finalWriteSet 总写 | **4 / 3** | 首条 4（3 业务+1 audit）/非首条 3（2 业务+1 audit） |
+| 新增 refs | **0** | 未改 refs 生成/预算；ticket 不落库 |
+| domain/proof/fence/marker/plan 写 | **0** | `h4cFinalWriteSet`/`inspectC1FinalWriteSet` 只允许 anchor/evidence/head + admin_audit；测试断言 |
+| finalWriteSet audit | 1（仅显式加入） | `h4cFinalWriteSet` 要求恰好 1 条；S2 helper 仍 0 条 |
+
+## S3.6 零写/不可变与合成并发
+
+- 纯 helper 不访问 Store、不写文件、不启动监听；测试在每个负向用例前对输入做 `structuredClone`，调用后 `assert.deepEqual`。
+- S3-11 专测 `S3 negative classes leave the complete input snapshot untouched`：对 precheck/audit/refs/ticket/writes/proof 六类负向，完整快照 `state/refs/precheck/ticket/写集` 调用后逐项 deepEqual；测试侧篡改副本与被测输入分开。
+- S3-20：签票后向 `finalWriteSet` 追加第二条 audit、不重签 → `ADMISSION`；重新计算 writesDigest/ticket 后仍因“恰好一条 audit”被拒；断言原始 `state/refs/precheck/ticket/写集` 不被 helper 修改。
+- S3-12 合成并发：先 `applyStateWrites` 把胜者写集应用到 state，刷新后用旧 head/旧 ticket：
+  - genesis 旧链尝试 → `EVIDENCE_CHAIN_BROKEN`；append 旧 head → `EVIDENCE_HEAD_CONFLICT`；失败前后 state deepEqual，无半写。
+  - 旧 ticket 对新写集 → `ADMISSION`；纯 helper 不自带一胜、不声称真实 Store 并发/原子回滚。
+- 边界：真实 Store 的 `transactFinal`/explicit/gate/整事务回滚、自动审计仍归 S4；完整 fence/marker/plan CoverageValid 归 S5；本节不声称已验证。
+
+## S3.7 静态/白名单核对
+
+| 扫描 | 结果 |
+|---|---|
+| 仅白名单文件变动 | 是（3 个代码/测试 + 本节证据） |
+| `store.mjs` / `server.mjs` / `routes.mjs` 零 diff | 是（0 路径） |
+| `h4c-collections.mjs` 零 diff | 是 |
+| 设计/勘误/任务卡/授权清单零 diff | 是 |
+| package/lock 零 diff | 是 |
+| 新增 K3/domain/Store/HTTP/UI/初始化入口 | 0 |
+| refs 预算改动 | 0（18 保持） |
+| `git diff --check` | exit 0 |
+| `git status --porcelain`（提交前） | 仅 3 个代码/测试文件 + 本节证据；无无关未跟踪文件 |
+
+## S3.8 S3-01..S3-20 逐项矩阵（本地实测；待 Codex 独立复审）
+
+| ID | 结果 | 本轮实测证据/说明 |
+|---|---|---|
+| S3-01 | **PASS（本地）** | `S3 precheck is exact…`：六字段缺/多/类型/未知 operation/control kind → ADMISSION；precheck 不含 digest；legacy 无 ticket → ADMISSION |
+| S3-02 | **PASS（本地）** | `S3 refs digest sorts…`：相同 18 refs 换序 digest 相同且 validate/mint 正例；增/删/替换/篡改 → ADMISSION；重复 ref digest 不去重、由 18-shape/AdmissionValid 拒绝；audit targetList 排序独立校验 |
+| S3-03 | **PASS（本地）** | `S3 writes digest binds…`：canonical sorted `{collection,id,data}`；业务写/audit 字节篡改、writesDigest 漂移 → ADMISSION |
+| S3-04 | **PASS（本地）** | `S3 finalWriteSet…`：3/2 + 恰好 1 audit = 4/3；0/2 audit、缺 audit、audit 不在 refs、targetList 不一致 → ADMISSION |
+| S3-05 | **PASS（本地）** | `S3 D4b audit formula V06-V09…`：genesis/append 的 scopeKey/action/revision/targetList/7 字段/createdAt/target 正例 |
+| S3-06 | **PASS（本地）** | 同上：scopeKey/action/revision/targetList 未排序/含 audit/重复、字段多缺、createdAt≠now、target≠join → ADMISSION |
+| S3-07 | **PASS（本地）** | `S3 ticket signs…`：原始 HMAC-SHA256 重算与 ticket 相等；domain v1；ticket 不自含；先 finalWriteSet 后签 |
+| S3-08 | **PASS（本地）** | 同上 V10–V13：显式 null 被签名；缺失/undefined/空串/任意摘要、control kind/operation、proof/precheck/epoch/refsDigest/writesDigest 不符 → ADMISSION |
+| S3-09 | **PASS（本地）** | 仅 `kind=runtime` + `operation∈{genesis,append}`；control/null 不绕授权 |
+| S3-10 | **PASS（本地）** | `S3 rejects the legacy no-ticket path…`：只有业务写无 ticket → ADMISSION；损坏链先由 S2 helper 抛 `EVIDENCE_CHAIN_BROKEN`，admission 仍验证 |
+| S3-11 | **PASS（本地，helper 层）** | `S3 negative classes…`：完整 state/refs/precheck/ticket/写集快照深比较；测试篡改副本与被测输入分开；Store 事务级零写归 S4 |
+| S3-12 | **PASS（本地，合成 helper 层）** | `S3 synthetic concurrency…`：应用胜者→刷新→genesis BROKEN、append HEAD_CONFLICT；旧 ticket 对新写集 ADMISSION；无半写；**不声称真实 Store 并发** |
+| S3-13 | **PASS（本地）** | refs=18；业务写 3/2；finalWriteSet 4/3；0 new refs；0 domain/proof/fence/marker/plan 写 |
+| S3-14 | **PASS（本地）** | §S3.7：仅白名单；Store/server/routes/设计/卡/package/lock 零 diff；无新增入口 |
+| S3-15 | **PASS（本地）** | 仅批准 C1 定向文件 + guard 控制；未跑 33+7、8 HTTP、npm/glob |
+| S3-16 | **PASS（本地）** | 七脚本 SHA256 0 mismatch；8/8 控制；测试进程计数器全 0；控制故意拦截计数已分列 |
+| S3-17 | **PASS（本地）** | 本节：命令/exit/计数、refs/writes、零写、V06–V13、S3-19/S3-20、五项裁定落点、未验证、Stop-3；不自批 |
+| S3-18 | **PASS（边界）** | 只用合成 finalWriteSet/helper；真实 explicit Store/gate 事务归 S4；完整 CoverageValid 归 S5；不以模拟冒充真实 Store |
+| S3-19 | **PASS（本地）** | `S3 keeps proof-body errors separate…`：proof 缺失/`_id` 不符/HMAC → PROOF；ticket/admission 漂移 → ADMISSION；重签 admission+缺失 proof+原 precheck → ADMISSION；无 precheck → PROOF；proof 字段绑定不符 → ADMISSION；均零写 |
+| S3-20 | **PASS（本地）** | `S3 rejects a second audit…`：签票后追加第二条 audit、不重签 → ADMISSION；重签 digest 仍因双 audit 被拒；完整输入快照不变；真实 Store 自动审计/回滚归 S4 |
+
+> 表中的 PASS 仅表示本轮本地实测通过，**不是 Codex 独立复审结论，也不是 Stop-3 通过**。
+
+## S3.9 五项裁定落点
+
+| # | 裁定 | 落点 |
+|---|---|---|
+| 1 | proof 本体缺失/失效 → `PROOF_REQUIRED`；ticket/precheck 缺失/形状/绑定/digest → `ADMISSION`；admission 的 proofId 与 ticket/precheck 不一致按票据错误；均零写；完整 CoverageValid 留 S5 | `validateH4cAdmission` L1603、`validateH4cAdmissionProof` L1642；测试 S3-19 |
+| 2 | 相同 refs 换序 canonical sorted digest 相同为正例；增/删/替换/篡改为负例；`h4cRefsDigest` 只排序不去重；重复 ref 由 18-shape/`AdmissionValid` 拒绝；audit targetList 排序独立保留 | `assertCanonicalC1Refs` L1527；测试 S3-02 / S3-04 / S3-06 |
+| 3 | 合成并发：应用胜者写集→刷新 state→旧 head 按链/CAS 错误；旧 ticket 对新写集才 ADMISSION；不声称真实 Store 并发/原子回滚 | 测试 S3-12；S2 helper 错误码未改 |
+| 4 | 签票后追加第二条 audit、不重签 → 拒绝；完整 state/refs/precheck/ticket/写集输入 deepEqual；测试篡改副本与被测输入分开；真实 Store 自动审计/回滚归 S4 | 测试 S3-20 / S3-11 |
+| 5 | 修正后来源引用/矩阵为验收依据；S3 纯 helper、S4 Store explicit/gate、S5 完整 CoverageValid 边界不混 | §S3.3 / §S3.6 / §S3.7 / §S3.8 / §S3.10；设计/卡/Store 零 diff |
+
+## S3.10 未验证/未做（必须单列，不得并入通过）
+
+- 未实现/未修改 Store：`transactFinal`、explicit 模式、gate 注入、M01–M30、LocalStore/CloudStore 整事务回滚、Store 自动审计 → **S4**。
+- 未实现完整 `CoverageValid`（fence/marker/writer plan/K3 全量）→ **S5**；S3 只做 proof 本体与 admission 的错误分离。
+- 未运行 33 个非 HTTP 全量、7 个根文件、8 个 HTTP 文件、`npm test`、任何 glob 或服务；未做全量回归。
+- 未验证真实 Cloud 并发（D11/C3）、真实 K3/设备/Provider/支付/生产云；未启动 HTTP/UI；未部署；未处置风险。
+- 未验证跨平台/其他 Node/PowerShell 版本；guard 仅本机 Node v24.19.0/win32。
+- S2 的 53/53 与 guard 8/8 为已验收历史；本轮不重跑 S2 专项，仅随本轮 C1 文件一起运行（65 项中包含既有 53 项）。
+- 未获 Codex 独立复审；**不自批、不宣称 Stop-3 通过、不进入 S4**。
+
+## S3.11 Stop-3 复审请求
+
+请 Codex 独立复审：
+
+1. 起点/父链/远端/白名单：`13298d4` → 本提交，父 `13298d4`；仅白名单 3 文件 + 本节；Store/server/routes/设计/卡/package/lock 零 diff。
+2. precheck 六字段精确、fail-fast、runtime 白名单；finalWriteSet 3/2+唯一 audit=4/3；C1 D4b V06–V09；ticket 公式/字节绑定/不含自身；`operationAuthDigest:null` 签名键不可省（V10–V13）。
+3. S3-19 proof/admission 错误分离与零写；S3-20 签票后追加 audit 拒绝与完整输入不可变；S3-02 refs 换序正例/不去重/增删替换负例；S3-12 合成并发边界与不宣称真实 Store。
+4. refs 18 保持、0 新增 refs、0 domain/proof/fence/marker/plan 写；helper 业务写 3/2；finalWriteSet 4/3。
+5. guard 七脚本哈希/8 控制/真实子进程继承/ESM/入口/加载期/正控；65/65；计数器全 0；只跑批准 C1 定向。
+6. 确认 S3/S4/S5 边界；**不自批 Stop-3，未通过不得进入 S4**。
+
+## S3.12 Git 与交付
+
+- 分支 `codex/h4c-c1-s3-implementation`，起点 `13298d4b90a2de6b8e32a6de4d14cec37eeaa2b1`；本提交父为 `13298d4`。
+- 普通追加提交、普通 push；不 amend/rebase/reset/squash/force/merge/cherry-pick；不改全局 Git/TLS；不碰无关未跟踪文件。
+- 提交前 `git diff --check` exit 0；提交后 `git show --check` 复核；push 前 `ls-remote` 核对远端快进条件；push 后 `ls-remote` 核对完整 40 位 SHA。
+- 本提交最终 SHA、远端 tip、`git show --stat` 由交付回报给出；本节不自指。

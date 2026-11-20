@@ -71,6 +71,7 @@ import {
   h4cAdmissionTicketDigest,
   h4cAuditProofDigest,
   h4cFenceDigest,
+  h4cFinalWriteSet,
   h4cK3DomainTicket,
   h4cK3MarkerDigest,
   h4cKeyedDigest,
@@ -83,13 +84,17 @@ import {
   h4cRefsDigest,
   h4cWritesDigest,
   h4cWriterRuntimeTicket,
+  mintH4cAdmission,
   validateEvidenceAnchorRecord,
   validateEvidenceC1AuditRecord,
+  validateH4cAdmission,
+  validateH4cAdmissionProof,
   validateH4cAuditProofRecord,
   validateH4cAuditRecord,
   validateH4cFenceRecord,
   validateH4cK3MarkerRecord,
   validateH4cPlanRecord,
+  validateH4cPrecheck,
   writerEpochFromRunId,
   writerPlanId,
   writerRunId,
@@ -2763,4 +2768,702 @@ test("S1 error-code table and public index stay add-only", async () => {
     assert.equal(name in service, false, name);
   }
   assert.equal(Object.hasOwn(service, "H4C_COLLECTION_SET"), false);
+});
+
+/* ---- S3 authorization layer (precheck -> finalWriteSet -> ticket) -------- */
+
+const S3_ADMISSION = "EVIDENCE_CHAIN_ADMISSION_REQUIRED";
+const S3_PROOF = "EVIDENCE_CHAIN_PROOF_REQUIRED";
+
+function s3Reject(values, code, fn) {
+  const before = values.map((value) => structuredClone(value));
+  assert.throws(fn, rejectCode(code));
+  values.forEach((value, index) => assert.deepEqual(value, before[index]));
+}
+
+function s3Precheck(operation = "genesis") {
+  return {
+    kind: "runtime",
+    operation,
+    writeEpoch: WRITE_EPOCH,
+    admissionPolicyVersion: PROOF.admissionPolicyVersion,
+    writerSetDigest: PROOF.writerSetDigest,
+    proofId: PROOF_ID,
+  };
+}
+
+function s3GenesisContext({ now = NOW } = {}) {
+  const state = s2State();
+  const args = appendArgs({ now });
+  const businessWrites = appendEvidenceWrites(state, args);
+  const sequence = 1;
+  const targetList = businessWrites.map((item) => `${item.collection}/${item.id}`).sort();
+  const audit = evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB_ID, targetList, sequence,
+    actorId: ACTOR, actorType: "user", now,
+  });
+  const writes = h4cFinalWriteSet({
+    businessWrites, audit, orgId: ORG, jobId: JOB_ID, sequence, now,
+  });
+  const refs = evidenceAppendRefs({
+    job: JOB, expectedHead: null, proofId: PROOF_ID,
+    writeEpoch: WRITE_EPOCH, auditId: audit._id, config: CONFIG,
+  });
+  const precheck = s3Precheck("genesis");
+  const admission = mintH4cAdmission({ precheck, refs, writes, config: CONFIG, now });
+  return { state, businessWrites, audit, writes, refs, precheck, admission, sequence, now };
+}
+
+function s3AppendContext({ now = NOW + 1_000 } = {}) {
+  const chain = chainFor(2);
+  const state = s2State(chain);
+  const args = appendArgs({
+    expectedHead: chain.head,
+    decision: "confirmed_present",
+    observedAt: OBSERVED + 10,
+    now,
+  });
+  const businessWrites = appendEvidenceWrites(state, args);
+  const evidenceWrite = businessWrites.find((item) => item.collection === H4C.evidence);
+  const sequence = evidenceWrite.data.sequence;
+  const targetList = businessWrites.map((item) => `${item.collection}/${item.id}`).sort();
+  const audit = evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB_ID, targetList, sequence,
+    actorId: ACTOR, actorType: "user", now,
+  });
+  const writes = h4cFinalWriteSet({
+    businessWrites, audit, orgId: ORG, jobId: JOB_ID, sequence, now,
+  });
+  const refs = evidenceAppendRefs({
+    job: JOB, expectedHead: chain.head, proofId: PROOF_ID,
+    writeEpoch: WRITE_EPOCH, auditId: audit._id, config: CONFIG,
+  });
+  const precheck = s3Precheck("append");
+  const admission = mintH4cAdmission({ precheck, refs, writes, config: CONFIG, now });
+  return {
+    state, chain, businessWrites, audit, writes, refs, precheck, admission,
+    sequence, now,
+  };
+}
+
+test("S3 precheck is exact, digest-free and runtime-only (S3-01/S3-09)", () => {
+  const { precheck } = s3GenesisContext();
+  assert.equal(validateH4cPrecheck(precheck), undefined);
+  const variants = [
+    ["missing proofId", (copy) => { delete copy.proofId; }],
+    ["missing policy", (copy) => { delete copy.admissionPolicyVersion; }],
+    ["extra refsDigest", (copy) => { copy.refsDigest = "a".repeat(64); }],
+    ["extra ticket", (copy) => { copy.ticket = ""; }],
+    ["extra operationAuthDigest", (copy) => { copy.operationAuthDigest = null; }],
+    ["control kind", (copy) => { copy.kind = "migration"; }],
+    ["control operation", (copy) => { copy.operation = "k3-domain-bootstrap"; }],
+    ["unknown operation", (copy) => { copy.operation = "recover"; }],
+    ["zero epoch", (copy) => { copy.writeEpoch = 0; }],
+    ["fractional epoch", (copy) => { copy.writeEpoch = 1.5; }],
+    ["empty policy", (copy) => { copy.admissionPolicyVersion = ""; }],
+    ["uppercase writer digest", (copy) => { copy.writerSetDigest = "A".repeat(64); }],
+    ["empty proofId", (copy) => { copy.proofId = ""; }],
+    ["numeric proofId", (copy) => { copy.proofId = 7; }],
+  ];
+  for (const [label, mutate] of variants) {
+    const copy = structuredClone(precheck);
+    mutate(copy);
+    s3Reject([copy], S3_ADMISSION, () => validateH4cPrecheck(copy));
+    assert.ok(label.length > 0);
+  }
+  for (const bad of [null, undefined, [], "precheck", 7]) {
+    assert.throws(() => validateH4cPrecheck(bad), rejectCode(S3_ADMISSION));
+  }
+});
+
+test("S3 finalWriteSet is 3/2 business writes plus exactly one explicit audit (S3-04/S3-13)", () => {
+  const genesis = s3GenesisContext();
+  const append = s3AppendContext();
+  assert.equal(genesis.businessWrites.length, 3);
+  assert.equal(genesis.writes.length, 4);
+  assert.equal(append.businessWrites.length, 2);
+  assert.equal(append.writes.length, 3);
+  for (const [label, context] of [["genesis", genesis], ["append", append]]) {
+    assert.equal(context.writes.filter(
+      (item) => item.collection === H4C_AUDIT_COLLECTION).length, 1, label);
+    assert.equal(context.writes.some((item) => [
+      H4C.domains, H4C.auditProofs, H4C.fences, H4C.k3Markers, H4C.plans,
+    ].includes(item.collection)), false, label);
+    assert.ok(context.writes.every((item) => item.data._id === item.id), label);
+    assert.deepEqual(Object.keys(context.audit).sort(), [
+      "_id", "action", "actorId", "actorType", "createdAt", "orgId", "target",
+    ], label);
+  }
+  s3Reject([genesis.businessWrites], S3_ADMISSION, () => h4cFinalWriteSet({
+    businessWrites: genesis.businessWrites, audit: null,
+    orgId: ORG, jobId: JOB_ID, sequence: 1, now: NOW,
+  }));
+  s3Reject([genesis.businessWrites, genesis.audit], S3_ADMISSION,
+    () => h4cFinalWriteSet({
+      businessWrites: [...genesis.businessWrites, genesis.writes[3]],
+      audit: genesis.audit, orgId: ORG, jobId: JOB_ID, sequence: 1, now: NOW,
+    }));
+  s3Reject([genesis.writes, genesis.refs], S3_ADMISSION, () => validateH4cAdmission({
+    admission: genesis.admission, refs: genesis.refs,
+    writes: genesis.businessWrites, config: CONFIG,
+  }));
+  const auditIndex = genesis.refs.findIndex(
+    (item) => item.collection === H4C_AUDIT_COLLECTION);
+  const refsWithoutAudit = genesis.refs.map((item, index) => index === auditIndex
+    ? { ...item, id: "audit-h4c-v1:" + "f".repeat(32) } : item);
+  s3Reject([genesis.writes, refsWithoutAudit], S3_ADMISSION, () => validateH4cAdmission({
+    admission: genesis.admission, refs: refsWithoutAudit, writes: genesis.writes,
+    config: CONFIG,
+  }));
+  const shortTargetList = genesis.businessWrites.slice(1)
+    .map((item) => `${item.collection}/${item.id}`).sort();
+  const mismatchedAudit = evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB_ID, targetList: shortTargetList, sequence: 1,
+    actorId: ACTOR, actorType: "user", now: NOW,
+  });
+  s3Reject([genesis.businessWrites, mismatchedAudit], S3_ADMISSION,
+    () => h4cFinalWriteSet({
+      businessWrites: genesis.businessWrites, audit: mismatchedAudit,
+      orgId: ORG, jobId: JOB_ID, sequence: 1, now: NOW,
+    }));
+});
+
+test("S3 D4b audit formula V06-V09 holds through finalWriteSet (S3-05/S3-06)", () => {
+  const genesis = s3GenesisContext();
+  const append = s3AppendContext();
+  for (const [label, context] of [["genesis", genesis], ["append", append]]) {
+    const targetList = context.businessWrites
+      .map((item) => `${item.collection}/${item.id}`).sort();
+    assert.equal(context.audit.orgId, ORG, label);
+    assert.equal(context.audit.action, label === "genesis"
+      ? "h4c.evidence.genesis" : "h4c.evidence.append", label);
+    assert.equal(context.audit.target, targetList.join(", "), label);
+    assert.equal(context.audit.createdAt, context.now, label);
+    assert.equal(context.audit._id, evidenceC1AuditId({
+      orgId: ORG, scopeKey: JOB_ID, action: context.audit.action,
+      targetList, revision: context.sequence,
+    }), label);
+  }
+  const genesisTarget = genesis.businessWrites
+    .map((item) => `${item.collection}/${item.id}`).sort();
+  const wrongScope = evidenceC1AuditRecord({
+    orgId: ORG, jobId: "job-other", targetList: genesisTarget, sequence: 1,
+    actorId: ACTOR, actorType: "user", now: NOW,
+  });
+  s3Reject([genesis.businessWrites, wrongScope], S3_ADMISSION, () => h4cFinalWriteSet({
+    businessWrites: genesis.businessWrites, audit: wrongScope,
+    orgId: ORG, jobId: JOB_ID, sequence: 1, now: NOW,
+  }));
+  const wrongAction = structuredClone(genesis.audit);
+  wrongAction.action = "h4c.evidence.append";
+  wrongAction._id = evidenceC1AuditId({
+    orgId: ORG, scopeKey: JOB_ID, action: "h4c.evidence.append",
+    targetList: genesisTarget, revision: 1,
+  });
+  s3Reject([genesis.businessWrites, wrongAction], S3_ADMISSION, () => h4cFinalWriteSet({
+    businessWrites: genesis.businessWrites, audit: wrongAction,
+    orgId: ORG, jobId: JOB_ID, sequence: 1, now: NOW,
+  }));
+  const wrongRevision = evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB_ID, targetList: genesisTarget, sequence: 2,
+    actorId: ACTOR, actorType: "user", now: NOW,
+  });
+  s3Reject([genesis.businessWrites, wrongRevision], S3_ADMISSION, () => h4cFinalWriteSet({
+    businessWrites: genesis.businessWrites, audit: wrongRevision,
+    orgId: ORG, jobId: JOB_ID, sequence: 1, now: NOW,
+  }));
+  const badTargetLists = [
+    [...genesisTarget].reverse(),
+    [...genesisTarget, `${H4C_AUDIT_COLLECTION}/audit-h4c-v1:` + "a".repeat(32)],
+    [...genesisTarget, genesisTarget[0]],
+  ];
+  for (const targetList of badTargetLists) {
+    assert.throws(() => evidenceC1AuditRecord({
+      orgId: ORG, jobId: JOB_ID, targetList, sequence: 1,
+      actorId: ACTOR, actorType: "user", now: NOW,
+    }), rejectCode(S3_ADMISSION));
+  }
+  const extraField = structuredClone(genesis.audit);
+  extraField.extra = "x";
+  s3Reject([genesis.businessWrites, extraField], S3_ADMISSION, () => h4cFinalWriteSet({
+    businessWrites: genesis.businessWrites, audit: extraField,
+    orgId: ORG, jobId: JOB_ID, sequence: 1, now: NOW,
+  }));
+  const missingField = structuredClone(genesis.audit);
+  delete missingField.target;
+  s3Reject([genesis.businessWrites, missingField], S3_ADMISSION, () => h4cFinalWriteSet({
+    businessWrites: genesis.businessWrites, audit: missingField,
+    orgId: ORG, jobId: JOB_ID, sequence: 1, now: NOW,
+  }));
+  const staleNow = evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB_ID, targetList: genesisTarget, sequence: 1,
+    actorId: ACTOR, actorType: "user", now: NOW - 1,
+  });
+  s3Reject([genesis.businessWrites, staleNow], S3_ADMISSION, () => h4cFinalWriteSet({
+    businessWrites: genesis.businessWrites, audit: staleNow,
+    orgId: ORG, jobId: JOB_ID, sequence: 1, now: NOW,
+  }));
+  const wrongTarget = structuredClone(genesis.audit);
+  wrongTarget.target = "x/y";
+  s3Reject([genesis.businessWrites, wrongTarget], S3_ADMISSION, () => h4cFinalWriteSet({
+    businessWrites: genesis.businessWrites, audit: wrongTarget,
+    orgId: ORG, jobId: JOB_ID, sequence: 1, now: NOW,
+  }));
+});
+
+test("S3 refs digest sorts without de-duplicating; reorder positive, mutation negative (S3-02)", () => {
+  const genesis = s3GenesisContext();
+  const reversedRefs = [...genesis.refs].reverse();
+  assert.equal(h4cRefsDigest(reversedRefs), h4cRefsDigest(genesis.refs));
+  assert.equal(validateH4cAdmission({
+    admission: genesis.admission, refs: reversedRefs, writes: genesis.writes,
+    config: CONFIG,
+  }), undefined);
+  assert.deepEqual(mintH4cAdmission({
+    precheck: genesis.precheck, refs: reversedRefs, writes: genesis.writes,
+    config: CONFIG, now: genesis.now,
+  }), genesis.admission);
+  const duplicateRefs = [...genesis.refs, { ...genesis.refs[0] }];
+  const duplicateDigest = h4cRefsDigest(duplicateRefs);
+  assert.match(duplicateDigest, /^[0-9a-f]{64}$/);
+  assert.notEqual(duplicateDigest, h4cRefsDigest(genesis.refs));
+  assert.equal(AdmissionValid(genesis.admission, duplicateRefs, genesis.writes, CONFIG), false);
+  s3Reject([genesis.writes, duplicateRefs], S3_ADMISSION, () => validateH4cAdmission({
+    admission: genesis.admission, refs: duplicateRefs, writes: genesis.writes,
+    config: CONFIG,
+  }));
+  const added = [...genesis.refs, { collection: H4C.fences, id: "extra-fence" }];
+  const removed = genesis.refs.slice(0, 17);
+  const replaced = genesis.refs.map((item) => item.collection === H4C.auditProofs
+    ? { ...item, id: "evidence-chain-audit:v1:" + "0".repeat(64) + ":1:4" } : item);
+  const tampered = genesis.refs.map((item) => item.collection === H4C.evidence &&
+    item.id === evidenceId(ORG, JOB_ID, 9) ? { ...item, id: item.id + "x" } : item);
+  const extraKey = genesis.refs.map((item, index) => index === 0
+    ? { ...item, extra: "x" } : item);
+  for (const [label, refs] of [
+    ["added", added], ["removed", removed], ["replaced", replaced], ["tampered", tampered],
+    ["extra-key", extraKey],
+  ]) {
+    s3Reject([genesis.writes, refs], S3_ADMISSION, () => validateH4cAdmission({
+      admission: genesis.admission, refs, writes: genesis.writes, config: CONFIG,
+    }));
+    assert.ok(label.length > 0);
+  }
+  const replacedAdmission = structuredClone(genesis.admission);
+  replacedAdmission.refsDigest = h4cRefsDigest(replaced);
+  replacedAdmission.ticket = h4cAdmissionTicketDigest(replacedAdmission, CONFIG);
+  assert.equal(AdmissionValid(replacedAdmission, replaced, genesis.writes, CONFIG), true);
+  s3Reject([genesis.writes, replaced, replacedAdmission], S3_ADMISSION,
+    () => validateH4cAdmission({
+      admission: replacedAdmission, refs: replaced, writes: genesis.writes,
+      config: CONFIG,
+    }));
+});
+
+test("S3 writes digest binds every finalWriteSet byte including the audit (S3-03)", () => {
+  const genesis = s3GenesisContext();
+  assert.equal(h4cWritesDigest([...genesis.writes].reverse()),
+    h4cWritesDigest(genesis.writes));
+  const tamperedBusiness = structuredClone(genesis.writes);
+  const evidenceIndex = tamperedBusiness.findIndex(
+    (item) => item.collection === H4C.evidence);
+  tamperedBusiness[evidenceIndex].data.decision = "confirmed_present";
+  assert.notEqual(h4cWritesDigest(tamperedBusiness), genesis.admission.writesDigest);
+  s3Reject([genesis.writes, genesis.admission], S3_ADMISSION, () => validateH4cAdmission({
+    admission: genesis.admission, refs: genesis.refs, writes: tamperedBusiness,
+    config: CONFIG,
+  }));
+  const tamperedAudit = structuredClone(genesis.writes);
+  const auditIndex = tamperedAudit.findIndex(
+    (item) => item.collection === H4C_AUDIT_COLLECTION);
+  tamperedAudit[auditIndex].data.target = "x/y";
+  s3Reject([genesis.writes, genesis.admission], S3_ADMISSION, () => validateH4cAdmission({
+    admission: genesis.admission, refs: genesis.refs, writes: tamperedAudit,
+    config: CONFIG,
+  }));
+  const digestDrift = structuredClone(genesis.admission);
+  digestDrift.writesDigest = "0".repeat(64);
+  s3Reject([genesis.writes, digestDrift], S3_ADMISSION, () => validateH4cAdmission({
+    admission: digestDrift, refs: genesis.refs, writes: genesis.writes,
+    config: CONFIG,
+  }));
+});
+
+test("S3 ticket signs the exact fields with explicit null operationAuthDigest (S3-07/S3-08 V10-V13)", () => {
+  const genesis = s3GenesisContext();
+  const { admission, refs, writes, precheck } = genesis;
+  assert.deepEqual(Object.keys(admission).sort(), [
+    "admissionPolicyVersion", "kind", "operation", "operationAuthDigest",
+    "proofId", "refsDigest", "ticket", "writeEpoch", "writerSetDigest",
+    "writesDigest",
+  ]);
+  const { ticket, ...fields } = admission;
+  const raw = createHmac("sha256", Buffer.from(KEY_A, "base64"))
+    .update(stableStringify({
+      domain: "KEYED_DIGEST/h4-canonical-write-admission", version: 1, ...fields,
+    }), "utf8").digest("hex");
+  assert.equal(ticket, raw);
+  assert.equal(h4cAdmissionTicketDigest({
+    ...admission, ticket: "f".repeat(64),
+  }, CONFIG), ticket);
+  assert.throws(() => mintH4cAdmission({
+    precheck, refs, writes, config: CONFIG,
+  }), rejectCode(S3_ADMISSION));
+  assert.throws(() => mintH4cAdmission({
+    precheck, refs, writes, config: CONFIG, now: NOW + 1,
+  }), rejectCode(S3_ADMISSION));
+  const append = s3AppendContext();
+  assert.equal(validateH4cAdmission({
+    admission: append.admission, refs: append.refs, writes: append.writes,
+    config: CONFIG, precheck: append.precheck,
+  }), undefined);
+  const authVariants = [
+    ["missing", (copy) => { delete copy.operationAuthDigest; }],
+    ["undefined", (copy) => { copy.operationAuthDigest = undefined; }],
+    ["empty", (copy) => { copy.operationAuthDigest = ""; }],
+    ["digest", (copy) => { copy.operationAuthDigest = "a".repeat(64); }],
+  ];
+  for (const [label, mutate] of authVariants) {
+    const copy = structuredClone(admission);
+    mutate(copy);
+    s3Reject([copy, refs, writes], S3_ADMISSION, () => validateH4cAdmission({
+      admission: copy, refs, writes, config: CONFIG,
+    }));
+    assert.ok(label.length > 0);
+  }
+  for (const overrides of [
+    { kind: "migration" }, { kind: "recovery" }, { kind: "monitor" },
+    { kind: "k3-bootstrap" }, { operation: "plan-issue" }, { operation: "recover" },
+  ]) {
+    const copy = structuredClone(admission);
+    Object.assign(copy, overrides);
+    copy.operationAuthDigest = null;
+    copy.ticket = h4cAdmissionTicketDigest(copy, CONFIG);
+    s3Reject([copy, refs, writes], S3_ADMISSION, () => validateH4cAdmission({
+      admission: copy, refs, writes, config: CONFIG,
+    }));
+  }
+  const proofIdDrift = structuredClone(admission);
+  proofIdDrift.proofId = "evidence-chain-audit:v1:" + "0".repeat(64) + ":1:4";
+  s3Reject([proofIdDrift, refs, writes], S3_ADMISSION, () => validateH4cAdmission({
+    admission: proofIdDrift, refs, writes, config: CONFIG,
+  }));
+  const precheckDrift = { ...precheck, proofId: proofIdDrift.proofId };
+  assert.throws(() => validateH4cAdmission({
+    admission, refs, writes, config: CONFIG, precheck: precheckDrift,
+  }), rejectCode(S3_ADMISSION));
+  for (const field of ["writeEpoch", "writerSetDigest", "admissionPolicyVersion"]) {
+    const copy = { ...precheck };
+    if (field === "writeEpoch") copy.writeEpoch = precheck.writeEpoch + 1;
+    else if (field === "writerSetDigest") copy.writerSetDigest = "b".repeat(64);
+    else copy.admissionPolicyVersion = "policy-v2";
+    assert.throws(() => validateH4cAdmission({
+      admission, refs, writes, config: CONFIG, precheck: copy,
+    }), rejectCode(S3_ADMISSION));
+  }
+  for (const field of ["refsDigest", "writesDigest"]) {
+    const copy = structuredClone(admission);
+    copy[field] = "0".repeat(64);
+    s3Reject([copy], S3_ADMISSION, () => validateH4cAdmission({
+      admission: copy, refs, writes, config: CONFIG,
+    }));
+  }
+  for (const [field, value] of [
+    ["writeEpoch", 0], ["proofId", 7], ["kind", "runtime2"],
+    ["operation", "recover"], ["ticket", "0".repeat(64)],
+  ]) {
+    const copy = structuredClone(admission);
+    copy[field] = value;
+    if (field !== "ticket") copy.ticket = h4cAdmissionTicketDigest(copy, CONFIG);
+    s3Reject([copy], S3_ADMISSION, () => validateH4cAdmission({
+      admission: copy, refs, writes, config: CONFIG,
+    }));
+  }
+  const extra = structuredClone(admission);
+  extra.extraField = "x";
+  extra.ticket = h4cAdmissionTicketDigest(extra, CONFIG);
+  s3Reject([extra], S3_ADMISSION, () => validateH4cAdmission({
+    admission: extra, refs, writes, config: CONFIG,
+  }));
+});
+
+test("S3 rejects the legacy no-ticket path and keeps chain errors ahead of admission (S3-01/S3-10/S3-11)", () => {
+  const genesis = s3GenesisContext();
+  s3Reject([genesis.businessWrites, genesis.refs], S3_ADMISSION, () => validateH4cAdmission({
+    admission: null, refs: genesis.refs, writes: genesis.businessWrites,
+    config: CONFIG,
+  }));
+  const append = s3AppendContext();
+  const damaged = structuredClone(append.state);
+  delete damaged[`${H4C.evidence}/${evidenceId(ORG, JOB_ID, 1)}`];
+  s3Reject([damaged], "EVIDENCE_CHAIN_BROKEN", () => appendEvidenceWrites(
+    damaged, appendArgs({
+      expectedHead: append.chain.head, decision: "confirmed_present",
+      observedAt: OBSERVED + 20, now: NOW + 2_000,
+    })));
+  assert.equal(validateH4cAdmission({
+    admission: append.admission, refs: append.refs, writes: append.writes,
+    config: CONFIG,
+  }), undefined);
+  const admissionCopy = structuredClone(genesis.admission);
+  admissionCopy.ticket = "0".repeat(64);
+  s3Reject([
+    genesis.state, genesis.refs, genesis.precheck, genesis.admission, genesis.writes,
+  ], S3_ADMISSION, () => validateH4cAdmission({
+    admission: admissionCopy, refs: genesis.refs, writes: genesis.writes,
+    config: CONFIG, precheck: genesis.precheck,
+  }));
+});
+
+test("S3 keeps proof-body errors separate from ticket/admission errors (S3-19)", () => {
+  const genesis = s3GenesisContext();
+  const args = {
+    admission: genesis.admission, refs: genesis.refs, writes: genesis.writes,
+    state: genesis.state, config: CONFIG, precheck: genesis.precheck,
+  };
+  assert.equal(validateH4cAdmissionProof(args), undefined);
+  const missing = structuredClone(genesis.state);
+  delete missing[`${H4C.auditProofs}/${PROOF_ID}`];
+  s3Reject([missing], S3_PROOF,
+    () => validateH4cAdmissionProof({ ...args, state: missing }));
+  const idMismatch = structuredClone(genesis.state);
+  idMismatch[`${H4C.auditProofs}/${PROOF_ID}`]._id =
+    "evidence-chain-audit:v1:" + "0".repeat(64) + ":1:4";
+  s3Reject([idMismatch], S3_PROOF,
+    () => validateH4cAdmissionProof({ ...args, state: idMismatch }));
+  const hmacDrift = structuredClone(genesis.state);
+  hmacDrift[`${H4C.auditProofs}/${PROOF_ID}`].auditDigest = "0".repeat(64);
+  s3Reject([hmacDrift], S3_PROOF,
+    () => validateH4cAdmissionProof({ ...args, state: hmacDrift }));
+  const admissionDrift = structuredClone(genesis.admission);
+  admissionDrift.proofId = "evidence-chain-audit:v1:" + "d".repeat(64) + ":1:4";
+  s3Reject([admissionDrift, missing], S3_ADMISSION, () => validateH4cAdmissionProof({
+    ...args, admission: admissionDrift, state: missing,
+  }));
+  const resigned = structuredClone(genesis.admission);
+  resigned.proofId = "evidence-chain-audit:v1:" + "d".repeat(64) + ":1:4";
+  const refsForMissing = genesis.refs.map((item) => item.collection === H4C.auditProofs
+    ? { ...item, id: resigned.proofId } : item);
+  resigned.refsDigest = h4cRefsDigest(refsForMissing);
+  resigned.ticket = h4cAdmissionTicketDigest(resigned, CONFIG);
+  assert.throws(() => validateH4cAdmissionProof({
+    ...args, admission: resigned, refs: refsForMissing,
+  }), rejectCode(S3_ADMISSION));
+  assert.throws(() => validateH4cAdmissionProof({
+    ...args, admission: resigned, refs: refsForMissing, precheck: undefined,
+    state: missing,
+  }), rejectCode(S3_PROOF));
+  const proofDrift = structuredClone(genesis.state);
+  const driftedProof = proofDrift[`${H4C.auditProofs}/${PROOF_ID}`];
+  driftedProof.writerSetDigest = "c".repeat(64);
+  driftedProof.auditDigest = h4cAuditProofDigest(driftedProof, CONFIG);
+  assert.equal(validateH4cAuditProofRecord(driftedProof, CONFIG), undefined);
+  s3Reject([proofDrift], S3_ADMISSION,
+    () => validateH4cAdmissionProof({ ...args, state: proofDrift }));
+  const badAdmission = structuredClone(genesis.admission);
+  badAdmission.writesDigest = "0".repeat(64);
+  assert.throws(() => validateH4cAdmissionProof({
+    ...args, admission: badAdmission, state: missing,
+  }), rejectCode(S3_ADMISSION));
+});
+
+test("S3 rejects a second audit appended after signing without re-signing (S3-20)", () => {
+  const genesis = s3GenesisContext();
+  const targetList = genesis.businessWrites
+    .map((item) => `${item.collection}/${item.id}`).sort();
+  const secondAudit = evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB_ID, targetList, sequence: 2,
+    actorId: ACTOR, actorType: "user", now: NOW + 1,
+  });
+  const tampered = structuredClone(genesis.writes);
+  tampered.push({
+    collection: H4C_AUDIT_COLLECTION, id: secondAudit._id, data: secondAudit,
+  });
+  assert.equal(tampered.length, 5);
+  assert.notEqual(h4cWritesDigest(tampered), genesis.admission.writesDigest);
+  assert.equal(AdmissionValid(genesis.admission, genesis.refs, tampered, CONFIG), false);
+  s3Reject([
+    genesis.state, genesis.refs, genesis.precheck, genesis.admission, genesis.writes,
+  ], S3_ADMISSION, () => validateH4cAdmission({
+    admission: genesis.admission, refs: genesis.refs, writes: tampered,
+    config: CONFIG,
+  }));
+  const resigned = structuredClone(genesis.admission);
+  resigned.writesDigest = h4cWritesDigest(tampered);
+  resigned.ticket = h4cAdmissionTicketDigest(resigned, CONFIG);
+  s3Reject([
+    genesis.state, genesis.refs, genesis.precheck, genesis.admission, genesis.writes,
+    tampered, resigned,
+  ], S3_ADMISSION, () => validateH4cAdmission({
+    admission: resigned, refs: genesis.refs, writes: tampered, config: CONFIG,
+  }));
+  assert.equal(validateH4cAdmission({
+    admission: genesis.admission, refs: genesis.refs, writes: genesis.writes,
+    config: CONFIG,
+  }), undefined);
+});
+
+test("S3 synthetic concurrency: refreshed state rejects the losing genesis/append (S3-12)", () => {
+  const genesis = s3GenesisContext();
+  const stateAfterGenesis = structuredClone(genesis.state);
+  applyStateWrites(stateAfterGenesis, genesis.writes);
+  assert.equal(stateAfterGenesis[
+    `${H4C.evidence}/${evidenceId(ORG, JOB_ID, 1)}`].sequence, 1);
+  s3Reject([stateAfterGenesis], "EVIDENCE_CHAIN_BROKEN",
+    () => appendEvidenceWrites(stateAfterGenesis, appendArgs()));
+  assert.equal(validateH4cAdmission({
+    admission: genesis.admission, refs: genesis.refs, writes: genesis.writes,
+    config: CONFIG,
+  }), undefined);
+  const refreshedGenesisHead = stateAfterGenesis[
+    `${H4C.evidenceHeads}/${evidenceHeadId(ORG, JOB_ID)}`];
+  const nextGenesisBusiness = appendEvidenceWrites(stateAfterGenesis, appendArgs({
+    expectedHead: refreshedGenesisHead, observedAt: OBSERVED + 10, now: NOW + 1_000,
+  }));
+  const nextGenesisSequence = nextGenesisBusiness.find(
+    (item) => item.collection === H4C.evidence).data.sequence;
+  const nextGenesisTargets = nextGenesisBusiness
+    .map((item) => `${item.collection}/${item.id}`).sort();
+  const nextGenesisAudit = evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB_ID, targetList: nextGenesisTargets,
+    sequence: nextGenesisSequence, actorId: ACTOR, actorType: "user", now: NOW + 1_000,
+  });
+  const nextGenesisWrites = h4cFinalWriteSet({
+    businessWrites: nextGenesisBusiness, audit: nextGenesisAudit,
+    orgId: ORG, jobId: JOB_ID, sequence: nextGenesisSequence, now: NOW + 1_000,
+  });
+  const nextGenesisRefs = evidenceAppendRefs({
+    job: JOB, expectedHead: refreshedGenesisHead, proofId: PROOF_ID,
+    writeEpoch: WRITE_EPOCH, auditId: nextGenesisAudit._id, config: CONFIG,
+  });
+  s3Reject([
+    genesis.state, genesis.refs, genesis.precheck, genesis.admission, genesis.writes,
+    nextGenesisWrites, nextGenesisRefs,
+  ], S3_ADMISSION, () => validateH4cAdmission({
+    admission: genesis.admission, refs: nextGenesisRefs, writes: nextGenesisWrites,
+    config: CONFIG,
+  }));
+  const append = s3AppendContext();
+  const stateAfterAppend = structuredClone(append.state);
+  applyStateWrites(stateAfterAppend, append.writes);
+  s3Reject([stateAfterAppend], "EVIDENCE_HEAD_CONFLICT",
+    () => appendEvidenceWrites(stateAfterAppend, appendArgs({
+      expectedHead: append.chain.head, decision: "confirmed_present",
+      observedAt: OBSERVED + 20, now: NOW + 2_000,
+    })));
+  assert.equal(validateH4cAdmission({
+    admission: append.admission, refs: append.refs, writes: append.writes,
+    config: CONFIG,
+  }), undefined);
+  const refreshedAppendHead = stateAfterAppend[
+    `${H4C.evidenceHeads}/${evidenceHeadId(ORG, JOB_ID)}`];
+  const nextAppendBusiness = appendEvidenceWrites(stateAfterAppend, appendArgs({
+    expectedHead: refreshedAppendHead, decision: "still_unknown",
+    observedAt: OBSERVED + 30, now: NOW + 3_000,
+  }));
+  const nextAppendSequence = nextAppendBusiness.find(
+    (item) => item.collection === H4C.evidence).data.sequence;
+  const nextAppendTargets = nextAppendBusiness
+    .map((item) => `${item.collection}/${item.id}`).sort();
+  const nextAppendAudit = evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB_ID, targetList: nextAppendTargets,
+    sequence: nextAppendSequence, actorId: ACTOR, actorType: "user", now: NOW + 3_000,
+  });
+  const nextAppendWrites = h4cFinalWriteSet({
+    businessWrites: nextAppendBusiness, audit: nextAppendAudit,
+    orgId: ORG, jobId: JOB_ID, sequence: nextAppendSequence, now: NOW + 3_000,
+  });
+  const nextAppendRefs = evidenceAppendRefs({
+    job: JOB, expectedHead: refreshedAppendHead, proofId: PROOF_ID,
+    writeEpoch: WRITE_EPOCH, auditId: nextAppendAudit._id, config: CONFIG,
+  });
+  s3Reject([
+    append.state, append.refs, append.precheck, append.admission, append.writes,
+    nextAppendWrites, nextAppendRefs,
+  ], S3_ADMISSION, () => validateH4cAdmission({
+    admission: append.admission, refs: nextAppendRefs, writes: nextAppendWrites,
+    config: CONFIG,
+  }));
+  const ticketDrift = structuredClone(append.admission);
+  ticketDrift.ticket = "0".repeat(64);
+  assert.throws(() => validateH4cAdmission({
+    admission: ticketDrift, refs: append.refs, writes: append.writes,
+    config: CONFIG,
+  }), rejectCode(S3_ADMISSION));
+});
+
+test("S3 negative classes leave the complete input snapshot untouched (S3-11)", () => {
+  const genesis = s3GenesisContext();
+  const append = s3AppendContext();
+  const snapshot = (context) => [
+    context.state, context.refs, context.precheck, context.admission, context.writes,
+  ];
+  const cases = [
+    ["precheck", genesis, S3_ADMISSION, () => {
+      const copy = structuredClone(genesis.precheck);
+      copy.kind = "migration";
+      return validateH4cPrecheck(copy);
+    }],
+    ["audit", genesis, S3_ADMISSION, () => {
+      const copy = structuredClone(genesis.audit);
+      copy.target = "x/y";
+      return h4cFinalWriteSet({
+        businessWrites: genesis.businessWrites, audit: copy,
+        orgId: ORG, jobId: JOB_ID, sequence: 1, now: NOW,
+      });
+    }],
+    ["refs", genesis, S3_ADMISSION, () => validateH4cAdmission({
+      admission: genesis.admission, refs: genesis.refs.slice(0, 17),
+      writes: genesis.writes, config: CONFIG,
+    })],
+    ["ticket", genesis, S3_ADMISSION, () => {
+      const copy = structuredClone(genesis.admission);
+      copy.ticket = "0".repeat(64);
+      return validateH4cAdmission({
+        admission: copy, refs: genesis.refs, writes: genesis.writes, config: CONFIG,
+      });
+    }],
+    ["writes", genesis, S3_ADMISSION, () => {
+      const copy = structuredClone(genesis.writes);
+      copy[0] = { ...copy[0], data: { ...copy[0].data, createdAt: NOW + 1 } };
+      return validateH4cAdmission({
+        admission: genesis.admission, refs: genesis.refs, writes: copy, config: CONFIG,
+      });
+    }],
+    ["proof", genesis, S3_PROOF, () => {
+      const state = structuredClone(genesis.state);
+      delete state[`${H4C.auditProofs}/${PROOF_ID}`];
+      return validateH4cAdmissionProof({
+        admission: genesis.admission, refs: genesis.refs, writes: genesis.writes,
+        state, config: CONFIG,
+      });
+    }],
+    ["append ticket", append, S3_ADMISSION, () => {
+      const copy = structuredClone(append.admission);
+      copy.operationAuthDigest = "";
+      return validateH4cAdmission({
+        admission: copy, refs: append.refs, writes: append.writes, config: CONFIG,
+      });
+    }],
+  ];
+  for (const [label, context, code, fn] of cases) {
+    const values = snapshot(context);
+    const before = values.map((value) => structuredClone(value));
+    assert.throws(fn, rejectCode(code), label);
+    values.forEach((value, index) => assert.deepEqual(value, before[index], label));
+  }
+});
+
+test("S3 service index re-exports only the pure authorization additions", async () => {
+  const service = await import("../lib/face-service/index.mjs");
+  for (const name of [
+    "h4cFinalWriteSet", "mintH4cAdmission", "validateH4cAdmission",
+    "validateH4cAdmissionProof", "validateH4cPrecheck",
+  ]) {
+    assert.equal(typeof service[name], "function", name);
+  }
+  for (const name of ["initializeEvidenceDomain", "bootstrapEvidenceDomain",
+    "createEvidenceDomain", "ensureEvidenceDomain"]) {
+    assert.equal(name in service, false, name);
+  }
 });

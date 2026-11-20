@@ -112,6 +112,15 @@ export {
   writerRunId,
 } from "./h4c-evidence.mjs";
 
+/* S3 authorization-layer surface (add-only; pure helper, no Store wiring). */
+export {
+  h4cFinalWriteSet,
+  mintH4cAdmission,
+  validateH4cAdmission,
+  validateH4cAdmissionProof,
+  validateH4cPrecheck,
+} from "./h4c-evidence.mjs";
+
 export {
   H4C,
   H4C_AUDIT_COLLECTION,

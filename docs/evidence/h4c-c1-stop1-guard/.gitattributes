@@ -1,0 +1,3 @@
+# Preserve the original guard/control scripts byte-for-byte.
+# No EOL normalization on add/checkout for this evidence directory.
+* -text

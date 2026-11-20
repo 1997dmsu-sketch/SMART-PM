@@ -1,0 +1,61 @@
+PASS negative:no-guard exit=3
+PASS positive:preload-sentinel exit=0
+PASS negative:esm-named-import exit=0 http.request=1
+PASS negative:per-entry exit=0 entries=63 blocked=63
+PASS negative:load-before-runtime exit=1 load_violations=1
+PASS negative:subprocess-inheritance exit=0 child={"blocked":true,"active":true,"network_attempts":1,"listen_calls":0}
+PASS positive:crypto-fs-k3-localstore exit=0
+----- C1 TEST STDOUT -----
+✔ K3 config is independent, canonical and fingerprint-bound (3.3547ms)
+✔ evidence/head/domain IDs are deterministic and the head is realm/org independent (0.7142ms)
+✔ structured HMAC is canonical, sorted and binds every message field (1.1271ms)
+✔ evidence validator is exact and enforces schema, source and sequence rules (1.6053ms)
+✔ head validator is exact and enforces CAS fields (0.9181ms)
+✔ domain validator is exact for the stable head and frozen version records (1.0314ms)
+✔ runtime domain guard never creates the K3 domain on empty state (1.1955ms)
+✔ runtime domain guard rejects one-sided and corrupt domains without backfill (1.5295ms)
+✔ runtime domain guard fails closed on realm switch, version change and same-version rekey (0.698ms)
+✔ append fails closed on K3 rekey, realm/version change and one-sided domain (17.7424ms)
+✔ test fixture seeds the fixed global pair and runtime verification is read-only (4.6399ms)
+✔ production module, public index and production tree expose no K3 initialization capability (27.9821ms)
+✔ constant-time digest comparison validates canonical hex before timingSafeEqual (0.3882ms)
+✔ both-missing after existing evidence or evidence head fails closed with every collection unchanged (11.1738ms)
+✔ append on an empty store never initializes the domain implicitly (2.2465ms)
+✔ runtime rejects both-missing, head-only, version-only and evidence-only states with zero writes (19.1587ms)
+✔ first evidence appends only evidence+head after a fixed fixture seed (5.4982ms)
+✔ second evidence validates its parent and CAS-increments the head (6.6278ms)
+✔ stale head CAS and missing/orphan head fail closed with zero writes (10.9678ms)
+✔ concurrent appends on the same head have one winner and no fork (7.2399ms)
+✔ damaged previous evidence is chain-broken across schema, identity, org/job, time, K3 and HMAC (17.4878ms)
+✔ damaged head variants are chain-broken without repair (9.1267ms)
+✔ observedAt bounds, monotonicity and invalid clock fail closed (7.3194ms)
+✔ decision/source binding and job invariants reject before writing (6.7171ms)
+✔ LocalStore registers the three collections and upgrades old local data (2.1247ms)
+✔ LocalStore keeps evidence/domain create-only and exact, head updates exact (7.7916ms)
+✔ CloudStore keeps exact fields and create-only semantics (4.2809ms)
+✔ persisted evidence, logs and audits contain no secrets or forbidden payloads (8.6253ms)
+✔ face-service index exports only the non-init C1 evidence surface (0.2073ms)
+✔ one stable global head is shared by multiple organizations and cannot fork (7.1396ms)
+✔ realm switch/version change/rekey are DOMAIN_MISMATCH and never add a head/version (7.54ms)
+✔ S1 collection gate is closed, frozen and Set-free (0.4203ms)
+✔ S1 canonical IDs cover anchor/proof/plan/audit and writer epoch parsing (1.076ms)
+✔ S1 schema arrays freeze the exact field counts and reject non-exact records (4.3333ms)
+✔ S1 D4a proof status/legacyCount and snapshot fields (V01-V05) (8.3549ms)
+✔ S1 C1 audit D4b formula, fields and V06-V09 (0.8829ms)
+✔ S1 plan 39 fields, planKind null table and consumed branches (9.4059ms)
+✔ S1 11 digest domains use canonical HMAC and rebuild from persisted fields (3.2283ms)
+✔ S1 fence predicates split healthy/expired/halted/clock and never mix usage (3.0468ms)
+✔ S1 marker/coverage/writer-plan predicates enforce consumed+runtimeTicket binding (6.2214ms)
+✔ S1 D5 runtime whitelist and ticket binding (V10-V13) (3.3031ms)
+✔ S1 gate is frozen, pure and enforces coverage/fence before writing (8.6014ms)
+✔ S1 error-code table and public index stay add-only (0.3178ms)
+ℹ tests 43
+ℹ suites 0
+ℹ pass 43
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 297.1452
+PASS test:c1-targeted exit=0 pass=43 fail=0 counters={"listen_calls":0,"network_attempts":0,"dns_calls":0,"dgram_calls":0,"provider_calls":0,"load_violations":0,"blocked_calls":0,"real_leaks":0}
+S1_GUARD_SUMMARY {"guard":"%TEMP%\\c1-staged-guard\\guard.cjs","version":"v24.19.0","platform":"win32","total":8,"failed":0,"results":[{"name":"negative:no-guard","ok":true,"detail":"exit=3"},{"name":"positive:preload-sentinel","ok":true,"detail":"exit=0"},{"name":"negative:esm-named-import","ok":true,"detail":"exit=0 http.request=1"},{"name":"negative:per-entry","ok":true,"detail":"exit=0 entries=63 blocked=63"},{"name":"negative:load-before-runtime","ok":true,"detail":"exit=1 load_violations=1"},{"name":"negative:subprocess-inheritance","ok":true,"detail":"exit=0 child={\"blocked\":true,\"active\":true,\"network_attempts\":1,\"listen_calls\":0}"},{"name":"positive:crypto-fs-k3-localstore","ok":true,"detail":"exit=0"},{"name":"test:c1-targeted","ok":true,"detail":"exit=0 pass=43 fail=0 counters={\"listen_calls\":0,\"network_attempts\":0,\"dns_calls\":0,\"dgram_calls\":0,\"provider_calls\":0,\"load_violations\":0,\"blocked_calls\":0,\"real_leaks\":0}"}]}

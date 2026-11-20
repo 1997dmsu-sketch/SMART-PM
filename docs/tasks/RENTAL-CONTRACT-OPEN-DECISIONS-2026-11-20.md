@@ -768,7 +768,7 @@ A 已确认；以下只列尚未确认的边界算法。**本文件不选、不�
 | 旧代码 `cloudfunctions/leasing/domain.js` | `0b23213` | https://github.com/1997dmsu-sketch/SMART-PM/blob/0b23213eff97fcc98f85e7544cf883c3b68027b5/cloudfunctions/leasing/domain.js |
 | 物业模型 `docs/PROPERTY-MODEL.md` | `282a20f`（main） | https://github.com/1997dmsu-sketch/SMART-PM/blob/282a20fca9f64ab80ead50372c9c3e90bf4aeba7/docs/PROPERTY-MODEL.md |
 
-> 链接核验说明：本文件中的 GitHub 链接在本环境 `web_fetch` 均返回 `fetch failed`（网络不可达），**未完成网页级核验**；提交/blob 的存在性与内容以 `git fetch`、`git rev-parse`、`git hash-object` 核验（见 §1.1、§1.4）。本文件不声称已通过网页渲染核验上述链接。
+> 链接核验说明：本文件中的 GitHub 链接**未完成网页级核验**；本环境 `web_fetch` 对输入 commit 链接的尝试返回 `fetch failed`（网络不可达）。提交/blob 的存在性与内容以 `git fetch`、`git rev-parse`、`git hash-object` 核验（见 §1.1、§1.4）。本文件不声称已通过网页渲染核验上述链接。
 
 ---
 

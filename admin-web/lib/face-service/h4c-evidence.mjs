@@ -9,8 +9,8 @@
  *     domain guard (append/reconcile can never create or repair the domain);
  *   - deterministic evidence/head IDs and one stable global domain head ID;
  *   - canonical (sorted-key) structured HMAC digests;
- *   - append helpers that re-validate the previous evidence, the head CAS and
- *     the K3 domain inside one Store transaction.
+ *   - append helpers that re-validate the complete 1..9 chain, the anchor, the
+ *     head CAS and the K3 domain inside one C1 transaction.
  *
  * First deployment initialization (the fixed head + version pair) is NOT a
  * runtime capability here. It belongs to a separate, controlled deployment
@@ -315,49 +315,113 @@ function checkHead(head, orgId, jobId) {
   if (head.orgId !== orgId || head.jobId !== jobId) fail("EVIDENCE_CHAIN_BROKEN");
 }
 
+const C1_APPEND_REF_COUNT = 18;
+const C1_APPEND_REF_COUNTS = Object.freeze(new Map([
+  [H4C.domains, 2],
+  [H4C.auditProofs, 1],
+  [H4C_AUDIT_COLLECTION, 1],
+  [H4C.fences, 1],
+  [H4C.k3Markers, 1],
+  [H4C.plans, 1],
+  [H4C.anchors, 1],
+  [H4C.evidenceHeads, 1],
+  [H4C.evidence, 9],
+]));
+
 /**
- * Point-read refs for one append transaction. The head/domain snapshots are
- * only used to choose the deterministic IDs; every check repeats inside the
- * transaction. A previous evidence ref is added only when the head points at it.
+ * Reject any C1 append ref set that is not the exact 18-shape (2 domain refs,
+ * one proof/audit/fence/marker/writer-plan/anchor/head and E1..E9). This is a
+ * module-level invariant used by evidenceAppendRefs and future S4 gate wiring;
+ * it is deliberately not re-exported from index.mjs.
  */
-export function evidenceAppendRefs(job, head, domainHead, config) {
-  const cfg = normalizedConfig(config);
-  if (!job || !opaque(job.orgId) || !opaque(job._id)) fail("EVIDENCE_INVALID");
-  if (head != null) checkHead(head, job.orgId, job._id);
-  if (domainHead != null) {
-    try {
-      validateEvidenceDomainRecord(domainHead);
-      if (domainHead.kind !== "head") fail("DOMAIN_INCOMPLETE");
-    } catch {
-      fail("DOMAIN_INCOMPLETE");
-    }
+export function assertC1AppendRefs(refs) {
+  if (!Array.isArray(refs) || refs.length !== C1_APPEND_REF_COUNT) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
   }
-  const { headId, versionId } = evidenceDomainIds(cfg.realm, cfg.version);
-  const refs = [
-    ref(EVIDENCE_DOMAINS_COLLECTION, headId),
-    ref(EVIDENCE_DOMAINS_COLLECTION, versionId),
-    ref(EVIDENCE_HEADS_COLLECTION, evidenceHeadId(job.orgId, job._id)),
-    ref(EVIDENCE_COLLECTION, evidenceId(job.orgId, job._id, (head?.lastSequence ?? 0) + 1)),
-  ];
-  if (head?.lastEvidenceId) refs.push(ref(EVIDENCE_COLLECTION, head.lastEvidenceId));
-  return unique(refs);
+  const keys = new Set();
+  const counts = new Map();
+  for (const item of refs) {
+    if (!isPlainObject(item) || typeof item.collection !== "string" ||
+        item.collection.length === 0 || typeof item.id !== "string" ||
+        item.id.length === 0) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+    const key = `${item.collection}/${item.id}`;
+    if (keys.has(key)) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+    keys.add(key);
+    counts.set(item.collection, (counts.get(item.collection) || 0) + 1);
+  }
+  if (counts.size !== C1_APPEND_REF_COUNTS.size) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  for (const [collection, count] of C1_APPEND_REF_COUNTS) {
+    if (counts.get(collection) !== count) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  return refs;
 }
 
 /**
- * Pure transaction builder for one evidence append. The global K3 domain is
- * only READ here; append never creates it. It re-reads the head for CAS, fully
- * re-validates the previous evidence (schema, org/job/sequence, observedAt,
- * K3 realm/version/fingerprint and timing-safe HMAC), then returns the new
- * evidence and head writes. Any failure throws before returning writes.
+ * Point-read refs for one C1 append transaction: exact 18, unique and stable.
+ * The helper is pure and never reads the Store; a missing proof/audit id is
+ * rejected before an incomplete ref set can be returned.
+ */
+export function evidenceAppendRefs({
+  job, expectedHead = null, proofId, writeEpoch, auditId, config,
+} = {}) {
+  const cfg = normalizedConfig(config);
+  if (!isPlainObject(job) || !opaque(job.orgId) || !opaque(job._id)) {
+    fail("EVIDENCE_INVALID");
+  }
+  if (typeof proofId !== "string" || proofId.length === 0) {
+    fail("EVIDENCE_CHAIN_PROOF_REQUIRED");
+  }
+  if (!integer(writeEpoch, 1)) fail("EVIDENCE_INVALID");
+  if (typeof auditId !== "string" || auditId.length === 0) fail("EVIDENCE_INVALID");
+  if (expectedHead != null && !isPlainObject(expectedHead)) {
+    fail("EVIDENCE_CHAIN_BROKEN");
+  }
+
+  const { headId, versionId } = evidenceDomainIds(cfg.realm, cfg.version);
+  const evidenceIds = [];
+  for (let sequence = 1; sequence <= EVIDENCE_MAX_SEQUENCE; sequence += 1) {
+    evidenceIds.push(evidenceId(job.orgId, job._id, sequence));
+  }
+  const refs = [
+    ref(H4C.domains, headId),
+    ref(H4C.domains, versionId),
+    ref(H4C.auditProofs, proofId),
+    ref(H4C_AUDIT_COLLECTION, auditId),
+    ref(H4C.fences, EVIDENCE_CHAIN_FENCE_ID),
+    ref(H4C.k3Markers, EVIDENCE_CHAIN_K3_MARKER_ID),
+    ref(H4C.plans, writerPlanId(writeEpoch)),
+    ref(H4C.anchors, evidenceAnchorId(job.orgId, job._id)),
+    ref(H4C.evidenceHeads, evidenceHeadId(job.orgId, job._id)),
+    ...evidenceIds.map((id) => ref(H4C.evidence, id)),
+  ];
+  const uniqueRefs = unique(refs);
+  assertC1AppendRefs(uniqueRefs);
+  return uniqueRefs;
+}
+
+/**
+ * Pure transaction builder for one C1 append. It re-reads the head for CAS,
+ * validates the anchor and the complete 1..N chain, fully re-checks the
+ * previous evidence (schema/ID/org/job/seq/observedAt/K3/HMAC), and returns
+ * only business writes: 3 for genesis (anchor+E+head) or 2 for append (E+head).
+ * Domain writes and the unique admin_audit belong outside this helper.
+ * Any failure throws before returning writes.
  */
 export function appendEvidenceWrites(state, {
-  job, expectedHead = null, hasExistingEvidence, config, now,
+  job, expectedHead = null, proofId, writeEpoch, auditId, config, now,
   decision, sourceType, sourceCode, observedAt, actorId,
 } = {}) {
   const cfg = normalizedConfig(config);
-  if (!isPlainObject(state) || !job || !isPlainObject(job) ||
+  if (!isPlainObject(state) || !isPlainObject(job) ||
       !opaque(job.orgId) || !opaque(job._id)) fail("EVIDENCE_INVALID");
   if (!integer(now) || !opaque(actorId)) fail("EVIDENCE_INVALID");
+  if (typeof proofId !== "string" || proofId.length === 0) {
+    fail("EVIDENCE_CHAIN_PROOF_REQUIRED");
+  }
+  if (!integer(writeEpoch, 1)) fail("EVIDENCE_INVALID");
+  if (typeof auditId !== "string" || auditId.length === 0) fail("EVIDENCE_INVALID");
   const finishedAt = job.result?.finishedAt;
   if (!integer(job.createdAt) || !integer(finishedAt)) fail("EVIDENCE_INVALID");
   if (!SOURCE_CODES.has(decision) || sourceType !== "operator" ||
@@ -369,62 +433,132 @@ export function appendEvidenceWrites(state, {
   }
 
   // Read-only domain validation must run before any evidence/head decision.
-  // A missing/damaged/mismatched domain fails closed with zero writes; it is
-  // never an implicit initialization signal. The guard returns an empty write
-  // set by contract, and append deliberately ignores it: this path writes only
-  // evidence + head and can never contribute a domain write.
   applyEvidenceDomain(state, cfg);
 
+  const planId = writerPlanId(writeEpoch);
+  const proof = read(state, H4C.auditProofs, proofId);
+  if (!proof || proof._id !== proofId || proof.writeEpoch !== writeEpoch ||
+      proof.writerPlanId !== planId) {
+    fail("EVIDENCE_CHAIN_PROOF_REQUIRED");
+  }
+  // S2 declares and reads these ref targets but deliberately leaves the full
+  // CoverageValid/fence/proof/writer-plan validation to S5. Only a locally
+  // inconsistent target id is rejected here.
+  const fence = read(state, H4C.fences, EVIDENCE_CHAIN_FENCE_ID);
+  const marker = read(state, H4C.k3Markers, EVIDENCE_CHAIN_K3_MARKER_ID);
+  const writerPlan = read(state, H4C.plans, planId);
+  if (fence !== null && fence._id !== EVIDENCE_CHAIN_FENCE_ID) {
+    fail("EVIDENCE_CHAIN_HALTED");
+  }
+  if (marker !== null && marker._id !== EVIDENCE_CHAIN_K3_MARKER_ID) {
+    fail("EVIDENCE_CHAIN_PROOF_REQUIRED");
+  }
+  if (writerPlan !== null && writerPlan._id !== planId) fail("PLAN_INVALID");
+
   const headId = evidenceHeadId(job.orgId, job._id);
-  const head = read(state, EVIDENCE_HEADS_COLLECTION, headId);
-  if (expectedHead == null) {
-    if (head !== null) fail("EVIDENCE_CHAIN_BROKEN");
-    if (hasExistingEvidence !== false) fail("EVIDENCE_CHAIN_BROKEN");
+  const anchorId = evidenceAnchorId(job.orgId, job._id);
+  const head = read(state, H4C.evidenceHeads, headId);
+  const anchor = read(state, H4C.anchors, anchorId);
+
+  const maxSequence = decision === "still_unknown"
+    ? STILL_UNKNOWN_MAX_SEQUENCE : EVIDENCE_MAX_SEQUENCE;
+  let sequence;
+  let previousEvidenceId;
+  let previous = null;
+  let anchorRecord = null;
+
+  if (head === null) {
+    // Genesis (empty head): expectedHead may not be supplied, and neither the
+    // anchor nor any residual 1..9 evidence record may exist. No adopt/renumber/repair.
+    if (expectedHead != null) fail("EVIDENCE_CHAIN_BROKEN");
+    if (anchor !== null) fail("EVIDENCE_CHAIN_BROKEN");
+    for (let seq = 1; seq <= EVIDENCE_MAX_SEQUENCE; seq += 1) {
+      if (read(state, H4C.evidence, evidenceId(job.orgId, job._id, seq)) !== null) {
+        fail("EVIDENCE_CHAIN_BROKEN");
+      }
+    }
+    sequence = 1;
+    previousEvidenceId = null;
   } else {
+    // ChainProof: CAS first, then a valid anchor and the complete 1..N chain.
+    if (expectedHead == null || !isPlainObject(expectedHead)) {
+      fail("EVIDENCE_CHAIN_BROKEN");
+    }
     checkHead(head, job.orgId, job._id);
     if (head.revision !== expectedHead.revision ||
         head.lastEvidenceId !== expectedHead.lastEvidenceId ||
         head.lastSequence !== expectedHead.lastSequence) {
       fail("EVIDENCE_HEAD_CONFLICT");
     }
-  }
-
-  const previousEvidenceId = head?.lastEvidenceId ?? null;
-  let previous = null;
-  if (previousEvidenceId === null) {
-    if (hasExistingEvidence !== false) fail("EVIDENCE_CHAIN_BROKEN");
-    if (head !== null && head.lastSequence !== 0) fail("EVIDENCE_CHAIN_BROKEN");
-  } else {
-    previous = read(state, EVIDENCE_COLLECTION, previousEvidenceId);
-    if (previous === null) fail("EVIDENCE_CHAIN_BROKEN");
+    if (anchor === null) fail("EVIDENCE_CHAIN_BROKEN");
     try {
-      validateEvidenceRecord(previous);
-      if (previous._id !== previousEvidenceId ||
-          previous.orgId !== job.orgId ||
-          previous.jobId !== job._id ||
-          previous.sequence !== head.lastSequence ||
-          previous.observedAt !== head.lastObservedAt ||
-          previous.keyRealm !== cfg.realm ||
-          previous.keyVersion !== cfg.version ||
-          previous.keyFingerprint !== cfg.fingerprint ||
-          !integer(previous.observedAt, floor, now) ||
-          !constantTimeHexEqual(previous.digest, evidenceDigest(previous, cfg))) {
-        fail("EVIDENCE_CHAIN_BROKEN");
-      }
+      validateEvidenceAnchorRecord(anchor);
     } catch {
       fail("EVIDENCE_CHAIN_BROKEN");
     }
+    if (anchor.orgId !== job.orgId || anchor.jobId !== job._id) {
+      fail("EVIDENCE_CHAIN_BROKEN");
+    }
+
+    const lastSequence = head.lastSequence;
+    if (!integer(lastSequence, 1, EVIDENCE_MAX_SEQUENCE) ||
+        head.lastEvidenceId !== evidenceId(job.orgId, job._id, lastSequence)) {
+      fail("EVIDENCE_CHAIN_BROKEN");
+    }
+    for (let seq = 1; seq <= lastSequence; seq += 1) {
+      const record = read(state, H4C.evidence, evidenceId(job.orgId, job._id, seq));
+      if (record === null) fail("EVIDENCE_CHAIN_BROKEN");
+      try {
+        validateEvidenceRecord(record);
+      } catch {
+        fail("EVIDENCE_CHAIN_BROKEN");
+      }
+      if (record._id !== evidenceId(job.orgId, job._id, seq) ||
+          record.orgId !== job.orgId || record.jobId !== job._id ||
+          record.sequence !== seq ||
+          record.previousEvidenceId !== (seq === 1
+            ? null : evidenceId(job.orgId, job._id, seq - 1))) {
+        fail("EVIDENCE_CHAIN_BROKEN");
+      }
+    }
+
+    previous = read(state, H4C.evidence, head.lastEvidenceId);
+    if (previous === null || previous._id !== head.lastEvidenceId ||
+        previous.sequence !== lastSequence ||
+        previous.observedAt !== head.lastObservedAt ||
+        previous.keyRealm !== cfg.realm || previous.keyVersion !== cfg.version ||
+        previous.keyFingerprint !== cfg.fingerprint ||
+        !integer(previous.observedAt, floor, now) ||
+        !constantTimeHexEqual(previous.digest, evidenceDigest(previous, cfg))) {
+      fail("EVIDENCE_CHAIN_BROKEN");
+    }
     if (observedAt < previous.observedAt) fail("EVIDENCE_STALE");
+    if (lastSequence >= EVIDENCE_MAX_SEQUENCE) fail("EVIDENCE_INVALID");
+    for (let seq = lastSequence + 1; seq <= EVIDENCE_MAX_SEQUENCE; seq += 1) {
+      if (read(state, H4C.evidence, evidenceId(job.orgId, job._id, seq)) !== null) {
+        fail(seq === lastSequence + 1 ? "CONFLICT" : "EVIDENCE_CHAIN_BROKEN");
+      }
+    }
+    sequence = lastSequence + 1;
+    previousEvidenceId = head.lastEvidenceId;
   }
 
-  const sequence = (head?.lastSequence ?? 0) + 1;
-  const maxSequence = decision === "still_unknown"
-    ? STILL_UNKNOWN_MAX_SEQUENCE : EVIDENCE_MAX_SEQUENCE;
   if (sequence > maxSequence) fail("EVIDENCE_INVALID");
-
   const id = evidenceId(job.orgId, job._id, sequence);
-  if (read(state, EVIDENCE_COLLECTION, id) !== null) {
+  if (read(state, H4C.evidence, id) !== null) {
     fail(sequence === 1 ? "EVIDENCE_CHAIN_BROKEN" : "CONFLICT");
+  }
+
+  if (sequence === 1) {
+    anchorRecord = {
+      _id: anchorId,
+      orgId: job.orgId,
+      jobId: job._id,
+      schemaVersion: EVIDENCE_SCHEMA_VERSION,
+      firstEvidenceId: evidenceId(job.orgId, job._id, 1),
+      createdAt: now,
+    };
+    validateEvidenceAnchorRecord(anchorRecord);
   }
 
   const record = {
@@ -465,10 +599,10 @@ export function appendEvidenceWrites(state, {
   };
   validateEvidenceHead(nextHead);
 
-  return [
-    write(EVIDENCE_COLLECTION, record),
-    write(EVIDENCE_HEADS_COLLECTION, nextHead),
-  ];
+  const writes = [];
+  if (anchorRecord !== null) writes.push(write(H4C.anchors, anchorRecord));
+  writes.push(write(H4C.evidence, record), write(H4C.evidenceHeads, nextHead));
+  return writes;
 }
 
 /* ------------------------------------------------------------------------- *
@@ -476,8 +610,8 @@ export function appendEvidenceWrites(state, {
  *
  * Pure constants, canonical IDs, exact schema arrays, digests and predicates
  * for the C1 contracts. This layer deliberately has no Store access, no I/O,
- * no clock read and no mutation of its inputs. Store wiring and the 18-refs
- * append path belong to later stages.
+ * no clock read and no mutation of its inputs. Store wiring belongs to later
+ * stages.
  * ------------------------------------------------------------------------- */
 
 export const EVIDENCE_CHAIN_ANCHOR_PREFIX = "h4c-evidence-anchor-v1:";

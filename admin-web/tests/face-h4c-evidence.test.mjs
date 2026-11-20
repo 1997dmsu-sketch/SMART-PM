@@ -18,6 +18,7 @@ import {
   EVIDENCE_SCHEMA_VERSION,
   appendEvidenceWrites,
   applyEvidenceDomain,
+  assertC1AppendRefs,
   evidenceAppendRefs,
   evidenceDigest,
   evidenceDomainIds,
@@ -122,7 +123,120 @@ const SOURCE_CODES = {
   confirmed_present: "OPERATOR_CONFIRMED_PRESENT",
   still_unknown: "OPERATOR_UNCERTAIN",
 };
+const PROOF = s1Proof();
+const PROOF_ID = PROOF._id;
+const WRITE_EPOCH = PROOF.writeEpoch;
+const AUDIT_ID = evidenceC1AuditId({
+  orgId: ORG,
+  scopeKey: JOB_ID,
+  action: "h4c.evidence.genesis",
+  targetList: [
+    `${H4C.anchors}/${evidenceAnchorId(ORG, JOB_ID)}`,
+    `${H4C.evidence}/${evidenceId(ORG, JOB_ID, 1)}`,
+    `${H4C.evidenceHeads}/${evidenceHeadId(ORG, JOB_ID)}`,
+  ].sort(),
+  revision: 1,
+});
 const ref = (collection, id) => ({ collection, id });
+
+function ensureProof(data) {
+  if (!data[H4C.auditProofs]) data[H4C.auditProofs] = [];
+  if (!data[H4C.auditProofs].some((row) => row._id === PROOF_ID)) {
+    data[H4C.auditProofs].push(structuredClone(PROOF));
+  }
+}
+
+function chainState(data, refs) {
+  return Object.fromEntries(refs.map(({ collection, id }) => {
+    const row = (data[collection] || []).find((entry) => entry._id === id);
+    return [`${collection}/${id}`, row === undefined ? null : structuredClone(row)];
+  }));
+}
+
+function applyWrites(data, writes) {
+  for (const item of writes) {
+    const rows = (data[item.collection] ||= []);
+    const index = rows.findIndex((row) => row._id === item.id);
+    if (index < 0) rows.push(structuredClone(item.data));
+    else rows[index] = structuredClone(item.data);
+  }
+}
+
+function applyStateWrites(state, writes) {
+  for (const item of writes) {
+    state[`${item.collection}/${item.id}`] = structuredClone(item.data);
+  }
+}
+
+function makeAnchor({ orgId = ORG, jobId = JOB_ID, createdAt = NOW } = {}) {
+  return {
+    _id: evidenceAnchorId(orgId, jobId),
+    orgId,
+    jobId,
+    schemaVersion: EVIDENCE_SCHEMA_VERSION,
+    firstEvidenceId: evidenceId(orgId, jobId, 1),
+    createdAt,
+  };
+}
+
+function chainFor(count, { job = JOB, decision = "confirmed_removed" } = {}) {
+  const evidence = [];
+  for (let sequence = 1; sequence <= count; sequence += 1) {
+    evidence.push(makeEvidenceRecord({
+      orgId: job.orgId,
+      jobId: job._id,
+      sequence,
+      decision,
+      observedAt: OBSERVED + sequence,
+    }));
+  }
+  const head = count === 0 ? null : makeHead({
+    orgId: job.orgId,
+    jobId: job._id,
+    revision: count,
+    lastSequence: count,
+    lastEvidenceId: evidence[count - 1]._id,
+    lastObservedAt: evidence[count - 1].observedAt,
+    createdAt: NOW,
+    updatedAt: NOW,
+  });
+  return { anchor: count === 0 ? null : makeAnchor({ orgId: job.orgId, jobId: job._id }), evidence, head };
+}
+
+function s2State({
+  job = JOB, config = CONFIG, head = null, anchor = null, evidence = [], proof = PROOF,
+} = {}) {
+  const domain = makeDomainRecords(config);
+  const state = domainState(config, domain.head, domain.version);
+  state[`${H4C.auditProofs}/${PROOF_ID}`] = proof === null ? null : structuredClone(proof);
+  state[`${H4C.anchors}/${evidenceAnchorId(job.orgId, job._id)}`] =
+    anchor === null ? null : structuredClone(anchor);
+  state[`${H4C.evidenceHeads}/${evidenceHeadId(job.orgId, job._id)}`] =
+    head === null ? null : structuredClone(head);
+  for (let sequence = 1; sequence <= 9; sequence += 1) {
+    state[`${H4C.evidence}/${evidenceId(job.orgId, job._id, sequence)}`] =
+      evidence[sequence - 1] ? structuredClone(evidence[sequence - 1]) : null;
+  }
+  return state;
+}
+
+function appendArgs({ decision = "still_unknown", ...overrides } = {}) {
+  return {
+    job: JOB,
+    expectedHead: null,
+    proofId: PROOF_ID,
+    writeEpoch: WRITE_EPOCH,
+    auditId: AUDIT_ID,
+    config: CONFIG,
+    now: NOW,
+    decision,
+    sourceType: "operator",
+    sourceCode: SOURCE_CODES[decision],
+    observedAt: OBSERVED,
+    actorId: ACTOR,
+    ...overrides,
+  };
+}
 
 async function localStore(t) {
   const directory = await mkdtemp(join(tmpdir(), "smartpm-h4c-"));
@@ -229,6 +343,10 @@ async function seedDomain(store, config = CONFIG, now = NOW) {
   const { head, version } = makeDomainRecords(config, now);
   await insert(store, EVIDENCE_DOMAINS_COLLECTION, head);
   await insert(store, EVIDENCE_DOMAINS_COLLECTION, version);
+  // S2 synthetic proof fixture: a minimal read target for the proof ref. Full
+  // CoverageValid is S5, so this fixture is intentionally not used as a claim
+  // of proof/fence/marker/plan validity.
+  if (store.data) ensureProof(store.data);
   return { head, version };
 }
 
@@ -242,6 +360,12 @@ async function domainStateFor(store, config = CONFIG) {
   return state;
 }
 
+/**
+ * S2 helper-layer append runner. Store wiring/anchor exactness belongs to S4,
+ * so this runner assembles the 18-ref state from LocalStore data, calls the
+ * pure helper and applies its exact writes to store.data. This keeps the
+ * tests focused on the S2 chain contract without modifying store.mjs.
+ */
 async function runAppend(store, {
   job = JOB,
   config = CONFIG,
@@ -250,41 +374,37 @@ async function runAppend(store, {
   sourceType = "operator",
   sourceCode = SOURCE_CODES[decision],
   observedAt = OBSERVED,
-  head,
   expectedHead,
-  domainHead,
-  hasExistingEvidence,
-  extraRefs = [],
+  proofId = PROOF_ID,
+  writeEpoch = WRITE_EPOCH,
+  auditId = AUDIT_ID,
   onBuild,
 } = {}) {
-  const actualHead = head !== undefined
-    ? head
-    : await store.get(EVIDENCE_HEADS_COLLECTION, evidenceHeadId(job.orgId, job._id), job.orgId);
-  const actualDomainHead = domainHead !== undefined
-    ? domainHead
-    : await store.get(EVIDENCE_DOMAINS_COLLECTION,
-      evidenceDomainIds(config.realm, config.version).headId);
-  const exists = hasExistingEvidence !== undefined
-    ? hasExistingEvidence
-    : (await store.list(EVIDENCE_COLLECTION, job.orgId))
-      .some((row) => row.jobId === job._id);
-  const refs = evidenceAppendRefs(job, actualHead, actualDomainHead, config);
-  return store.transact([...refs, ...extraRefs], (state) => {
-    const writes = appendEvidenceWrites(state, {
-      job,
-      expectedHead: expectedHead !== undefined ? expectedHead : actualHead,
-      hasExistingEvidence: exists,
-      config,
-      now,
-      decision,
-      sourceType,
-      sourceCode,
-      observedAt,
-      actorId: ACTOR,
-    });
-    onBuild?.(writes, refs);
-    return writes;
-  }, AUDIT);
+  if (!store.data) throw Error("runAppend requires a data-backed store");
+  const actualHead = (store.data[EVIDENCE_HEADS_COLLECTION] || [])
+    .find((row) => row._id === evidenceHeadId(job.orgId, job._id)) ?? null;
+  const expected = expectedHead !== undefined ? expectedHead : actualHead;
+  const refs = evidenceAppendRefs({
+    job, expectedHead: expected, proofId, writeEpoch, auditId, config,
+  });
+  const state = chainState(store.data, refs);
+  const writes = appendEvidenceWrites(state, {
+    job,
+    expectedHead: expected,
+    proofId,
+    writeEpoch,
+    auditId,
+    config,
+    now,
+    decision,
+    sourceType,
+    sourceCode,
+    observedAt,
+    actorId: ACTOR,
+  });
+  onBuild?.(writes, refs);
+  applyWrites(store.data, writes);
+  return writes;
 }
 
 function rejectCode(code) {
@@ -301,8 +421,9 @@ async function expectFailure(store, options, code) {
 }
 
 function assertNoBusinessWrites(store) {
-  assert.deepEqual(store.data[EVIDENCE_COLLECTION], []);
-  assert.deepEqual(store.data[EVIDENCE_HEADS_COLLECTION], []);
+  assert.deepEqual(store.data[EVIDENCE_COLLECTION] ?? [], []);
+  assert.deepEqual(store.data[EVIDENCE_HEADS_COLLECTION] ?? [], []);
+  assert.deepEqual(store.data[H4C.anchors] ?? [], []);
 }
 
 function cloudHarness(initial = []) {
@@ -831,14 +952,17 @@ test("runtime rejects both-missing, head-only, version-only and evidence-only st
   }
 });
 
-test("first evidence appends only evidence+head after a fixed fixture seed", async (t) => {
+test("first evidence appends anchor+evidence+head after a fixed fixture seed", async (t) => {
   const store = await localStore(t);
   await seedDomain(store);
   let built = null;
   await runAppend(store, {
     onBuild: (writes, refs) => { built = { writes, refs }; },
   });
-  assert.equal(built.writes.length, 2);
+  assert.equal(built.writes.length, 3);
+  assert.deepEqual(built.writes.map((write) => write.collection), [
+    H4C.anchors, EVIDENCE_COLLECTION, EVIDENCE_HEADS_COLLECTION,
+  ]);
   assert.ok(built.writes.every((write) => write.collection !== EVIDENCE_DOMAINS_COLLECTION));
   for (const write of built.writes) {
     assert.ok(built.refs.some((item) => item.collection === write.collection && item.id === write.id),
@@ -848,7 +972,19 @@ test("first evidence appends only evidence+head after a fixed fixture seed", asy
   assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 2);
   assert.equal(store.data[EVIDENCE_COLLECTION].length, 1);
   assert.equal(store.data[EVIDENCE_HEADS_COLLECTION].length, 1);
+  assert.equal(store.data[H4C.anchors].length, 1);
   assert.deepEqual(store.data.device_operation_logs, []);
+
+  const [anchor] = store.data[H4C.anchors];
+  assert.equal(validateEvidenceAnchorRecord(anchor), undefined);
+  assert.equal(anchor._id, evidenceAnchorId(ORG, JOB_ID));
+  assert.equal(anchor.firstEvidenceId, evidenceId(ORG, JOB_ID, 1));
+  assert.equal(anchor.schemaVersion, EVIDENCE_SCHEMA_VERSION);
+  assert.equal(anchor.createdAt, NOW);
+  assert.equal(Object.hasOwn(anchor, "updatedAt"), false);
+  assert.deepEqual(Object.keys(anchor).sort(), [
+    "_id", "createdAt", "firstEvidenceId", "jobId", "orgId", "schemaVersion",
+  ]);
 
   const [evidence] = store.data[EVIDENCE_COLLECTION];
   assert.equal(validateEvidenceRecord(evidence), undefined);
@@ -880,18 +1016,30 @@ test("first evidence appends only evidence+head after a fixed fixture seed", asy
     assert.equal(validateEvidenceDomainRecord(record), undefined);
   }
 
-  const refs = evidenceAppendRefs(JOB, null, null, CONFIG);
-  assert.equal(refs.length, 4);
-  assert.deepEqual(new Set(refs.map((item) => `${item.collection}/${item.id}`)), new Set([
+  const refs = evidenceAppendRefs({
+    job: JOB, expectedHead: null, proofId: PROOF_ID,
+    writeEpoch: WRITE_EPOCH, auditId: AUDIT_ID, config: CONFIG,
+  });
+  assert.equal(refs.length, 18);
+  const expectedRefs = new Set([
     `${EVIDENCE_DOMAINS_COLLECTION}/${EVIDENCE_DOMAIN_HEAD_ID}`,
     `${EVIDENCE_DOMAINS_COLLECTION}/${evidenceDomainIds(CONFIG.realm, CONFIG.version).versionId}`,
-    `${EVIDENCE_HEADS_COLLECTION}/${evidenceHeadId(ORG, JOB_ID)}`,
-    `${EVIDENCE_COLLECTION}/${evidenceId(ORG, JOB_ID, 1)}`,
-  ]));
+    `${H4C.auditProofs}/${PROOF_ID}`,
+    `${H4C_AUDIT_COLLECTION}/${AUDIT_ID}`,
+    `${H4C.fences}/${EVIDENCE_CHAIN_FENCE_ID}`,
+    `${H4C.k3Markers}/${EVIDENCE_CHAIN_K3_MARKER_ID}`,
+    `${H4C.plans}/${writerPlanId(WRITE_EPOCH)}`,
+    `${H4C.anchors}/${evidenceAnchorId(ORG, JOB_ID)}`,
+    `${H4C.evidenceHeads}/${evidenceHeadId(ORG, JOB_ID)}`,
+    ...Array.from({ length: 9 }, (_, index) =>
+      `${EVIDENCE_COLLECTION}/${evidenceId(ORG, JOB_ID, index + 1)}`),
+  ]);
+  assert.deepEqual(new Set(refs.map((item) => `${item.collection}/${item.id}`)), expectedRefs);
+  assert.equal(refs.filter((item) => item.collection === H4C.auditProofs).length, 1);
 
   const audit = store.data.admin_audit;
-  // Two audits from the test fixture seed plus one from the append.
-  assert.equal(audit.length, 3);
+  // Two audits from the domain fixture seed; S2 helper deliberately writes no audit.
+  assert.equal(audit.length, 2);
   for (const entry of audit) {
     assert.deepEqual(Object.keys(entry).sort(), [
       "_id", "action", "actorId", "actorType", "createdAt", "orgId", "target",
@@ -926,6 +1074,7 @@ test("second evidence validates its parent and CAS-increments the head", async (
   assert.equal(second.previousEvidenceId, firstEvidence._id);
   assert.equal(second.digest, evidenceDigest(second, CONFIG));
   assert.equal(store.data[EVIDENCE_HEADS_COLLECTION].length, 1);
+  assert.equal(store.data[H4C.anchors].length, 1);
   const head = store.data[EVIDENCE_HEADS_COLLECTION][0];
   assert.equal(head.revision, 2);
   assert.equal(head.lastSequence, 2);
@@ -934,11 +1083,18 @@ test("second evidence validates its parent and CAS-increments the head", async (
   assert.equal(head.createdAt, firstHead.createdAt);
   assert.equal(head.updatedAt, NOW + 1_000);
 
-  const refs = evidenceAppendRefs(JOB, firstHead,
-    store.data[EVIDENCE_DOMAINS_COLLECTION].find((row) => row.kind === "head"), CONFIG);
-  assert.equal(refs.length, 5);
+  const refs = evidenceAppendRefs({
+    job: JOB, expectedHead: firstHead, proofId: PROOF_ID,
+    writeEpoch: WRITE_EPOCH, auditId: AUDIT_ID, config: CONFIG,
+  });
+  assert.equal(refs.length, 18);
+  assert.ok(refs.some((item) => item.collection === H4C.auditProofs && item.id === PROOF_ID));
+  assert.ok(refs.some((item) => item.collection === H4C.anchors &&
+    item.id === evidenceAnchorId(ORG, JOB_ID)));
   assert.ok(refs.some((item) => item.collection === EVIDENCE_COLLECTION &&
     item.id === firstEvidence._id));
+  assert.ok(refs.some((item) => item.collection === EVIDENCE_COLLECTION &&
+    item.id === second._id));
 });
 
 test("stale head CAS and missing/orphan head fail closed with zero writes", async (t) => {
@@ -1102,6 +1258,244 @@ test("observedAt bounds, monotonicity and invalid clock fail closed", async (t) 
     "EVIDENCE_STALE");
 });
 
+test("S2 refs are exactly 18, stable, unique and reject a missing proof ref", () => {
+  const args = {
+    job: JOB, expectedHead: null, proofId: PROOF_ID,
+    writeEpoch: WRITE_EPOCH, auditId: AUDIT_ID, config: CONFIG,
+  };
+  const refs = evidenceAppendRefs(args);
+  assert.equal(refs.length, 18);
+  assert.equal(new Set(refs.map((item) => `${item.collection}/${item.id}`)).size, 18);
+  assert.deepEqual(evidenceAppendRefs(args), refs);
+  const proofRefs = refs.filter((item) => item.collection === H4C.auditProofs);
+  assert.equal(proofRefs.length, 1);
+  assert.equal(proofRefs[0].id, PROOF_ID);
+  assert.equal(assertC1AppendRefs(refs), refs);
+  assert.throws(() => assertC1AppendRefs(refs.slice(0, 17)),
+    rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+  assert.throws(() => assertC1AppendRefs(refs.filter(
+    (item) => item.collection !== H4C.auditProofs)),
+  rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+  // 17 refs cannot be produced: the exact-length invariant is enforced, and a
+  // missing proof id is rejected instead of silently dropped.
+  assert.throws(() => evidenceAppendRefs({ ...args, proofId: undefined }),
+    rejectCode("EVIDENCE_CHAIN_PROOF_REQUIRED"));
+  assert.throws(() => evidenceAppendRefs({ ...args, proofId: "" }),
+    rejectCode("EVIDENCE_CHAIN_PROOF_REQUIRED"));
+  assert.throws(() => evidenceAppendRefs({ ...args, writeEpoch: 0 }),
+    rejectCode("EVIDENCE_INVALID"));
+});
+
+test("S2 genesis returns anchor+E1+head only and leaves state untouched", () => {
+  const state = s2State();
+  const before = structuredClone(state);
+  const writes = appendEvidenceWrites(state, appendArgs());
+  assert.equal(writes.length, 3);
+  assert.deepEqual(writes.map((item) => item.collection), [
+    H4C.anchors, EVIDENCE_COLLECTION, EVIDENCE_HEADS_COLLECTION,
+  ]);
+  assert.equal(writes.some((item) => item.collection === EVIDENCE_DOMAINS_COLLECTION ||
+    item.collection === H4C_AUDIT_COLLECTION), false);
+  assert.equal(validateEvidenceAnchorRecord(writes[0].data), undefined);
+  assert.equal(validateEvidenceRecord(writes[1].data), undefined);
+  assert.equal(validateEvidenceHead(writes[2].data), undefined);
+  assert.equal(writes[0].data.firstEvidenceId, evidenceId(ORG, JOB_ID, 1));
+  assert.deepEqual(state, before);
+});
+
+test("S2 append returns E+head only and leaves anchor/state untouched", () => {
+  const chain = chainFor(2);
+  const state = s2State(chain);
+  const before = structuredClone(state);
+  const writes = appendEvidenceWrites(state, appendArgs({
+    expectedHead: chain.head,
+    decision: "confirmed_present",
+    observedAt: OBSERVED + 10,
+  }));
+  assert.equal(writes.length, 2);
+  assert.deepEqual(writes.map((item) => item.collection), [
+    EVIDENCE_COLLECTION, EVIDENCE_HEADS_COLLECTION,
+  ]);
+  assert.equal(writes.some((item) => item.collection === H4C.anchors), false);
+  assert.equal(validateEvidenceRecord(writes[0].data), undefined);
+  assert.equal(validateEvidenceHead(writes[1].data), undefined);
+  assert.deepEqual(state, before);
+});
+
+test("S2 empty-chain genesis rejects E1..E9 residuals, an anchor or an expected head", () => {
+  const cases = [
+    ["E1", { evidence: chainFor(1).evidence }],
+    ["E2", { evidence: chainFor(2).evidence }],
+    ["E9", { evidence: chainFor(9).evidence }],
+    ["anchor", { anchor: makeAnchor() }],
+  ];
+  for (const [name, fixture] of cases) {
+    const state = s2State(fixture);
+    const before = structuredClone(state);
+    assert.throws(() => appendEvidenceWrites(state, appendArgs()),
+      rejectCode("EVIDENCE_CHAIN_BROKEN"), name);
+    assert.deepEqual(state, before, name);
+  }
+  const state = s2State();
+  const before = structuredClone(state);
+  assert.throws(() => appendEvidenceWrites(state, appendArgs({ expectedHead: makeHead() })),
+    rejectCode("EVIDENCE_CHAIN_BROKEN"));
+  assert.deepEqual(state, before);
+});
+
+test("S2 damaged anchor is chain-broken without repair", () => {
+  const chain = chainFor(1);
+  const cases = [
+    ["extra field", (anchor) => { anchor.extra = 1; }],
+    ["_id", (anchor) => { anchor._id = `${EVIDENCE_CHAIN_ANCHOR_PREFIX}other`; }],
+    ["firstEvidenceId", (anchor) => { anchor.firstEvidenceId = evidenceId(ORG, JOB_ID, 2); }],
+    ["orgId", (anchor) => { anchor.orgId = "org-other"; }],
+    ["jobId", (anchor) => { anchor.jobId = "job-other"; }],
+    ["schemaVersion", (anchor) => { anchor.schemaVersion = 2; }],
+    ["missing createdAt", (anchor) => { delete anchor.createdAt; }],
+  ];
+  for (const [name, mutate] of cases) {
+    const anchor = structuredClone(chain.anchor);
+    mutate(anchor);
+    const state = s2State({ ...chain, anchor });
+    const before = structuredClone(state);
+    assert.throws(() => appendEvidenceWrites(state, appendArgs({ expectedHead: chain.head })),
+      rejectCode("EVIDENCE_CHAIN_BROKEN"), name);
+    assert.deepEqual(state, before, name);
+  }
+});
+
+test("S2 complete chain bounds reject N+1 target reservation and later residuals", () => {
+  const chain = chainFor(2);
+  const e3 = makeEvidenceRecord({ sequence: 3, observedAt: OBSERVED + 3 });
+  let state = s2State({ ...chain, evidence: [...chain.evidence, e3] });
+  let before = structuredClone(state);
+  assert.throws(() => appendEvidenceWrites(state, appendArgs({
+    expectedHead: chain.head, observedAt: OBSERVED + 10,
+  })), rejectCode("CONFLICT"));
+  assert.deepEqual(state, before);
+
+  const e4 = makeEvidenceRecord({ sequence: 4, observedAt: OBSERVED + 4 });
+  state = s2State({ ...chain, evidence: [...chain.evidence, undefined, e4] });
+  before = structuredClone(state);
+  assert.throws(() => appendEvidenceWrites(state, appendArgs({
+    expectedHead: chain.head, observedAt: OBSERVED + 10,
+  })), rejectCode("EVIDENCE_CHAIN_BROKEN"));
+  assert.deepEqual(state, before);
+
+  const chain2 = chainFor(2);
+  const missingE1 = s2State({
+    anchor: chain2.anchor,
+    head: chain2.head,
+    evidence: [null, chain2.evidence[1]],
+  });
+  const missingBefore = structuredClone(missingE1);
+  assert.throws(() => appendEvidenceWrites(missingE1, appendArgs({
+    expectedHead: chain2.head, observedAt: OBSERVED + 10,
+  })), rejectCode("EVIDENCE_CHAIN_BROKEN"));
+  assert.deepEqual(missingE1, missingBefore);
+
+  const chain9 = chainFor(9);
+  assert.throws(() => appendEvidenceWrites(s2State(chain9), appendArgs({
+    expectedHead: chain9.head, observedAt: OBSERVED + 10,
+  })), rejectCode("EVIDENCE_INVALID"));
+
+  const chain8 = chainFor(8, { decision: "still_unknown" });
+  const state8 = s2State(chain8);
+  assert.equal(state8[`${H4C.evidence}/${evidenceId(ORG, JOB_ID, 9)}`], null);
+  assert.throws(() => appendEvidenceWrites(state8, appendArgs({
+    expectedHead: chain8.head, decision: "still_unknown", observedAt: OBSERVED + 10,
+  })), rejectCode("EVIDENCE_INVALID"));
+});
+
+test("S2 observedAt equality is allowed and decreasing/out-of-bounds is stale", () => {
+  const chain = chainFor(1);
+  const previous = chain.evidence[0];
+  const equalState = s2State(chain);
+  const equalWrites = appendEvidenceWrites(equalState, appendArgs({
+    expectedHead: chain.head,
+    decision: "confirmed_present",
+    observedAt: previous.observedAt,
+  }));
+  assert.equal(equalWrites.length, 2);
+
+  const decreasing = s2State(chain);
+  const before = structuredClone(decreasing);
+  assert.throws(() => appendEvidenceWrites(decreasing, appendArgs({
+    expectedHead: chain.head,
+    decision: "confirmed_present",
+    observedAt: previous.observedAt - 1,
+  })), rejectCode("EVIDENCE_STALE"));
+  assert.deepEqual(decreasing, before);
+
+  assert.throws(() => appendEvidenceWrites(s2State(chain), appendArgs({
+    expectedHead: chain.head, decision: "confirmed_present", observedAt: NOW + 1,
+  })), rejectCode("EVIDENCE_STALE"));
+  assert.throws(() => appendEvidenceWrites(s2State(chain), appendArgs({
+    expectedHead: chain.head, decision: "confirmed_present", observedAt: JOB.createdAt - 1,
+  })), rejectCode("EVIDENCE_STALE"));
+});
+
+test("S2 proof ref target is required and epoch/writer-plan bound", () => {
+  const cases = [
+    ["missing", null],
+    ["wrong epoch", { ...PROOF, writeEpoch: WRITE_EPOCH + 1 }],
+    ["wrong plan", { ...PROOF, writerPlanId: writerPlanId(WRITE_EPOCH + 1) }],
+  ];
+  for (const [name, proof] of cases) {
+    const state = s2State({ proof });
+    const before = structuredClone(state);
+    assert.throws(() => appendEvidenceWrites(state, appendArgs()),
+      rejectCode("EVIDENCE_CHAIN_PROOF_REQUIRED"), name);
+    assert.deepEqual(state, before, name);
+  }
+});
+
+test("S2 expectedHead CAS: stale is head-conflict and deleted head is broken", () => {
+  const chain = chainFor(1);
+  const state = s2State(chain);
+  const before = structuredClone(state);
+  assert.throws(() => appendEvidenceWrites(state, appendArgs({
+    expectedHead: { ...chain.head, revision: 0 },
+  })), rejectCode("EVIDENCE_HEAD_CONFLICT"));
+  assert.deepEqual(state, before);
+
+  const deleted = s2State({ anchor: chain.anchor, evidence: chain.evidence, head: null });
+  const deletedBefore = structuredClone(deleted);
+  assert.throws(() => appendEvidenceWrites(deleted, appendArgs({
+    expectedHead: chain.head,
+  })), rejectCode("EVIDENCE_CHAIN_BROKEN"));
+  assert.throws(() => appendEvidenceWrites(deleted, appendArgs({ expectedHead: null })),
+    rejectCode("EVIDENCE_CHAIN_BROKEN"));
+  assert.deepEqual(deleted, deletedBefore);
+});
+
+test("S2 helper concurrency: one CAS loser and no half writes", () => {
+  const chain = chainFor(1);
+  const state = s2State(chain);
+  const first = appendEvidenceWrites(state, appendArgs({
+    expectedHead: chain.head,
+    decision: "confirmed_present",
+    observedAt: chain.evidence[0].observedAt + 1,
+  }));
+  assert.equal(first.length, 2);
+  applyStateWrites(state, first);
+  const settled = structuredClone(state);
+  assert.throws(() => appendEvidenceWrites(state, appendArgs({
+    expectedHead: chain.head,
+    decision: "confirmed_present",
+    observedAt: chain.evidence[0].observedAt + 2,
+  })), rejectCode("EVIDENCE_HEAD_CONFLICT"));
+  assert.deepEqual(state, settled);
+
+  const genesis = s2State();
+  applyStateWrites(genesis, appendEvidenceWrites(genesis, appendArgs()));
+  const genesisSettled = structuredClone(genesis);
+  assert.throws(() => appendEvidenceWrites(genesis, appendArgs({ expectedHead: null })),
+    rejectCode("EVIDENCE_CHAIN_BROKEN"));
+  assert.deepEqual(genesis, genesisSettled);
+});
+
 test("decision/source binding and job invariants reject before writing", async (t) => {
   const store = await localStore(t);
   await seedDomain(store);
@@ -1117,7 +1511,8 @@ test("decision/source binding and job invariants reject before writing", async (
   ]) {
     await expectFailure(store, options, "EVIDENCE_INVALID");
   }
-  await expectFailure(store, { hasExistingEvidence: true }, "EVIDENCE_CHAIN_BROKEN");
+  store.data[H4C.auditProofs] = [];
+  await expectFailure(store, {}, "EVIDENCE_CHAIN_PROOF_REQUIRED");
   assertNoBusinessWrites(store);
   assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION].length, 2);
 });
@@ -1204,19 +1599,23 @@ test("LocalStore keeps evidence/domain create-only and exact, head updates exact
   assert.equal(store.data[EVIDENCE_COLLECTION][0].digest, evidence.digest);
 });
 
-test("CloudStore keeps exact fields and create-only semantics", async (t) => {
+test("CloudStore keeps evidence/domain exact fields and create-only semantics", async (t) => {
   const harness = cloudHarness();
   const store = harness.store;
   await seedDomain(store);
-  await runAppend(store);
 
   const evidenceId1 = evidenceId(ORG, JOB_ID, 1);
+  const evidenceRecord = makeEvidenceRecord();
+  await insert(store, EVIDENCE_COLLECTION, evidenceRecord);
+  const headId = evidenceHeadId(ORG, JOB_ID);
+  const headRecord = makeHead({ lastSequence: 1 });
+  await insert(store, EVIDENCE_HEADS_COLLECTION, headRecord);
+
   const evidence = harness.record(EVIDENCE_COLLECTION, evidenceId1);
   assert.equal(validateEvidenceRecord(evidence), undefined);
   assert.equal(Object.hasOwn(evidence, "updatedAt"), false);
   assert.deepEqual(Object.keys(evidence).sort(), Object.keys(makeEvidenceRecord()).sort());
 
-  const headId = evidenceHeadId(ORG, JOB_ID);
   const head = harness.record(EVIDENCE_HEADS_COLLECTION, headId);
   assert.equal(validateEvidenceHead(head), undefined);
   assert.equal(head.updatedAt, NOW);
@@ -1260,7 +1659,20 @@ test("CloudStore keeps exact fields and create-only semantics", async (t) => {
   ), (error) => error.status === 409);
   assert.deepEqual(harness.snapshot(), snapshot);
 
-  await runAppend(store, { observedAt: OBSERVED + 100, now: NOW + 1_000 });
+  // S2 does not wire Store; this is the existing exact head-update path only.
+  const nextHead = {
+    ...head,
+    revision: 2,
+    lastSequence: 2,
+    lastEvidenceId: evidenceId(ORG, JOB_ID, 2),
+    lastObservedAt: OBSERVED + 100,
+    updatedAt: NOW + 1_000,
+  };
+  await store.transact(
+    [ref(EVIDENCE_HEADS_COLLECTION, headId)],
+    () => [{ collection: EVIDENCE_HEADS_COLLECTION, id: headId, data: nextHead }],
+    AUDIT,
+  );
   const updated = harness.record(EVIDENCE_HEADS_COLLECTION, headId);
   assert.equal(updated.revision, 2);
   assert.equal(updated.updatedAt, NOW + 1_000);

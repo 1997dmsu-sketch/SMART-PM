@@ -888,3 +888,181 @@ stat   1 file changed, 477 insertions(+)
 - 请求 Codex 独立复审 S1：白名单 4 个代码/测试文件 + 本节证据；重点核对上述 2 个 S1 修复、22/18 错误码边界、`CoverageValid` state 要求、D4b/V08、D5、18/27 未变、Store 零 diff、guard 8/8 与 43/43 复跑。
 - **不自行调用 CLI 放行**；不自批 Stop-1；不进入 S2。
 - 提交为普通追加（父 `84a9a55…`），只 push `feat/h4c-c1-s0-s1`；最终提交 SHA/push 后 `ls-remote` 完整 40 位 SHA 由交付回报给出。
+
+---
+
+# S2 实施与 Stop-2 复审请求（追加；不改历史小节）
+
+> 状态：**S2 已实现，待 Codex 独立复审 Stop-2；不自批、不进入 S3、不宣称 C1/G1 通过。**
+>
+> 执行者：DSH agent `c1-s2-impl`（deepseek-flash，父 agent `lead`）；调度工作区 `SMART-PM-H3`。
+>
+> session：`session-c66a8852-9b75-4676-8fc9-50823770c4b5`（子会话；本会话未由 baton 单独分配 `hrun` id）。
+>
+> 工作树/分支：`宇宙智联/.tmp/c1-s2-implementation` / `feat/h4c-c1-s2`。
+>
+> 起点：`0b7eca2a676a337b656afcfa89f1a92490828ff1`（已验收前置清单；代码树与 `403970a` 一致，仅多 docs）。
+>
+> 固定实现基线：`403970a035be44bb04d0ce5c01154a103a5ec5c5`；guard 补证：`6f96fed9bd478192c8bbffeb52f47c90df89939e`。
+>
+> 本轮提交：普通追加，最终完整 SHA 由交付回报给出（本文件不自指）。
+
+## S2.1 起点、输入与代码基线
+
+| 项 | 值 |
+|---|---|
+| 工作树 HEAD（开始） | `0b7eca2a676a337b656afcfa89f1a92490828ff1` |
+| 起点父 | `3c3e439ae98b29f525972d993141af454a657d8d` |
+| 代码基线 | `403970a035be44bb04d0ce5c01154a103a5ec5c5` |
+| 非 docs 代码差异（`403970a..0b7eca2`） | 空（exit 0） |
+| 任务卡 S2 输入 | `docs/tasks/HK-AI-04-H4C-C1-STAGED-IMPLEMENTATION-TASK-2026-11-18.md` §6（@ `0b7eca2`） |
+| 前置清单 | `docs/tasks/HK-AI-04-H4C-C1-S2-PREFLIGHT-2026-11-20.md`（@ `0b7eca2`，27 项 + guard 复用） |
+| 授权清单 | `docs/tasks/HK-AI-04-H4C-C1-S0-S1-AUTHORIZATION-2026-11-19.md` §7/§8（@ `ed6f862`） |
+| 远端 | `origin https://github.com/1997dmsu-sketch/SMART-PM.git` |
+
+- 开始前 `git status --porcelain` 为空；本阶段未改 `403970a` 基线文件，只在工作树内改 S2 白名单。
+
+## S2.2 变更文件与 diff
+
+| 文件 | 动作 | 说明 |
+|---|---|---|
+| `admin-web/lib/face-service/h4c-evidence.mjs` | 修改 | 18 refs、anchor/完整链、3/2 业务写、删除调用方布尔、observedAt 非递减 |
+| `admin-web/tests/face-h4c-evidence.test.mjs` | 修改 | 适配新 API；43 项基线改为 helper/链断言；新增 10 项 S2 用例（共 53 项） |
+| `docs/tasks/HK-AI-04-H4C-C1-STAGED-IMPLEMENTATION-EVIDENCE-2026-11-19.md` | 追加 | 本节 S2；不改历史小节 |
+| `admin-web/lib/face-service/index.mjs` | 未改 | 既有 re-export 已覆盖两个 helper；无新增 bootstrap/初始化入口 |
+| `admin-web/lib/h4c-collections.mjs` | 未改 | 8 集合字面名沿用 S1 |
+| `admin-web/lib/store.mjs`、`server.mjs`、`lib/face-service/routes.mjs` | 未改 | 零 diff |
+
+- 代码/测试 diff stat（提交前）：`2 files changed, 667 insertions(+), 121 deletions(-)`；其中 `h4c-evidence.mjs` +203/−69、C1 测试 +464/−52。含本节证据的完整 diff：`3 files changed, 845 insertions(+), 121 deletions(-)`。
+- `git diff --check` exit 0；`store.mjs`/`server.mjs`/`routes.mjs`/`index.mjs`/`h4c-collections.mjs` 零 diff。
+- 新增模块级 `assertC1AppendRefs`（仅模块导出，不 re-export 到 `index.mjs`），用于 18-shape 与 17-refs 拒绝；不新增 bootstrap/create-domain/初始化入口。
+
+## S2.3 实现内容
+
+1. `evidenceAppendRefs({ job, expectedHead, proofId, writeEpoch, auditId, config } = {})`：
+   - exact **18** refs，去重、稳定顺序：domain2 + proof1 + audit1 + fence1 + marker1 + writerPlan1 + anchor1 + head1 + E1..9；
+   - 不访问 Store；缺 `proofId` → `EVIDENCE_CHAIN_PROOF_REQUIRED`，`assertC1AppendRefs` 对 17/去重/错 shape → `EVIDENCE_CHAIN_ADMISSION_REQUIRED`；
+   - `proof1` 存在，`audit1` 与 proof 分属 `admin_audit` / `evidence_chain_audits`。
+2. `appendEvidenceWrites(state, { job, expectedHead, proofId, writeEpoch, auditId, config, now, decision, sourceType, sourceCode, observedAt, actorId } = {})`：
+   - 首条返回 `anchor+E1+head` **3** 条；非首条返回 `E+head` **2** 条；**0 domain 写**；helper **不写 admin_audit**；
+   - 首条要求 head=null、anchor=null、E1..9 全 null；任一残留 → `EVIDENCE_CHAIN_BROKEN`；
+   - 非首条要求 anchor valid、head valid、1..N canonical、previous 全字段复核（schema/ID/org/job/seq/observedAt/K3/HMAC）、N+1..9 空；
+   - `expectedHead` CAS 保留（revision/lastEvidenceId/lastSequence）；head 被删仍带 expectedHead → BROKEN；CAS 过期 → HEAD_CONFLICT；
+   - 删除 `hasExistingEvidence`；production/测试 `hasExistingEvidence` 扫描 0；
+   - `observedAt` **允许相等、禁止递减**，`>now` 或 `<floor` → STALE；
+   - N=9 再 append → INVALID；`still_unknown` 第 8 条后 E9 仍 null；
+   - `proof` 按 state 读取并校验 `_id`/`writeEpoch`/`writerPlanId`；fence/marker/plan 按 §3.3a 读取但完整 CoverageValid 留 S5；
+   - 所有失败在返回写之前抛错，返回写集在函数末尾一次性构造。
+3. 未收养/重编号/删除孤儿；未写 domain；未改 Store/路由/生产接线；未新增 HTTP/UI/初始化入口。
+
+## S2.4 测试与 guard（实际命令）
+
+| 命令 | exit | 结果 |
+|---|---:|---|
+| `node --test --test-isolation=none tests/face-h4c-evidence.test.mjs`（cwd `admin-web`，guard 内） | 0 | tests 53；pass 53；fail 0；cancelled 0；skipped 0 |
+| guard `run-controls.cjs`（`NODE_OPTIONS=--require <temp>/guard.cjs`） | 0 | 8/8 控制 PASS |
+| guard 七脚本 SHA256SUMS 校验 | 0 | 0 mismatches（从 `6f96fed` 提取到工作树外临时目录） |
+| `git diff --check` | 0 | 无空白错误 |
+
+- 环境：Node `v24.19.0`，`win32`。
+- guard 8/8：
+  1. `negative:no-guard` exit 3，PASS；
+  2. `positive:preload-sentinel` exit 0，PASS；
+  3. `negative:esm-named-import` `http.request=1`，PASS；
+  4. `negative:per-entry` 63/63 入口，`blocked_calls=63`，PASS；
+  5. `negative:load-before-runtime` exit 1，`load_violations=1`，PASS；
+  6. `negative:subprocess-inheritance` `blocked=true`、`active=true`、`network_attempts=1`、`listen_calls=0`，PASS；
+  7. `positive:crypto-fs-k3-localstore` exit 0，PASS；
+  8. `test:c1-targeted` exit 0，pass=53、fail=0，PASS。
+- C1 测试进程计数器：`listen_calls=0`、`network_attempts=0`、`dns_calls=0`、`dgram_calls=0`、`provider_calls=0`、`load_violations=0`、`blocked_calls=0`、`real_leaks=0`。
+- 未运行 33+7、8 个 HTTP 文件、`npm test`、glob 或任何服务；guard 文件在工作树外，不提交。
+
+## S2.5 refs/writes 实测
+
+| 项 | 实测 | 证据 |
+|---|---:|---|
+| `evidenceAppendRefs` refs | **18** | `S2 refs are exactly 18...`：18 unique、proof1=1、`assertC1AppendRefs` 通过 |
+| 首条 writes | **3** | `S2 genesis returns anchor+E1+head...`：anchor/evidence/head，无 domain/audit |
+| 非首条 writes | **2** | `S2 append returns E+head...`：E/head，无 anchor/domain/audit |
+| domain 写 | **0** | 两项写集断言 + tests |
+| helper audit 写 | **0** | 首条测试断言 `admin_audit` 仍为 2 条 fixture 审计（helper 未追加） |
+| 事务总写 4/3 | **未声称** | 唯一 audit 由 S3 finalWriteSet 追加；S2 只报 helper 业务写 3/2 |
+
+## S2.6 零写/不可变证据
+
+- 所有 helper 负向测试在调用前对输入 `state` 做 `structuredClone`，调用后 `assert.deepEqual(state, before)`；失败在返回任何 write 之前抛出，无半批写。
+- 既有 `expectFailure`（Store fixture）对 `store.data` 做快照并在失败后 deepEqual；本阶段未改 Store，事务级零写/LocalStore 文件 hash 归 S4。
+- 新增覆盖：EmptyProof 残留（E1/E2/E9/anchor/expectedHead）、anchor 7 类损坏、N+1 目标预占、N+2 后孤儿、N=9、still_unknown 8、observedAt 相等/递减/越界、proof 缺失/epoch/plan 不配、expectedHead stale/head 删除、helper 并发 loser。
+- 纯函数未改输入 `state`；并发 loser 后 `state` deepEqual 且无半批写。
+
+## S2.7 静态扫描与白名单
+
+| 扫描 | 结果 |
+|---|---|
+| production `hasExistingEvidence` | **0** |
+| production `emptyProof` / `callerProof` | **0 / 0** |
+| test `hasExistingEvidence` | **0**（测试源码不再含该 token） |
+| test `emptyProof` | 1（仅 `production module...` 的 forbidden-export 断言列表，用于证明模块不导出该名；非生产 token） |
+| `store.mjs` / `server.mjs` / `routes.mjs` 零 diff | 是 |
+| `index.mjs` / `h4c-collections.mjs` 零 diff | 是 |
+| 设计/勘误/任务卡/授权清单/package/lock 零 diff | 是 |
+| 仅白名单文件变动 | 是（2 个代码/测试 + 本节证据） |
+
+## S2.8 逐条对照前置清单 27 项
+
+| ID | 结果 | 证据/说明 |
+|---|---|---|
+| S2-01 | **PASS** | refs 18 unique、proof1；`S2 refs...` |
+| S2-02 | **PASS** | `assertC1AppendRefs(refs.slice(0,17))` / 去 proof ref → `ADMISSION_REQUIRED`；缺 `proofId` → `PROOF_REQUIRED`；`S2 refs...` |
+| S2-03 | **PASS** | 首条 3 写，0 domain；`S2 genesis...` |
+| S2-04 | **PASS** | 非首条 2 写，0 domain；`S2 append...` |
+| S2-05 | **PASS** | head=null + E2/E9 → BROKEN；`S2 empty-chain genesis...` |
+| S2-06 | **PASS** | E1 残留 → BROKEN；同上 |
+| S2-07 | **PASS** | anchor 存在/head null → BROKEN；同上 |
+| S2-08 | **PASS** | head seq2 但 E1 缺 → BROKEN；`S2 complete chain bounds...` |
+| S2-09 | **PASS** | anchor 字段/ID/firstEvidence/org/job/schema/createdAt 损坏 → BROKEN；`S2 damaged anchor...` |
+| S2-10 | **PASS（含边界说明）** | 完整 1..N 正例；E(N+1) 目标预占 → `CONFLICT`（seq 预占），E(N+2..9) 后孤儿 → `BROKEN`；设计 §5.5/§11 允许 BROKEN/CONFLICT；`S2 complete chain bounds...` |
+| S2-11 | **PASS** | N=9 再 append → INVALID；同上 |
+| S2-12 | **PASS** | still_unknown 8 后 E9 null，再 append → INVALID；同上 |
+| S2-13 | **PASS** | 既有 `damaged previous evidence...` 覆盖 schema/ID/org/job/seq/observedAt/K3/HMAC 19 类 |
+| S2-14 | **PASS** | 相等成功、递减 STALE、`>now`/`<floor` STALE；`S2 observedAt equality...` |
+| S2-15 | **PASS** | expectedHead stale → HEAD_CONFLICT；head 删除仍带 expected → BROKEN；`S2 expectedHead CAS...` |
+| S2-16 | **PASS（helper 层）** | 每个负向 state deepEqual、无半批写；Store/LocalStore 文件级零写归 S4 |
+| S2-17 | **PASS** | production `hasExistingEvidence` 0；test 0 |
+| S2-18 | **PASS（helper 层）** | 一 CAS loser、一无半写；真实 create-only/CAS 归 S4 |
+| S2-19 | **PASS** | 18 / 3 / 2 / 0 domain / 无 audit；§S2.5 |
+| S2-20 | **PASS** | 覆盖 BROKEN、HEAD_CONFLICT、CONFLICT、INVALID、STALE、PROOF_REQUIRED；不混用 |
+| S2-21 | **PASS** | 仅白名单；禁止文件零 diff；§S2.7 |
+| S2-22 | **PASS** | guard 8/8；53/53；计数器 0；只跑 C1 定向 |
+| S2-23 | **PASS** | 本节；命令/exit/计数/refs-writes/零写/未验证/Stop-2 请求齐全 |
+| S2-24 | **PASS** | 两个 helper 签名与 §3.3a 一致；`index.mjs` 未新增初始化入口 |
+| S2-25 | **PASS** | proof/fence/marker/plan 按 state 读取；完整 CoverageValid 归 S5 |
+| S2-26 | **PASS（helper 层）** | 写集末尾一次性构造；失败先抛错；事务原子性归 S4 |
+| S2-27 | **PASS** | 不 adopt/重编号/删除孤儿；不写 domain；不创建 proof/fence/marker/plan |
+
+## S2.9 未验证/未做
+
+- **Store 接线未做**：S2 不接 Store；anchor 的 exact/create-only、`transactFinal`、gate、LocalStore/CloudStore 事务级零写归 S4。当前 Store 的 exact 集合尚未含 `evidence_chain_anchors`，因此 S2 测试使用 helper/state 层，不声称 Store 已可持久化 anchor。
+- **完整 CoverageValid 未做**：proof/fence/marker/plan 的完整校验归 S5；测试 proof 是合成 fixture（仅 `_id`/`writeEpoch`/`writerPlanId` 等必要字段），不声称 proof 有效。
+- 未跑 33+7、8 个 HTTP 文件、`npm test`/glob；未做全量回归。
+- 未验证真实 Cloud 并发（D11/C3）；未接真实 K3/设备/Provider/支付/生产云。
+- 未改 HTTP/UI、未部署、未处置风险；未进入 C2/C3 或 S3。
+- 不自批、不宣称 C1/G1 通过。
+
+## S2.10 Stop-2 复审请求
+
+请 Codex 独立复审：
+
+1. refs **18** 组成（含 proof1）、去重/稳定顺序、17 refs 与缺 proof 拒绝；
+2. anchor 6 字段/ID/firstEvidence、EmptyProof 全空、1..9 完整链、N+1..9、N=9、still_unknown 8；
+3. previous 全字段复核、observedAt 非递减、expectedHead CAS/head 删除；
+4. helper 3/2 业务写、0 domain、无 audit、无调用方布尔；
+5. 零写/不可变、helper 并发、错误码；
+6. guard 8/8、53/53、白名单、禁止文件零 diff。
+
+**不自批 Stop-2；不进入 S3。**
+
+## S2.11 Git 与交付
+
+- 分支 `feat/h4c-c1-s2`，起点 `0b7eca2…`；普通追加提交，不改写历史；push 前后 `ls-remote` 核对完整 40 位 SHA。
+- `git diff --check` / `git show --check` 在提交时复核；最终提交 SHA、远端 tip、`git show --stat` 由交付回报给出。

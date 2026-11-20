@@ -783,12 +783,14 @@ A、28 日对齐后减 1 天、A-09 四字段快照均已确认；以下只列�
 | 已验收需求 r2 | `9286f72ccad47e6d584b61344a9e93c0baf3bbea` | https://github.com/1997dmsu-sketch/SMART-PM/commit/9286f72ccad47e6d584b61344a9e93c0baf3bbea |
 | 已验收文本级映射（已关闭，不改） | `fd84f37df0aab66b50b563e8ec7d560348bf2468` | https://github.com/1997dmsu-sketch/SMART-PM/commit/fd84f37df0aab66b50b563e8ec7d560348bf2468 |
 | 本轮固定输入（已验收决策） | `92404e3a6d248e9577f425a1cc2f9f82c12eb7d3` | https://github.com/1997dmsu-sketch/SMART-PM/commit/92404e3a6d248e9577f425a1cc2f9f82c12eb7d3 |
-| 本轮输入父提交（R3 交付） | `f3672a06c0eaf33b7cb55b1e524c79c62915cb44` | https://github.com/1997dmsu-sketch/SMART-PM/commit/f3672a06c0eaf33b7cb55b1e524c79c62915cb44 |
-| 历史 R2 固定输入（D-01 回写） | `b7be8ebf8528b77ee4269b5c7da60813c8dfd5c3` | https://github.com/1997dmsu-sketch/SMART-PM/commit/b7be8ebf8528b77ee4269b5c7da60813c8dfd5c3 |
-| 历史 R1 固定输入 | `4f12eefe8086a5f4370dd2a8a2c555ea8c6eebbc` | https://github.com/1997dmsu-sketch/SMART-PM/commit/4f12eefe8086a5f4370dd2a8a2c555ea8c6eebbc |
+| 本轮输入父提交（R3 输入父 = R2 最终交付） | `f3672a06c0eaf33b7cb55b1e524c79c62915cb44` | https://github.com/1997dmsu-sketch/SMART-PM/commit/f3672a06c0eaf33b7cb55b1e524c79c62915cb44 |
+| 历史 R2 D-01 回写 | `b7be8ebf8528b77ee4269b5c7da60813c8dfd5c3` | https://github.com/1997dmsu-sketch/SMART-PM/commit/b7be8ebf8528b77ee4269b5c7da60813c8dfd5c3 |
+| 历史 R1 交付 | `4f12eefe8086a5f4370dd2a8a2c555ea8c6eebbc` | https://github.com/1997dmsu-sketch/SMART-PM/commit/4f12eefe8086a5f4370dd2a8a2c555ea8c6eebbc |
 | 需求文档（本轮修改前，`fd84f37` 树） | `fd84f37` 树 | https://github.com/1997dmsu-sketch/SMART-PM/blob/fd84f37df0aab66b50b563e8ec7d560348bf2468/docs/RENTAL-CONTRACT-GENERATION-REQUIREMENTS-2026-11-20.md |
 | 映射文档（blob `389efb6…`） | `fd84f37` 树 | https://github.com/1997dmsu-sketch/SMART-PM/blob/fd84f37df0aab66b50b563e8ec7d560348bf2468/docs/tasks/RENTAL-CONTRACT-TEMPLATE-FIELD-MAPPING-2026-11-20.md |
 | 本文件 R1 版本（blob `df13273…`） | `4f12eef` 树 | https://github.com/1997dmsu-sketch/SMART-PM/blob/4f12eefe8086a5f4370dd2a8a2c555ea8c6eebbc/docs/tasks/RENTAL-CONTRACT-OPEN-DECISIONS-2026-11-20.md |
+
+> 口径：本表“固定输入”指该轮被验提交；R2 最终交付为 `f3672a0`（含 `b7be8eb` 的 D-01 回写与后续链接说明修正）；R1 交付为 `4f12eef`。
 
 ### 12.2 上游证据（需求 §15 既有链接，未新增）
 

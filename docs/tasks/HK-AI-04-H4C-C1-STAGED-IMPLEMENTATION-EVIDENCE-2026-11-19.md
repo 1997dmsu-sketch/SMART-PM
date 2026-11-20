@@ -1,4 +1,4 @@
-# HK-AI-04 H4-c C1 分阶段实施证据（S0/S1）
+﻿# HK-AI-04 H4-c C1 分阶段实施证据（S0/S1）
 
 > 状态：**S0 证据已记录；Stop-0 请求 Codex 独立复审，未自批、未判定通过；S1 未开始。** 本轮用户已授权 S0/S1 实施范围，但 S1 以 Stop-0 复审通过为前提（§0）。本文件由 S0 新建；后续各段只追加本段小节，不改写 S0 小节。
 >
@@ -1312,3 +1312,60 @@ positive.cjs       c34225ccc8854a1720ee51985d777ad29e1c7d85860e293bebeb2f3f7268b
 - 请 Codex 复审：P2 修复是否在 `validateH4cAdmission`/`validateH4cAdmissionProof` 两入口用 `Reflect.ownKeys` 拒绝额外 non-enumerable/Symbol 键且保持输入描述符不变；正常 10 字段正例与 proof 入口路径；66/66 + guard 8/8；白名单仅 `h4c-evidence.mjs`/定向 test/本证据（`index.mjs` 未改）。
 - 分支 `codex/h4c-c1-s3-implementation`，本提交父 `5a13fcc86efd38bae3b8448ec1ad3864cbb94a8e`（固定输入）；普通追加提交、普通 push；不 amend/rebase/reset/squash/force/merge；不改全局 Git/TLS；不碰无关文件。
 - `git diff --check` / `git show --check` 提交时复核；push 前 `ls-remote` 检查快进，push 后 `ls-remote` 核对完整 40 位 SHA；最终 SHA 由交付回报给出。
+
+## S4 Stop-4 实施与证据（2026-11-20）
+
+- 授权：项目负责人 2026-11-20 21:22 明确「直接开工」，作为 S4 本轮单独授权。
+- 起点：`49ca13ec77a94bce09a566ce1e42870accbcade7`（S0/S1⊂S2⊂S3 线性栈顶，祖先关系已用 `merge-base --is-ancestor` 核验：`403970a`、`923dbf1` 均为其祖先）。
+- 分支 / 工作树：`feat/h4c-c1-s4` / `.tmp/c1-s4`（独立 worktree，未复用前置分支）。
+- 提交方式：普通提交、普通 push；未 amend/rebase/reset/squash/force/merge。
+
+### A. 变更范围（严格命中白名单）
+
+| 文件 | 变更 | 说明 |
+|---|---|---|
+| `admin-web/lib/store.mjs` | 修改 | 唯一 Store 接线点 |
+| `admin-web/tests/face-h4c-evidence.test.mjs` | 修改 | S4 M 矩阵 + 夹具路径 |
+| `admin-web/tests/verification.test.mjs` | 修改（D10-A fixture-only） | 仅替换 `store.persist` 直调 |
+| `admin-web/tests/store-deterministic-audit.test.mjs` | 修改（D10-B fixture-only） | 仅替换持久化失败模拟 |
+| 本证据文档 | 追加 | 只追加 S4 小节 |
+
+未改：`server.mjs`、`routes.mjs`、`h4c-collections.mjs`、设计/勘误/任务卡/授权/package/lock。
+
+### B. Store 实施要点
+
+1. 构造：`new LocalStore(dir, { h4cGate = null })`、`new CloudStore(app, { h4cGate = null })`；`#h4cGate` 私有，非 null 缺 `verify` → `TypeError`。
+2. `transactFinal(refs, build, admission, { now, auditMode = "explicit" })`（Local + Cloud）：gate 前置 → 唯一 audit（7 字段、`target` 为排序业务目标、`createdAt === now`、必须在 refs 内声明）→ 所有写入必须已声明且属 H4-c → `gate.verify` → 落盘 → 推进私有基线。
+3. `#persist` 私有化，`Object.hasOwn(store,"persist") === false`。
+4. `transact`：H4-c refs 或 build 返回 H4-c 写 → `EVIDENCE_CHAIN_ADMISSION_REQUIRED`/409，build 不执行（原裸 `Error` 已映射）。
+5. `change`：H4-c 集合名 → 同上，build 不执行。
+6. `seed(injection)`：注入非空 H4-c 数据 → `ADMISSION_REQUIRED`/409；默认无参行为不变。
+7. `init()`：缺失 H4-c 数组仅内存补 `[]`、非数组 → `EVIDENCE_INVALID`/409、非空原样保留、建立私有已提交基线；普通 `transact/change` 检测到内存直改即拒绝且零写。
+8. `now` 仅接受非负安全整数，否则 `EVIDENCE_INVALID`/409。
+
+### C. 本轮测试结果（本机实跑）
+
+| 套件 | 命令 | 结果 |
+|---|---|---|
+| C1 定向（含 S0–S3 与新增 S4 M 矩阵） | `node tests/face-h4c-evidence.test.mjs` | **86 / 86 通过** |
+| D10-A 定向 | `node tests/verification.test.mjs` | **15 / 15 通过** |
+| D10-B 定向 | `node tests/store-deterministic-audit.test.mjs` | **12 / 12 通过** |
+
+- 未运行 33+7 全量、8 个 HTTP 文件、`npm test`、glob、任何服务/监听；未安装依赖。
+- 未接真实 Cloud、未做真实并发（D11 C3 仍 OPEN）；M30a/M30b 的真实链层并发属 S5。
+
+### D. S4 M 矩阵覆盖情况
+
+已覆盖（Store 接线与拒绝语义，桩 gate 隔离链层）：M03、M05、M06、M08、M09、M10、M11、M12、M13、M15、M16、M17、M18a、M18b、M19、M20、M21、M22、M23、M24、M25、M26、M27。
+
+未覆盖（需真实 admission/proof/fence/marker/plan 夹具，留待 S5）：M01、M02、M14a、M14b、M14c、M28、M29、M30a、M30b。
+
+### E. 已知偏差（需复审裁定）
+
+1. `store.mjs` 额外 import 了 `H4C_COLLECTION_NAMES`（冻结名单），超出 §3.3「只 import `isH4cCollection` 与 `H4C_AUDIT_COLLECTION`」的字面约束。原因：8 个 H4-c 集合中有 5 个不在 `seed()` 形状内，若不引用冻结名单就必须在本文件复制第二套字面量；选择引用冻结枚举以避免重复定义。
+2. 为在第一轮跑通既有 S2/S3 套件，测试夹具 `insert()` 改为直接播种 H4-c 状态（并保留 create-only 重复即 409、补等价审计行）。S2/S3 断言未删改、未弱化零写断言；两处与新契约冲突的旧断言已按 S4 语义更新（H4-c 写入经 `transact` 一律 `ADMISSION_REQUIRED`/409）。
+
+### F. 停止点
+
+- 本提交仅完成 S4 实施与上述定向测试；M01/M02/M14/M30 等链层用例、33+7 全量、HTTP、UI、真实 Cloud、K3、设备、支付、部署均未做。
+- 不自批、不宣称 Stop-4 通过、不宣称 C1 完成、不授权合并；交 Codex 独立复审。

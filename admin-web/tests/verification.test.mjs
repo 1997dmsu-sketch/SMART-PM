@@ -1,6 +1,6 @@
-import { test } from "node:test";
+﻿import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { LocalStore } from "../lib/store.mjs";
@@ -378,7 +378,10 @@ test("F02: historical digests without a domain document require controlled initi
   );
   store.data.identity_domains = store.data.identity_domains
     .filter((d) => d._id !== "identity-domain-verification:org-a");
-  await store.persist(store.data); // simulated legacy data, temporary LocalStore only
+  // D10-A fixture-only: construct the legacy state through a temporary file,
+  // not through a Store capability (persist is private in S4).
+  await writeFile(join(store.directory, "demo-data.json"),
+    JSON.stringify(store.data), { mode: 0o600 });
   await assert.rejects(
     admin.submit(applicationId, { expectedRevision: 1, document: DOC, fileIds: FILES }, adminAudit),
     (e) => e.code === "IDENTITY_CONFIG_CHANGED" && /受控初始化/.test(e.message),

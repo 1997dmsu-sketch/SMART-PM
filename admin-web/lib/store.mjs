@@ -1,7 +1,8 @@
-import { readFile, mkdir, writeFile, rename } from "node:fs/promises";
+﻿import { readFile, mkdir, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { HttpError } from "./model.mjs";
+import { isH4cCollection, H4C_AUDIT_COLLECTION, H4C_COLLECTION_NAMES } from "./h4c-collections.mjs";
 const collections = [
   "houses",
   "content",
@@ -113,6 +114,62 @@ const createOnlyCollections = new Set([
   "evidence_digest_domains",
 ]);
 
+// H4-c S4: closed H4-c collection list used by Store-side checks. It reuses the
+// frozen enumeration from h4c-collections so the eight names are never written
+// a second time in this module.
+const H4C_STORE_COLLECTIONS = H4C_COLLECTION_NAMES;
+// C1 audit record is exactly these 7 fields (S4 §3.3).
+const H4C_AUDIT_FIELDS = Object.freeze([
+  "_id",
+  "orgId",
+  "actorId",
+  "actorType",
+  "action",
+  "target",
+  "createdAt",
+]);
+
+const admissionRequired = (message) =>
+  new HttpError(409, message, "EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+
+/**
+ * S4: the single explicit H4-c transaction carries exactly one admin_audit
+ * write with the frozen 7 fields, target computed from the sorted business
+ * writes and createdAt equal to the caller-supplied `now`.
+ */
+function finalAuditWrite(writes, now) {
+  const audits = writes.filter((w) => w?.collection === H4C_AUDIT_COLLECTION);
+  if (audits.length !== 1) throw admissionRequired("H4-c 事务必须恰好包含一条审计记录");
+  const audit = audits[0];
+  const data = audit.data;
+  if (!data || typeof data !== "object" || Array.isArray(data))
+    throw admissionRequired("H4-c 审计记录缺失");
+  const own = Reflect.ownKeys(data);
+  if (own.length !== H4C_AUDIT_FIELDS.length ||
+      !own.every((key) => typeof key === "string" && H4C_AUDIT_FIELDS.includes(key)))
+    throw admissionRequired("H4-c 审计记录字段非法");
+  const target = writes
+    .filter((w) => w !== audit)
+    .map((w) => `${w.collection}/${w.id}`)
+    .sort()
+    .join(", ");
+  if (data.target !== target || data.createdAt !== now || data._id !== audit.id)
+    throw admissionRequired("H4-c 审计记录目标或时间非法");
+  return audit;
+}
+
+// Private H4-c snapshot: used to prove no caller mutated H4-c collection state
+// directly in memory outside an authorised transactFinal commit.
+function h4cSnapshot(data) {
+  const snapshot = {};
+  for (const name of H4C_STORE_COLLECTIONS) snapshot[name] = data?.[name] ?? [];
+  return structuredClone(snapshot);
+}
+
+function sameH4c(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 function auditRecord(config, writes, createdAt) {
   return {
     _id: config.auditId,
@@ -124,7 +181,16 @@ function auditRecord(config, writes, createdAt) {
     createdAt,
   };
 }
-export function seed() {
+export function seed(injection) {
+  if (injection !== undefined && injection !== null &&
+      typeof injection === "object") {
+    for (const key of Reflect.ownKeys(injection)) {
+      if (typeof key !== "string" || !isH4cCollection(key)) continue;
+      const value = injection[key];
+      if (Array.isArray(value) ? value.length > 0 : value !== undefined)
+        throw admissionRequired("seed 不得注入 H4-c 数据");
+    }
+  }
   return {
     houses: Array.from({ length: 16 }, (_, i) => ({
       _id: `demo-house-${i + 1}`,
@@ -229,7 +295,13 @@ export function seed() {
   };
 }
 export class LocalStore {
-  constructor(directory) {
+  #h4cGate;
+  #h4cCommitted;
+  constructor(directory, { h4cGate = null } = {}) {
+    if (h4cGate !== null && typeof h4cGate?.verify !== "function")
+      throw new TypeError("h4cGate 必须提供 verify 方法");
+    this.#h4cGate = h4cGate;
+    this.#h4cCommitted = null;
     this.directory = directory;
     this.queue = Promise.resolve();
   }
@@ -242,7 +314,7 @@ export class LocalStore {
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
       this.data = seed();
-      await this.persist(this.data);
+      await this.#persist(this.data);
     }
     this.data.property_catalog ||= [];
     // DB-07: on-demand initialization for existing local data files that
@@ -259,16 +331,29 @@ export class LocalStore {
     this.data.grant_slot_claims ||= [];
     this.data.access_devices ||= [];
     this.data.operation_key_domains ||= [];
-    this.data.device_operation_evidence ||= [];
-    this.data.device_operation_evidence_heads ||= [];
-    this.data.evidence_digest_domains ||= [];
+    for (const name of H4C_STORE_COLLECTIONS) {
+      if (!Object.hasOwn(this.data, name)) {
+        // S4: missing H4-c arrays are filled in memory only; init never
+        // persists them and never rewrites the data file.
+        this.data[name] = [];
+        continue;
+      }
+      if (!Array.isArray(this.data[name]))
+        throw new HttpError(409, "H4-c 集合数据非法", "EVIDENCE_INVALID");
+    }
     this.data.device_claim_release_guards ||= [];
+    this.#h4cCommitted = h4cSnapshot(this.data);
     return this;
   }
-  async persist(data) {
+  async #persist(data) {
     const file = join(this.directory, "demo-data.json");
     await writeFile(file + ".tmp", JSON.stringify(data), { mode: 0o600 });
     await rename(file + ".tmp", file);
+  }
+  #assertH4cUnchanged() {
+    if (this.#h4cCommitted === null) return;
+    if (!sameH4c(this.#h4cCommitted, h4cSnapshot(this.data)))
+      throw admissionRequired("H4-c 集合只能通过 transactFinal 写入");
   }
   async list(name, orgId = null) {
     const rows = this.data[name] || [];
@@ -285,8 +370,11 @@ export class LocalStore {
     return structuredClone(row);
   }
   async transact(refs, build, audit) {
+    if (Array.isArray(refs) && refs.some((r) => isH4cCollection(r?.collection)))
+      throw admissionRequired("H4-c 集合必须通过 transactFinal 写入");
     const prepared = prepareDeterministicAudit(refs, audit);
     const task = this.queue.then(async () => {
+      this.#assertH4cUnchanged();
       const next = structuredClone(this.data);
       const state = Object.fromEntries(
         prepared.refs.map(({ collection, id }) => [
@@ -311,8 +399,11 @@ export class LocalStore {
       for (const w of writes) {
         if (prepared.config && w.collection === "admin_audit")
           throw new HttpError(400, "确定性审计记录只能由 Store 写入");
-        if (!allowed.has(`${w.collection}/${w.id}`))
+        if (!allowed.has(`${w.collection}/${w.id}`)) {
+          if (isH4cCollection(w.collection))
+            throw admissionRequired("H4-c 集合必须通过 transactFinal 写入");
           throw Error("Undeclared transaction write");
+        }
         const rows = (next[w.collection] ||= []);
         const index = rows.findIndex((r) => r._id === w.id);
         if (createOnlyCollections.has(w.collection) && index >= 0)
@@ -335,14 +426,84 @@ export class LocalStore {
             target: writes.map((w) => `${w.collection}/${w.id}`).join(", "),
             createdAt: Date.now(),
           });
-      await this.persist(next);
+      await this.#persist(next);
       this.data = next;
     });
     this.queue = task.catch(() => {});
     return task;
   }
-  async change(name, id, build, audit) {
+  /**
+   * S4: the only authorised H4-c explicit write path. Gate verification and all
+   * Store-side checks run before anything is written; the committed H4-c
+   * baseline advances only after a successful persist.
+   */
+  async transactFinal(refs, build, admission, { now, auditMode = "explicit" } = {}) {
+    if (this.#h4cGate === null) throw admissionRequired("H4-c gate 未配置");
+    if (auditMode !== "explicit")
+      throw admissionRequired("H4-c 只接受 explicit 审计模式");
+    if (!Number.isSafeInteger(now) || now < 0)
+      throw new HttpError(409, "H4-c 提交时间非法", "EVIDENCE_INVALID");
+    const unique = uniqueRefs(refs);
+    if (unique.length > 90)
+      throw new HttpError(400, "一次操作涉及记录过多，请缩小选择范围");
     const task = this.queue.then(async () => {
+      this.#assertH4cUnchanged();
+      const next = structuredClone(this.data);
+      const state = Object.fromEntries(
+        unique.map(({ collection, id }) => [
+          `${collection}/${id}`,
+          structuredClone(
+            (next[collection] || []).find((r) => r._id === id) || null,
+          ),
+        ]),
+      );
+      const writes = await build(state);
+      if (!Array.isArray(writes))
+        throw new HttpError(400, "事务写入必须是数组");
+      const audit = finalAuditWrite(writes, now);
+      const allowed = new Set(unique.map((r) => `${r.collection}/${r.id}`));
+      if (!allowed.has(`${audit.collection}/${audit.id}`))
+        throw admissionRequired("H4-c 审计记录未在 refs 中声明");
+      for (const w of writes) {
+        if (w === audit) continue;
+        if (!allowed.has(`${w.collection}/${w.id}`))
+          throw admissionRequired("H4-c 事务包含未声明写入");
+        if (!isH4cCollection(w.collection))
+          throw admissionRequired("H4-c 事务不得写非 H4-c 集合");
+      }
+      await this.#h4cGate.verify({ state, refs: unique, writes, admission, now });
+      for (const w of writes) {
+        if (w === audit) continue;
+        const rows = (next[w.collection] ||= []);
+        const index = rows.findIndex((r) => r._id === w.id);
+        if (createOnlyCollections.has(w.collection) && index >= 0)
+          throw new HttpError(409, "记录已存在", "CONFLICT");
+        const exact = exactWriteCollections.has(w.collection);
+        if (exact && (!w.data || typeof w.data !== "object" ||
+            Array.isArray(w.data) || w.data._id !== w.id))
+          throw new HttpError(400, "事务写入数据非法");
+        const record = exact
+          ? { ...w.data, _id: w.id }
+          : { ...(index < 0 ? {} : rows[index]), ...w.data, _id: w.id };
+        if (index < 0) rows.push(record);
+        else rows[index] = record;
+      }
+      const auditRows = (next[H4C_AUDIT_COLLECTION] ||= []);
+      if (auditRows.some((r) => r._id === audit.id))
+        throw new HttpError(409, "确定性审计记录已存在", "CONFLICT");
+      auditRows.unshift({ ...audit.data, _id: audit.id });
+      await this.#persist(next);
+      this.data = next;
+      this.#h4cCommitted = h4cSnapshot(next);
+    });
+    this.queue = task.catch(() => {});
+    return task;
+  }
+  async change(name, id, build, audit) {
+    if (isH4cCollection(name))
+      throw admissionRequired("H4-c 集合必须通过 transactFinal 写入");
+    const task = this.queue.then(async () => {
+      this.#assertH4cUnchanged();
       const next = structuredClone(this.data);
       const rows = next[name];
       const old = id ? rows.find((r) => r._id === id) : null;
@@ -368,7 +529,7 @@ export class LocalStore {
         target: `${name}/${id}`,
         createdAt: Date.now(),
       });
-      await this.persist(next);
+      await this.#persist(next);
       this.data = next;
       return structuredClone(record);
     });
@@ -377,7 +538,11 @@ export class LocalStore {
   }
 }
 export class CloudStore {
-  constructor(app) {
+  #h4cGate;
+  constructor(app, { h4cGate = null } = {}) {
+    if (h4cGate !== null && typeof h4cGate?.verify !== "function")
+      throw new TypeError("h4cGate 必须提供 verify 方法");
+    this.#h4cGate = h4cGate;
     this.app = app;
     this.db = app.database({ throwOnCode: true });
   }
@@ -423,6 +588,8 @@ export class CloudStore {
     return row;
   }
   async transact(refs, build, audit) {
+    if (Array.isArray(refs) && refs.some((r) => isH4cCollection(r?.collection)))
+      throw admissionRequired("H4-c 集合必须通过 transactFinal 写入");
     const prepared = prepareDeterministicAudit(refs, audit);
     const unique = prepared.config ? prepared.refs : uniqueRefs(refs);
     if (unique.length > 90)
@@ -453,7 +620,11 @@ export class CloudStore {
         if (prepared.config && w.collection === "admin_audit")
           throw new HttpError(400, "确定性审计记录只能由 Store 写入");
         const k = `${w.collection}/${w.id}`;
-        if (!allowed.has(k)) throw Error("Undeclared transaction write");
+        if (!allowed.has(k)) {
+          if (isH4cCollection(w.collection))
+            throw admissionRequired("H4-c 集合必须通过 transactFinal 写入");
+          throw Error("Undeclared transaction write");
+        }
         if (createOnlyCollections.has(w.collection) && (state[k] || written.has(k)))
           throw new HttpError(409, "记录已存在");
         const exact = exactWriteCollections.has(w.collection);
@@ -489,7 +660,66 @@ export class CloudStore {
       if (logged.code) throw new HttpError(503, "日志保存失败，整批回滚");
     });
   }
+  /** S4: Cloud equivalent of LocalStore#transactFinal (fake semantics only). */
+  async transactFinal(refs, build, admission, { now, auditMode = "explicit" } = {}) {
+    if (this.#h4cGate === null) throw admissionRequired("H4-c gate 未配置");
+    if (auditMode !== "explicit")
+      throw admissionRequired("H4-c 只接受 explicit 审计模式");
+    if (!Number.isSafeInteger(now) || now < 0)
+      throw new HttpError(409, "H4-c 提交时间非法", "EVIDENCE_INVALID");
+    const unique = uniqueRefs(refs);
+    if (unique.length > 90)
+      throw new HttpError(400, "一次操作涉及记录过多，请缩小选择范围");
+    return this.db.runTransaction(async (tx) => {
+      const state = {};
+      for (const r of unique) {
+        const result = await tx.collection(r.collection).doc(r.id).get();
+        if (result.code) throw new HttpError(503, "云数据库读取失败");
+        state[`${r.collection}/${r.id}`] = Array.isArray(result.data)
+          ? result.data[0]
+          : result.data;
+      }
+      const writes = await build(state);
+      if (!Array.isArray(writes))
+        throw new HttpError(400, "事务写入必须是数组");
+      const audit = finalAuditWrite(writes, now);
+      const allowed = new Set(unique.map((r) => `${r.collection}/${r.id}`));
+      if (!allowed.has(`${audit.collection}/${audit.id}`))
+        throw admissionRequired("H4-c 审计记录未在 refs 中声明");
+      for (const w of writes) {
+        if (w === audit) continue;
+        if (!allowed.has(`${w.collection}/${w.id}`))
+          throw admissionRequired("H4-c 事务包含未声明写入");
+        if (!isH4cCollection(w.collection))
+          throw admissionRequired("H4-c 事务不得写非 H4-c 集合");
+      }
+      await this.#h4cGate.verify({ state, refs: unique, writes, admission, now });
+      for (const w of writes) {
+        if (w === audit) continue;
+        const k = `${w.collection}/${w.id}`;
+        if (createOnlyCollections.has(w.collection) && state[k])
+          throw new HttpError(409, "记录已存在", "CONFLICT");
+        const exact = exactWriteCollections.has(w.collection);
+        if (exact && (!w.data || typeof w.data !== "object" ||
+            Array.isArray(w.data) || w.data._id !== w.id))
+          throw new HttpError(400, "事务写入数据非法");
+        const data = exact ? { ...w.data } : { ...state[k], ...w.data };
+        delete data._id;
+        const result = await tx.collection(w.collection).doc(w.id).set(data);
+        if (result.code) throw new HttpError(503, "批量写入失败，整批回滚");
+      }
+      const record = { ...audit.data };
+      delete record._id;
+      const logged = await tx
+        .collection(H4C_AUDIT_COLLECTION)
+        .doc(audit.id)
+        .set(record);
+      if (logged?.code) throw new HttpError(503, "日志保存失败，整批回滚");
+    });
+  }
   async change(name, id, build, audit) {
+    if (isH4cCollection(name))
+      throw admissionRequired("H4-c 集合必须通过 transactFinal 写入");
     const isNew = !id;
     const initial = isNew ? await build(null) : null;
     id =

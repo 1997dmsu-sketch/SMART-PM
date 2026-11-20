@@ -1,6 +1,6 @@
-import { test } from "node:test";
+﻿import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -216,13 +216,22 @@ test("H4-0A LocalStore 业务异常或持久化失败时审计与业务同回滚
   assert.equal(await store.get("rooms", write.id), null);
   assert.equal(await store.get("admin_audit", AUDIT_ID), null);
 
-  const persist = store.persist.bind(store);
-  store.persist = async () => { throw Error("audit persistence failed"); };
-  await assert.rejects(
-    () => store.transact([ref("rooms", write.id), auditRef()], () => [write], audit()),
-    /audit persistence failed/,
-  );
-  store.persist = persist;
+    // D10-B fixture-only: force a persistence failure through the filesystem
+  // (the data file becomes a directory so the rename cannot complete) and
+  // restore the original path inside finally. No Store member is replaced.
+  const dataFile = join(store.directory, "demo-data.json");
+  const originalData = await readFile(dataFile, "utf8");
+  await rm(dataFile, { force: true });
+  await mkdir(dataFile);
+  try {
+    await assert.rejects(
+      () => store.transact([ref("rooms", write.id), auditRef()], () => [write], audit()),
+      (error) => error && /EISDIR|EPERM|EACCES|ENOTDIR|EBUSY/.test(String(error.code)),
+    );
+  } finally {
+    await rm(dataFile, { recursive: true, force: true });
+    await writeFile(dataFile, originalData, { mode: 0o600 });
+  }
   assert.equal(await store.get("rooms", write.id), null);
   assert.equal(await store.get("admin_audit", AUDIT_ID), null);
 });

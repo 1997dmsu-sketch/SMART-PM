@@ -1,4 +1,4 @@
-import { test } from "node:test";
+﻿import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -332,7 +332,34 @@ function domainState(config, head, version) {
   return state;
 }
 
+let fixtureAuditSeq = 0;
 async function insert(store, collection, record) {
+  // S4: H4-c collections may only be written through transactFinal, so the
+  // fixture seeds them directly into Store state instead of via transact. The
+  // create-only contract is preserved: a duplicate id still rejects with 409.
+  if (store.data || typeof store.__seedRecord === "function") {
+    const exists = store.data
+      ? (store.data[collection] || []).some((r) => r._id === record._id)
+      : store.__seedRecord(collection, record._id, undefined, true);
+    if (exists) {
+      const error = new Error("记录已存在");
+      error.status = 409;
+      error.code = "CONFLICT";
+      throw error;
+    }
+    if (store.data) {
+      (store.data[collection] ||= []).push(structuredClone(record));
+      // Mirror the audit row the legacy transact used to append, so existing
+      // audit-count assertions keep their original meaning under S4 seeding.
+      (store.data.admin_audit ||= []).unshift({
+        ...AUDIT,
+        _id: `fixture-audit-${(fixtureAuditSeq += 1)}`,
+        target: `${collection}/${record._id}`,
+        createdAt: Date.now(),
+      });
+    } else store.__seedRecord(collection, record._id, record);
+    return;
+  }
   await store.transact([ref(collection, record._id)], () => [{
     collection, id: record._id, data: structuredClone(record),
   }], AUDIT);
@@ -478,8 +505,17 @@ function cloudHarness(initial = []) {
       return query;
     },
   };
+  const store = new CloudStore({ database: () => db });
+  // S4: fixture-only seeding hook (H4-c collections are no longer writable via
+  // transact). probe=true answers existence without mutating the harness.
+  store.__seedRecord = (collection, id, data, probe = false) => {
+    const key = `${collection}/${id}`;
+    if (probe) return records.has(key);
+    records.set(key, structuredClone(data));
+    return true;
+  };
   return {
-    store: new CloudStore({ database: () => db }),
+    store,
     record(collection, id) {
       const value = records.get(`${collection}/${id}`);
       return value === undefined ? null : { _id: id, ...structuredClone(value) };
@@ -1570,6 +1606,8 @@ test("LocalStore keeps evidence/domain create-only and exact, head updates exact
 
   before = structuredClone(store.data);
   const mismatchedId = evidenceId(ORG, JOB_ID, 3);
+  // S4: exact-write validation now runs behind transactFinal; the legacy entry
+  // point rejects every H4-c ref before touching the write set.
   await assert.rejects(() => store.transact(
     [ref(EVIDENCE_COLLECTION, mismatchedId)],
     () => [{
@@ -1578,7 +1616,8 @@ test("LocalStore keeps evidence/domain create-only and exact, head updates exact
       data: { ...evidence, _id: "h4c-evidence-v1:other" },
     }],
     AUDIT,
-  ), (error) => error.status === 400);
+  ), (error) => error.status === 409 &&
+    error.code === "EVIDENCE_CHAIN_ADMISSION_REQUIRED");
   assert.deepEqual(store.data, before);
 
   const duplicateId = evidenceId(ORG, JOB_ID, 4);
@@ -1664,7 +1703,8 @@ test("CloudStore keeps evidence/domain exact fields and create-only semantics", 
   ), (error) => error.status === 409);
   assert.deepEqual(harness.snapshot(), snapshot);
 
-  // S2 does not wire Store; this is the existing exact head-update path only.
+  // S4: the head is no longer mutable through the legacy `transact` entry; the
+  // direct update must be rejected and the harness left untouched.
   const nextHead = {
     ...head,
     revision: 2,
@@ -1673,14 +1713,17 @@ test("CloudStore keeps evidence/domain exact fields and create-only semantics", 
     lastObservedAt: OBSERVED + 100,
     updatedAt: NOW + 1_000,
   };
-  await store.transact(
+  const beforeHeadUpdate = harness.snapshot();
+  await assert.rejects(() => store.transact(
     [ref(EVIDENCE_HEADS_COLLECTION, headId)],
     () => [{ collection: EVIDENCE_HEADS_COLLECTION, id: headId, data: nextHead }],
     AUDIT,
-  );
+  ), (error) => error.status === 409 &&
+    error.code === "EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  assert.deepEqual(harness.snapshot(), beforeHeadUpdate);
   const updated = harness.record(EVIDENCE_HEADS_COLLECTION, headId);
-  assert.equal(updated.revision, 2);
-  assert.equal(updated.updatedAt, NOW + 1_000);
+  assert.equal(updated.revision, head.revision);
+  assert.equal(updated.updatedAt, head.updatedAt);
   assert.equal(updated.createdAt, NOW);
 });
 
@@ -3561,4 +3604,374 @@ test("S3 P2 admission own keys are exact: non-enumerable and Symbol keys rejecte
   assert.equal(Object.isFrozen(frozen), true);
   assert.equal(AdmissionValid(frozen, genesis.refs, genesis.writes, CONFIG), true);
   rejectsP2(frozen, "frozen hidden+symbol");
+});
+
+// ===========================================================================
+
+
+// ===========================================================================
+// HK-AI-04 H4-c C1 S4: Store wiring matrix (M03–M29)
+//
+// These cases assert the Store-side contract only: which entry points may touch
+// H4-c collections, what the Store itself rejects before any chain semantics
+// run, and that every rejection leaves state byte-identical. Chain-level cases
+// (M01/M02/M14/M30) need real admission fixtures and live in the S5 matrix.
+// ===========================================================================
+
+const S4_ADMISSION = "EVIDENCE_CHAIN_ADMISSION_REQUIRED";
+const S4_INVALID = "EVIDENCE_INVALID";
+const S4_CONFLICT = "CONFLICT";
+
+/** Stub gate: records calls and never performs chain verification. */
+function s4Gate() {
+  const calls = [];
+  return {
+    calls,
+    verify(args) {
+      calls.push(args);
+      return undefined;
+    },
+  };
+}
+
+/** Business write on an H4-c collection the Store accepts as a C1 target. */
+function s4Anchor(id = "h4c-s4-anchor-1") {
+  return { collection: H4C.anchors, id, data: { _id: id, orgId: ORG, jobId: JOB_ID } };
+}
+
+/** The single explicit audit write for a given business write set. */
+function s4Audit(business, {
+  now = NOW, auditId = AUDIT_ID, target = null,
+} = {}) {
+  const computed = target ?? business
+    .map((w) => `${w.collection}/${w.id}`)
+    .sort()
+    .join(", ");
+  return {
+    collection: H4C_AUDIT_COLLECTION,
+    id: auditId,
+    data: {
+      _id: auditId,
+      orgId: ORG,
+      actorId: AUDIT.actorId,
+      actorType: AUDIT.actorType,
+      action: AUDIT.action,
+      target: computed,
+      createdAt: now,
+    },
+  };
+}
+
+async function s4Store(t, { gate = null } = {}) {
+  const directory = await mkdtemp(join(tmpdir(), "smartpm-h4c-s4-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = await new LocalStore(directory, { h4cGate: gate }).init();
+  return { store, directory };
+}
+
+function s4Rejects(promise, status, code) {
+  return assert.rejects(promise, (error) => {
+    assert.equal(error.status, status);
+    if (code !== undefined) assert.equal(error.code, code);
+    return true;
+  });
+}
+
+test("S4 M03: transactFinal without a gate is rejected before build", async (t) => {
+  const { store } = await s4Store(t);
+  let built = false;
+  await s4Rejects(store.transactFinal(
+    [ref(H4C.anchors, "missing-gate")],
+    () => { built = true; return []; },
+    {},
+    { now: NOW },
+  ), 409, S4_ADMISSION);
+  assert.equal(built, false);
+});
+
+test("S4 M05: transactFinal only accepts auditMode=explicit", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  const before = structuredClone(store.data);
+  let built = false;
+  await s4Rejects(store.transactFinal(
+    [ref(H4C.anchors, "a")],
+    () => { built = true; return []; },
+    {},
+    { now: NOW, auditMode: "deterministic" },
+  ), 409, S4_ADMISSION);
+  assert.equal(built, false);
+  assert.deepEqual(store.data, before);
+});
+
+test("S4 M06: transactFinal requires a safe-integer now", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  const before = structuredClone(store.data);
+  for (const now of [undefined, null, 1.5, -1, "1760000000000", Number.MAX_SAFE_INTEGER + 2]) {
+    let built = false;
+    await s4Rejects(store.transactFinal(
+      [ref(H4C.anchors, "a")],
+      () => { built = true; return []; },
+      {},
+      { now },
+    ), 409, S4_INVALID);
+    assert.equal(built, false, `now=${String(now)} 不得进入 build`);
+  }
+  assert.deepEqual(store.data, before);
+});
+
+test("S4 M08/M09: exactly one audit write is required", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  const before = structuredClone(store.data);
+  for (const auditCount of [0, 2]) {
+    const business = [s4Anchor()];
+    const audits = Array.from({ length: auditCount }, (_, i) =>
+      s4Audit(business, { auditId: `s4-audit-${i}` }));
+    const writes = [...business, ...audits];
+    const refs = writes.map((w) => ref(w.collection, w.id));
+    await s4Rejects(store.transactFinal(
+      refs,
+      () => writes.map((w) => structuredClone(w)),
+      {},
+      { now: NOW },
+    ), 409, S4_ADMISSION);
+  }
+  assert.deepEqual(store.data, before);
+});
+
+test("S4 M10: the audit write must be declared in refs", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  const before = structuredClone(store.data);
+  const business = [s4Anchor()];
+  const audit = s4Audit(business);
+  await s4Rejects(store.transactFinal(
+    [ref(business[0].collection, business[0].id)],
+    () => [business[0], audit],
+    {},
+    { now: NOW },
+  ), 409, S4_ADMISSION);
+  assert.deepEqual(store.data, before);
+});
+
+test("S4 M11: audit target and createdAt must match the write set and now", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  const business = [s4Anchor()];
+  for (const audit of [
+    s4Audit(business, { target: "wrong/target" }),
+    s4Audit(business, { now: NOW - 1 }),
+  ]) {
+    const refs = [ref(business[0].collection, business[0].id),
+      ref(audit.collection, audit.id)];
+    await s4Rejects(store.transactFinal(
+      refs,
+      () => [business[0], audit],
+      {},
+      { now: NOW },
+    ), 409, S4_ADMISSION);
+  }
+});
+
+test("S4 M12/M13: undeclared or non-H4-c business writes are rejected", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  const before = structuredClone(store.data);
+
+  // M12: the anchor is not declared in refs.
+  const undeclared = s4Anchor("undeclared");
+  const audit1 = s4Audit([undeclared]);
+  await s4Rejects(store.transactFinal(
+    [ref(H4C_AUDIT_COLLECTION, audit1.id)],
+    () => [undeclared, audit1],
+    {},
+    { now: NOW },
+  ), 409, S4_ADMISSION);
+
+  // M13: a declared write on a non-H4-c collection.
+  const house = { collection: "houses", id: "h4c-s4-house", data: { _id: "h4c-s4-house" } };
+  const audit2 = s4Audit([house]);
+  await s4Rejects(store.transactFinal(
+    [ref(house.collection, house.id), ref(H4C_AUDIT_COLLECTION, audit2.id)],
+    () => [house, audit2],
+    {},
+    { now: NOW },
+  ), 409, S4_ADMISSION);
+
+  assert.deepEqual(store.data, before);
+});
+
+test("S4 M15: create-only conflict is reported as CONFLICT", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  const evidenceKey = evidenceId(ORG, JOB_ID, 1);
+  const target = `${EVIDENCE_COLLECTION}/${evidenceKey}`;
+  const auditFor = (id) => ({
+    collection: H4C_AUDIT_COLLECTION,
+    id,
+    data: {
+      _id: id, orgId: ORG, actorId: AUDIT.actorId, actorType: AUDIT.actorType,
+      action: AUDIT.action, target, createdAt: NOW,
+    },
+  });
+  const commit = (auditId) => store.transactFinal(
+    [ref(EVIDENCE_COLLECTION, evidenceKey), ref(H4C_AUDIT_COLLECTION, auditId)],
+    () => [
+      { collection: EVIDENCE_COLLECTION, id: evidenceKey, data: { _id: evidenceKey, orgId: ORG } },
+      auditFor(auditId),
+    ],
+    {},
+    { now: NOW },
+  );
+  await commit("s4-m15-audit-1");
+  const before = structuredClone(store.data);
+  await s4Rejects(commit("s4-m15-audit-2"), 409, S4_CONFLICT);
+  assert.deepEqual(store.data, before);
+});
+
+test("S4 M16: 91 unique refs exceed the Store capacity with 400", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  const refs = Array.from({ length: 91 }, (_, i) => ref(H4C.evidence, `s4-cap-${i}`));
+  await s4Rejects(store.transactFinal(
+    refs,
+    () => [],
+    {},
+    { now: NOW },
+  ), 400, undefined);
+});
+
+test("S4 M17: a build error propagates unchanged and writes nothing", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  const before = structuredClone(store.data);
+  const boom = new Error("build failed");
+  await assert.rejects(store.transactFinal(
+    [ref(H4C.anchors, "a")],
+    () => { throw boom; },
+    {},
+    { now: NOW },
+  ), (error) => error === boom);
+  assert.deepEqual(store.data, before);
+});
+
+test("S4 M18a/M18b: legacy transact cannot write H4-c collections", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  const before = structuredClone(store.data);
+
+  // M18a: H4-c ref is rejected before build runs.
+  let built = false;
+  await s4Rejects(store.transact(
+    [ref(H4C.anchors, "a")],
+    () => { built = true; return []; },
+    AUDIT,
+  ), 409, S4_ADMISSION);
+  assert.equal(built, false);
+  assert.deepEqual(store.data, before);
+
+  // M18b: build returns an H4-c write for a non-H4-c ref.
+  await s4Rejects(store.transact(
+    [ref("houses", "h4c-s4-house-2")],
+    () => [{ collection: H4C.anchors, id: "h4c-s4-house-2", data: { _id: "x" } }],
+    AUDIT,
+  ), 409, S4_ADMISSION);
+  assert.deepEqual(store.data, before);
+});
+
+test("S4 M19: legacy transact on non-H4-c collections is unchanged", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  const before = store.data.admin_audit.length;
+  await store.transact(
+    [ref("houses", "h4c-s4-legacy")],
+    () => [{ collection: "houses", id: "h4c-s4-legacy", data: { title: "legacy" } }],
+    AUDIT,
+  );
+  assert.equal(store.data.houses.at(-1)._id, "h4c-s4-legacy");
+  assert.equal(store.data.admin_audit.length, before + 1);
+});
+
+test("S4 M20: change rejects H4-c collection names before build", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  const before = structuredClone(store.data);
+  for (const name of [H4C.evidence, H4C.evidenceHeads, H4C.domains, H4C.anchors]) {
+    let built = false;
+    await s4Rejects(store.change(name, "any", () => { built = true; return {}; }, AUDIT),
+      409, S4_ADMISSION);
+    assert.equal(built, false, `${name} 不得进入 build`);
+  }
+  assert.deepEqual(store.data, before);
+});
+
+test("S4 M21: change on non-H4-c collections is unchanged", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  const before = store.data.admin_audit.length;
+  const record = await store.change("houses", null, () => ({ title: "created" }), AUDIT);
+  assert.equal(record.title, "created");
+  assert.equal(store.data.admin_audit.length, before + 1);
+});
+
+test("S4 M22: persist is no longer a public Store member", async (t) => {
+  const { store } = await s4Store(t, { gate: s4Gate() });
+  assert.equal(Object.hasOwn(store, "persist"), false);
+  assert.equal(store.persist, undefined);
+  assert.equal(typeof store.transactFinal, "function");
+});
+
+test("S4 M23: seed rejects injected non-empty H4-c data", async (t) => {
+  for (const injection of [
+    { [H4C.evidence]: [{ _id: "x" }] },
+    { [H4C.anchors]: [{ _id: "y" }] },
+  ]) {
+    assert.throws(() => seed(injection), (error) => {
+      assert.equal(error.status, 409);
+      assert.equal(error.code, S4_ADMISSION);
+      return true;
+    });
+  }
+  // Default no-arg seed keeps every H4-c collection empty.
+  for (const name of Object.values(H4C)) assert.deepEqual(seed()[name] ?? [], []);
+});
+
+test("S4 M24: a fresh seed persists with eight empty H4-c collections", async (t) => {
+  const { store, directory } = await s4Store(t, { gate: s4Gate() });
+  for (const name of Object.values(H4C)) assert.deepEqual(store.data[name], []);
+  const persisted = JSON.parse(await readFile(join(directory, "demo-data.json"), "utf8"));
+  // seed() only carries the three chain collections that predate S4; init fills
+  // the remaining five in memory only, so persistence never invents records.
+  for (const name of Object.values(H4C)) {
+    assert.deepEqual(persisted[name] ?? [], []);
+  }
+});
+
+test("S4 M25: init fills missing H4-c arrays in memory without rewriting the file", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "smartpm-h4c-s4-m25-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "demo-data.json");
+  await writeFile(file, JSON.stringify({ houses: [], admin_audit: [] }));
+  const before = createHash("sha256").update(await readFile(file)).digest("hex");
+  const store = await new LocalStore(directory, { h4cGate: s4Gate() }).init();
+  for (const name of Object.values(H4C)) assert.deepEqual(store.data[name], []);
+  const after = createHash("sha256").update(await readFile(file)).digest("hex");
+  assert.equal(after, before);
+});
+
+test("S4 M26: init preserves existing non-empty H4-c records without writing", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "smartpm-h4c-s4-m26-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "demo-data.json");
+  const existing = { _id: "existing-anchor", orgId: ORG, jobId: JOB_ID };
+  const data = { houses: [], admin_audit: [], [H4C.anchors]: [existing] };
+  await writeFile(file, JSON.stringify(data));
+  const before = createHash("sha256").update(await readFile(file)).digest("hex");
+  const store = await new LocalStore(directory, { h4cGate: s4Gate() }).init();
+  assert.deepEqual(store.data[H4C.anchors], [existing]);
+  const after = createHash("sha256").update(await readFile(file)).digest("hex");
+  assert.equal(after, before);
+});
+
+test("S4 M27: init rejects a non-array H4-c collection as EVIDENCE_INVALID", async (t) => {
+  for (const bad of [{}, "x", 1, null]) {
+    const directory = await mkdtemp(join(tmpdir(), "smartpm-h4c-s4-m27-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    await writeFile(join(directory, "demo-data.json"),
+      JSON.stringify({ houses: [], admin_audit: [], [H4C.domains]: bad }));
+    await s4Rejects(
+      new LocalStore(directory, { h4cGate: s4Gate() }).init(),
+      409,
+      S4_INVALID,
+    );
+  }
 });

@@ -6,9 +6,11 @@
 >
 > 执行者：DSH 根代理 `lead`（`deepseek-flash`）。
 >
-> 本轮真实 run / session：`hrun-mworlgg2-4d0901` / `session-85d1620b-a49f-44c9-a1db-5f92c300741b`（2026-11-20T17:16:23+08:00 起，`sender=codex`、`mode=followup`）。
+> 原前置 run / session：`hrun-mworlgg2-4d0901` / `session-85d1620b-a49f-44c9-a1db-5f92c300741b`（2026-11-20T17:16:23+08:00；本文档初稿）。
 >
-> 工作树 / 分支：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-s4-preflight` / `codex/h4c-c1-s4-preflight`（新建，仅本文档）。
+> 本轮续派 run / session：`hrun-mwotfctk-a36243` / `session-85d1620b-a49f-44c9-a1db-5f92c300741b`（2026-11-20T18:07:38+08:00 起；同一会话/分支/worktree，仅补本文档）。
+>
+> 工作树 / 分支：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-s4-preflight` / `codex/h4c-c1-s4-preflight`（复用；已有交付 `f5932df`；当前 HEAD）。
 >
 > 固定基线 / 父：`49ca13ec77a94bce09a566ce1e42870accbcade7` / `5a13fcc86efd38bae3b8448ec1ad3864cbb94a8e`。
 >
@@ -19,15 +21,16 @@
 | 项 | 结论 |
 |---|---|
 | 固定对象 | 基线 `49ca13ec`、父 `5a13fcc`、远端 `origin/codex/h4c-c1-s3-implementation` = `49ca13ec`；`git fetch` exit 0；父链线性、无 merge；无前移/分叉。 |
-| 重复运行/分支/worktree | 创建前无 `codex/h4c-c1-s4-preflight` 本地/远端分支、无同名 worktree；`~/.dsh-baton/host-runs` 仅本 run `hrun-mworlgg2-4d0901` 命中 C1 S4；`schedule_list` 无 S4 任务；`list_agents` 仅 root；未创建第二个 worker/分支/worktree。 |
+| 已有交付（复用） | `f5932dfc950e4b32b0fe5810be0b4b86dd5216c5`；父 `c982905b6c65af3d213fc6c28f15520adc94866e`；本 worktree/branch；本轮只补 M30a/b 计数、G1 own键/Symbol、D10-A/B 标识与当前 run 身份，不重建。 |
+| 重复运行/分支/worktree | 创建前无 `codex/h4c-c1-s4-preflight` 本地/远端分支、无同名 worktree；原 run `hrun-mworlgg2-4d0901`（已完成，交付 `f5932df`）与本轮 `hrun-mwotfctk-a36243` 同 session/分支/worktree；无其他 S4 queued/running；`schedule_list` 无 S4 任务；`list_agents` 仅 root。 |
 | S3 关闭输入 | Codex 已独立验收 Stop-3 关闭：**66/66 + guard 8/8**；正常十字段、隐藏/Symbol 拒绝 `ADMISSION_REQUIRED`/409、两入口及 key/descriptor 不变覆盖；网络/监听/Provider 计数 0；三文件范围合规。本清单只记录，不重跑、不重审、不重复修复。 |
 | S4 原定范围 | `transactFinal`、explicit audit、gate 注入、`#persist` 私有、`transact`/`change` 拒 H4-c、8 集合 + `admin_audit`、create-only/exact、≤90、M01–M30；白名单与预算见 §3。 |
-| 预算 | C1 **18 refs**；helper 业务写 **3/2**；finalWriteSet **4/3**（含唯一 audit）；90 是 Store 单事务上限，**不是** C1 新预算；C2 27 不在 S4 实现。 |
+| 预算 | C1 **18 refs**；helper 业务写 **3/2**；finalWriteSet **4/3**（含唯一 audit）；M30a 总 **3**（2 业务+audit1）、M30b 总 **4**（3 业务+audit1），总 3/4 已含 audit，禁止再加 audit；90 是 Store 单事务上限，**不是** C1 新预算；C2 27 不在 S4 实现。 |
 | 基线缺口（只读） | `transactFinal`/`h4cGate`/`#persist` 在 `store.mjs` 均为 **0 命中**；`store.mjs` 未 import `isH4cCollection`；`transact`/`change` 仍自动写 audit；`collections`/`seed`/`init` 只登记 3 个 H4-c 集合，缺 5 个；`exactWriteCollections` 仅 3 个、`createOnlyCollections` 仅 2 个；`persist` 为 public（L268）。 |
-| 硬阻断 | **D10 仍 OPEN**：`#persist` 私有会破坏 `verification.test.mjs:381`，本清单另发现 `store-deterministic-audit.test.mjs:219–225` 也直接改写 `store.persist`；两份文件都需 Codex 明确纳入 S4 白名单/处置。未批准前 S4 不得开工（`卡:L741`、`授权:L139`、`勘误:L377`）。 |
-| 未决/阻断项 | **M23 `seed` 非空拒绝无执行入口**（Store 无 `seed()` 方法，模块 `seed()` 为无参工厂，`代码:L127`）；**G1 `createH4cGate.verify` 未执行 §3.3c 要求的“唯一 audit/18 shape”**（`H4C:L1697–1724` 只调 `AdmissionValid`，未调 `validateH4cAdmission`）；**`store.data` public 可被外部篡改后再由非 H4-c `transact` 持久化**（旁路，见 §4.6）。 |
+| 硬阻断 | **D10 仍 OPEN（D10-A/D10-B）**：`#persist` 私有会破坏 `verification.test.mjs:381`，本清单另发现 `store-deterministic-audit.test.mjs:219–225` 也直接改写 `store.persist`；两份文件都需 Codex 明确纳入 S4 白名单/处置。未批准前 S4 不得开工（`卡:L741`、`授权:L139`、`勘误:L377`）。 |
+| 未决/阻断项 | **M23 `seed` 非空拒绝无执行入口**（Store 无 `seed()` 方法，模块 `seed()` 为无参工厂，`代码:L127`）；**G1 `createH4cGate.verify` 未执行 §3.3c 要求的“唯一 audit/own键/Symbol/18 refs”**（`H4C:L1697–1724` 只调 `AdmissionValid`，未调 `validateH4cAdmission`；仅为接线建议、未实现，待 Codex 裁定）；**`store.data` public 可被外部篡改后再由非 H4-c `transact` 持久化**（旁路，见 §4.6）。 |
 | 测试可行性 | 现有 S2 用例用 `store.transact` 写 H4-c（`C1测试:L336`、`L1556`、`L1576`、`L1587`、`L1634`、`L1646`、`L1657`、`L1676`），S4 一旦拒 H4-c 将全部失败；S4 必须改 fixture 设置路径但保留 S2 断言。Cloud fake 未串行化（`C1测试:L434–491`），M30 Cloud 需补串行 fake。 |
-| 本轮动作 | 仅新增本文档；未改代码/测试/Store/guard/设计/卡；未运行任何实施测试/guard；未安装；未进入 S4；未动合同/供应商/预签约 S2/合并/HTTP/UI/真实支付/设备云/部署。 |
+| 本轮动作 | 仅修订本文档（M30a/b 计数口径、G1 own键/Symbol/18 refs 待裁说明、D10-A/B 标识、当前 run 身份）；未改代码/测试/Store/guard/设计/卡；未运行任何实施测试/guard；未安装；未进入 S4；未动合同/供应商/预签约 S2/合并/HTTP/UI/真实支付/设备云/部署。 |
 
 ## 1. 固定输入、父链与远端
 
@@ -35,7 +38,8 @@
 
 | 对象 | 固定读取点 | 完整 SHA / blob / 行数 | 说明 |
 |---|---|---|---|
-| 基线提交 | `49ca13ec` | commit `49ca13ec77a94bce09a566ce1e42870accbcade7`；tree `ce5bc68c50d82f265a481c86c813973c5a8721bc`；父 `5a13fcc86efd38bae3b8448ec1ad3864cbb94a8e` | S3 P2 最终提交；本工作树 HEAD |
+| 基线提交 | `49ca13ec` | commit `49ca13ec77a94bce09a566ce1e42870accbcade7`；tree `ce5bc68c50d82f265a481c86c813973c5a8721bc`；父 `5a13fcc86efd38bae3b8448ec1ad3864cbb94a8e` | S3 P2 最终提交；本分支起点（当前 HEAD 见“已有交付”） |
+| 已有交付 | `f5932df` | commit `f5932dfc950e4b32b0fe5810be0b4b86dd5216c5`；父 `c982905b6c65af3d213fc6c28f15520adc94866e`；tree `116259be2802e3b2a12c3fcdd92403f12dc17a62`；doc blob `eea69b83b59e015a9bbece937a538e3b7569733f`；515 行 | 初稿 `c982905` + D10 细化；本轮续核对象 |
 | 分阶段任务卡 r5 | `49ca13ec` | blob `080c590fb61112c3b061b4b26c9dc017f1bf5c73`；995 行 | S4 见 `卡:L739–787` |
 | 设计 v8 | `49ca13ec` | blob `c4feffa5831f5bf0e04e8e902865cb8e1f1b0183`；1607 行 | 冲突优先级 §18 > §17 > §16 > §15 > §4–§14 |
 | 勘误 r4 | `49ca13ec` | blob `c5797a075f15eadc59c31b80ef258a6717d0af3b`；384 行 | E1/E2/E3 + D4/D5 + D10/P5 |
@@ -54,6 +58,8 @@
 
 | 提交 | 父 | 说明 |
 |---|---|---|
+| `f5932dfc950e4b32b0fe5810be0b4b86dd5216c5` | `c982905b6c65af3d213fc6c28f15520adc94866e` | 已有交付（D10 细化；当前 HEAD） |
+| `c982905b6c65af3d213fc6c28f15520adc94866e` | `49ca13ec77a94bce09a566ce1e42870accbcade7` | 已有交付初稿 |
 | `49ca13ec77a94bce09a566ce1e42870accbcade7` | `5a13fcc86efd38bae3b8448ec1ad3864cbb94a8e` | S3 P2 修复（本基线） |
 | `5a13fcc86efd38bae3b8448ec1ad3864cbb94a8e` | `13298d4b90a2de6b8e32a6de4d14cec37eeaa2b1` | S3 授权 helper |
 | `13298d4b90a2de6b8e32a6de4d14cec37eeaa2b1` | `6acceb0d354780560dfd95d9b1f0d7690e94f127` | S3 前置修订 |
@@ -67,12 +73,13 @@
 
 | 项 | 实测 | 结果 |
 |---|---|---|
-| `git fetch origin codex/h4c-c1-s3-implementation codex/h4c-c1-s3-preflight codex/h4c-c1-s3-preflight-review main` | exit **0**（`-c http.sslBackend=openssl`） | 固定 ref 已取回；未改全局 Git/TLS |
+| 原前置 `git fetch origin codex/h4c-c1-s3-implementation codex/h4c-c1-s3-preflight codex/h4c-c1-s3-preflight-review main` | exit **0**（`-c http.sslBackend=openssl`） | 固定 ref 已取回；未改全局 Git/TLS |
+| 本轮续派 `git fetch origin codex/h4c-c1-s4-preflight codex/h4c-c1-s3-implementation` | exit **0**（`-c http.sslBackend=openssl`） | 已有交付与 S3 基线已取回；未改全局 Git/TLS |
 | `git ls-remote origin refs/heads/codex/h4c-c1-s3-implementation` | `49ca13ec77a94bce09a566ce1e42870accbcade7` | 与固定基线一致 |
-| `git ls-remote origin refs/heads/codex/h4c-c1-s4-preflight` | 推送前 **不存在** | 本轮新建，非复用 |
+| `git ls-remote origin refs/heads/codex/h4c-c1-s4-preflight` | `f5932dfc950e4b32b0fe5810be0b4b86dd5216c5` | 已有交付；本轮续派前与 HEAD 一致，无前移/分叉 |
 | `origin/main` | `282a20fca9f64ab80ead50372c9c3e90bf4aeba7` | 仅记录，不合并、不比较业务 |
-| 工作树 | `HEAD=49ca13ec…`；`branch=codex/h4c-c1-s4-preflight`；父 `5a13fcc…`；`git status --porcelain` 建树后为空 | 干净；无 upstream |
-| 重复运行 | `~/.dsh-baton/host-runs` 仅 `hrun-mworlgg2-4d0901`（本 run，running）命中 C1 S4；无其他 queued/running | 无重复任务 |
+| 工作树 | `HEAD=f5932df…`；`branch=codex/h4c-c1-s4-preflight`；父 `c982905…`；`git status --porcelain` 为空 | 复用；干净；无 upstream |
+| 重复运行 | 原 run `hrun-mworlgg2-4d0901`（completed，交付 `f5932df`）与本轮 `hrun-mwotfctk-a36243`（running）同一 session/分支/worktree；另一 running `hrun-mwotfce0-24ce27` 为 rental，不命中 C1 S4；无其他 S4 queued/running | 无重复任务 |
 | 定时任务 | `schedule_list` 仅“SMART-PM 工作进度汇报”与一个已结束探针任务 | 无 S4 任务 |
 | 子代理/作业 | `list_agents` 仅 root；`job_list` 为空 | 无并行 worker |
 
@@ -229,9 +236,9 @@
 3. `CoverageValid`（L1715）；
 4. `FenceValid`/`FenceExpired`（L1718–1722）。
 
-**G1（必须由 Codex 确认落点）**：`AdmissionValid` **不**检查“恰好 1 条 audit/7 字段/audit target/C1 3+2 业务集合”。这些检查在 S3 的 `validateH4cAdmission`（`H4C:L1628–1660`）里通过 `inspectC1FinalWriteSet`（L1414–1480）和 `assertCanonicalC1Refs`（L1527–1546）完成，但 `createH4cGate.verify` 没有调用它。任务卡 §3.3c 要求 gate 检查“writes 声明/唯一 audit”（`卡:L281`），因此 S4 若只调现有 `gate.verify`，M08–M13 不能诚实通过。
+**G1（必须由 Codex 确认落点；未实现，仅接线建议）**：`AdmissionValid` **不**检查“恰好 1 条 audit/7 字段/audit target/C1 3+2 业务集合”，也不执行 S3 P2 的 `assertExactAdmissionOwnKeys`（own键/Symbol 精确 10 字段）和 `assertCanonicalC1Refs`（18 refs 重建）。这些检查在 S3 的 `validateH4cAdmission`（`H4C:L1628–1660`）里通过 `inspectC1FinalWriteSet`（L1414–1480）、`assertCanonicalC1Refs`（L1527–1546）和 `assertExactAdmissionOwnKeys`（L1554–1570）完成，但 `createH4cGate.verify` 没有调用它。任务卡 §3.3c 要求 gate 检查“writes 声明/唯一 audit”（`卡:L281`），因此 S4 若只调现有 `gate.verify`，M08–M13 不能诚实通过。
 
-- **建议的最小落点（不新增设计/API）**：在 `createH4cGate.verify` 内、`AdmissionValid` 之后调用已有的 `validateH4cAdmission({ admission, refs, writes, config: cfg })`（同模块已定义），用它完成 C1 18-shape/唯一 audit/3+2 业务集合/audit 字段校验；`AdmissionValid` 可保留或由前者覆盖。该改动在 S4 白名单 `h4c-evidence.mjs` 内，复用 S3 已测 helper，不改链层/票据公式。
+- **建议的最小落点（不新增设计/API；未实现，待 Codex 裁定）**：在 `createH4cGate.verify` 内、`AdmissionValid` 之后调用已有的 `validateH4cAdmission({ admission, refs, writes, config: cfg })`（同模块已定义），用它完成 C1 **18-shape、own键/Symbol 精确 10 字段、唯一 audit/7 字段、3+2 业务集合、audit 字段**校验；`AdmissionValid` 可保留或由前者覆盖。该改动在 S4 白名单 `h4c-evidence.mjs` 内，复用 S3 已测 helper，不改链层/票据公式。
 - **替代落点**：Store 侧自行校验；但 E3 冻结“`store.mjs` 只 import `isH4cCollection` 与 `H4C_AUDIT_COLLECTION`”（`勘误:L204`），Store 不能 import face-service validator，需复制 audit 字段/公式，违反单一来源，故不推荐。
 - **需 Codex 裁定**：这是“S4 gate 接线”还是“重开 S3 gate”；若不允许改 `createH4cGate`，S4 必须在 Store 侧实现等价校验并说明 import 边界，否则 Stop-4 不通过。
 
@@ -296,7 +303,7 @@
 
 **最小方案（保留原断言、消除 public persist 逃逸口）**：
 
-1. `verification.test.mjs:381`：
+1. **D10-A** — `verification.test.mjs:381`：
    - 删除 `store.persist(store.data)` 直调；在测试内加一个 fixture helper（仅 LocalStore 测试用）：
      ```js
      import { writeFile, rename } from "node:fs/promises";
@@ -310,7 +317,7 @@
    - 把 L381 改为 `await persistDemoData(store);`。保留 L379 的 `store.data.identity_domains` 过滤、L382–389 的全部 `assert.rejects`/状态断言；不改 identity service 断言。该 helper 是测试 fixture，不是生产 API；与 `#persist` 相同的 tmp+rename 字节落盘，保留“legacy 数据已持久化”的场景。
    - 若更严格地要求“重启后读回”，可在写完后 `new LocalStore(store.directory).init()` 断言文件内容；但当前测试继续用同一实例，无需新增重启，避免扩大改动。
 
-2. `store-deterministic-audit.test.mjs:219–225`：
+2. **D10-B** — `store-deterministic-audit.test.mjs:219–225`：
    - 删除对 `store.persist` 的赋值；改为在测试内临时把 `store.directory` 定义成抛 `audit persistence failed` 的 getter，让真实的 `#persist` 在读取 `this.directory`（`代码:L269`）时抛出同一错误；`finally` 恢复原 data property。保留原错误消息与全部断言：
      ```js
      const directory = store.directory;
@@ -368,17 +375,18 @@
 | M20 | `change` H4-c name | `change` | `EVIDENCE_CHAIN_ADMISSION_REQUIRED` / **409** | 0 / 0 | Z_all | **build 不被调用**；Local/Cloud 均先检查 name |
 | M21 | `change` 非 H4-c | `change` | 成功/行为不变 | 记录 + 自动 audit **1** | — | 不改变旧 `change` 语义 |
 | M22 | 外部调 `#persist` | Local/Cloud | `store.persist === undefined`；调用 → **TypeError** | 0 / 0 | 无写 | `Object.hasOwn(store,"persist")===false`；静态扫描 production `persist(` = 0；D10 两份测试需先处置 |
-| M23 | `seed` H4-c 非空 | `seed` | **UNKNOWN/BLOCKED**（设计写 `ADMISSION_REQUIRED`，但无执行入口） | 0 / 0 | Z_all | Store 无 `seed()` 方法；模块 `seed()` 无参（`代码:L127`）。见 §7-R1：建议 Codex 将 M23 判为不适用或另定 |
+| M23 | `seed` H4-c 非空 | `seed` | **UNKNOWN/BLOCKED**（设计写 `ADMISSION_REQUIRED`，但无执行入口） | 0 / 0 | Z_all | Store 无 `seed()` 方法；模块 `seed()` 无参（`代码:L127`）。见 §7-R2：建议 Codex 将 M23 判为不适用或另定 |
 | M24 | `seed` H4-c 空数组 | 模块 `seed()` / `init` 新目录 | 成功；无记录 | 0 / 0 | 无记录写 | 断言 8 个 H4-c 均为 `[]`；新目录 seed 可持久化，但无 H4-c 记录 |
 | M25 | `init` 缺 H4-c 数组 | `init` | 成功；仅内存补 `[]` | 0 / 0 | 无记录写；文件 sha256 不变 | 文件存在时不 persist；M25 断言 8 个数组 |
 | M26 | `init` 已有非空 H4-c | `init` | 成功；原样保留；不写 | 0 / 0 | 无写 | 不得改记录/不得补记录 |
 | M27 | `init` H4-c 非数组/损坏 | `init` | `EVIDENCE_INVALID` / **409** | 0 / 0 | Z_all；不修复 | 当前基线不报错（L247–265 仅用逻辑或默认赋值），S4 必须显式检查 |
 | M28 | gate 修改入参/读环境/读时钟 | gate（纯） | 测试断言失败（无 Store code） | 0 / 0 | — | 现有 S1 gate 测试 `C1测试:L2698–2747`；S4 复用同一 gate，不新增环境/时钟 |
 | M29 | 集合门禁 | `h4c-collections`/import 面 | 测试断言通过（无 code） | 0 / 0 | — | 无 `H4C_COLLECTION_SET`/Set 导出；`H4C`/数组冻结；`isH4cCollection` 边界；`store.mjs` 只 import 两符号 |
-| M30a | 并发：两 append 同 head | `transactFinal` Local+Cloud | 一胜；败者 `EVIDENCE_HEAD_CONFLICT` / **409** | 胜者 **3** + audit 1；败者 0 / 0 | Z_all（败者） | Local 队列；Cloud fake 必须串行化；真实 Cloud 未验证 |
-| M30b | 并发：两 genesis | `transactFinal` Local+Cloud | 一胜；败者 `EVIDENCE_CHAIN_BROKEN` / **409** | 胜者 **4** + audit 1；败者 0 / 0 | Z_all（败者） | anchor create-only；败者在 build/链检查即失败；不产生第二 anchor/E/head/audit |
+| M30a | 并发：两 append 同 head | `transactFinal` Local+Cloud | 一胜；败者 `EVIDENCE_HEAD_CONFLICT` / **409** | 胜者 业务写 **2** + audit **1** = 总 **3**；败者 0 / 0 | Z_all（败者） | Local 队列；Cloud fake 必须串行化；真实 Cloud 未验证 |
+| M30b | 并发：两 genesis | `transactFinal` Local+Cloud | 一胜；败者 `EVIDENCE_CHAIN_BROKEN` / **409** | 胜者 业务写 **3** + audit **1** = 总 **4**；败者 0 / 0 | Z_all（败者） | anchor create-only；败者在 build/链检查即失败；不产生第二 anchor/E/head/audit |
 
 - M14/M18/M30 原表各含多分支；本清单拆为 a/b/c，保持原编号，确保“逐场景唯一 code/status”。M23 无执行入口，不伪造 PASS。
+- **M30 计数口径（本轮更正）**：M30a append 业务写 2 + audit 1 = 总 3；M30b genesis 业务写 3 + audit 1 = 总 4。总 3/总 4 已含 audit，**禁止在总 3/总 4 之后再写“+ audit 1”，也禁止写成总 4/总 5**；批准预算仍为 helper 3/2、finalWriteSet 4/3，不变。
 - M01/M02 的 store 测试 fixture 可从 `s3GenesisContext`/`s3AppendContext`（`C1测试:L2795–2847`）取 18 refs/4/3 writes/admission，并补 `s1Marker/s1Plan/s1Fence`（`C1测试:L1831/L1896/L2012`）使 `gate.verify` 的 `CoverageValid` 通过；这是 S4 实施细节，本清单不写代码。
 - **完整 CoverageValid 仍 S5**：S4 的成功路径会经 `gate.verify` 执行 `CoverageValid`（`H4C:L1715`），但 S4 只负责 Store 接线/M 矩阵；S5 才负责 V01–V05、proof/marker/plan/fence 全量运行时矩阵。S4 不得把 M14a 当作 S5 覆盖，也不得新增 S5 用例。
 
@@ -454,9 +462,9 @@ node (Join-Path $gd "run-controls.cjs")   # 预期 exit 0；8/8 控制；C1 定�
 
 | ID | 事项 | 原文/代码定位 | 状态 | 建议/最小裁定 |
 |---|---|---|---|---|
-| **R1/D10** | `#persist` 私有破坏两份测试；D10 只列其中一份 | `卡:L972`、`勘误:L296/L363`、`授权:L62/L139`；`代码:L268`；`验证测试:L381`；`审计测试:L219–225` | **BLOCKED** | 批准 §4.7 最小方案：`verification` 用测试内 `persistDemoData` 直写 tmp+rename；`审计测试` 临时把 `store.directory` 定义为抛 `audit persistence failed` 的 getter（`#persist` 读取 `this.directory` 时抛错），`finally` 恢复；两者保留原断言、不保留 public persist、不 patch 全局内建模块。**同时批准将 `store-deterministic-audit.test.mjs` 纳入 S4 白名单的 D10 fixture-only 改动**；否则 S4 不得开工。 |
+| **R1/D10** | `#persist` 私有破坏两份测试；D10 只列其中一份 | `卡:L972`、`勘误:L296/L363`、`授权:L62/L139`；`代码:L268`；`验证测试:L381`；`审计测试:L219–225` | **BLOCKED（两方案未实现，待 Codex）** | 批准 §4.7 的 **D10-A/D10-B 两方案**：D10-A `verification` 用测试内 `persistDemoData` 直写 tmp+rename；D10-B `审计测试` 临时把 `store.directory` 定义为抛 `audit persistence failed` 的 getter（`#persist` 读取 `this.directory` 时抛错），`finally` 恢复；两者保留原断言、不保留 public persist、不 patch 全局内建模块。**同时批准将 `store-deterministic-audit.test.mjs` 纳入 S4 白名单的 D10 fixture-only 改动**；否则 S4 不得开工。 |
 | **R2/M23** | `seed` 非空拒绝无执行入口 | `卡:L317`、`设计:L171`；`代码:L127`（无参模块函数）；Store 无 `seed()` 方法 | **UNKNOWN/BLOCKED** | 建议 Codex 判 M23 不适用（`seed()` 是零参默认工厂，8 个 H4-c 静态空数组，M24 覆盖），或明确要求新增 Store `seed()`（属 API 扩大，不建议）；不要猜。 |
-| **R3/G1** | `createH4cGate.verify` 未执行 §3.3c 的“唯一 audit/18 shape” | `卡:L281`、`L342–348`；`H4C:L1697–1724`（只调 `AdmissionValid`）；`H4C:L1628–1660`（`validateH4cAdmission` 已做） | **CONDITIONAL** | 建议 S4 在 gate.verify 内复用 `validateH4cAdmission`（不改 S3 helper 语义），使 M08–M13 可诚实通过；请 Codex 确认这是“接线”而非重开 S3。若不允许，S4 需在 Store 侧实现等价校验并解释 E3 import 边界。 |
+| **R3/G1** | `createH4cGate.verify` 未执行 §3.3c 的“唯一 audit/own键/Symbol/18 refs” | `卡:L281`、`L342–348`；`H4C:L1697–1724`（只调 `AdmissionValid`）；`H4C:L1628–1660`（`validateH4cAdmission` 已做）、`L1554–1570`（own键）、`L1527–1546`（18 refs） | **CONDITIONAL（未实现，仅建议）** | 建议 S4 在 gate.verify 内复用 `validateH4cAdmission`（含 `assertExactAdmissionOwnKeys` 的 own键/Symbol、唯一 audit、`assertCanonicalC1Refs` 的 18 refs；不改 S3 helper 语义），使 M08–M13 可诚实通过；请 Codex 确认这是“接线”而非重开 S3。若不允许，S4 需在 Store 侧实现等价校验并解释 E3 import 边界。 |
 | **R4/旁路** | `store.data` public 可被篡改后由非 H4-c `transact` 持久化 | `代码:L239/L247–265`；`代码:L290/L338`；测试 `C1测试:L411`、`验证测试:L379` | **UNKNOWN** | `#persist` 私有只关闭 public persist 方法；请 Codex 明确 `store.data` 是受信内部/测试 seam，还是要求 S4 增加完整性检查/封装。S4 不自行扩大去封装（会破坏大量测试且不在 E3 范围）。 |
 | **R5/Cloud 并发** | Cloud fake 未串行；真实 Cloud 未验证 | `C1测试:L434–491`；`代码:L430`；`设计:L414`；`授权:L140` | 未验证（C3） | S4 测试 fake 必须串行化/冲突检测后 M30 才能一胜；证据分列“LocalStore 真实队列”与“Cloud fake 语义”；真实 Cloud 并发/重试不声称。 |
 | **R6/测试 fixture** | 现有 S2 用例用 `store.transact` 写 H4-c | `C1测试:L336/L1556/L1576/L1587/L1634/L1646/L1657/L1676` | 需 S4 处理 | 改为直接构造 `store.data`（`勘误:L293` 允许测试 setup）或 `transactFinal`；**保留 S2 断言**，不得弱化；此改动属 C1 测试白名单。 |
@@ -467,8 +475,8 @@ node (Join-Path $gd "run-controls.cjs")   # 预期 exit 0；8/8 控制；C1 定�
 
 ## 8. 停止点与交接
 
-- **本任务停止点**：仅新增本文档；提交并普通 push `codex/h4c-c1-s4-preflight`；交 Codex 独立裁定；**不实施 S4、不运行 C1/33+7/8 HTTP/guard、不安装、不接生产/云/设备/支付/HTTP/UI**。
-- **S4 开工条件（全部满足才可申请）**：S3 Stop-3 关闭（已满足，仅记录）；R1/D10 最小方案获批 + 白名单扩项；R2/M23 裁定；R3/G1 落点裁定；R4 旁路信任边界裁定；S4 本轮单独授权与起点 SHA 明确；测试 fixture 改法在 C1 测试白名单内。
+- **本任务停止点**：仅修订本文档；提交并普通 push `codex/h4c-c1-s4-preflight`；交 Codex 独立裁定；**不实施 S4、不运行 C1/33+7/8 HTTP/guard、不安装、不接生产/云/设备/支付/HTTP/UI**。
+- **S4 开工条件（全部满足才可申请）**：S3 Stop-3 关闭（已满足，仅记录）；R1/D10-A/D10-B 两方案获批 + 白名单扩项；R2/M23 裁定；R3/G1 落点裁定；R4 旁路信任边界裁定；S4 本轮单独授权与起点 SHA 明确；测试 fixture 改法在 C1 测试白名单内。
 - **Stop-4 复审输入（未来，不在本轮）**：Store diff、gate 放置点、构造注入、explicit 模式、M01–M30（含 a/b/c 子项）、私有 Set/谓词/冻结、D10 处置、非 H4-c 零回归、Local/Cloud 证据分列、未验证单列。
 - 本文件**不自批**、不宣称 S4 通过、不宣称 C1/G1 通过、不授权合并/部署/生产接线。
 
@@ -504,12 +512,14 @@ node (Join-Path $gd "run-controls.cjs")   # 预期 exit 0；8/8 控制；C1 定�
 ```text
 任务：HK-AI-04-H4C-C1-S4-PREFLIGHT-2026-11-20（仅文档；不实施 S4）
 执行者：DSH 根代理 lead（deepseek-flash）
-run/session：hrun-mworlgg2-4d0901 / session-85d1620b-a49f-44c9-a1db-5f92c300741b
-工作树/分支：宇宙智联/.tmp/c1-s4-preflight / codex/h4c-c1-s4-preflight（新建；未复用 S3 分支）
+原前置 run/session：hrun-mworlgg2-4d0901 / session-85d1620b-a49f-44c9-a1db-5f92c300741b
+本轮续派 run/session：hrun-mwotfctk-a36243 / session-85d1620b-a49f-44c9-a1db-5f92c300741b
+工作树/分支：宇宙智联/.tmp/c1-s4-preflight / codex/h4c-c1-s4-preflight（复用；已有交付 f5932df）
 固定输入/父：49ca13ec77a94bce09a566ce1e42870accbcade7 / 5a13fcc86efd38bae3b8448ec1ad3864cbb94a8e
+已有交付/父：f5932dfc950e4b32b0fe5810be0b4b86dd5216c5 / c982905b6c65af3d213fc6c28f15520adc94866e
 最终提交：<fill-after-commit>
 文件清单：docs/tasks/HK-AI-04-H4C-C1-S4-PREFLIGHT-2026-11-20.md（仅此一个）
-命令/exit：fetch 0；ls-remote 0；worktree add 0；diff/show --check 待提交后；未运行测试/guard
-未验证：S4 实现、M01–M30、D10 两份测试方案、S4-R1/R2、Local/Cloud 事务、真实 Cloud/K3/设备/支付/HTTP/UI
+命令/exit：fetch 0；ls-remote 0；diff/show --check 0；未运行测试/guard
+未验证：S4 实现、M01–M30、D10-A/B 两方案、S4-R1/R2、Local/Cloud 事务、真实 Cloud/K3/设备/支付/HTTP/UI
 停止点：本文档推送后停手，交 Codex 独立裁定；不实施 S4、不进入 S5、不自批
 ```

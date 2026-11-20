@@ -1,14 +1,16 @@
+// The guard installs itself on load, before any subject module is read or run.
+const guard = require("./rental-network-guard.cjs");
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const path = require("node:path");
 const { createRequire } = require("node:module");
-const leasingSource = fs.readFileSync(
-  require.resolve("../cloudfunctions/leasing/index.js"),
-  "utf8",
-);
+// The cloud handler source and its dependency graph are only loaded inside the
+// tests, after the guard is installed (never at module evaluation time).
 function cloudHandler(user, context = { OPENID: "openid" }) {
+  const indexFile = require.resolve("../cloudfunctions/leasing/index.js");
+  const leasingSource = fs.readFileSync(indexFile, "utf8");
   const exports = {};
   const sdk = {
     DYNAMIC_CURRENT_ENV: "test",
@@ -22,9 +24,7 @@ function cloudHandler(user, context = { OPENID: "openid" }) {
       }),
     }),
   };
-  const requireFn = createRequire(
-    require.resolve("../cloudfunctions/leasing/index.js"),
-  );
+  const requireFn = createRequire(indexFile);
   vm.runInNewContext(leasingSource, {
     require: (n) => (n === "wx-server-sdk" ? sdk : requireFn(n)),
     exports,
@@ -35,6 +35,8 @@ function cloudHandler(user, context = { OPENID: "openid" }) {
 }
 test("cloud leasing derives actor from OPENID and rejects forged admin/payment actions", async () => {
   const guest = cloudHandler(null, {});
+  guard.assertNoLoadTimeViolation();
+  assert.equal(guard.loadViolationCount(), 0);
   assert.equal((await guest({ action: "mine" })).code, 401);
   const main = cloudHandler({ _id: "u1", phone: "13800000000", role: "admin" });
   assert.equal(
@@ -59,6 +61,7 @@ test("cloud leasing derives actor from OPENID and rejects forged admin/payment a
     400,
     "client cannot impersonate timer",
   );
+  assert.equal(guard.runtimeViolationCount(), 0);
 });
 function page(api) {
   const file = path.resolve(__dirname, "../miniprogram/pages/leasing/index.js");

@@ -37,6 +37,23 @@ const money = (v, label = "金额") => {
   return v;
 };
 const safe = (r) => Boolean(r && r.isPublic !== true);
+// S1 persistent single-flight states. `none` is not a stored status: only a
+// wholly missing paymentRequest means the legacy "none" state (contract §4.1).
+const PAYMENT_STATUSES = ["preparing", "ready", "reconciling", "failed"];
+const PAYMENT_LEASE_MS = 60000;
+const PAYMENT_UNAVAILABLE = "租赁服务暂不可用，请稍后重试";
+const PAYMENT_QUERY_PENDING = "支付请求状态待核对，请稍后刷新";
+const PAYMENT_IN_PROGRESS = "支付请求正在处理，请稍后重试";
+const paymentFail = (code, message, status) => {
+  const e = new Error(message);
+  e.status = status;
+  e.code = code;
+  throw e;
+};
+const queryUnavailable = () =>
+  paymentFail("PAYMENT_QUERY_UNAVAILABLE", PAYMENT_QUERY_PENDING, 503);
+const inProgress = () =>
+  paymentFail("PAYMENT_PARAMS_IN_PROGRESS", PAYMENT_IN_PROGRESS, 409);
 const read = (s, c, i) => s[`${c}/${i}`];
 const write = (collection, id, data) => ({ collection, id, data });
 const sum = (rent, cfg) =>
@@ -843,21 +860,274 @@ class LeasingService {
     );
     return checked;
   }
+  // Only a wholly missing paymentRequest is the legacy `none`/epoch 0 state.
+  // `null`, non-objects, unknown statuses and unsafe epochs are corrupt/unknown
+  // records and must never be treated as a fresh `none` (contract §4.1/§6).
+  paymentRequestState(order) {
+    if (
+      !order ||
+      !Object.hasOwn(order, "paymentRequest") ||
+      order.paymentRequest === undefined
+    )
+      return { kind: "none", epoch: 0 };
+    const pr = order.paymentRequest;
+    if (!pr || typeof pr !== "object" || Array.isArray(pr))
+      return { kind: "corrupt" };
+    if (!PAYMENT_STATUSES.includes(pr.status)) return { kind: "corrupt" };
+    if (!Number.isSafeInteger(pr.epoch) || pr.epoch < 0)
+      return { kind: "epoch" };
+    return { kind: "state", request: pr };
+  }
+  // Local validation, CAS, lease and externalRequestSentAt are committed by this
+  // one transaction. A failure before commit aborts with zero writes; there is
+  // no persisted intermediate state that a later transaction has to restore.
+  async claimPaymentRequest(o) {
+    const now = this.now();
+    let claim = null;
+    await this.store.transact(
+      [
+        ref(C.orders, o._id),
+        ref(C.holds, o.roomId),
+        ...this.paymentIdentityRefs(o),
+        ref(C.settings, "global"),
+      ],
+      (state) => {
+        const cur = read(state, C.orders, o._id),
+          hold = read(state, C.holds, o.roomId);
+        if (!cur || cur.ownerId !== this.actor.id) fail("订单不存在", 404);
+        const seen = this.paymentRequestState(cur);
+        if (seen.kind === "corrupt" || seen.kind === "epoch")
+          queryUnavailable();
+        let takeover = false,
+          base = null;
+        if (seen.kind === "state") {
+          base = seen.request;
+          if (base.status === "failed")
+            fail("订单不在可支付时间内，请刷新状态", 409);
+          if (base.status === "ready") queryUnavailable();
+          if (Number.isSafeInteger(base.leaseUntil) && base.leaseUntil > now)
+            inProgress();
+          // `preparing` without a recorded external request cannot come from this
+          // transaction; it is a damaged fixture and is never replayed as `none`.
+          if (!base.externalRequestSentAt) queryUnavailable();
+          if (base.epoch >= Number.MAX_SAFE_INTEGER) queryUnavailable();
+          takeover = true;
+        }
+        if (
+          cur.status !== "awaiting_payment" ||
+          cur.paymentDeadline <= now ||
+          hold?.orderId !== cur._id ||
+          !(hold.until > now)
+        )
+          fail("订单不在可支付时间内，请刷新状态", 409);
+        if (!this.paymentIdentityMatches(state, cur, now))
+          fail("身份证材料或审核状态已变化，请重新审核并确认合同", 409);
+        const attemptId = "attempt-" + randomUUID(),
+          epoch = takeover ? base.epoch + 1 : 1,
+          leaseUntil = now + PAYMENT_LEASE_MS,
+          paymentRequest = {
+            status: takeover ? "reconciling" : "preparing",
+            attemptId,
+            epoch,
+            leaseUntil,
+            startedAt: now,
+            // The single place that ever writes externalRequestSentAt. It is
+            // committed before the merchant create call and kept forever after.
+            externalRequestSentAt: takeover ? base.externalRequestSentAt : now,
+            lastQueryAt: takeover ? base.lastQueryAt || null : null,
+            failedAt: takeover ? base.failedAt || null : null,
+            queryEvidence: takeover ? base.queryEvidence || null : null,
+            prepay: takeover ? base.prepay || null : null,
+            clientParams: takeover ? base.clientParams || null : null,
+          };
+        claim = { attemptId, epoch, takeover, order: { ...cur, paymentRequest } };
+        return [write(C.orders, cur._id, { ...cur, paymentRequest })];
+      },
+      null,
+      { writeAudit: false },
+    );
+    return claim;
+  }
+  // Complete/reconcile writes only land when attemptId+epoch still own the
+  // request; a stale attempt is rejected with zero writes and never overwrites
+  // the newer epoch. `params === null` records an unconfirmed external result.
+  paymentCompletionVerdict(state, { orderId, attemptId, epoch, params, now }) {
+    const cur = read(state, C.orders, orderId);
+    const seen = this.paymentRequestState(cur);
+    if (seen.kind !== "state") return { kind: "lost" };
+    const pr = seen.request;
+    if (pr.attemptId !== attemptId || pr.epoch !== epoch)
+      return { kind: "lost" };
+    if (!["preparing", "reconciling"].includes(pr.status))
+      return { kind: "lost" };
+    if (!params) return { kind: "reconcile", cur, request: pr };
+    if (pr.status !== "preparing") return { kind: "lost" };
+    const hold = read(state, C.holds, cur.roomId);
+    const binding =
+      cur.status === "awaiting_payment" &&
+      cur.paymentDeadline > now &&
+      hold?.orderId === cur._id &&
+      hold.until > now &&
+      this.paymentIdentityMatches(state, cur, now);
+    const prepayId =
+      typeof params.package === "string"
+        ? /prepay_id=([^&\s]+)/.exec(params.package)?.[1] || ""
+        : "";
+    if (!binding || !prepayId) return { kind: "reconcile", cur, request: pr };
+    return { kind: "ready", cur, request: pr, prepayId };
+  }
+  async paymentVerdict(o, attemptId, epoch, params) {
+    const refs = [
+      ref(C.orders, o._id),
+      ref(C.holds, o.roomId),
+      ...this.paymentIdentityRefs(o),
+    ];
+    const now = this.now();
+    let verdict = null;
+    await this.store.transact(
+      refs,
+      (state) => {
+        verdict = this.paymentCompletionVerdict(state, {
+          orderId: o._id,
+          attemptId,
+          epoch,
+          params,
+          now,
+        });
+        return [];
+      },
+      null,
+      { writeAudit: false },
+    );
+    return verdict;
+  }
+  async completePaymentRequest({ orderId, attemptId, epoch, params }) {
+    const o = await this.get(C.orders, id(orderId));
+    if (!o || o.ownerId !== this.actor.id) fail("订单不存在", 404);
+    const refs = [
+      ref(C.orders, o._id),
+      ref(C.holds, o.roomId),
+      ...this.paymentIdentityRefs(o),
+    ];
+    const now = this.now();
+    let verdict = await this.paymentVerdict(o, attemptId, epoch, params);
+    if (verdict.kind === "ready") {
+      let wrote = false;
+      try {
+        // `ready` and its single success audit are committed together, so a
+        // failure path can never leave a success audit behind.
+        await this.store.transact(
+          refs,
+          (state) => {
+            const again = this.paymentCompletionVerdict(state, {
+              orderId: o._id,
+              attemptId,
+              epoch,
+              params,
+              now,
+            });
+            if (again.kind !== "ready") {
+              const abort = new Error("payment-complete-retry");
+              abort.paymentAbort = true;
+              throw abort;
+            }
+            wrote = true;
+            return [
+              write(C.orders, again.cur._id, {
+                ...again.cur,
+                paymentRequest: {
+                  ...again.request,
+                  status: "ready",
+                  leaseUntil: null,
+                  prepay: { prepayId: again.prepayId, createdAt: now },
+                  clientParams: params,
+                },
+              }),
+            ];
+          },
+          this.audit("核对支付资格"),
+        );
+      } catch (e) {
+        if (!e.paymentAbort) throw e;
+      }
+      if (wrote) return true;
+      verdict = await this.paymentVerdict(o, attemptId, epoch, params);
+    }
+    if (verdict.kind !== "reconcile") return false;
+    await this.store.transact(
+      refs,
+      (state) => {
+        const again = this.paymentCompletionVerdict(state, {
+          orderId: o._id,
+          attemptId,
+          epoch,
+          params,
+          now,
+        });
+        if (again.kind !== "reconcile") return [];
+        return [
+          write(C.orders, again.cur._id, {
+            ...again.cur,
+            paymentRequest: { ...again.request, status: "reconciling" },
+          }),
+        ];
+      },
+      null,
+      { writeAudit: false },
+    );
+    return false;
+  }
   async paymentParams(oid) {
     this.user();
     if (!this.payment) fail("微信支付商户尚未配置", 503);
-    const o = await this.validatePayableOrder(oid);
-    const params = await this.payment.create({
-      order: o,
-      tradeNo: o._id.replace("lease-", "L").slice(0, 32),
-      openid: o.payerOpenid,
+    const orderId = id(oid);
+    const o = await this.get(C.orders, orderId);
+    if (!o || o.ownerId !== this.actor.id) fail("订单不存在", 404);
+    const seen = this.paymentRequestState(o);
+    if (seen.kind === "corrupt" || seen.kind === "epoch") queryUnavailable();
+    if (seen.kind === "state") {
+      const pr = seen.request;
+      // `failed` is a terminal request state, not a retry entry: reuse the
+      // existing order-not-payable 409 without touching any fact field.
+      if (pr.status === "failed")
+        fail("订单不在可支付时间内，请刷新状态", 409);
+      // S1 has no prepay/signature TTL, so a stored `ready` cannot be proven
+      // valid and must not be returned as a cache (contract §4.1-1 / ruling 3).
+      if (pr.status === "ready") queryUnavailable();
+      if (Number.isSafeInteger(pr.leaseUntil) && pr.leaseUntil > this.now())
+        inProgress();
+    }
+    const claim = await this.claimPaymentRequest(o);
+    // Taking over a request that may already have reached the merchant needs an
+    // authoritative query, which S1 cannot run: fixed 503, create 0, query 0.
+    if (claim.takeover) queryUnavailable();
+    let params;
+    try {
+      params = await this.payment.create({
+        order: claim.order,
+        tradeNo: claim.order._id.replace("lease-", "L").slice(0, 32),
+        openid: claim.order.payerOpenid,
+      });
+    } catch {
+      // The external request may have been issued: keep the reconciling fact,
+      // never roll back to `none`, never retry, never leak adapter details.
+      await this.completePaymentRequest({
+        orderId,
+        attemptId: claim.attemptId,
+        epoch: claim.epoch,
+        params: null,
+      });
+      fail(PAYMENT_UNAVAILABLE, 503);
+    }
+    // A document/hold change can commit while the merchant request is in
+    // flight; an unconfirmed result stays `reconciling` and returns no params.
+    const ready = await this.completePaymentRequest({
+      orderId,
+      attemptId: claim.attemptId,
+      epoch: claim.epoch,
+      params,
     });
-    // A document replacement can commit while the merchant request is in flight.
-    // Do not return the newly issued params unless the binding still holds.
-    await this.validatePayableOrder(oid);
-    // Only a fully successful payment-params request records its audit entry.
-    // A rejected or adapter-failed request must leave every collection unchanged.
-    await this.store.transact([], () => [], this.audit("核对支付资格"));
+    if (!ready) queryUnavailable();
     return params;
   }
   async refreshPayment(oid) {

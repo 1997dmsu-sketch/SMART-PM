@@ -1546,6 +1546,30 @@ function assertCanonicalC1Refs(refs, { job, proofId, writeEpoch, auditId, config
 }
 
 /**
+ * P2: the final admission must own exactly the ten frozen fields. S1's
+ * AdmissionValid uses Object.keys (enumerable string keys only), so S3's
+ * entry checks use Reflect.ownKeys to reject hidden string properties and
+ * Symbol keys instead of filtering them.
+ */
+function assertExactAdmissionOwnKeys(admission) {
+  if (!isPlainObject(admission)) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  const keys = Reflect.ownKeys(admission);
+  if (keys.length !== ADMISSION_FIELDS.length) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  for (const key of keys) {
+    if (typeof key !== "string" || !ADMISSION_FIELDS.includes(key)) {
+      fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+    }
+  }
+  for (const field of ADMISSION_FIELDS) {
+    if (!Object.hasOwn(admission, field)) {
+      fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+    }
+  }
+}
+
+/**
  * S3 stage 2b: mint the final ten-field admission after `finalWriteSet` is
  * fixed. The ticket signs the six precheck fields, both digests and the
  * explicit JSON `operationAuthDigest:null`; it never contains itself.
@@ -1588,6 +1612,7 @@ export function mintH4cAdmission({ precheck, refs, writes, config, now } = {}) {
     ticket: "",
   };
   admission.ticket = h4cAdmissionTicketDigest(admission, cfg);
+  assertExactAdmissionOwnKeys(admission);
   if (!AdmissionValid(admission, refs, writes, cfg)) {
     fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
   }
@@ -1604,7 +1629,7 @@ export function validateH4cAdmission({
   admission, refs, writes, config, precheck,
 } = {}) {
   const cfg = normalizedConfig(config);
-  if (!isPlainObject(admission)) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  assertExactAdmissionOwnKeys(admission);
   if (precheck !== undefined) {
     validateH4cPrecheck(precheck);
     for (const field of PRECHECK_FIELDS) {
@@ -1643,6 +1668,7 @@ export function validateH4cAdmissionProof({
   admission, refs, writes, state, config, precheck,
 } = {}) {
   const cfg = normalizedConfig(config);
+  assertExactAdmissionOwnKeys(admission);
   validateH4cAdmission({ admission, refs, writes, config: cfg, precheck });
   if (!isPlainObject(state)) fail("EVIDENCE_INVALID");
   const proof = read(state, H4C.auditProofs, admission.proofId);

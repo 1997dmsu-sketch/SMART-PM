@@ -3467,3 +3467,98 @@ test("S3 service index re-exports only the pure authorization additions", async 
     assert.equal(name in service, false, name);
   }
 });
+
+test("S3 P2 admission own keys are exact: non-enumerable and Symbol keys rejected", () => {
+  const genesis = s3GenesisContext();
+  const expectedKeys = [
+    "kind", "operation", "writeEpoch", "admissionPolicyVersion", "writerSetDigest",
+    "proofId", "refsDigest", "writesDigest", "operationAuthDigest", "ticket",
+  ];
+  const args = {
+    admission: genesis.admission, refs: genesis.refs, writes: genesis.writes,
+    config: CONFIG, precheck: genesis.precheck,
+  };
+  const proofArgs = { ...args, state: genesis.state };
+  assert.deepEqual(
+    Reflect.ownKeys(genesis.admission).slice().sort(), expectedKeys.slice().sort());
+  assert.equal(validateH4cAdmission(args), undefined);
+  assert.equal(validateH4cAdmissionProof(proofArgs), undefined);
+
+  const ownSnapshot = (object) => {
+    const keys = Reflect.ownKeys(object);
+    const descriptors = new Map(keys.map(
+      (key) => [key, Object.getOwnPropertyDescriptor(object, key)]));
+    return {
+      keys: keys.slice(), descriptors,
+      frozen: Object.isFrozen(object), sealed: Object.isSealed(object),
+      extensible: Object.isExtensible(object),
+    };
+  };
+  const assertOwnSnapshot = (object, before, label) => {
+    const after = Reflect.ownKeys(object);
+    assert.equal(after.length, before.keys.length, label);
+    for (let index = 0; index < after.length; index += 1) {
+      assert.equal(after[index], before.keys[index], label);
+    }
+    for (const key of before.keys) {
+      assert.deepEqual(Object.getOwnPropertyDescriptor(object, key),
+        before.descriptors.get(key), label + " descriptor " + String(key));
+    }
+    assert.equal(Object.isFrozen(object), before.frozen, label + " frozen");
+    assert.equal(Object.isSealed(object), before.sealed, label + " sealed");
+    assert.equal(Object.isExtensible(object), before.extensible, label + " extensible");
+  };
+  const rejectsP2 = (value, label) => {
+    for (const [entry, invoke] of [
+      ["validateH4cAdmission", () => validateH4cAdmission({
+        ...args, admission: value,
+      })],
+      ["validateH4cAdmissionProof", () => validateH4cAdmissionProof({
+        ...proofArgs, admission: value,
+      })],
+    ]) {
+      const before = ownSnapshot(value);
+      assert.throws(invoke, (error) => {
+        assert.equal(error.code, "EVIDENCE_CHAIN_ADMISSION_REQUIRED", entry + " " + label);
+        assert.equal(error.status, 409, entry + " " + label);
+        return true;
+      }, entry + " " + label);
+      assertOwnSnapshot(value, before, entry + " " + label);
+    }
+  };
+
+  const hidden = structuredClone(genesis.admission);
+  Object.defineProperty(hidden, "hiddenP2", {
+    value: "hidden-value", enumerable: false, configurable: true, writable: true,
+  });
+  assert.equal(Reflect.ownKeys(hidden).length, 11);
+  assert.equal(AdmissionValid(hidden, genesis.refs, genesis.writes, CONFIG), true);
+  rejectsP2(hidden, "non-enumerable");
+
+  const symbolKey = Symbol("p2-symbol");
+  const symbol = structuredClone(genesis.admission);
+  Object.defineProperty(symbol, symbolKey, {
+    value: { marker: "symbol-value" },
+    enumerable: false, configurable: true, writable: true,
+  });
+  assert.equal(Reflect.ownKeys(symbol).length, 11);
+  assert.equal(AdmissionValid(symbol, genesis.refs, genesis.writes, CONFIG), true);
+  const symbolDescriptor = Object.getOwnPropertyDescriptor(symbol, symbolKey);
+  rejectsP2(symbol, "symbol");
+  assert.equal(Reflect.ownKeys(symbol).includes(symbolKey), true);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(symbol, symbolKey), symbolDescriptor);
+  assert.deepEqual(symbol[symbolKey], { marker: "symbol-value" });
+
+  const frozen = structuredClone(genesis.admission);
+  const frozenSymbol = Symbol.for("p2-frozen-symbol");
+  Object.defineProperty(frozen, "hiddenFrozen", {
+    value: "hidden-frozen", enumerable: false, configurable: true, writable: true,
+  });
+  Object.defineProperty(frozen, frozenSymbol, {
+    value: "symbol-frozen", enumerable: false, configurable: true, writable: true,
+  });
+  Object.freeze(frozen);
+  assert.equal(Object.isFrozen(frozen), true);
+  assert.equal(AdmissionValid(frozen, genesis.refs, genesis.writes, CONFIG), true);
+  rejectsP2(frozen, "frozen hidden+symbol");
+});

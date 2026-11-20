@@ -1242,3 +1242,73 @@ stat   1 file changed, 477 insertions(+)
 - 普通追加提交、普通 push；不 amend/rebase/reset/squash/force/merge/cherry-pick；不改全局 Git/TLS；不碰无关未跟踪文件。
 - 提交前 `git diff --check` exit 0；提交后 `git show --check` 复核；push 前 `ls-remote` 核对远端快进条件；push 后 `ls-remote` 核对完整 40 位 SHA。
 - 本提交最终 SHA、远端 tip、`git show --stat` 由交付回报给出；本节不自指。
+
+## S3-P2.1 P2 修复输入、身份与重复检查
+
+- 本轮任务：C1 S3 P2 修复；续原会话/原 worktree/原分支，不新建重复任务；仅修 P2，不进入 S4。
+- 执行者：DSH agent `lead`（`deepseek-flash`）。
+- 本轮真实 run/session：`hrun-mwor8wz9-9ed19b` / `session-d3ae4bd9-2a32-4c18-8f97-aaffd7cfa006`（2026-11-20T17:06:38+08:00 起；与上一轮 S3 同一会话）。
+- 原 worktree / 分支：`C:\Users\Administrator\Documents\ChatGPT\宇宙智联\.tmp\c1-s3-implementation` / `codex/h4c-c1-s3-implementation`（复用，无新建分支/worktree）。
+- 固定输入 / 父：`5a13fcc86efd38bae3b8448ec1ad3864cbb94a8e` / `13298d4b90a2de6b8e32a6de4d14cec37eeaa2b1`。
+- `git fetch origin --prune` exit **0**；`origin/codex/h4c-c1-s3-implementation` = `5a13fcc…`（与固定输入一致）；`origin/codex/h4c-c1-s3-preflight-review` 仍 `13298d4…`、`origin/feat/h4c-c1-s2` 仍 `923dbf1…`、`origin/main` 仍 `282a20f…`；无前移/分叉。
+- 重复检查：`schedule_list` 无 S3 P2 任务；`list_agents` 仅 root；`job_list` 为空；`~/.dsh-baton/host-runs` 仅本 run `hrun-mwor8wz9-9ed19b`（running）命中 P2，上一轮 `hrun-mwopskb4-713cfb` 已 completed；未发现其他同目标 queued/running。
+- Codex P2 事实：`AdmissionValid`（S1，L1311）用 `Object.keys` 只遍历可枚举字符串键；正常 10 字段通过后，额外 non-enumerable 属性或 Symbol 仍被接受。P2 修复限定在 S3 验证入口，不修改 S1 `AdmissionValid`。
+
+## S3-P2.2 修复实现
+
+| 项 | 内容 |
+|---|---|
+| 新 helper | `assertExactAdmissionOwnKeys`（L1554）：`isPlainObject` → `Reflect.ownKeys` 长度必须为 10 → 每个 key 必须是非 Symbol 字符串且在冻结 `ADMISSION_FIELDS` 内 → 10 个字段均 `Object.hasOwn`；否则 `EVIDENCE_CHAIN_ADMISSION_REQUIRED`/409 |
+| `validateH4cAdmission` | L1628 入口调用该 helper；在 precheck 对比、refs/writes/digest/ticket 校验之前拒绝隐藏键 |
+| `validateH4cAdmissionProof` | L1667 入口再次调用该 helper，再走 `validateH4cAdmission`；proof 入口负例不会被 proof 缺失掩盖 |
+| `mintH4cAdmission` | L1577 对构造出的 admission 调用该 helper 后再 `AdmissionValid`，确保输出恰十字段 |
+| 边界 | 不删除/过滤额外键、不规范化/重建掩盖非法输入；不修改 S1 `AdmissionValid`、S2 链层、Store/路由/接线/设计 |
+
+- P2 代码/测试 diff：`2 files changed, 122 insertions(+), 1 deletion(-)`（`h4c-evidence.mjs` +27/−1；定向 test +95）。`index.mjs` 无需变化，未改；其余禁止文件零 diff。
+- 正常 10 字段正例仍通过；额外 non-enumerable/Symbol 负例在两个 S3 验证入口均抛唯一 `EVIDENCE_CHAIN_ADMISSION_REQUIRED`/409。
+
+## S3-P2.3 测试与 guard（本轮实测）
+
+guard 固定 `6f96fed9bd478192c8bbffeb52f47c90df89939e`，从固定提交 `git archive` 提取到工作树外临时目录，七脚本 SHA256SUMS 全部 **OK / 0 mismatch**：
+
+```text
+guard.cjs          2d013d808e8b78214db835ada611c9700d966ba07624342e26fcd637a900a8f5
+run-controls.cjs   3fd2507aabd8eb8a7abdb284e3b59061843d9e70ad081e902d291bbe25e73643
+entry-negative.cjs 36f8d53326ab4f270928e294ba9ec517d6efffa935ddf8145cbecfc70f2124a6
+load-negative.cjs  ca89b38c351abcb026c71c5cd3d8fdd784acc192cb804468b29d650c49f7570f
+child-net.cjs      3afa02dec336a12c34114ef4083f87f3b05806dec97b007587faa42aa5c158ef
+esm-sentinel.mjs   b3fb4bef441b1b6aa4f53879af5c1dc712a8dbbb2764d7ddc77379726a671b0c
+positive.cjs       c34225ccc8854a1720ee51985d777ad29e1c7d85860e293bebeb2f3f7268bad2
+```
+
+- 预加载：`NODE_OPTIONS=--require "<temp>\guard.cjs"`；`H4C_ADMIN_WEB="<worktree>\admin-web"`；cwd `admin-web`；`run-controls.cjs` exit **0**。
+- 8/8 控制 PASS：`negative:no-guard` exit 3；`positive:preload-sentinel` exit 0；`negative:esm-named-import` `http.request=1`；`negative:per-entry` 63/63、`blocked_calls=63`；`negative:load-before-runtime` exit 1、`load_violations=1`；`negative:subprocess-inheritance` `blocked=true`、`active=true`、`network_attempts=1`、`listen_calls=0`；`positive:crypto-fs-k3-localstore` exit 0；`test:c1-targeted` exit 0。
+- C1 定向：**tests 66 / pass 66 / fail 0 / cancelled 0 / skipped 0 / todo 0**；新增 P2 用例通过。
+- 实际 C1 测试进程计数器全 0：`listen_calls=0`、`network_attempts=0`、`dns_calls=0`、`dgram_calls=0`、`provider_calls=0`、`load_violations=0`、`blocked_calls=0`、`real_leaks=0`。控制项非零计数为负控预期，已分列。
+- 其他：`node --check`（模块/测试）exit 0；仅跑批准 C1 定向 + guard 控制；未安装依赖、未跑 33+7/8 HTTP/全量/服务。
+
+## S3-P2.4 逐入口正负例与 own-key/descriptor 证据
+
+测试：`S3 P2 admission own keys are exact: non-enumerable and Symbol keys rejected`（定向 test L3471）。负例快照不使用 `structuredClone` 作为对象快照；使用 `Reflect.ownKeys` + `Object.getOwnPropertyDescriptors` 逐 key 比较，保留 Symbol 键身份、值、描述符及冻结/密封/可扩展状态；helper 不删除/不重建输入。
+
+| 场景 | own keys | `AdmissionValid`（S1） | `validateH4cAdmission` | `validateH4cAdmissionProof`（合法 proof fixture） | 调用前后输入 |
+|---|---:|---|---|---|---|
+| 正常精确 10 字段 | 10 string | true | 通过 | 通过 | keys/descriptors 不变 |
+| 额外 non-enumerable `hiddenP2`（value `hidden-value`，`enumerable:false`，`configurable:true`，`writable:true`） | 11 | true（证明 S1 不覆盖） | ADMISSION/409 | ADMISSION/409 | 11 keys 及全部描述符不变；非冻结/非密封/可扩展状态不变 |
+| 额外 `Symbol("p2-symbol")`（value `{marker:"symbol-value"}`，non-enumerable） | 11 | true | ADMISSION/409 | ADMISSION/409 | Symbol 身份、值、描述符不变；keys/descriptors 不变 |
+| 冻结负例：`hiddenFrozen` + `Symbol.for("p2-frozen-symbol")` | 12 | true | ADMISSION/409 | ADMISSION/409 | `Object.isFrozen=true` 前后不变；keys/descriptors 不变 |
+
+- proof 入口负例使用**合法 proof fixture**（同一 `state` 的正例也通过），因此拒绝发生在 admission 形状检查，不是 proof 缺失/失效造成的 `PROOF_REQUIRED`。
+- 两个入口均断言唯一 code `EVIDENCE_CHAIN_ADMISSION_REQUIRED` 且 HTTP status **409**；未接受、未过滤、未重写隐藏键。
+
+## S3-P2.5 冻结口径保持
+
+- proof/admission 错误分离、18 refs、3/2 业务写 + 唯一 audit = 4/3、canonical sorted digest、`operationAuthDigest` 显式 JSON `null`、合成并发（genesis BROKEN / append HEAD_CONFLICT）、签票后追加第二条 audit 拒绝、0 新增 refs、S2 链语义均保持；本轮 66 项包含上一轮 65 项，全绿。
+- Store explicit/gate/事务/M01–M30、完整 CoverageValid、33+7、8 HTTP、HTTP/UI/真实 Cloud/K3/设备/支付/部署均未做；不声称已验证。
+- 不自批、不宣称 Stop-3 通过、不进入 S4。
+
+## S3-P2.6 Stop-3 复审请求与 Git
+
+- 请 Codex 复审：P2 修复是否在 `validateH4cAdmission`/`validateH4cAdmissionProof` 两入口用 `Reflect.ownKeys` 拒绝额外 non-enumerable/Symbol 键且保持输入描述符不变；正常 10 字段正例与 proof 入口路径；66/66 + guard 8/8；白名单仅 `h4c-evidence.mjs`/定向 test/本证据（`index.mjs` 未改）。
+- 分支 `codex/h4c-c1-s3-implementation`，本提交父 `5a13fcc86efd38bae3b8448ec1ad3864cbb94a8e`（固定输入）；普通追加提交、普通 push；不 amend/rebase/reset/squash/force/merge；不改全局 Git/TLS；不碰无关文件。
+- `git diff --check` / `git show --check` 提交时复核；push 前 `ls-remote` 检查快进，push 后 `ls-remote` 核对完整 40 位 SHA；最终 SHA 由交付回报给出。

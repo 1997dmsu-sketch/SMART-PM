@@ -337,6 +337,31 @@ function paymentRequestFixture(now, patch = {}) {
   };
 }
 
+// Models a store-level transaction retry: the build runs once, the clock moves
+// on, and the SDK runs the same build again before committing the retried
+// result. Any clock/lease decision must therefore be revalidated per attempt.
+function retryTransactionAfterClock(x, { call, advanceMs }) {
+  const real = x.store.transact.bind(x.store);
+  let calls = 0;
+  x.store.transact = async (refs, build, audit, options) => {
+    const index = (calls += 1);
+    return real(
+      refs,
+      async (state) => {
+        const writes = await build(state);
+        if (index === call) {
+          x.advance(advanceMs);
+          return await build(state);
+        }
+        return writes;
+      },
+      audit,
+      options,
+    );
+  };
+  return () => calls;
+}
+
 test("network guard: installed before subject modules, every entry blocked, child inherits", async () => {
   assert.equal(guard.isInstalled(), true);
   const names = guard.entryNames();
@@ -348,6 +373,9 @@ test("network guard: installed before subject modules, every entry blocked, chil
   assert.equal(evidence.positives.passed, evidence.positives.total);
   assert.equal(evidence.subprocess.passed, 1);
   assert.equal(evidence.subprocess.violations >= 5, true);
+  assert.equal(evidence.subprocess.preload, "verified-before-require");
+  assert.equal(evidence.subprocess.negative.status, 42);
+  assert.equal(evidence.subprocess.negative.markerMissing, true);
   assert.equal(evidence.forwarded, 0);
   console.log("[guard-evidence] " + JSON.stringify(evidence));
   assert.equal(guard.activeNetworkResources().length, 0);
@@ -1490,6 +1518,31 @@ test("S1-18 corrupt or unknown paymentRequest is 503 with zero writes", async (t
   }
 });
 
+// S1-18b: a present-but-undefined value is NOT the legacy missing field, so it
+// must fail closed as a corrupt record and must never be replayed as `none`.
+test("S1-18b present-but-undefined paymentRequest is corrupt, not legacy none", async (t) => {
+  const x = await setup(t),
+    a = await x.prepared(),
+    o = await x.order(a);
+  x.row(o.id).paymentRequest = undefined;
+  assert.equal(
+    Object.hasOwn(x.row(o.id), "paymentRequest"),
+    true,
+    "fixture must keep the own property",
+  );
+  const before = structuredClone(x.store.data);
+  await rejectsWithStatus(
+    x.user.paymentParams(o.id),
+    503,
+    "PAYMENT_QUERY_UNAVAILABLE",
+  );
+  assert.equal(x.calls.create, 0);
+  assert.equal(x.calls.query, 0);
+  assert.equal(Object.hasOwn(x.row(o.id), "paymentRequest"), true);
+  assert.equal(x.row(o.id).paymentRequest, undefined);
+  assertWriteSet(before, structuredClone(x.store.data));
+});
+
 // S1-19: unsafe epoch values and an overflowing takeover are refused.
 test("S1-19 unsafe or overflowing epoch is 503 and refused without writes", async (t) => {
   const now = () => Date.now();
@@ -1524,6 +1577,99 @@ test("S1-19 unsafe or overflowing epoch is 503 and refused without writes", asyn
     assert.deepEqual(x.row(o.id).paymentRequest, record, name);
     assert.equal(x.calls.create, 0, name);
     assert.equal(x.calls.query, 0, name);
+  }
+});
+
+// S1-20: a create that returns after its own lease expired must not become
+// ready or return params, even without a takeover: keep sent, close with 503.
+test("S1-20 create returning after its lease expired cannot complete ready and closes with 503", async (t) => {
+  const x = await setup(t),
+    a = await x.prepared(),
+    o = await x.order(a);
+  let entered, release;
+  const called = new Promise((r) => (entered = r)),
+    wait = new Promise((r) => (release = r));
+  x.onCreate(async () => {
+    entered();
+    await wait;
+    return { package: "prepay_id=late-lease" };
+  });
+  const pending = x.user.paymentParams(o.id);
+  await called;
+  x.advance(61 * 1000); // the claim lease expired and nobody took over
+  const before = structuredClone(x.store.data);
+  const claimed = before.rental_preleases.find(
+    (r) => r._id === o.id,
+  ).paymentRequest;
+  release();
+  await rejectsWithStatus(pending, 503, "PAYMENT_QUERY_UNAVAILABLE");
+  assert.equal(x.calls.create, 1);
+  assert.equal(x.calls.query, 0);
+  const pr = x.row(o.id).paymentRequest;
+  assert.notEqual(pr.status, "ready");
+  assert.equal(pr.status, "reconciling");
+  assert.equal(pr.attemptId, claimed.attemptId);
+  assert.equal(pr.epoch, claimed.epoch);
+  assert.equal(pr.externalRequestSentAt, claimed.externalRequestSentAt);
+  assert.equal(
+    x.store.data.admin_audit.filter(
+      (e) => e.action === "租赁预约：核对支付资格",
+    ).length,
+    0,
+  );
+  assertPaymentRequestWrite(before, structuredClone(x.store.data), o.id, 0);
+});
+
+// S1-21: a retried transaction build must re-read the clock instead of reusing a
+// `now` captured before the transaction started.
+test("S1-21 transaction retry re-reads now for claim and complete", async (t) => {
+  // Claim retry: the payment deadline passes between the two build attempts.
+  {
+    const x = await setup(t),
+      a = await x.prepared(),
+      o = await x.order(a);
+    const callCount = retryTransactionAfterClock(x, {
+      call: 1,
+      advanceMs: 16 * 60000,
+    });
+    const before = structuredClone(x.store.data);
+    const error = await rejectsWithStatus(x.user.paymentParams(o.id), 409);
+    assert.equal(error.message, "订单不在可支付时间内，请刷新状态");
+    assert.equal(callCount(), 1);
+    assert.equal(x.calls.create, 0);
+    assert.equal(x.calls.query, 0);
+    assertWriteSet(before, structuredClone(x.store.data));
+    assert.equal(Object.hasOwn(x.row(o.id), "paymentRequest"), false);
+  }
+  // Complete retry: the attempt lease expires between the two build attempts.
+  {
+    const x = await setup(t),
+      a = await x.prepared(),
+      o = await x.order(a);
+    x.onCreate(async () => ({ package: "prepay_id=retry-lease" }));
+    const callCount = retryTransactionAfterClock(x, {
+      call: 3,
+      advanceMs: 61 * 1000,
+    });
+    await rejectsWithStatus(
+      x.user.paymentParams(o.id),
+      503,
+      "PAYMENT_QUERY_UNAVAILABLE",
+    );
+    assert.equal(callCount() >= 3, true);
+    assert.equal(x.calls.create, 1);
+    assert.equal(x.calls.query, 0);
+    const pr = x.row(o.id).paymentRequest;
+    assert.notEqual(pr.status, "ready");
+    assert.equal(pr.status, "reconciling");
+    assert.equal(pr.externalRequestSentAt > 0, true);
+    assert.equal(
+      x.store.data.admin_audit.filter(
+        (e) => e.action === "租赁预约：核对支付资格",
+      ).length,
+      0,
+      "a discarded retry attempt must not leave an audit entry",
+    );
   }
 });
 

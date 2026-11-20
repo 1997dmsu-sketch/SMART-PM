@@ -860,18 +860,14 @@ class LeasingService {
     );
     return checked;
   }
-  // Only a wholly missing paymentRequest is the legacy `none`/epoch 0 state.
-  // `null`, non-objects, unknown statuses and unsafe epochs are corrupt/unknown
-  // records and must never be treated as a fresh `none` (contract §4.1/§6).
+  // Only a wholly missing paymentRequest key is the legacy `none`/epoch 0
+  // state. A present-but-undefined value is a corrupt record: it must fail
+  // closed and must never be replayed as a fresh `none` (contract §4.1/§6).
   paymentRequestState(order) {
-    if (
-      !order ||
-      !Object.hasOwn(order, "paymentRequest") ||
-      order.paymentRequest === undefined
-    )
+    if (!order || !Object.hasOwn(order, "paymentRequest"))
       return { kind: "none", epoch: 0 };
     const pr = order.paymentRequest;
-    if (!pr || typeof pr !== "object" || Array.isArray(pr))
+    if (pr === undefined || !pr || typeof pr !== "object" || Array.isArray(pr))
       return { kind: "corrupt" };
     if (!PAYMENT_STATUSES.includes(pr.status)) return { kind: "corrupt" };
     if (!Number.isSafeInteger(pr.epoch) || pr.epoch < 0)
@@ -882,7 +878,6 @@ class LeasingService {
   // one transaction. A failure before commit aborts with zero writes; there is
   // no persisted intermediate state that a later transaction has to restore.
   async claimPaymentRequest(o) {
-    const now = this.now();
     let claim = null;
     await this.store.transact(
       [
@@ -892,6 +887,9 @@ class LeasingService {
         ref(C.settings, "global"),
       ],
       (state) => {
+        // The clock is re-read on every build invocation, so a transaction
+        // retry revalidates deadlines/leases instead of reusing a stale `now`.
+        const now = this.now();
         const cur = read(state, C.orders, o._id),
           hold = read(state, C.holds, o.roomId);
         if (!cur || cur.ownerId !== this.actor.id) fail("订单不存在", 404);
@@ -962,6 +960,11 @@ class LeasingService {
       return { kind: "lost" };
     if (!params) return { kind: "reconcile", cur, request: pr };
     if (pr.status !== "preparing") return { kind: "lost" };
+    // A create that returns after its own lease expired cannot become `ready`,
+    // even without a takeover: the result is unconfirmed, so it fails closed
+    // and keeps the sent reconciliation fact (approved 503 close).
+    if (!Number.isSafeInteger(pr.leaseUntil) || !(pr.leaseUntil > now))
+      return { kind: "reconcile", cur, request: pr };
     const hold = read(state, C.holds, cur.roomId);
     const binding =
       cur.status === "awaiting_payment" &&
@@ -982,17 +985,17 @@ class LeasingService {
       ref(C.holds, o.roomId),
       ...this.paymentIdentityRefs(o),
     ];
-    const now = this.now();
     let verdict = null;
     await this.store.transact(
       refs,
       (state) => {
+        // Re-read the clock on every build invocation (transaction retry).
         verdict = this.paymentCompletionVerdict(state, {
           orderId: o._id,
           attemptId,
           epoch,
           params,
-          now,
+          now: this.now(),
         });
         return [];
       },
@@ -1009,16 +1012,20 @@ class LeasingService {
       ref(C.holds, o.roomId),
       ...this.paymentIdentityRefs(o),
     ];
-    const now = this.now();
     let verdict = await this.paymentVerdict(o, attemptId, epoch, params);
     if (verdict.kind === "ready") {
-      let wrote = false;
+      // The flag is only set after the commit resolves: a discarded or retried
+      // build attempt must never be able to report success on its own.
+      let committed = false;
       try {
         // `ready` and its single success audit are committed together, so a
         // failure path can never leave a success audit behind.
         await this.store.transact(
           refs,
           (state) => {
+            // Re-read the clock on every build invocation, so a retried commit
+            // cannot complete a lease that expired while it was retrying.
+            const now = this.now();
             const again = this.paymentCompletionVerdict(state, {
               orderId: o._id,
               attemptId,
@@ -1031,7 +1038,6 @@ class LeasingService {
               abort.paymentAbort = true;
               throw abort;
             }
-            wrote = true;
             return [
               write(C.orders, again.cur._id, {
                 ...again.cur,
@@ -1047,10 +1053,11 @@ class LeasingService {
           },
           this.audit("核对支付资格"),
         );
+        committed = true;
       } catch (e) {
         if (!e.paymentAbort) throw e;
       }
-      if (wrote) return true;
+      if (committed) return true;
       verdict = await this.paymentVerdict(o, attemptId, epoch, params);
     }
     if (verdict.kind !== "reconcile") return false;
@@ -1062,7 +1069,7 @@ class LeasingService {
           attemptId,
           epoch,
           params,
-          now,
+          now: this.now(),
         });
         if (again.kind !== "reconcile") return [];
         return [

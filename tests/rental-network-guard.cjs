@@ -29,6 +29,11 @@ const SENTINEL = Object.freeze({
   message: "network access is blocked in offline rental tests",
 });
 
+// Global marker written only by the preloaded guard itself. A child process can
+// therefore prove that NODE_OPTIONS preloading happened before its own code
+// ran, instead of requiring the guard itself and claiming inheritance.
+const MARKER = "__RENTAL_NETWORK_GUARD__";
+
 const state = {
   installed: false,
   esmSynced: false,
@@ -132,6 +137,17 @@ function installNetworkGuard() {
   state.esmSynced = true;
   state.installed = true;
   state.phase = "load";
+  Object.defineProperty(globalThis, MARKER, {
+    value: Object.freeze({
+      installed: true,
+      pid: process.pid,
+      version: process.version,
+      violations: () => violationCount(),
+    }),
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
 }
 
 function assertInstalled() {
@@ -309,11 +325,31 @@ function positiveControls() {
   return { checks, pending: result };
 }
 
+function runChild(script, env, label) {
+  const child = spawnSync(process.execPath, ["-e", script], {
+    env,
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  if (child.error)
+    throw new Error(label + " failed: " + child.error.message);
+  return child;
+}
+
 function subprocessControl() {
   const guardPath = __filename;
-  const script = `
+  // The child proves the NODE_OPTIONS preload happened before its own code ran:
+  // it reads the guard's global marker first and only then requires net/dgram.
+  // It never requires the guard itself, so "self-require then claim inheritance"
+  // is impossible by construction.
+  const preloadedScript = `
 "use strict";
-const guard = require(${JSON.stringify(guardPath)});
+const marker = globalThis.${MARKER};
+if (!marker || marker.installed !== true || typeof marker.violations !== "function") {
+  console.log("PRELOAD_MISSING");
+  process.exit(42);
+}
+const sameProcess = marker.pid === process.pid;
 const net = require("node:net");
 const dgram = require("node:dgram");
 const tcp = net.connect({ port: 9, host: "127.0.0.1" });
@@ -325,8 +361,9 @@ const fetched = globalThis.fetch("http://127.0.0.1:9/");
   const awaited = await fetched;
   const results = [tcp, tcp2, server, udp, awaited];
   console.log(JSON.stringify({
-    installed: guard.isInstalled(),
-    violations: guard.violationCount(),
+    preloadVerifiedBeforeRequire: true,
+    sameProcess,
+    violations: marker.violations(),
     allBlocked: results.every((value) => value && value.blocked === true),
   }));
 })().catch((error) => {
@@ -334,17 +371,15 @@ const fetched = globalThis.fetch("http://127.0.0.1:9/");
   process.exit(3);
 });
 `;
-  const child = spawnSync(process.execPath, ["-e", script], {
-    env: {
+  const child = runChild(
+    preloadedScript,
+    {
       ...process.env,
       // The only supported way to make the child inherit the guard.
       NODE_OPTIONS: "--require " + guardPath,
     },
-    encoding: "utf8",
-    timeout: 30000,
-  });
-  if (child.error)
-    throw new Error("subprocess guard control failed: " + child.error.message);
+    "subprocess guard control",
+  );
   if (child.status !== 0)
     throw new Error(
       "subprocess guard control exited " +
@@ -361,15 +396,53 @@ const fetched = globalThis.fetch("http://127.0.0.1:9/");
         String(child.stdout || ""),
     );
   }
-  if (parsed.installed !== true)
-    throw new Error("subprocess did not inherit the guard installation");
+  if (parsed.preloadVerifiedBeforeRequire !== true)
+    throw new Error(
+      "subprocess did not verify the NODE_OPTIONS preload before its own require",
+    );
+  if (parsed.sameProcess !== true)
+    throw new Error(
+      "subprocess guard marker did not come from the preloaded guard in that process",
+    );
   if (parsed.allBlocked !== true)
     throw new Error("subprocess network calls were not all blocked");
   if (!(parsed.violations >= 5))
     throw new Error(
       "subprocess recorded too few blocked calls: " + parsed.violations,
     );
-  return { passed: 1, total: 1, violations: parsed.violations };
+  // Safe negative control: with the preload removed the child must fail fast on
+  // the missing marker. It touches no network entry and starts no listener.
+  const noPreloadScript = `
+"use strict";
+if (!globalThis.${MARKER}) {
+  console.log("PRELOAD_MISSING");
+  process.exit(42);
+}
+console.log("PRELOAD_PRESENT");
+process.exit(43);
+`;
+  const bare = runChild(
+    noPreloadScript,
+    { ...process.env, NODE_OPTIONS: "" },
+    "subprocess no-preload control",
+  );
+  const bareOutput = String(bare.stdout || "");
+  if (bare.status !== 42)
+    throw new Error(
+      "no-preload control did not fail fast on the missing marker: exit " +
+        bare.status,
+    );
+  if (!bareOutput.includes("PRELOAD_MISSING"))
+    throw new Error("no-preload control did not report the missing marker");
+  if (bareOutput.includes("PRELOAD_PRESENT"))
+    throw new Error("no-preload control unexpectedly found a guard marker");
+  return {
+    passed: 1,
+    total: 1,
+    violations: parsed.violations,
+    preload: "verified-before-require",
+    negative: { status: bare.status, markerMissing: true },
+  };
 }
 
 function assertNonListeningFiles(files) {
@@ -395,6 +468,12 @@ function assertNoUncontrolledChildProcess(files) {
   const guardSource = fs.readFileSync(__filename, "utf8");
   if (!/NODE_OPTIONS:\s*"--require "/.test(guardSource))
     throw new Error("guard subprocess control does not inherit NODE_OPTIONS");
+  if (!guardSource.includes(MARKER))
+    throw new Error("guard does not publish the preload marker");
+  if (!guardSource.includes("globalThis.${MARKER}"))
+    throw new Error("child does not verify the preload marker before requiring");
+  if (/require\(\s*guardPath\s*\)/.test(guardSource))
+    throw new Error("child must not require the guard itself");
   return files.length;
 }
 

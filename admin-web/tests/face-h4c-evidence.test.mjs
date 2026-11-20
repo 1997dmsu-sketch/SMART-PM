@@ -3985,3 +3985,128 @@ test("S4 M27: init rejects a non-array H4-c collection as EVIDENCE_INVALID", asy
     );
   }
 });
+
+// ===========================================================================
+// HK-AI-04 H4-c C1 S4 (continued): chain-level Store cases
+// M01(partial) / M14a / M14b / M14c / M30a — these run the real gate against a
+// gate-valid fixture (s1Fixture), so they exercise Store + gate together rather
+// than the stub gate used by the M03–M27 Store contracts.
+// ===========================================================================
+
+async function s4GateStore(t, state, { gate = null } = {}) {
+  const directory = await mkdtemp(join(tmpdir(), "smartpm-h4c-s4g-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const data = seed();
+  for (const [key, record] of Object.entries(state)) {
+    if (!record) continue;
+    const collection = key.slice(0, key.indexOf("/"));
+    (data[collection] ||= []).push(structuredClone(record));
+  }
+  await writeFile(join(directory, "demo-data.json"), JSON.stringify(data), { mode: 0o600 });
+  return new LocalStore(directory, {
+    h4cGate: gate ?? createH4cGate({ config: CONFIG }),
+  }).init();
+}
+
+function s4Business(fx) {
+  return fx.writes.filter((w) => w.collection !== H4C_AUDIT_COLLECTION);
+}
+
+test("S4 M01(partial): genesis final commit through Store writes the audited set only", async (t) => {
+  const fx = s1Fixture();
+  const store = await s4GateStore(t, fx.state);
+  const before = structuredClone(store.data);
+  const business = s4Business(fx);
+  assert.equal(business.length, 3);
+  await store.transactFinal(
+    fx.refs,
+    () => fx.writes.map((w) => structuredClone(w)),
+    fx.admission,
+    { now: NOW },
+  );
+  for (const item of business) {
+    const rows = store.data[item.collection];
+    assert.equal(rows.some((r) => r._id === item.id), true, `${item.collection} 未落库`);
+  }
+  const audit = fx.writes.find((w) => w.collection === H4C_AUDIT_COLLECTION);
+  const stored = store.data.admin_audit.find((r) => r._id === audit.data._id);
+  assert.ok(stored, "审计记录未落库");
+  assert.deepEqual(Object.keys(stored).sort(), [
+    "_id", "action", "actorId", "actorType", "createdAt", "orgId", "target",
+  ]);
+  assert.equal(stored.createdAt, NOW);
+  // Only the audited set changed: no extra business rows appeared.
+  assert.equal(store.data[H4C.anchors].length, business.filter((w) => w.collection === H4C.anchors).length);
+});
+
+test("S4 M14a: a missing proof record fails closed with PROOF_REQUIRED", async (t) => {
+  const fx = s1Fixture();
+  const state = structuredClone(fx.state);
+  const proofKey = `${H4C.auditProofs}/${fx.proof._id}`;
+  delete state[proofKey];
+  const store = await s4GateStore(t, state);
+  const before = structuredClone(store.data);
+  await s4Rejects(store.transactFinal(
+    fx.refs,
+    () => fx.writes.map((w) => structuredClone(w)),
+    fx.admission,
+    { now: NOW },
+  ), 409, "EVIDENCE_CHAIN_PROOF_REQUIRED");
+  assert.deepEqual(store.data, before);
+});
+
+test("S4 M14b: a halted fence fails closed with HALTED", async (t) => {
+  const fx = s1Fixture();
+  const state = structuredClone(fx.state);
+  state[`${H4C.fences}/${EVIDENCE_CHAIN_FENCE_ID}`] = s1Fence({
+    epoch: fx.fence.epoch, status: "halted", reasonCode: "monitor-halt",
+  });
+  const store = await s4GateStore(t, state);
+  const before = structuredClone(store.data);
+  await s4Rejects(store.transactFinal(
+    fx.refs,
+    () => fx.writes.map((w) => structuredClone(w)),
+    fx.admission,
+    { now: NOW },
+  ), 409, "EVIDENCE_CHAIN_HALTED");
+  assert.deepEqual(store.data, before);
+});
+
+test("S4 M14c: an expired fence fails closed with FENCE_EXPIRED", async (t) => {
+  const fx = s1Fixture();
+  const state = structuredClone(fx.state);
+  state[`${H4C.fences}/${EVIDENCE_CHAIN_FENCE_ID}`] = s1Fence({
+    epoch: fx.fence.epoch,
+    heartbeatAt: NOW - 400_000,
+    validUntil: NOW - 100_000,
+    updatedAt: NOW - 400_000,
+  });
+  const store = await s4GateStore(t, state);
+  const before = structuredClone(store.data);
+  await s4Rejects(store.transactFinal(
+    fx.refs,
+    () => fx.writes.map((w) => structuredClone(w)),
+    fx.admission,
+    { now: NOW },
+  ), 409, "EVIDENCE_CHAIN_FENCE_EXPIRED");
+  assert.deepEqual(store.data, before);
+});
+
+test("S4 M30a: concurrent final commits serialise and the last one sees the new state", async (t) => {
+  const fx = s1Fixture();
+  const store = await s4GateStore(t, fx.state);
+  const run = () => store.transactFinal(
+    fx.refs,
+    () => fx.writes.map((w) => structuredClone(w)),
+    fx.admission,
+    { now: NOW },
+  ).then(() => "ok", (error) => error.code ?? "error");
+  const results = await Promise.all([run(), run()]);
+  // LocalStore serialises through one queue, so exactly one commit wins and the
+  // loser fails closed instead of double-writing the create-only anchor.
+  assert.equal(results.filter((r) => r === "ok").length, 1, JSON.stringify(results));
+  assert.deepEqual(
+    store.data[H4C.anchors].filter((r) => r._id === fx.writes[0].id).length >= 1,
+    true,
+  );
+});

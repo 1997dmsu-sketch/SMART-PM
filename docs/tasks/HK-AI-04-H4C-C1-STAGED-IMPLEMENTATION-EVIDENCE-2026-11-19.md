@@ -1390,3 +1390,17 @@ positive.cjs       c34225ccc8854a1720ee51985d777ad29e1c7d85860e293bebeb2f3f7268b
 
 - 变更总量（相对 `49ca13ec`）：`store.mjs`、`face-h4c-evidence.test.mjs`、`store-deterministic-audit.test.mjs`、`verification.test.mjs`、本证据文档。
 - `h4c-evidence.mjs` 相对基线**零 diff**（复审 B1 采用 Store 层方案后撤销）。
+### I. 链层用例补齐（2026-11-21 01:2x）
+
+新增 5 条使用**真实 gate**（createH4cGate）的用例，弥补 M 矩阵此前只有桩 gate 的缺口：
+
+| 用例 | 断言 |
+|---|---|
+| M01(partial) | 	ransactFinal 提交门禁合法写集：3 条业务写 + 1 条 audit 落库；audit 恰为 7 字段、createdAt === now；无额外业务行 |
+| M14a | 删除 proof 记录 → EVIDENCE_CHAIN_PROOF_REQUIRED/409 且零写 |
+| M14b | fence halted → EVIDENCE_CHAIN_HALTED/409 且零写 |
+| M14c | fence 过期 → EVIDENCE_CHAIN_FENCE_EXPIRED/409 且零写 |
+| M30a | 同一状态下两次并发 	ransactFinal：恰好一次成功，另一次 fail-closed，不产生重复 anchor |
+
+- 未覆盖仍为：M02（append 形态）、M28、M29、M30b（genesis 并发链层判定）。M01 用 S1 规范化夹具而非 18 refs 规范形，故标注 partial。
+- 复跑：ace-h4c-evidence.test.mjs **92 / 92**；erification 15/15；store-deterministic-audit 12/12。

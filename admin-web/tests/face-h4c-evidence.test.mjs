@@ -30,6 +30,72 @@ import {
   validateEvidenceHead,
   validateEvidenceRecord,
 } from "../lib/face-service/h4c-evidence.mjs";
+import {
+  AdmissionValid,
+  CLOCK_SKEW_MS,
+  CoverageValid,
+  DOMAIN_HEAD_FIELDS,
+  DOMAIN_VERSION_FIELDS,
+  EVIDENCE_ANCHOR_FIELDS,
+  EVIDENCE_AUDIT_FIELDS,
+  EVIDENCE_AUDIT_PROOF_FIELDS,
+  EVIDENCE_CHAIN_ANCHOR_PREFIX,
+  EVIDENCE_CHAIN_FENCE_ID,
+  EVIDENCE_CHAIN_K3_MARKER_ID,
+  EVIDENCE_FENCE_FIELDS,
+  EVIDENCE_FIELDS,
+  EVIDENCE_HEAD_FIELDS,
+  EVIDENCE_K3_MARKER_FIELDS,
+  EVIDENCE_PLAN_FIELDS,
+  FenceExpired,
+  FenceHealthy,
+  FenceHeartbeatable,
+  FenceRecordValid,
+  FenceStructValid,
+  FenceValid,
+  H4C_DIGEST_DOMAINS,
+  H4C_ERROR_CODES,
+  H4C_SCHEMA_FIELDS,
+  K3DomainExact,
+  K3MarkerValid,
+  MONITOR_HEALTH_WINDOW_MS,
+  PlanRecordValid,
+  WriterPlanValid,
+  createH4cGate,
+  evidenceAnchorId,
+  evidenceC1AuditId,
+  evidenceC1AuditRecord,
+  evidencePlanId,
+  evidenceProofId,
+  h4cAdmissionTicketDigest,
+  h4cAuditProofDigest,
+  h4cFenceDigest,
+  h4cK3DomainTicket,
+  h4cK3MarkerDigest,
+  h4cKeyedDigest,
+  h4cMaintenanceManifestTicket,
+  h4cMonitorAuthDigest,
+  h4cPlanDigest,
+  h4cPlanStatusTicket,
+  h4cPlanTicket,
+  h4cRecoveryTicket,
+  h4cRefsDigest,
+  h4cWritesDigest,
+  h4cWriterRuntimeTicket,
+  validateEvidenceAnchorRecord,
+  validateEvidenceC1AuditRecord,
+  validateH4cAuditProofRecord,
+  validateH4cAuditRecord,
+  validateH4cFenceRecord,
+  validateH4cK3MarkerRecord,
+  validateH4cPlanRecord,
+  writerEpochFromRunId,
+  writerPlanId,
+  writerRunId,
+} from "../lib/face-service/h4c-evidence.mjs";
+import {
+  H4C, H4C_AUDIT_COLLECTION, H4C_COLLECTION_NAMES, isH4cCollection,
+} from "../lib/h4c-collections.mjs";
 
 const ORG = "org-h4c";
 const JOB_ID = "job-h4c-1";
@@ -1339,4 +1405,950 @@ test("realm switch/version change/rekey are DOMAIN_MISMATCH and never add a head
     .filter((row) => row.kind === "head").length, 1);
   assert.equal(store.data[EVIDENCE_DOMAINS_COLLECTION]
     .find((row) => row.kind === "head").realm, CONFIG.realm);
+});
+
+/* ------------------------------------------------------------------------- *
+ * S1 contract-layer tests
+ * ------------------------------------------------------------------------- */
+
+function s1Marker(overrides = {}) {
+  const { head, version } = makeDomainRecords();
+  const marker = {
+    _id: EVIDENCE_CHAIN_K3_MARKER_ID,
+    kind: "k3-marker",
+    scope: "global",
+    schemaVersion: 1,
+    fenceId: EVIDENCE_CHAIN_FENCE_ID,
+    k3DomainHeadId: head._id,
+    k3DomainVersionId: version._id,
+    k3DomainHeadRevision: head.revision,
+    realm: CONFIG.realm,
+    keyVersion: CONFIG.version,
+    keyFingerprint: CONFIG.fingerprint,
+    bootstrapRunId: "run-bootstrap",
+    maintenanceId: "maint-1",
+    maintenanceManifestDigest: "c".repeat(64),
+    windowStart: NOW - 10_000,
+    windowEnd: NOW + 10_000,
+    createdAt: NOW,
+    markerDigest: "",
+    ...overrides,
+  };
+  marker.markerDigest = h4cK3MarkerDigest(marker, CONFIG);
+  return marker;
+}
+
+function s1Proof(overrides = {}) {
+  const marker = overrides.marker ?? s1Marker();
+  const proof = {
+    _id: "",
+    kind: "audit",
+    scope: "global",
+    schemaVersion: 1,
+    realm: CONFIG.realm,
+    keyVersion: CONFIG.version,
+    keyFingerprint: CONFIG.fingerprint,
+    domainHeadId: EVIDENCE_DOMAIN_HEAD_ID,
+    domainHeadRevision: 1,
+    writeEpoch: 4,
+    admissionPolicyVersion: "policy-v1",
+    writerSetDigest: "a".repeat(64),
+    auditedCollections: [...H4C_COLLECTION_NAMES].sort(),
+    status: "verified",
+    canonicalEvidenceCount: 1,
+    canonicalHeadCount: 1,
+    anchorCount: 1,
+    legacyCount: 0,
+    inventoryDigest: "b".repeat(64),
+    checkedAt: NOW,
+    checkedBy: ACTOR,
+    auditDigest: "",
+    k3MarkerDigest: marker.markerDigest,
+    writerPlanId: writerPlanId(4),
+    ...overrides,
+  };
+  delete proof.marker;
+  if (overrides._id === undefined) {
+    proof._id = evidenceProofId(
+      proof.keyFingerprint, proof.domainHeadRevision, proof.writeEpoch);
+  }
+  proof.auditDigest = h4cAuditProofDigest(proof, CONFIG);
+  return proof;
+}
+
+function s1Plan(overrides = {}) {
+  const plan = {
+    _id: "",
+    kind: "plan",
+    scope: "global",
+    schemaVersion: 1,
+    planKind: "migration",
+    phase: "pre-anchor",
+    runId: "run-1",
+    issuedBy: ACTOR,
+    issuedAt: NOW,
+    windowStart: NOW - 1_000,
+    windowEnd: NOW + 1_000,
+    keyFingerprint: CONFIG.fingerprint,
+    k3MarkerId: EVIDENCE_CHAIN_K3_MARKER_ID,
+    sourceKind: "none",
+    sourceHaltedEpoch: null,
+    sourceFenceDigest: null,
+    targetWriteEpoch: 1,
+    targetAdmissionPolicyVersion: "policy-v1",
+    targetWriterSetDigest: "a".repeat(64),
+    targetProofId: evidenceProofId(CONFIG.fingerprint, 1, 1),
+    writerEpoch: null,
+    revokedWriterSetDigest: null,
+    revocationReceiptDigest: null,
+    finalInventoryDigest: null,
+    canonicalEvidenceCount: 0,
+    canonicalHeadCount: 0,
+    anchorCount: 0,
+    auditedCollections: null,
+    status: "active",
+    statusFrom: "none",
+    statusTargetProofId: null,
+    statusUpdatedAt: NOW,
+    statusReason: "plan-issue",
+    statusActor: ACTOR,
+    statusTicket: "",
+    initialStatusTicket: "",
+    runtimeTicket: null,
+    ...overrides,
+  };
+  if (plan.planKind === "writer") {
+    plan.phase = "writer";
+    plan.runId = writerRunId(plan.writerEpoch);
+    plan._id = writerPlanId(plan.writerEpoch);
+    plan.targetWriteEpoch = plan.writerEpoch;
+    if (overrides.targetProofId === undefined) {
+      plan.targetProofId = evidenceProofId(CONFIG.fingerprint, 1, plan.writerEpoch);
+    }
+  } else {
+    plan._id = evidencePlanId(plan.planKind, plan.runId, plan.phase);
+  }
+  plan.initialStatusTicket = h4cPlanStatusTicket({
+    planId: plan._id,
+    fromStatus: "none",
+    toStatus: "active",
+    targetProofId: null,
+    statusUpdatedAt: plan.issuedAt,
+    statusReason: "plan-issue",
+    actor: plan.issuedBy,
+  }, CONFIG);
+  if (plan.status === "active") {
+    plan.statusFrom = "none";
+    plan.statusTargetProofId = null;
+    plan.statusUpdatedAt = plan.issuedAt;
+    plan.statusReason = "plan-issue";
+    plan.statusActor = plan.issuedBy;
+    plan.statusTicket = plan.initialStatusTicket;
+    plan.runtimeTicket = null;
+  } else if (plan.status === "consumed") {
+    plan.statusFrom = "active";
+    plan.statusTargetProofId = plan.targetProofId;
+    plan.statusTicket = h4cPlanStatusTicket({
+      planId: plan._id,
+      fromStatus: "active",
+      toStatus: "consumed",
+      targetProofId: plan.targetProofId,
+      statusUpdatedAt: plan.statusUpdatedAt,
+      statusReason: plan.statusReason,
+      actor: plan.statusActor,
+    }, CONFIG);
+    if (plan.planKind === "writer") {
+      plan.runtimeTicket = h4cWriterRuntimeTicket({
+        planId: plan._id,
+        proofId: plan.targetProofId,
+        writerEpoch: plan.writerEpoch,
+        targetWriterSetDigest: plan.targetWriterSetDigest,
+        k3MarkerId: plan.k3MarkerId,
+        keyFingerprint: plan.keyFingerprint,
+        activatedAt: plan.statusUpdatedAt,
+      }, CONFIG);
+    } else {
+      plan.runtimeTicket = null;
+    }
+  } else {
+    plan.statusFrom = "active";
+    plan.statusTargetProofId = null;
+    plan.statusReason = "revoked:plan-revoke";
+    plan.statusTicket = h4cPlanStatusTicket({
+      planId: plan._id,
+      fromStatus: "active",
+      toStatus: "revoked",
+      targetProofId: null,
+      statusUpdatedAt: plan.statusUpdatedAt,
+      statusReason: plan.statusReason,
+      actor: plan.statusActor,
+    }, CONFIG);
+    plan.runtimeTicket = null;
+  }
+  const core = {};
+  for (const field of EVIDENCE_PLAN_FIELDS.slice(0, 28)) core[field] = plan[field];
+  plan.planDigest = h4cPlanDigest(core);
+  plan.planTicket = h4cPlanTicket({ ...core, planDigest: plan.planDigest }, CONFIG);
+  return plan;
+}
+
+function s1Fence(overrides = {}) {
+  const fence = {
+    _id: EVIDENCE_CHAIN_FENCE_ID,
+    kind: "fence",
+    scope: "global",
+    schemaVersion: 1,
+    status: "clear",
+    epoch: 4,
+    reasonCode: "monitor-ok",
+    monitorId: "monitor-1",
+    heartbeatAt: NOW,
+    validUntil: NOW + MONITOR_HEALTH_WINDOW_MS,
+    updatedAt: NOW,
+    fenceDigest: "",
+    ...overrides,
+  };
+  fence.fenceDigest = h4cFenceDigest(fence, CONFIG);
+  return fence;
+}
+
+function s1State({ proof, marker, plan, fence } = {}) {
+  const domain = makeDomainRecords();
+  const state = domainState(CONFIG, domain.head, domain.version);
+  state[`${H4C.auditProofs}/${proof._id}`] = proof;
+  state[`${H4C.k3Markers}/${EVIDENCE_CHAIN_K3_MARKER_ID}`] = marker;
+  state[`${H4C.plans}/${plan._id}`] = plan;
+  state[`${H4C.fences}/${EVIDENCE_CHAIN_FENCE_ID}`] = fence;
+  return state;
+}
+
+function s1GateWrites(proof, marker, plan, fence) {
+  const anchor = {
+    _id: evidenceAnchorId(ORG, JOB._id),
+    orgId: ORG,
+    jobId: JOB._id,
+    schemaVersion: 1,
+    firstEvidenceId: evidenceId(ORG, JOB._id, 1),
+    createdAt: NOW,
+  };
+  const evidence = { _id: evidenceId(ORG, JOB._id, 1) };
+  const head = { _id: evidenceHeadId(ORG, JOB._id) };
+  const targetList = [
+    `${H4C.anchors}/${anchor._id}`,
+    `${H4C.evidence}/${evidence._id}`,
+    `${H4C.evidenceHeads}/${head._id}`,
+  ].sort();
+  const audit = evidenceC1AuditRecord({
+    orgId: ORG,
+    jobId: JOB._id,
+    targetList,
+    sequence: 1,
+    actorId: ACTOR,
+    actorType: "user",
+    now: NOW,
+  });
+  const refs = [
+    { collection: H4C.anchors, id: anchor._id },
+    { collection: H4C.evidence, id: evidence._id },
+    { collection: H4C.evidenceHeads, id: head._id },
+    { collection: H4C.auditProofs, id: proof._id },
+    { collection: H4C.fences, id: fence._id },
+    { collection: H4C.k3Markers, id: marker._id },
+    { collection: H4C.plans, id: plan._id },
+    { collection: H4C.domains, id: EVIDENCE_DOMAIN_HEAD_ID },
+    { collection: H4C.domains, id: evidenceDomainIds(CONFIG.realm, CONFIG.version).versionId },
+    { collection: H4C_AUDIT_COLLECTION, id: audit._id },
+  ];
+  const writes = [
+    { collection: H4C.anchors, id: anchor._id, data: anchor },
+    { collection: H4C.evidence, id: evidence._id, data: evidence },
+    { collection: H4C.evidenceHeads, id: head._id, data: head },
+    { collection: H4C_AUDIT_COLLECTION, id: audit._id, data: audit },
+  ];
+  return { refs, writes };
+}
+
+function s1Admission({ refs, writes, proof, overrides = {} }) {
+  const admission = {
+    kind: "runtime",
+    operation: "genesis",
+    writeEpoch: proof.writeEpoch,
+    admissionPolicyVersion: proof.admissionPolicyVersion,
+    writerSetDigest: proof.writerSetDigest,
+    proofId: proof._id,
+    refsDigest: h4cRefsDigest(refs),
+    writesDigest: h4cWritesDigest(writes),
+    operationAuthDigest: null,
+    ticket: "",
+    ...overrides,
+  };
+  admission.ticket = h4cAdmissionTicketDigest(admission, CONFIG);
+  return admission;
+}
+
+function s1Fixture() {
+  const marker = s1Marker();
+  const proof = s1Proof({ marker });
+  const plan = s1Plan({
+    planKind: "writer",
+    writerEpoch: 4,
+    sourceKind: "halted-fence",
+    sourceHaltedEpoch: 3,
+    sourceFenceDigest: "d".repeat(64),
+    targetProofId: proof._id,
+    targetWriterSetDigest: proof.writerSetDigest,
+    revokedWriterSetDigest: "e".repeat(64),
+    revocationReceiptDigest: "f".repeat(64),
+    status: "consumed",
+    statusUpdatedAt: NOW + 1,
+  });
+  const fence = s1Fence({ epoch: proof.writeEpoch });
+  const state = s1State({ proof, marker, plan, fence });
+  const { refs, writes } = s1GateWrites(proof, marker, plan, fence);
+  const admission = s1Admission({ refs, writes, proof });
+  return { marker, proof, plan, fence, state, refs, writes, admission };
+}
+
+test("S1 collection gate is closed, frozen and Set-free", async () => {
+  const ns = await import("../lib/h4c-collections.mjs");
+  assert.deepEqual(Object.keys(ns).sort(), [
+    "H4C", "H4C_AUDIT_COLLECTION", "H4C_COLLECTION_NAMES", "isH4cCollection",
+  ]);
+  assert.equal(Object.hasOwn(ns, "H4C_COLLECTION_SET"), false);
+  assert.equal(Object.isFrozen(ns.H4C), true);
+  assert.equal(Object.isFrozen(ns.H4C_COLLECTION_NAMES), true);
+  assert.deepEqual([...ns.H4C_COLLECTION_NAMES], [
+    "device_operation_evidence",
+    "device_operation_evidence_heads",
+    "evidence_digest_domains",
+    "evidence_chain_anchors",
+    "evidence_chain_audits",
+    "evidence_chain_fences",
+    "evidence_chain_k3_markers",
+    "evidence_chain_plans",
+  ]);
+  assert.equal(ns.H4C_AUDIT_COLLECTION, "admin_audit");
+  assert.throws(() => { ns.H4C.evidence = "x"; }, TypeError);
+  assert.throws(() => { ns.H4C.other = "x"; }, TypeError);
+  assert.throws(() => { ns.H4C_COLLECTION_NAMES.push("x"); }, TypeError);
+  assert.throws(() => { ns.H4C_COLLECTION_NAMES[0] = "x"; }, TypeError);
+  for (const name of ns.H4C_COLLECTION_NAMES) {
+    assert.equal(ns.isH4cCollection(name), true, name);
+  }
+  for (const name of [
+    "admin_audit", "__proto__", "constructor", "", "device_operation_evidence_2",
+    "evidence_chain_audits_v2", "evidence-chain-audits", null, undefined, 0, 7,
+    {}, [], Symbol("x"),
+  ]) {
+    assert.equal(ns.isH4cCollection(name), false, String(name));
+  }
+
+  // A frozen Set is still mutable; that is exactly why no Set is exported.
+  const frozenSet = Object.freeze(new Set(["a"]));
+  frozenSet.add("b");
+  assert.equal(frozenSet.has("b"), true);
+
+  // Replacing Set.prototype.has after load cannot change the captured decision.
+  const originalHas = Set.prototype.has;
+  Set.prototype.has = () => false;
+  try {
+    assert.equal(ns.isH4cCollection("device_operation_evidence"), true);
+    assert.equal(ns.isH4cCollection("admin_audit"), false);
+  } finally {
+    Set.prototype.has = originalHas;
+  }
+  for (const name of [
+    "addH4cCollection", "removeH4cCollection", "setH4cCollections",
+    "getH4cCollectionSet", "H4C_COLLECTION_SET",
+  ]) assert.equal(Object.hasOwn(ns, name), false);
+
+  assert.equal(EVIDENCE_COLLECTION, ns.H4C.evidence);
+  assert.equal(EVIDENCE_HEADS_COLLECTION, ns.H4C.evidenceHeads);
+  assert.equal(EVIDENCE_DOMAINS_COLLECTION, ns.H4C.domains);
+});
+
+test("S1 canonical IDs cover anchor/proof/plan/audit and writer epoch parsing", () => {
+  const anchor = evidenceAnchorId(ORG, JOB._id);
+  assert.equal(anchor, EVIDENCE_CHAIN_ANCHOR_PREFIX + createHash("sha256")
+    .update(stableStringify([ORG, JOB._id])).digest("hex").slice(0, 32));
+  assert.match(anchor, /^h4c-evidence-anchor-v1:[0-9a-f]{32}$/);
+  assert.notEqual(anchor, evidenceAnchorId(ORG, "job-other"));
+
+  assert.equal(evidenceProofId(CONFIG.fingerprint, 3, 7),
+    `evidence-chain-audit:v1:${CONFIG.fingerprint}:3:7`);
+  assert.throws(() => evidenceProofId("A".repeat(64), 3, 7), rejectCode("EVIDENCE_CHAIN_PROOF_REQUIRED"));
+  assert.throws(() => evidenceProofId(CONFIG.fingerprint, 0, 7), rejectCode("EVIDENCE_CHAIN_PROOF_REQUIRED"));
+
+  for (const epoch of [1, 7, 10]) {
+    assert.equal(writerRunId(epoch), `we-${epoch}`);
+    assert.equal(writerPlanId(epoch),
+      `evidence-chain-plan:v1:writer:we-${epoch}:writer`);
+    assert.equal(writerEpochFromRunId(`we-${epoch}`), epoch);
+  }
+  assert.equal(writerPlanId(7),
+    "evidence-chain-plan:v1:writer:we-7:writer");
+  assert.throws(() => writerPlanId(0), rejectCode("PLAN_INVALID"));
+  assert.throws(() => writerPlanId(1.5), rejectCode("PLAN_INVALID"));
+  for (const bad of [
+    "we-07", "we-0", "WE-7", "", "we-", "we-1.0", "we-+1", " we-7", "we- 7",
+    "we-9007199254740993", null, 7,
+  ]) {
+    assert.throws(() => writerEpochFromRunId(bad), rejectCode("PLAN_INVALID"), String(bad));
+  }
+  assert.equal(evidencePlanId("migration", "run-1", "pre-anchor"),
+    "evidence-chain-plan:v1:migration:run-1:pre-anchor");
+  assert.equal(evidencePlanId("recovery", "run-2", "recovery"),
+    "evidence-chain-plan:v1:recovery:run-2:recovery");
+  assert.throws(() => evidencePlanId("writer", "run-1", "pre-anchor"), rejectCode("PLAN_INVALID"));
+
+  const targetList = [
+    `${H4C.anchors}/${anchor}`,
+    `${H4C.evidence}/${evidenceId(ORG, JOB._id, 1)}`,
+  ].sort();
+  const auditId = evidenceC1AuditId({
+    orgId: ORG, scopeKey: JOB._id, action: "h4c.evidence.genesis", targetList, revision: 1,
+  });
+  assert.equal(auditId, "audit-h4c-v1:" + createHash("sha256").update(stableStringify([
+    ORG, JOB._id, "h4c.evidence.genesis", targetList, 1,
+  ])).digest("hex").slice(0, 32));
+  assert.match(auditId, /^audit-h4c-v1:[0-9a-f]{32}$/);
+  assert.throws(() => evidenceC1AuditId({
+    orgId: ORG, scopeKey: JOB._id, action: "h4c.evidence.genesis",
+    targetList: [...targetList].reverse(), revision: 1,
+  }), rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+  assert.throws(() => evidenceC1AuditId({
+    orgId: ORG, scopeKey: JOB._id, action: "h4c.evidence.genesis",
+    targetList: [targetList[0], targetList[0]], revision: 1,
+  }), rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+  assert.throws(() => evidenceC1AuditId({
+    orgId: ORG, scopeKey: JOB._id, action: "h4c.evidence.genesis",
+    targetList: [`${H4C_AUDIT_COLLECTION}/audit-h4c-v1:${"0".repeat(32)}`], revision: 1,
+  }), rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+});
+
+test("S1 schema arrays freeze the exact field counts and reject non-exact records", () => {
+  assert.equal(EVIDENCE_ANCHOR_FIELDS.length, 6);
+  assert.equal(EVIDENCE_FIELDS.length, 20);
+  assert.equal(EVIDENCE_HEAD_FIELDS.length, 9);
+  assert.equal(DOMAIN_HEAD_FIELDS.length, 7);
+  assert.equal(DOMAIN_VERSION_FIELDS.length, 6);
+  assert.equal(EVIDENCE_AUDIT_FIELDS.length, 7);
+  assert.equal(EVIDENCE_FENCE_FIELDS.length, 12);
+  assert.equal(EVIDENCE_K3_MARKER_FIELDS.length, 18);
+  assert.equal(EVIDENCE_AUDIT_PROOF_FIELDS.length, 24);
+  assert.equal(EVIDENCE_PLAN_FIELDS.length, 39);
+  for (const fields of Object.values(H4C_SCHEMA_FIELDS)) {
+    assert.equal(Object.isFrozen(fields), true);
+  }
+  assert.equal(Object.isFrozen(H4C_SCHEMA_FIELDS), true);
+
+  const { head } = makeDomainRecords();
+  const anchor = {
+    _id: evidenceAnchorId(ORG, JOB._id), orgId: ORG, jobId: JOB._id, schemaVersion: 1,
+    firstEvidenceId: evidenceId(ORG, JOB._id, 1), createdAt: NOW,
+  };
+  assert.equal(validateEvidenceAnchorRecord(anchor), undefined);
+  const audit = evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB._id,
+    targetList: [`${H4C.evidence}/${evidenceId(ORG, JOB._id, 1)}`],
+    sequence: 1, actorId: ACTOR, actorType: "user", now: NOW,
+  });
+  assert.equal(validateH4cAuditRecord(audit), undefined);
+  const proof = s1Proof();
+  assert.equal(validateH4cAuditProofRecord(proof, CONFIG), undefined);
+  const marker = s1Marker();
+  assert.equal(validateH4cK3MarkerRecord(marker, CONFIG), undefined);
+  const fence = s1Fence();
+  assert.equal(validateH4cFenceRecord(fence, CONFIG), undefined);
+  const plan = s1Plan();
+  assert.equal(validateH4cPlanRecord(plan, CONFIG), undefined);
+
+  const cases = [
+    [() => validateEvidenceAnchorRecord({ ...anchor, extra: 1 }), "EVIDENCE_INVALID"],
+    [() => validateEvidenceAnchorRecord((({ _id, ...rest }) => rest)(anchor)), "EVIDENCE_INVALID"],
+    [() => validateEvidenceAnchorRecord({ ...anchor, createdAt: "x" }), "EVIDENCE_INVALID"],
+    [() => validateH4cAuditRecord({ ...audit, extra: 1 }), "EVIDENCE_INVALID"],
+    [() => validateH4cAuditRecord((({ target, ...rest }) => rest)(audit)), "EVIDENCE_INVALID"],
+    [() => validateH4cAuditRecord({ ...audit, createdAt: "x" }), "EVIDENCE_INVALID"],
+    [() => validateH4cAuditProofRecord({ ...proof, extra: 1 }, CONFIG), "EVIDENCE_CHAIN_PROOF_REQUIRED"],
+    [() => validateH4cAuditProofRecord((({ legacyCount, ...rest }) => rest)(proof), CONFIG), "EVIDENCE_CHAIN_PROOF_REQUIRED"],
+    [() => validateH4cAuditProofRecord({ ...proof, writeEpoch: "4" }, CONFIG), "EVIDENCE_CHAIN_PROOF_REQUIRED"],
+    [() => validateH4cFenceRecord({ ...fence, extra: 1 }, CONFIG), "EVIDENCE_CHAIN_HALTED"],
+    [() => validateH4cFenceRecord((({ epoch, ...rest }) => rest)(fence), CONFIG), "EVIDENCE_CHAIN_HALTED"],
+    [() => validateH4cFenceRecord({ ...fence, epoch: "4" }, CONFIG), "EVIDENCE_CHAIN_HALTED"],
+    [() => validateH4cK3MarkerRecord({ ...marker, extra: 1 }, CONFIG), "EVIDENCE_CHAIN_PROOF_REQUIRED"],
+    [() => validateH4cK3MarkerRecord((({ realm, ...rest }) => rest)(marker), CONFIG), "EVIDENCE_CHAIN_PROOF_REQUIRED"],
+    [() => validateH4cK3MarkerRecord({ ...marker, createdAt: "x" }, CONFIG), "EVIDENCE_CHAIN_PROOF_REQUIRED"],
+    [() => validateH4cPlanRecord({ ...plan, extra: 1 }, CONFIG), "PLAN_INVALID"],
+    [() => validateH4cPlanRecord((({ status, ...rest }) => rest)(plan), CONFIG), "PLAN_INVALID"],
+    [() => validateH4cPlanRecord({ ...plan, issuedAt: "x" }, CONFIG), "PLAN_INVALID"],
+  ];
+  for (const [fn, code] of cases) assert.throws(fn, rejectCode(code));
+  for (const value of [null, [], new (class Record {})()]) {
+    assert.throws(() => validateEvidenceAnchorRecord(value), rejectCode("EVIDENCE_INVALID"));
+    assert.throws(() => validateH4cAuditRecord(value), rejectCode("EVIDENCE_INVALID"));
+    assert.throws(() => validateH4cAuditProofRecord(value, CONFIG),
+      rejectCode("EVIDENCE_CHAIN_PROOF_REQUIRED"));
+    assert.throws(() => validateH4cFenceRecord(value, CONFIG),
+      rejectCode("EVIDENCE_CHAIN_HALTED"));
+    assert.throws(() => validateH4cK3MarkerRecord(value, CONFIG),
+      rejectCode("EVIDENCE_CHAIN_PROOF_REQUIRED"));
+    assert.throws(() => validateH4cPlanRecord(value, CONFIG), rejectCode("PLAN_INVALID"));
+  }
+  assert.equal(Object.hasOwn(head, "_id"), true);
+});
+
+test("S1 D4a proof status/legacyCount and snapshot fields (V01-V05)", () => {
+  assert.equal(validateH4cAuditProofRecord(s1Proof(), CONFIG), undefined);
+  for (const status of ["valid", "empty", "backfilled", "", null, 1]) {
+    assert.throws(() => validateH4cAuditProofRecord(s1Proof({ status }), CONFIG),
+      rejectCode("EVIDENCE_CHAIN_PROOF_REQUIRED"), String(status));
+  }
+  const missingStatus = s1Proof();
+  delete missingStatus.status;
+  assert.throws(() => validateH4cAuditProofRecord(missingStatus, CONFIG),
+    rejectCode("EVIDENCE_CHAIN_PROOF_REQUIRED"));
+  for (const legacyCount of [-1, 1, 1.5, "0", Number.MAX_SAFE_INTEGER + 2]) {
+    assert.throws(() => validateH4cAuditProofRecord(s1Proof({ legacyCount }), CONFIG),
+      rejectCode("EVIDENCE_CHAIN_PROOF_REQUIRED"), String(legacyCount));
+  }
+  const snapshot = s1Proof({
+    canonicalEvidenceCount: 99,
+    canonicalHeadCount: 42,
+    anchorCount: 7,
+    inventoryDigest: "d".repeat(64),
+  });
+  assert.equal(validateH4cAuditProofRecord(snapshot, CONFIG), undefined);
+  assert.equal(snapshot.inventoryDigest, "d".repeat(64));
+  const coverageMarker = s1Marker();
+  const coveragePlan = s1Plan({
+    planKind: "writer", writerEpoch: 4, sourceKind: "halted-fence",
+    sourceHaltedEpoch: 3, sourceFenceDigest: "d".repeat(64),
+    targetProofId: snapshot._id, targetWriterSetDigest: snapshot.writerSetDigest,
+    revokedWriterSetDigest: "e".repeat(64), revocationReceiptDigest: "f".repeat(64),
+    status: "consumed", statusUpdatedAt: NOW + 1,
+  });
+  const coverageState = s1State({
+    proof: snapshot,
+    marker: coverageMarker,
+    plan: coveragePlan,
+    fence: s1Fence({ epoch: snapshot.writeEpoch }),
+  });
+  assert.equal(CoverageValid(snapshot, coverageMarker, coveragePlan, CONFIG, coverageState), true);
+  assert.equal(CoverageValid(snapshot, coverageMarker, coveragePlan, CONFIG), false);
+  const tampered = s1Proof();
+  tampered.auditDigest = "0".repeat(64);
+  assert.throws(() => validateH4cAuditProofRecord(tampered, CONFIG),
+    rejectCode("EVIDENCE_CHAIN_PROOF_REQUIRED"));
+});
+
+test("S1 C1 audit D4b formula, fields and V06-V09", () => {
+  const anchor = evidenceAnchorId(ORG, JOB._id);
+  const evidence = evidenceId(ORG, JOB._id, 1);
+  const head = evidenceHeadId(ORG, JOB._id);
+  const targetList = [
+    `${H4C.anchors}/${anchor}`,
+    `${H4C.evidence}/${evidence}`,
+    `${H4C.evidenceHeads}/${head}`,
+  ].sort();
+  const context = { orgId: ORG, jobId: JOB._id, targetList, sequence: 1, now: NOW };
+  const audit = evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB._id, targetList, sequence: 1, actorId: ACTOR,
+    actorType: "user", now: NOW,
+  });
+  assert.equal(audit._id, evidenceC1AuditId({
+    orgId: ORG, scopeKey: JOB._id, action: "h4c.evidence.genesis", targetList, revision: 1,
+  }));
+  assert.equal(audit.action, "h4c.evidence.genesis");
+  assert.equal(audit.target, targetList.join(", "));
+  assert.equal(audit.createdAt, NOW);
+  assert.deepEqual(Object.keys(audit).sort(), [
+    "_id", "action", "actorId", "actorType", "createdAt", "orgId", "target",
+  ]);
+  assert.equal(validateEvidenceC1AuditRecord(audit, context), undefined);
+
+  const append = evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB._id, targetList, sequence: 4, actorId: ACTOR,
+    actorType: "user", now: NOW + 1,
+  });
+  assert.equal(append.action, "h4c.evidence.append");
+  assert.equal(validateEvidenceC1AuditRecord(append, { ...context, sequence: 4, now: NOW + 1 }),
+    undefined);
+
+  const wrongScope = evidenceC1AuditRecord({
+    orgId: ORG, jobId: "job-other", targetList, sequence: 1, actorId: ACTOR,
+    actorType: "user", now: NOW,
+  });
+  assert.throws(() => validateEvidenceC1AuditRecord(wrongScope, context),
+    rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+  const wrongAction = { ...audit, action: "h4c.evidence.append" };
+  assert.throws(() => validateEvidenceC1AuditRecord(wrongAction, context),
+    rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+  const wrongRevision = { ...audit, _id: evidenceC1AuditId({
+    orgId: ORG, scopeKey: JOB._id, action: "h4c.evidence.append", targetList, revision: 2,
+  }), action: "h4c.evidence.append" };
+  assert.throws(() => validateEvidenceC1AuditRecord(wrongRevision, context),
+    rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+  assert.throws(() => validateEvidenceC1AuditRecord({ ...audit, createdAt: NOW + 1 }, context),
+    rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+  assert.throws(() => validateEvidenceC1AuditRecord({ ...audit, target: "x" }, context),
+    rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+  assert.throws(() => evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB._id, targetList: [...targetList].reverse(), sequence: 1,
+    actorId: ACTOR, actorType: "user", now: NOW,
+  }), rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+  assert.throws(() => evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB._id, targetList: [targetList[0], targetList[0]], sequence: 1,
+    actorId: ACTOR, actorType: "user", now: NOW,
+  }), rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+  assert.throws(() => evidenceC1AuditRecord({
+    orgId: ORG, jobId: JOB._id,
+    targetList: [`${H4C_AUDIT_COLLECTION}/audit-h4c-v1:${"0".repeat(32)}`],
+    sequence: 1, actorId: ACTOR, actorType: "user", now: NOW,
+  }), rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+});
+
+test("S1 plan 39 fields, planKind null table and consumed branches", () => {
+  const pre = s1Plan();
+  const final = s1Plan({
+    phase: "final",
+    finalInventoryDigest: "d".repeat(64),
+    canonicalEvidenceCount: 3,
+    canonicalHeadCount: 2,
+    anchorCount: 1,
+    auditedCollections: [...H4C_COLLECTION_NAMES].sort(),
+  });
+  const recovery = s1Plan({
+    planKind: "recovery", phase: "recovery", runId: "run-recovery",
+    sourceKind: "halted-fence", sourceHaltedEpoch: 3, sourceFenceDigest: "d".repeat(64),
+    targetWriteEpoch: 4, targetProofId: evidenceProofId(CONFIG.fingerprint, 1, 4),
+    finalInventoryDigest: "e".repeat(64), canonicalEvidenceCount: 3,
+    canonicalHeadCount: 2, anchorCount: 1,
+    auditedCollections: [...H4C_COLLECTION_NAMES].sort(),
+  });
+  const bootstrap = s1Plan({
+    planKind: "writer", writerEpoch: 1, sourceKind: "bootstrap",
+    targetProofId: evidenceProofId(CONFIG.fingerprint, 1, 1),
+    revokedWriterSetDigest: "e".repeat(64), revocationReceiptDigest: "f".repeat(64),
+  });
+  const rotate = s1Plan({
+    planKind: "writer", writerEpoch: 4, sourceKind: "halted-fence",
+    sourceHaltedEpoch: 3, sourceFenceDigest: "d".repeat(64),
+    targetProofId: evidenceProofId(CONFIG.fingerprint, 1, 4),
+    targetWriterSetDigest: "a".repeat(64),
+    revokedWriterSetDigest: "e".repeat(64), revocationReceiptDigest: "f".repeat(64),
+  });
+  const consumedWriter = s1Plan({
+    planKind: "writer", writerEpoch: 4, sourceKind: "halted-fence",
+    sourceHaltedEpoch: 3, sourceFenceDigest: "d".repeat(64),
+    targetProofId: evidenceProofId(CONFIG.fingerprint, 1, 4),
+    targetWriterSetDigest: "a".repeat(64),
+    revokedWriterSetDigest: "e".repeat(64), revocationReceiptDigest: "f".repeat(64),
+    status: "consumed", statusUpdatedAt: NOW + 1,
+  });
+  const consumedMigration = s1Plan({
+    phase: "final", finalInventoryDigest: "d".repeat(64),
+    canonicalEvidenceCount: 3, canonicalHeadCount: 2, anchorCount: 1,
+    auditedCollections: [...H4C_COLLECTION_NAMES].sort(),
+    status: "consumed", statusUpdatedAt: NOW + 1,
+  });
+  const revoked = s1Plan({ status: "revoked", statusUpdatedAt: NOW + 1 });
+  for (const plan of [pre, final, recovery, bootstrap, rotate, consumedWriter,
+    consumedMigration, revoked]) {
+    assert.equal(validateH4cPlanRecord(plan, CONFIG), undefined);
+    assert.equal(PlanRecordValid(plan, CONFIG), true);
+  }
+  assert.equal(bootstrap._id, writerPlanId(1));
+  assert.equal(bootstrap.runId, "we-1");
+
+  const negatives = [
+    () => ({ ...pre, finalInventoryDigest: "d".repeat(64) }),
+    () => ({ ...final, auditedCollections: null }),
+    () => ({ ...recovery, sourceKind: "none" }),
+    () => ({ ...bootstrap, sourceHaltedEpoch: 1 }),
+    () => ({ ...rotate, runId: "we-04" }),
+    () => ({ ...rotate, writerEpoch: 3 }),
+    (() => { const copy = structuredClone(consumedWriter); copy.runtimeTicket = null; return copy; }),
+    (() => { const copy = structuredClone(consumedMigration); copy.runtimeTicket = "0".repeat(64); return copy; }),
+    (() => { const copy = structuredClone(pre); copy.runtimeTicket = "0".repeat(64); return copy; }),
+    () => ({ ...revoked, statusTargetProofId: evidenceProofId(CONFIG.fingerprint, 1, 1) }),
+    (() => { const copy = structuredClone(consumedWriter); copy.runtimeTicket = "0".repeat(64); return copy; }),
+    (() => { const copy = structuredClone(consumedWriter); copy.statusTicket = "0".repeat(64); return copy; }),
+  ];
+  for (const mutate of negatives) {
+    assert.throws(() => validateH4cPlanRecord(mutate(), CONFIG), rejectCode("PLAN_INVALID"));
+  }
+  assert.equal(PlanRecordValid({ ...pre, extra: 1 }, CONFIG), false);
+});
+
+test("S1 11 digest domains use canonical HMAC and rebuild from persisted fields", () => {
+  assert.deepEqual(Object.keys(H4C_DIGEST_DOMAINS).sort(), [
+    "audit", "fence", "k3Bootstrap", "k3Marker", "maintenanceManifest",
+    "monitor", "plan", "planStatus", "recovery", "ticket", "writerRuntime",
+  ]);
+  assert.equal(Object.keys(H4C_DIGEST_DOMAINS).length, 11);
+  const expected = (domain, fields) => createHmac("sha256", CONFIG.key)
+    .update(stableStringify({ domain, version: 1, ...fields })).digest("hex");
+
+  const proof = s1Proof();
+  const { auditDigest, ...proofFields } = proof;
+  assert.equal(auditDigest, expected(H4C_DIGEST_DOMAINS.audit, proofFields));
+  assert.equal(auditDigest, h4cAuditProofDigest(proof, CONFIG));
+
+  const fence = s1Fence();
+  const { fenceDigest, ...fenceFields } = fence;
+  assert.equal(fenceDigest, expected(H4C_DIGEST_DOMAINS.fence, fenceFields));
+
+  const marker = s1Marker();
+  const { markerDigest, ...markerFields } = marker;
+  assert.equal(markerDigest, expected(H4C_DIGEST_DOMAINS.k3Marker, markerFields));
+
+  const monitor = { monitorId: "m1", observedEpoch: 3, reasonCode: "monitor-halt", halt: true, fenceId: EVIDENCE_CHAIN_FENCE_ID };
+  assert.equal(h4cMonitorAuthDigest(monitor, CONFIG),
+    expected(H4C_DIGEST_DOMAINS.monitor, monitor));
+
+  const admission = s1Fixture().admission;
+  const { ticket, ...ticketFields } = admission;
+  assert.equal(ticket, expected(H4C_DIGEST_DOMAINS.ticket, ticketFields));
+
+  const core = {};
+  const plan = s1Plan();
+  for (const field of EVIDENCE_PLAN_FIELDS.slice(0, 28)) core[field] = plan[field];
+  assert.equal(plan.planDigest, createHash("sha256")
+    .update(stableStringify(core)).digest("hex"));
+  assert.equal(plan.planTicket, expected(H4C_DIGEST_DOMAINS.plan,
+    { ...core, planDigest: plan.planDigest }));
+  assert.equal(plan.statusTicket, expected(H4C_DIGEST_DOMAINS.planStatus, {
+    planId: plan._id, fromStatus: "none", toStatus: "active", targetProofId: null,
+    statusUpdatedAt: plan.issuedAt, statusReason: "plan-issue", actor: plan.issuedBy,
+  }));
+
+  const runtimeFields = {
+    planId: "p", proofId: "e", writerEpoch: 4, targetWriterSetDigest: "a".repeat(64),
+    k3MarkerId: EVIDENCE_CHAIN_K3_MARKER_ID, keyFingerprint: CONFIG.fingerprint,
+    activatedAt: NOW,
+  };
+  assert.equal(h4cWriterRuntimeTicket(runtimeFields, CONFIG),
+    expected(H4C_DIGEST_DOMAINS.writerRuntime, runtimeFields));
+
+  const recoveryFields = { recoveryRunId: "r1", haltedEpoch: 3, targetProofId: "p1" };
+  assert.equal(h4cRecoveryTicket(recoveryFields, CONFIG),
+    expected(H4C_DIGEST_DOMAINS.recovery, recoveryFields));
+
+  const bootstrapFields = { bootstrapRunId: "b1", realm: CONFIG.realm, keyVersion: 1 };
+  assert.equal(h4cK3DomainTicket(bootstrapFields, CONFIG),
+    expected(H4C_DIGEST_DOMAINS.k3Bootstrap, bootstrapFields));
+
+  const manifestFields = { maintenanceId: "m1", windowStart: NOW, windowEnd: NOW + 1 };
+  assert.equal(h4cMaintenanceManifestTicket(manifestFields, CONFIG),
+    expected(H4C_DIGEST_DOMAINS.maintenanceManifest, manifestFields));
+
+  const refs = [
+    { collection: H4C.evidence, id: "b" },
+    { collection: H4C.anchors, id: "a" },
+  ];
+  assert.equal(h4cRefsDigest(refs), h4cRefsDigest([...refs].reverse()));
+  assert.throws(() => h4cKeyedDigest("KEYED_DIGEST/unknown", {}, CONFIG),
+    rejectCode("EVIDENCE_INVALID"));
+  assert.throws(() => h4cKeyedDigest(H4C_DIGEST_DOMAINS.audit, [], CONFIG),
+    rejectCode("EVIDENCE_INVALID"));
+});
+
+test("S1 fence predicates split healthy/expired/halted/clock and never mix usage", () => {
+  const proof = s1Proof();
+  const healthy = s1Fence({ epoch: proof.writeEpoch });
+  assert.equal(FenceRecordValid(healthy, CONFIG), true);
+  assert.equal(FenceStructValid(healthy, proof, CONFIG), true);
+  assert.equal(FenceHealthy(healthy, proof, NOW, CONFIG), true);
+  assert.equal(FenceValid(healthy, proof, NOW, CONFIG), true);
+  assert.equal(FenceExpired(healthy, proof, NOW, CONFIG), false);
+  assert.equal(FenceHeartbeatable(healthy, proof, NOW, CONFIG), true);
+
+  const expired = s1Fence({
+    epoch: proof.writeEpoch, heartbeatAt: NOW - 400_000, validUntil: NOW - 100_000,
+    updatedAt: NOW - 400_000,
+  });
+  assert.equal(FenceValid(expired, proof, NOW, CONFIG), false);
+  assert.equal(FenceExpired(expired, proof, NOW, CONFIG), true);
+  assert.equal(FenceHealthy(expired, proof, NOW, CONFIG), false);
+  assert.equal(FenceHeartbeatable(expired, proof, NOW, CONFIG), true);
+
+  const halted = s1Fence({ epoch: proof.writeEpoch, status: "halted", reasonCode: "monitor-halt" });
+  assert.equal(FenceValid(halted, proof, NOW, CONFIG), false);
+  assert.equal(FenceHeartbeatable(halted, proof, NOW, CONFIG), false);
+  assert.equal(FenceExpired(halted, proof, NOW, CONFIG), false);
+
+  const rolledBack = NOW - CLOCK_SKEW_MS - 1;
+  assert.equal(FenceHealthy(healthy, proof, rolledBack, CONFIG), false);
+  assert.equal(FenceExpired(healthy, proof, rolledBack, CONFIG), false);
+  assert.equal(FenceHeartbeatable(healthy, proof, rolledBack, CONFIG), false);
+
+  const tooWide = s1Fence({
+    epoch: proof.writeEpoch, heartbeatAt: NOW,
+    validUntil: NOW + MONITOR_HEALTH_WINDOW_MS + 1,
+  });
+  assert.equal(FenceRecordValid(tooWide, CONFIG), false);
+
+  const wrongEpoch = s1Proof({ writeEpoch: 5 });
+  assert.equal(FenceStructValid(healthy, wrongEpoch, CONFIG), false);
+  assert.equal(FenceValid(healthy, wrongEpoch, NOW, CONFIG), false);
+});
+
+test("S1 marker/coverage/writer-plan predicates enforce consumed+runtimeTicket binding", () => {
+  const { marker, proof, plan, state } = s1Fixture();
+  assert.equal(K3DomainExact(state, CONFIG), true);
+  assert.equal(K3MarkerValid(marker, state, CONFIG), true);
+  assert.equal(WriterPlanValid(plan, proof, marker, CONFIG), true);
+  assert.equal(CoverageValid(proof, marker, plan, CONFIG, state), true);
+
+  const active = s1Plan({
+    planKind: "writer", writerEpoch: 4, sourceKind: "halted-fence",
+    sourceHaltedEpoch: 3, sourceFenceDigest: "d".repeat(64),
+    targetProofId: proof._id, targetWriterSetDigest: proof.writerSetDigest,
+    revokedWriterSetDigest: "e".repeat(64), revocationReceiptDigest: "f".repeat(64),
+  });
+  assert.equal(WriterPlanValid(active, proof, marker, CONFIG), false);
+
+  const wrongPlanProof = s1Proof({ marker, writerPlanId: writerPlanId(5) });
+  assert.equal(WriterPlanValid(plan, wrongPlanProof, marker, CONFIG), false);
+
+  const badMarker = s1Marker();
+  badMarker.markerDigest = "0".repeat(64);
+  assert.equal(CoverageValid(proof, badMarker, plan, CONFIG, state), false);
+  assert.equal(K3MarkerValid(badMarker, state, CONFIG), false);
+
+  const badCoverage = s1Proof({ marker, legacyCount: 1 });
+  assert.equal(CoverageValid(badCoverage, marker, plan, CONFIG, state), false);
+
+  const mismatchedSet = s1Plan({
+    planKind: "writer", writerEpoch: 4, sourceKind: "halted-fence",
+    sourceHaltedEpoch: 3, sourceFenceDigest: "d".repeat(64),
+    targetProofId: proof._id, targetWriterSetDigest: "9".repeat(64),
+    revokedWriterSetDigest: "e".repeat(64), revocationReceiptDigest: "f".repeat(64),
+    status: "consumed", statusUpdatedAt: NOW + 1,
+  });
+  assert.equal(CoverageValid(proof, marker, mismatchedSet, CONFIG, state), false);
+});
+
+test("S1 D5 runtime whitelist and ticket binding (V10-V13)", () => {
+  const { proof, state, refs, writes, admission } = s1Fixture();
+  assert.equal(AdmissionValid(admission, refs, writes, CONFIG), true);
+  const gate = createH4cGate({ config: CONFIG });
+
+  const authVariants = [
+    (copy) => { delete copy.operationAuthDigest; },
+    (copy) => { copy.operationAuthDigest = undefined; },
+    (copy) => { copy.operationAuthDigest = ""; },
+    (copy) => { copy.operationAuthDigest = "digest"; },
+  ];
+  for (const mutate of authVariants) {
+    const copy = structuredClone(admission);
+    mutate(copy);
+    assert.equal(AdmissionValid(copy, refs, writes, CONFIG), false);
+    assert.throws(() => gate.verify({ state, refs, writes, admission: copy, now: NOW }),
+      rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+  }
+  for (const overrides of [
+    { kind: "migration" },
+    { kind: "recovery" },
+    { operation: "k3-domain-bootstrap" },
+    { operation: "recover" },
+  ]) {
+    const copy = structuredClone(admission);
+    Object.assign(copy, overrides);
+    copy.ticket = h4cAdmissionTicketDigest(copy, CONFIG);
+    assert.equal(AdmissionValid(copy, refs, writes, CONFIG), false);
+  }
+  const digestMismatch = structuredClone(admission);
+  digestMismatch.refsDigest = "0".repeat(64);
+  assert.equal(AdmissionValid(digestMismatch, refs, writes, CONFIG), false);
+  const ticketMismatch = structuredClone(admission);
+  ticketMismatch.ticket = "0".repeat(64);
+  assert.equal(AdmissionValid(ticketMismatch, refs, writes, CONFIG), false);
+  const duplicateRefs = [...refs, { ...refs[0] }];
+  assert.equal(AdmissionValid(admission, duplicateRefs, writes, CONFIG), false);
+  const undeclaredWrites = [...writes, {
+    collection: H4C.evidence, id: "h4c-evidence-v1:missing", data: { _id: "h4c-evidence-v1:missing" },
+  }];
+  assert.equal(AdmissionValid(admission, refs, undeclaredWrites, CONFIG), false);
+  const epochMismatch = structuredClone(admission);
+  epochMismatch.writeEpoch = 5;
+  epochMismatch.ticket = h4cAdmissionTicketDigest(epochMismatch, CONFIG);
+  assert.throws(() => gate.verify({ state, refs, writes, admission: epochMismatch, now: NOW }),
+    rejectCode("EVIDENCE_CHAIN_ADMISSION_REQUIRED"));
+});
+
+test("S1 gate is frozen, pure and enforces coverage/fence before writing", () => {
+  const { proof, fence, state, refs, writes, admission } = s1Fixture();
+  const gate = createH4cGate({ config: CONFIG });
+  assert.equal(Object.isFrozen(gate), true);
+  assert.deepEqual(Object.keys(gate), ["verify"]);
+  assert.equal(typeof gate.verify, "function");
+  for (const name of ["key", "config", "health", "setConfig", "replace"]) {
+    assert.equal(Object.hasOwn(gate, name), false, name);
+  }
+  assert.throws(() => createH4cGate({
+    config: { ...CONFIG, fingerprint: "0".repeat(64) },
+  }), rejectCode("NOT_CONFIGURED"));
+  assert.throws(() => createH4cGate({ config: CONFIG, health: { windowMs: 0 } }),
+    rejectCode("NOT_CONFIGURED"));
+  assert.throws(() => createH4cGate({ config: CONFIG, health: { skewMs: -1 } }),
+    rejectCode("NOT_CONFIGURED"));
+
+  const stateBefore = structuredClone(state);
+  const refsBefore = structuredClone(refs);
+  const writesBefore = structuredClone(writes);
+  const admissionBefore = structuredClone(admission);
+  assert.equal(gate.verify({ state, refs, writes, admission, now: NOW }), undefined);
+  assert.deepEqual(state, stateBefore);
+  assert.deepEqual(refs, refsBefore);
+  assert.deepEqual(writes, writesBefore);
+  assert.deepEqual(admission, admissionBefore);
+
+  const noProofState = structuredClone(state);
+  delete noProofState[`${H4C.auditProofs}/${proof._id}`];
+  assert.throws(() => gate.verify({ state: noProofState, refs, writes, admission, now: NOW }),
+    rejectCode("EVIDENCE_CHAIN_PROOF_REQUIRED"));
+
+  const expiredState = structuredClone(state);
+  expiredState[`${H4C.fences}/${EVIDENCE_CHAIN_FENCE_ID}`] = s1Fence({
+    epoch: proof.writeEpoch, heartbeatAt: NOW - 400_000, validUntil: NOW - 100_000,
+    updatedAt: NOW - 400_000,
+  });
+  assert.throws(() => gate.verify({ state: expiredState, refs, writes, admission, now: NOW }),
+    rejectCode("EVIDENCE_CHAIN_FENCE_EXPIRED"));
+
+  const haltedState = structuredClone(state);
+  haltedState[`${H4C.fences}/${EVIDENCE_CHAIN_FENCE_ID}`] = s1Fence({
+    epoch: fence.epoch, status: "halted", reasonCode: "monitor-halt",
+  });
+  assert.throws(() => gate.verify({ state: haltedState, refs, writes, admission, now: NOW }),
+    rejectCode("EVIDENCE_CHAIN_HALTED"));
+
+  assert.throws(() => gate.verify({ state, refs, writes, admission, now: 1.5 }),
+    rejectCode("EVIDENCE_INVALID"));
+});
+
+test("S1 error-code table and public index stay add-only", async () => {
+  const values = Object.values(H4C_ERROR_CODES);
+  assert.equal(new Set(values).size, values.length);
+  assert.equal(H4C_ERROR_CODES.EVIDENCE_CHAIN_PROOF_REQUIRED,
+    "EVIDENCE_CHAIN_PROOF_REQUIRED");
+  assert.notEqual(H4C_ERROR_CODES.EVIDENCE_CHAIN_PROOF_REQUIRED,
+    H4C_ERROR_CODES.EVIDENCE_CHAIN_ADMISSION_REQUIRED);
+  assert.notEqual(H4C_ERROR_CODES.EVIDENCE_CHAIN_HALTED,
+    H4C_ERROR_CODES.EVIDENCE_CHAIN_FENCE_EXPIRED);
+
+  const service = await import("../lib/face-service/index.mjs");
+  for (const name of [
+    "H4C", "isH4cCollection", "createH4cGate", "CoverageValid",
+    "WriterPlanValid", "AdmissionValid", "FenceValid", "FenceHeartbeatable",
+    "evidenceAnchorId", "evidenceProofId", "writerPlanId", "writerRunId",
+    "evidenceC1AuditRecord", "H4C_SCHEMA_FIELDS", "H4C_DIGEST_DOMAINS",
+  ]) assert.equal(typeof service[name] !== "undefined", true, name);
+  for (const name of ["initializeEvidenceDomain", "bootstrapEvidenceDomain",
+    "createEvidenceDomain", "ensureEvidenceDomain"]) {
+    assert.equal(name in service, false, name);
+  }
+  assert.equal(Object.hasOwn(service, "H4C_COLLECTION_SET"), false);
 });

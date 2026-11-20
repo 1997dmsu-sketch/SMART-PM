@@ -19,10 +19,11 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 import { failCode } from "../model.mjs";
+import { H4C, H4C_AUDIT_COLLECTION, H4C_COLLECTION_NAMES } from "../h4c-collections.mjs";
 
-export const EVIDENCE_COLLECTION = "device_operation_evidence";
-export const EVIDENCE_HEADS_COLLECTION = "device_operation_evidence_heads";
-export const EVIDENCE_DOMAINS_COLLECTION = "evidence_digest_domains";
+export const EVIDENCE_COLLECTION = H4C.evidence;
+export const EVIDENCE_HEADS_COLLECTION = H4C.evidenceHeads;
+export const EVIDENCE_DOMAINS_COLLECTION = H4C.domains;
 
 export const EVIDENCE_DIGEST_DOMAIN = "KEYED_DIGEST/h4-reconcile-evidence";
 export const EVIDENCE_DIGEST_ALGORITHM = "HMAC-SHA256";
@@ -47,10 +48,10 @@ const SOURCE_CODES = new Map([
   ["still_unknown", "OPERATOR_UNCERTAIN"],
 ]);
 
-const EVIDENCE_FIELDS = "_id orgId jobId schemaVersion sequence decision sourceType sourceCode observedAt digestDomain digestAlgorithm digestAlgorithmVersion keyRealm keyVersion keyFingerprint digest previousEvidenceId evidenceScope actorId createdAt".split(" ");
-const EVIDENCE_HEAD_FIELDS = "_id orgId jobId revision lastSequence lastEvidenceId lastObservedAt createdAt updatedAt".split(" ");
-const DOMAIN_HEAD_FIELDS = "_id kind realm keyVersion keyFingerprint revision createdAt".split(" ");
-const DOMAIN_VERSION_FIELDS = "_id kind realm keyVersion keyFingerprint enabledAt".split(" ");
+export const EVIDENCE_FIELDS = Object.freeze("_id orgId jobId schemaVersion sequence decision sourceType sourceCode observedAt digestDomain digestAlgorithm digestAlgorithmVersion keyRealm keyVersion keyFingerprint digest previousEvidenceId evidenceScope actorId createdAt".split(" "));
+export const EVIDENCE_HEAD_FIELDS = Object.freeze("_id orgId jobId revision lastSequence lastEvidenceId lastObservedAt createdAt updatedAt".split(" "));
+export const DOMAIN_HEAD_FIELDS = Object.freeze("_id kind realm keyVersion keyFingerprint revision createdAt".split(" "));
+export const DOMAIN_VERSION_FIELDS = Object.freeze("_id kind realm keyVersion keyFingerprint enabledAt".split(" "));
 
 const fail = (code, status = 409) => failCode(code, code, status);
 const integer = (value, min = 0, max = Number.MAX_SAFE_INTEGER) =>
@@ -468,4 +469,796 @@ export function appendEvidenceWrites(state, {
     write(EVIDENCE_COLLECTION, record),
     write(EVIDENCE_HEADS_COLLECTION, nextHead),
   ];
+}
+
+/* ------------------------------------------------------------------------- *
+ * S1 contract layer
+ *
+ * Pure constants, canonical IDs, exact schema arrays, digests and predicates
+ * for the C1 contracts. This layer deliberately has no Store access, no I/O,
+ * no clock read and no mutation of its inputs. Store wiring and the 18-refs
+ * append path belong to later stages.
+ * ------------------------------------------------------------------------- */
+
+export const EVIDENCE_CHAIN_ANCHOR_PREFIX = "h4c-evidence-anchor-v1:";
+export const EVIDENCE_CHAIN_FENCE_ID = "evidence-chain-fence:v1:global";
+export const EVIDENCE_CHAIN_K3_MARKER_ID = "evidence-chain-k3-marker:v1:global";
+export const MONITOR_HEALTH_WINDOW_MS = 300_000;
+export const CLOCK_SKEW_MS = 30_000;
+
+export const H4C_DIGEST_DOMAINS = Object.freeze({
+  audit: "KEYED_DIGEST/h4-evidence-chain-audit",
+  fence: "KEYED_DIGEST/h4-evidence-chain-fence",
+  monitor: "KEYED_DIGEST/h4-evidence-monitor",
+  ticket: "KEYED_DIGEST/h4-canonical-write-admission",
+  plan: "KEYED_DIGEST/h4-evidence-plan",
+  planStatus: "KEYED_DIGEST/h4-evidence-plan-status",
+  recovery: "KEYED_DIGEST/h4-evidence-chain-recovery",
+  k3Bootstrap: "KEYED_DIGEST/h4-k3-bootstrap",
+  writerRuntime: "KEYED_DIGEST/h4-evidence-writer-runtime",
+  k3Marker: "KEYED_DIGEST/h4-evidence-k3-marker",
+  maintenanceManifest: "KEYED_DIGEST/h4-maintenance-manifest",
+});
+
+export const H4C_ERROR_CODES = Object.freeze({
+  NOT_CONFIGURED: "NOT_CONFIGURED",
+  DOMAIN_INCOMPLETE: "DOMAIN_INCOMPLETE",
+  DOMAIN_MISMATCH: "DOMAIN_MISMATCH",
+  K3_BOOTSTRAP_DENIED: "K3_BOOTSTRAP_DENIED",
+  EVIDENCE_CHAIN_PROOF_REQUIRED: "EVIDENCE_CHAIN_PROOF_REQUIRED",
+  EVIDENCE_CHAIN_ADMISSION_REQUIRED: "EVIDENCE_CHAIN_ADMISSION_REQUIRED",
+  EVIDENCE_CHAIN_HALTED: "EVIDENCE_CHAIN_HALTED",
+  EVIDENCE_CHAIN_FENCE_EXPIRED: "EVIDENCE_CHAIN_FENCE_EXPIRED",
+  EVIDENCE_CHAIN_BROKEN: "EVIDENCE_CHAIN_BROKEN",
+  EVIDENCE_HEAD_CONFLICT: "EVIDENCE_HEAD_CONFLICT",
+  CONFLICT: "CONFLICT",
+  EVIDENCE_INVALID: "EVIDENCE_INVALID",
+  EVIDENCE_STALE: "EVIDENCE_STALE",
+  MIGRATION_CAPACITY_EXCEEDED: "MIGRATION_CAPACITY_EXCEEDED",
+  MAINTENANCE_WINDOW_EXPIRED: "MAINTENANCE_WINDOW_EXPIRED",
+  MAINTENANCE_MANIFEST_INVALID: "MAINTENANCE_MANIFEST_INVALID",
+  PLAN_DUPLICATE: "PLAN_DUPLICATE",
+  PLAN_INVALID: "PLAN_INVALID",
+  PLAN_CONSUMED: "PLAN_CONSUMED",
+  PLAN_EXPIRED: "PLAN_EXPIRED",
+  PLAN_REVOKED: "PLAN_REVOKED",
+  PLAN_STALE: "PLAN_STALE",
+});
+
+export const EVIDENCE_ANCHOR_FIELDS = Object.freeze(
+  "_id orgId jobId schemaVersion firstEvidenceId createdAt".split(" "));
+export const EVIDENCE_AUDIT_FIELDS = Object.freeze(
+  "_id orgId actorId actorType action target createdAt".split(" "));
+export const EVIDENCE_FENCE_FIELDS = Object.freeze(
+  "_id kind scope schemaVersion status epoch reasonCode monitorId heartbeatAt validUntil updatedAt fenceDigest".split(" "));
+export const EVIDENCE_K3_MARKER_FIELDS = Object.freeze(
+  "_id kind scope schemaVersion fenceId k3DomainHeadId k3DomainVersionId k3DomainHeadRevision realm keyVersion keyFingerprint bootstrapRunId maintenanceId maintenanceManifestDigest windowStart windowEnd createdAt markerDigest".split(" "));
+export const EVIDENCE_AUDIT_PROOF_FIELDS = Object.freeze(
+  "_id kind scope schemaVersion realm keyVersion keyFingerprint domainHeadId domainHeadRevision writeEpoch admissionPolicyVersion writerSetDigest auditedCollections status canonicalEvidenceCount canonicalHeadCount anchorCount legacyCount inventoryDigest checkedAt checkedBy auditDigest k3MarkerDigest writerPlanId".split(" "));
+export const EVIDENCE_PLAN_FIELDS = Object.freeze([
+  "_id", "kind", "scope", "schemaVersion", "planKind", "phase", "runId", "issuedBy",
+  "issuedAt", "windowStart", "windowEnd", "keyFingerprint", "k3MarkerId", "sourceKind",
+  "sourceHaltedEpoch", "sourceFenceDigest", "targetWriteEpoch", "targetAdmissionPolicyVersion",
+  "targetWriterSetDigest", "targetProofId", "writerEpoch", "revokedWriterSetDigest",
+  "revocationReceiptDigest", "finalInventoryDigest", "canonicalEvidenceCount",
+  "canonicalHeadCount", "anchorCount", "auditedCollections", "planDigest", "planTicket",
+  "status", "statusFrom", "statusTargetProofId", "statusUpdatedAt", "statusReason",
+  "statusActor", "statusTicket", "initialStatusTicket", "runtimeTicket",
+]);
+
+export const H4C_SCHEMA_FIELDS = Object.freeze({
+  anchor: EVIDENCE_ANCHOR_FIELDS,
+  evidence: EVIDENCE_FIELDS,
+  head: EVIDENCE_HEAD_FIELDS,
+  domainHead: DOMAIN_HEAD_FIELDS,
+  domainVersion: DOMAIN_VERSION_FIELDS,
+  audit: EVIDENCE_AUDIT_FIELDS,
+  fence: EVIDENCE_FENCE_FIELDS,
+  k3Marker: EVIDENCE_K3_MARKER_FIELDS,
+  auditProof: EVIDENCE_AUDIT_PROOF_FIELDS,
+  plan: EVIDENCE_PLAN_FIELDS,
+});
+
+const AUDITED_COLLECTIONS_SORTED = Object.freeze([...H4C_COLLECTION_NAMES].sort());
+const PLAN_KINDS = new Set(["migration", "recovery", "writer"]);
+const PLAN_PHASES = new Set(["pre-anchor", "final", "recovery", "writer"]);
+const PLAN_STATUSES = new Set(["active", "consumed", "revoked"]);
+const PLAN_STATUS_REASONS = new Set([
+  "plan-issue", "consumed:migration-finalize", "consumed:recovery-finalize",
+  "consumed:writer-rotate", "revoked:plan-revoke",
+]);
+const ADMISSION_FIELDS = Object.freeze([
+  "kind", "operation", "writeEpoch", "admissionPolicyVersion", "writerSetDigest",
+  "proofId", "refsDigest", "writesDigest", "operationAuthDigest", "ticket",
+]);
+
+/** Canonical keyed digest: HMAC-SHA256 over { domain, version:1, ...fields }. */
+function keyedDigest(domain, fields, config) {
+  const cfg = normalizedConfig(config);
+  return createHmac("sha256", cfg.key)
+    .update(stableStringify({ domain, version: 1, ...fields }), "utf8").digest("hex");
+}
+
+export function h4cKeyedDigest(domain, fields, config) {
+  if (!Object.values(H4C_DIGEST_DOMAINS).includes(domain)) fail("EVIDENCE_INVALID");
+  if (!isPlainObject(fields)) fail("EVIDENCE_INVALID");
+  return keyedDigest(domain, fields, config);
+}
+
+const sha256 = (value) => createHash("sha256")
+  .update(stableStringify(value), "utf8").digest("hex");
+
+export function h4cAuditProofDigest(proof, config) {
+  if (!isPlainObject(proof)) fail("EVIDENCE_CHAIN_PROOF_REQUIRED");
+  const { auditDigest, ...fields } = proof;
+  return keyedDigest(H4C_DIGEST_DOMAINS.audit, fields, config);
+}
+
+export function h4cFenceDigest(fence, config) {
+  if (!isPlainObject(fence)) fail("EVIDENCE_CHAIN_HALTED");
+  const { fenceDigest, ...fields } = fence;
+  return keyedDigest(H4C_DIGEST_DOMAINS.fence, fields, config);
+}
+
+export function h4cMonitorAuthDigest(message, config) {
+  if (!isPlainObject(message)) fail("EVIDENCE_INVALID");
+  return keyedDigest(H4C_DIGEST_DOMAINS.monitor, message, config);
+}
+
+export function h4cAdmissionTicketDigest(admission, config) {
+  if (!isPlainObject(admission)) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  const { ticket, ...fields } = admission;
+  return keyedDigest(H4C_DIGEST_DOMAINS.ticket, fields, config);
+}
+
+export function h4cPlanDigest(core) {
+  if (!isPlainObject(core)) fail("PLAN_INVALID");
+  return createHash("sha256").update(stableStringify(core), "utf8").digest("hex");
+}
+
+export function h4cPlanTicket(core, config) {
+  if (!isPlainObject(core)) fail("PLAN_INVALID");
+  return keyedDigest(H4C_DIGEST_DOMAINS.plan, core, config);
+}
+
+export function h4cPlanStatusTicket(fields, config) {
+  if (!isPlainObject(fields)) fail("PLAN_INVALID");
+  return keyedDigest(H4C_DIGEST_DOMAINS.planStatus, fields, config);
+}
+
+export function h4cRecoveryTicket(plan, config) {
+  if (!isPlainObject(plan)) fail("PLAN_INVALID");
+  const { recoveryTicket, ...fields } = plan;
+  return keyedDigest(H4C_DIGEST_DOMAINS.recovery, fields, config);
+}
+
+export function h4cK3DomainTicket(bootstrap, config) {
+  if (!isPlainObject(bootstrap)) fail("PLAN_INVALID");
+  const { ticket, ...fields } = bootstrap;
+  return keyedDigest(H4C_DIGEST_DOMAINS.k3Bootstrap, fields, config);
+}
+
+export function h4cWriterRuntimeTicket(fields, config) {
+  if (!isPlainObject(fields)) fail("PLAN_INVALID");
+  return keyedDigest(H4C_DIGEST_DOMAINS.writerRuntime, fields, config);
+}
+
+export function h4cK3MarkerDigest(marker, config) {
+  if (!isPlainObject(marker)) fail("EVIDENCE_CHAIN_PROOF_REQUIRED");
+  const { markerDigest, ...fields } = marker;
+  return keyedDigest(H4C_DIGEST_DOMAINS.k3Marker, fields, config);
+}
+
+export function h4cMaintenanceManifestTicket(manifest, config) {
+  if (!isPlainObject(manifest)) fail("MAINTENANCE_MANIFEST_INVALID");
+  const { maintenanceTicket, ...fields } = manifest;
+  return keyedDigest(H4C_DIGEST_DOMAINS.maintenanceManifest, fields, config);
+}
+
+function sortRefRows(left, right) {
+  if (left.collection !== right.collection) return left.collection < right.collection ? -1 : 1;
+  if (left.id === right.id) return 0;
+  return left.id < right.id ? -1 : 1;
+}
+
+export function h4cRefsDigest(refs) {
+  if (!Array.isArray(refs)) fail("EVIDENCE_INVALID");
+  const canonical = refs.map((item) => {
+    if (!isPlainObject(item) || typeof item.collection !== "string" ||
+        typeof item.id !== "string") fail("EVIDENCE_INVALID");
+    return { collection: item.collection, id: item.id };
+  }).sort(sortRefRows);
+  return sha256(canonical);
+}
+
+export function h4cWritesDigest(writes) {
+  if (!Array.isArray(writes)) fail("EVIDENCE_INVALID");
+  const canonical = writes.map((item) => {
+    if (!isPlainObject(item) || typeof item.collection !== "string" ||
+        typeof item.id !== "string" || !isPlainObject(item.data)) fail("EVIDENCE_INVALID");
+    return { collection: item.collection, id: item.id, data: item.data };
+  }).sort(sortRefRows);
+  return sha256(canonical);
+}
+
+/* ---- canonical IDs ------------------------------------------------------- */
+
+export function evidenceAnchorId(orgId, jobId) {
+  if (!opaque(orgId) || !opaque(jobId)) fail("EVIDENCE_INVALID");
+  return hashId(EVIDENCE_CHAIN_ANCHOR_PREFIX, [orgId, jobId]);
+}
+
+export function evidenceProofId(keyFingerprint, domainHeadRevision, writeEpoch) {
+  if (!hex(keyFingerprint) || !integer(domainHeadRevision, 1) || !integer(writeEpoch, 1)) {
+    fail("EVIDENCE_CHAIN_PROOF_REQUIRED");
+  }
+  return `evidence-chain-audit:v1:${keyFingerprint}:${domainHeadRevision}:${writeEpoch}`;
+}
+
+export function writerRunId(writerEpoch) {
+  if (!integer(writerEpoch, 1)) fail("PLAN_INVALID");
+  return `we-${writerEpoch}`;
+}
+
+/** Parse only the canonical writer runId (`we-<positive decimal, no zeros>`). */
+export function writerEpochFromRunId(runId) {
+  if (typeof runId !== "string" || !/^we-(0|[1-9][0-9]*)$/.test(runId)) fail("PLAN_INVALID");
+  const writerEpoch = Number(runId.slice(3));
+  if (!integer(writerEpoch, 1)) fail("PLAN_INVALID");
+  return writerEpoch;
+}
+
+export function writerPlanId(writerEpoch) {
+  return `evidence-chain-plan:v1:writer:${writerRunId(writerEpoch)}:writer`;
+}
+
+export function evidencePlanId(planKind, runId, phase) {
+  if (!PLAN_KINDS.has(planKind) || !PLAN_PHASES.has(phase) ||
+      typeof runId !== "string" || runId.length === 0 || runId !== runId.trim()) {
+    fail("PLAN_INVALID");
+  }
+  if (planKind === "writer" && phase !== "writer") fail("PLAN_INVALID");
+  if (planKind === "migration" && !["pre-anchor", "final"].includes(phase)) {
+    fail("PLAN_INVALID");
+  }
+  if (planKind === "recovery" && phase !== "recovery") fail("PLAN_INVALID");
+  return `evidence-chain-plan:v1:${planKind}:${runId}:${phase}`;
+}
+
+export function evidenceC1AuditId({ orgId, scopeKey, action, targetList, revision } = {}) {
+  if (!opaque(orgId) || !opaque(scopeKey) ||
+      !["h4c.evidence.genesis", "h4c.evidence.append"].includes(action) ||
+      !Array.isArray(targetList) || targetList.length === 0 ||
+      !integer(revision, 1)) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  const seen = new Set();
+  for (let index = 0; index < targetList.length; index += 1) {
+    const target = targetList[index];
+    if (typeof target !== "string" || !target.includes("/") ||
+        target.startsWith(`${H4C_AUDIT_COLLECTION}/`) || seen.has(target) ||
+        (index > 0 && targetList[index - 1] >= target)) {
+      fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+    }
+    seen.add(target);
+  }
+  return hashId("audit-h4c-v1:", [orgId, scopeKey, action, targetList, revision]);
+}
+
+/** Build the exact 7-field C1 test-only explicit audit record. */
+export function evidenceC1AuditRecord({
+  orgId, jobId, targetList, sequence, actorId, actorType, now,
+} = {}) {
+  if (!integer(sequence, 1) || !integer(now) || !opaque(actorId) || !opaque(actorType)) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  const action = sequence === 1 ? "h4c.evidence.genesis" : "h4c.evidence.append";
+  const audit = {
+    _id: evidenceC1AuditId({ orgId, scopeKey: jobId, action, targetList, revision: sequence }),
+    orgId,
+    actorId,
+    actorType,
+    action,
+    target: targetList.join(", "),
+    createdAt: now,
+  };
+  validateH4cAuditRecord(audit);
+  return audit;
+}
+
+/** Rebuild and compare a C1 audit against the exact D4b inputs. */
+export function validateEvidenceC1AuditRecord(record, {
+  orgId, jobId, targetList, sequence, now,
+} = {}) {
+  validateH4cAuditRecord(record);
+  if (!integer(sequence, 1) || !integer(now)) {
+    fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+  }
+  const expected = evidenceC1AuditRecord({
+    orgId, jobId, targetList, sequence, actorId: record.actorId,
+    actorType: record.actorType, now,
+  });
+  if (record._id !== expected._id || record.orgId !== expected.orgId ||
+      record.action !== expected.action || record.target !== expected.target ||
+      record.createdAt !== now) fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+}
+
+/* ---- exact schema validators -------------------------------------------- */
+
+export function validateEvidenceAnchorRecord(record) {
+  assertExact(record, EVIDENCE_ANCHOR_FIELDS, "EVIDENCE_INVALID");
+  if (!opaque(record.orgId) || !opaque(record.jobId) ||
+      record._id !== evidenceAnchorId(record.orgId, record.jobId) ||
+      record.schemaVersion !== EVIDENCE_SCHEMA_VERSION ||
+      record.firstEvidenceId !== evidenceId(record.orgId, record.jobId, 1) ||
+      !integer(record.createdAt)) fail("EVIDENCE_INVALID");
+}
+
+export function validateH4cAuditRecord(record) {
+  assertExact(record, EVIDENCE_AUDIT_FIELDS, "EVIDENCE_INVALID");
+  if (!/^audit-h4c-v1:[0-9a-f]{32}$/.test(record._id ?? "") ||
+      !opaque(record.orgId) || !opaque(record.actorId) || !opaque(record.actorType) ||
+      !opaque(record.action) || typeof record.target !== "string" ||
+      record.target.length === 0 || !integer(record.createdAt)) fail("EVIDENCE_INVALID");
+}
+
+export function validateH4cAuditProofRecord(record, config) {
+  const code = "EVIDENCE_CHAIN_PROOF_REQUIRED";
+  assertExact(record, EVIDENCE_AUDIT_PROOF_FIELDS, code);
+  const cfg = normalizedConfig(config);
+  if (!hex(record.keyFingerprint) || !integer(record.domainHeadRevision, 1) ||
+      !integer(record.writeEpoch, 1)) fail(code);
+  let expectedDigest = null;
+  try {
+    expectedDigest = h4cAuditProofDigest(record, cfg);
+  } catch {
+    fail(code);
+  }
+  if (record._id !== evidenceProofId(record.keyFingerprint, record.domainHeadRevision,
+    record.writeEpoch) ||
+      record.kind !== "audit" || record.scope !== "global" || record.schemaVersion !== 1 ||
+      record.realm !== cfg.realm || record.keyVersion !== cfg.version ||
+      record.keyFingerprint !== cfg.fingerprint ||
+      record.domainHeadId !== EVIDENCE_DOMAIN_HEAD_ID ||
+      !opaque(record.admissionPolicyVersion) || !hex(record.writerSetDigest) ||
+      !Array.isArray(record.auditedCollections) ||
+      record.auditedCollections.length !== AUDITED_COLLECTIONS_SORTED.length ||
+      record.auditedCollections.some((name, index) => name !== AUDITED_COLLECTIONS_SORTED[index]) ||
+      record.status !== "verified" ||
+      !integer(record.canonicalEvidenceCount, 0) ||
+      !integer(record.canonicalHeadCount, 0) || !integer(record.anchorCount, 0) ||
+      !integer(record.legacyCount, 0) || record.legacyCount !== 0 ||
+      !hex(record.inventoryDigest) || !integer(record.checkedAt) ||
+      !opaque(record.checkedBy) || !hex(record.auditDigest) ||
+      !hex(record.k3MarkerDigest) ||
+      record.writerPlanId !== writerPlanId(record.writeEpoch) ||
+      record.auditDigest !== expectedDigest) fail(code);
+}
+
+export function validateH4cFenceRecord(record, config) {
+  const code = "EVIDENCE_CHAIN_HALTED";
+  assertExact(record, EVIDENCE_FENCE_FIELDS, code);
+  const cfg = normalizedConfig(config);
+  let expectedDigest = null;
+  try {
+    expectedDigest = h4cFenceDigest(record, cfg);
+  } catch {
+    fail(code);
+  }
+  if (record._id !== EVIDENCE_CHAIN_FENCE_ID || record.kind !== "fence" ||
+      record.scope !== "global" || record.schemaVersion !== 1 ||
+      !["clear", "halted"].includes(record.status) ||
+      !integer(record.epoch, 1) || !opaque(record.reasonCode) ||
+      !opaque(record.monitorId) || !integer(record.heartbeatAt) ||
+      !integer(record.validUntil) || record.validUntil <= record.heartbeatAt ||
+      record.validUntil - record.heartbeatAt > MONITOR_HEALTH_WINDOW_MS ||
+      !integer(record.updatedAt) || !hex(record.fenceDigest) ||
+      record.fenceDigest !== expectedDigest) fail(code);
+}
+
+export function validateH4cK3MarkerRecord(record, config) {
+  const code = "EVIDENCE_CHAIN_PROOF_REQUIRED";
+  assertExact(record, EVIDENCE_K3_MARKER_FIELDS, code);
+  const cfg = normalizedConfig(config);
+  let expectedDigest = null;
+  try {
+    expectedDigest = h4cK3MarkerDigest(record, cfg);
+  } catch {
+    fail(code);
+  }
+  if (record._id !== EVIDENCE_CHAIN_K3_MARKER_ID || record.kind !== "k3-marker" ||
+      record.scope !== "global" || record.schemaVersion !== 1 ||
+      record.fenceId !== EVIDENCE_CHAIN_FENCE_ID ||
+      record.k3DomainHeadId !== EVIDENCE_DOMAIN_HEAD_ID ||
+      !opaque(record.k3DomainVersionId) || !integer(record.k3DomainHeadRevision, 1) ||
+      record.realm !== cfg.realm || record.keyVersion !== cfg.version ||
+      record.keyFingerprint !== cfg.fingerprint ||
+      !opaque(record.bootstrapRunId) || !opaque(record.maintenanceId) ||
+      !hex(record.maintenanceManifestDigest) ||
+      !integer(record.windowStart) || !integer(record.windowEnd) ||
+      record.windowEnd < record.windowStart || !integer(record.createdAt) ||
+      record.createdAt < record.windowStart || record.createdAt > record.windowEnd ||
+      !hex(record.markerDigest) || record.markerDigest !== expectedDigest) fail(code);
+}
+
+function sortedUniqueStrings(value) {
+  if (!Array.isArray(value) || value.length === 0) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    if (typeof value[index] !== "string" || value[index].length === 0 ||
+        (index > 0 && value[index - 1] >= value[index])) return false;
+  }
+  return true;
+}
+
+function planCore28(plan) {
+  const core = {};
+  for (const field of EVIDENCE_PLAN_FIELDS.slice(0, 28)) core[field] = plan[field];
+  return core;
+}
+
+function planEmptyValuesValid(plan) {
+  if (plan.planKind === "migration") {
+    if (!["pre-anchor", "final"].includes(plan.phase) || plan.sourceKind !== "none") return false;
+    if (plan.sourceHaltedEpoch !== null || plan.sourceFenceDigest !== null) return false;
+    if (plan.writerEpoch !== null || plan.revokedWriterSetDigest !== null ||
+        plan.revocationReceiptDigest !== null) return false;
+    if (plan.phase === "pre-anchor") {
+      if (plan.finalInventoryDigest !== null || plan.auditedCollections !== null) return false;
+      return plan.canonicalEvidenceCount === 0 && plan.canonicalHeadCount === 0 &&
+        plan.anchorCount === 0;
+    }
+    return hex(plan.finalInventoryDigest) && sortedUniqueStrings(plan.auditedCollections) &&
+      integer(plan.canonicalEvidenceCount, 0) && integer(plan.canonicalHeadCount, 0) &&
+      integer(plan.anchorCount, 0);
+  }
+  if (plan.planKind === "recovery") {
+    if (plan.phase !== "recovery" || plan.sourceKind !== "halted-fence") return false;
+    if (!integer(plan.sourceHaltedEpoch, 1) || !hex(plan.sourceFenceDigest)) return false;
+    if (plan.writerEpoch !== null || plan.revokedWriterSetDigest !== null ||
+        plan.revocationReceiptDigest !== null) return false;
+    return hex(plan.finalInventoryDigest) && sortedUniqueStrings(plan.auditedCollections) &&
+      integer(plan.canonicalEvidenceCount, 0) && integer(plan.canonicalHeadCount, 0) &&
+      integer(plan.anchorCount, 0);
+  }
+  if (plan.phase !== "writer" || !integer(plan.writerEpoch, 1)) return false;
+  if (!hex(plan.revokedWriterSetDigest) || !hex(plan.revocationReceiptDigest)) return false;
+  if (plan.finalInventoryDigest !== null || plan.auditedCollections !== null) return false;
+  if (plan.canonicalEvidenceCount !== 0 || plan.canonicalHeadCount !== 0 ||
+      plan.anchorCount !== 0) return false;
+  if (plan.sourceKind === "bootstrap") {
+    return plan.sourceHaltedEpoch === null && plan.sourceFenceDigest === null;
+  }
+  if (plan.sourceKind === "halted-fence") {
+    return integer(plan.sourceHaltedEpoch, 1) && hex(plan.sourceFenceDigest) &&
+      plan.writerEpoch > plan.sourceHaltedEpoch;
+  }
+  return false;
+}
+
+export function validateH4cPlanRecord(record, config) {
+  const code = "PLAN_INVALID";
+  assertExact(record, EVIDENCE_PLAN_FIELDS, code);
+  const cfg = normalizedConfig(config);
+  if (record.kind !== "plan" || record.scope !== "global" || record.schemaVersion !== 1 ||
+      !PLAN_KINDS.has(record.planKind) || !PLAN_PHASES.has(record.phase) ||
+      typeof record.runId !== "string" || record.runId.length === 0 ||
+      !opaque(record.issuedBy) || !integer(record.issuedAt) ||
+      !integer(record.windowStart) || !integer(record.windowEnd) ||
+      record.windowStart > record.issuedAt || record.issuedAt >= record.windowEnd ||
+      !hex(record.keyFingerprint) || record.keyFingerprint !== cfg.fingerprint ||
+      record.k3MarkerId !== EVIDENCE_CHAIN_K3_MARKER_ID ||
+      !integer(record.targetWriteEpoch, 1) ||
+      !opaque(record.targetAdmissionPolicyVersion) ||
+      !hex(record.targetWriterSetDigest) ||
+      typeof record.targetProofId !== "string" || record.targetProofId.length === 0 ||
+      !["none", "bootstrap", "halted-fence"].includes(record.sourceKind) ||
+      !hex(record.planDigest) || !hex(record.planTicket) ||
+      !PLAN_STATUSES.has(record.status) || !["none", "active"].includes(record.statusFrom) ||
+      !integer(record.statusUpdatedAt) || !PLAN_STATUS_REASONS.has(record.statusReason) ||
+      !opaque(record.statusActor) || !hex(record.statusTicket) ||
+      !hex(record.initialStatusTicket) ||
+      (record.runtimeTicket !== null && !hex(record.runtimeTicket))) fail(code);
+
+  if (record.planKind === "writer") {
+    if (!integer(record.writerEpoch, 1) || record.phase !== "writer" ||
+        record.runId !== writerRunId(record.writerEpoch) ||
+        record._id !== writerPlanId(record.writerEpoch) ||
+        record.targetWriteEpoch !== record.writerEpoch) fail(code);
+  } else if (record._id !== evidencePlanId(record.planKind, record.runId, record.phase)) {
+    fail(code);
+  }
+  if (!planEmptyValuesValid(record)) fail(code);
+
+  const core = planCore28(record);
+  let expectedPlanDigest = null;
+  let expectedPlanTicket = null;
+  let expectedInitialTicket = null;
+  try {
+    expectedPlanDigest = h4cPlanDigest(core);
+    expectedPlanTicket = h4cPlanTicket({ ...core, planDigest: expectedPlanDigest }, cfg);
+    expectedInitialTicket = h4cPlanStatusTicket({
+      planId: record._id, fromStatus: "none", toStatus: "active", targetProofId: null,
+      statusUpdatedAt: record.issuedAt, statusReason: "plan-issue", actor: record.issuedBy,
+    }, cfg);
+  } catch {
+    fail(code);
+  }
+  if (record.planDigest !== expectedPlanDigest ||
+      record.planTicket !== expectedPlanTicket ||
+      record.initialStatusTicket !== expectedInitialTicket) fail(code);
+
+  const statusFields = {
+    planId: record._id,
+    fromStatus: record.statusFrom,
+    toStatus: record.status,
+    targetProofId: record.statusTargetProofId,
+    statusUpdatedAt: record.statusUpdatedAt,
+    statusReason: record.statusReason,
+    actor: record.statusActor,
+  };
+  if (record.status === "active") {
+    if (record.statusFrom !== "none" || record.statusTargetProofId !== null ||
+        record.statusReason !== "plan-issue" || record.statusUpdatedAt !== record.issuedAt ||
+        record.statusActor !== record.issuedBy ||
+        record.statusTicket !== record.initialStatusTicket ||
+        record.runtimeTicket !== null) fail(code);
+  } else if (record.status === "consumed") {
+    if (record.statusFrom !== "active" ||
+        record.statusTargetProofId !== record.targetProofId) fail(code);
+    let expectedStatusTicket = null;
+    try {
+      expectedStatusTicket = h4cPlanStatusTicket(statusFields, cfg);
+    } catch {
+      fail(code);
+    }
+    if (record.statusTicket !== expectedStatusTicket) fail(code);
+    if (record.planKind === "writer") {
+      if (record.runtimeTicket === null) fail(code);
+      let expectedRuntimeTicket = null;
+      try {
+        expectedRuntimeTicket = h4cWriterRuntimeTicket({
+          planId: record._id,
+          proofId: record.statusTargetProofId,
+          writerEpoch: record.writerEpoch,
+          targetWriterSetDigest: record.targetWriterSetDigest,
+          k3MarkerId: record.k3MarkerId,
+          keyFingerprint: record.keyFingerprint,
+          activatedAt: record.statusUpdatedAt,
+        }, cfg);
+      } catch {
+        fail(code);
+      }
+      if (record.runtimeTicket !== expectedRuntimeTicket) fail(code);
+    } else if (record.runtimeTicket !== null) {
+      fail(code);
+    }
+  } else {
+    if (record.statusFrom !== "active" || record.statusTargetProofId !== null ||
+        record.statusReason !== "revoked:plan-revoke" ||
+        record.runtimeTicket !== null) fail(code);
+    let expectedStatusTicket = null;
+    try {
+      expectedStatusTicket = h4cPlanStatusTicket(statusFields, cfg);
+    } catch {
+      fail(code);
+    }
+    if (record.statusTicket !== expectedStatusTicket) fail(code);
+  }
+}
+
+/* ---- predicates (booleans; no throws on invalid records) ---------------- */
+
+function healthOptions(health) {
+  return {
+    windowMs: health?.windowMs ?? MONITOR_HEALTH_WINDOW_MS,
+    skewMs: health?.skewMs ?? CLOCK_SKEW_MS,
+  };
+}
+
+export function FenceRecordValid(fence, config) {
+  try {
+    validateH4cFenceRecord(fence, config);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function FenceStructValid(fence, proof, config) {
+  if (!FenceRecordValid(fence, config) || !proof) return false;
+  return fence.epoch === proof.writeEpoch;
+}
+
+export function FenceHealthy(fence, proof, now, config, health = {}) {
+  if (!FenceStructValid(fence, proof, config) || !integer(now)) return false;
+  const { windowMs, skewMs } = healthOptions(health);
+  if (!integer(windowMs, 1) || !integer(skewMs, 0)) return false;
+  return fence.status === "clear" && now >= fence.heartbeatAt - skewMs &&
+    now <= fence.validUntil;
+}
+
+export function FenceExpired(fence, proof, now, config, health = {}) {
+  if (!FenceStructValid(fence, proof, config) || !integer(now)) return false;
+  const { skewMs } = healthOptions(health);
+  if (!integer(skewMs, 0)) return false;
+  return fence.status === "clear" && now > fence.validUntil &&
+    now >= fence.heartbeatAt - skewMs;
+}
+
+export function FenceValid(fence, proof, now, config, health = {}) {
+  return FenceHealthy(fence, proof, now, config, health);
+}
+
+export function FenceHeartbeatable(fence, proof, now, config, health = {}) {
+  if (!FenceStructValid(fence, proof, config) || !integer(now)) return false;
+  const { skewMs } = healthOptions(health);
+  if (!integer(skewMs, 0)) return false;
+  return fence.status === "clear" && now >= fence.heartbeatAt - skewMs;
+}
+
+export function K3DomainExact(state, config) {
+  try {
+    if (!isPlainObject(state)) return false;
+    applyEvidenceDomain(state, normalizedConfig(config));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function K3MarkerValid(marker, state, config) {
+  try {
+    const cfg = normalizedConfig(config);
+    validateH4cK3MarkerRecord(marker, cfg);
+    if (!isPlainObject(state)) return false;
+    applyEvidenceDomain(state, cfg);
+    const { versionId } = evidenceDomainIds(cfg.realm, cfg.version);
+    const head = read(state, H4C.domains, EVIDENCE_DOMAIN_HEAD_ID);
+    const version = read(state, H4C.domains, versionId);
+    return Boolean(head && version) &&
+      marker.k3DomainHeadId === head._id &&
+      marker.k3DomainHeadRevision === head.revision &&
+      marker.k3DomainVersionId === version._id &&
+      marker.realm === head.realm && marker.keyVersion === head.keyVersion &&
+      marker.keyFingerprint === head.keyFingerprint;
+  } catch {
+    return false;
+  }
+}
+
+export function PlanRecordValid(plan, config) {
+  try {
+    validateH4cPlanRecord(plan, config);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function WriterPlanValid(plan, proof, marker, config) {
+  try {
+    const cfg = normalizedConfig(config);
+    validateH4cPlanRecord(plan, cfg);
+    if (plan.planKind !== "writer" || plan.status !== "consumed" || !proof || !marker) {
+      return false;
+    }
+    return plan.statusTargetProofId === proof._id &&
+      proof.writerPlanId === plan._id &&
+      plan.writerEpoch === proof.writeEpoch &&
+      plan.k3MarkerId === marker._id && proof.k3MarkerDigest === marker.markerDigest &&
+      plan.keyFingerprint === cfg.fingerprint &&
+      proof.keyFingerprint === cfg.fingerprint;
+  } catch {
+    return false;
+  }
+}
+
+export function CoverageValid(proof, marker, writerPlan, config, state = null) {
+  try {
+    const cfg = normalizedConfig(config);
+    validateH4cAuditProofRecord(proof, cfg);
+    if (proof.status !== "verified" || proof.legacyCount !== 0) return false;
+    if (proof.realm !== cfg.realm || proof.keyVersion !== cfg.version ||
+        proof.keyFingerprint !== cfg.fingerprint) return false;
+    if (!isPlainObject(state) || !K3MarkerValid(marker, state, cfg)) return false;
+    if (!marker || proof.k3MarkerDigest !== marker.markerDigest) return false;
+    if (!WriterPlanValid(writerPlan, proof, marker, cfg)) return false;
+    if (proof.writerSetDigest !== writerPlan.targetWriterSetDigest) return false;
+    const audited = [...proof.auditedCollections].sort();
+    return audited.length === AUDITED_COLLECTIONS_SORTED.length &&
+      audited.every((name, index) => name === AUDITED_COLLECTIONS_SORTED[index]);
+  } catch {
+    return false;
+  }
+}
+
+export function AdmissionValid(admission, refs, writes, config) {
+  try {
+    const cfg = normalizedConfig(config);
+    if (!isPlainObject(admission)) return false;
+    const keys = Object.keys(admission);
+    if (keys.length !== ADMISSION_FIELDS.length ||
+        ADMISSION_FIELDS.some((field) => !Object.hasOwn(admission, field)) ||
+        keys.some((field) => !ADMISSION_FIELDS.includes(field))) return false;
+    if (admission.kind !== "runtime" ||
+        !["genesis", "append"].includes(admission.operation)) return false;
+    if (!Object.hasOwn(admission, "operationAuthDigest") ||
+        admission.operationAuthDigest !== null) return false;
+    if (!integer(admission.writeEpoch, 1) ||
+        !opaque(admission.admissionPolicyVersion) ||
+        !hex(admission.writerSetDigest) ||
+        typeof admission.proofId !== "string" || admission.proofId.length === 0 ||
+        !hex(admission.refsDigest) || !hex(admission.writesDigest) ||
+        !hex(admission.ticket)) return false;
+
+    if (!Array.isArray(refs) || refs.length === 0 || refs.length > 90) return false;
+    const refKeys = new Set();
+    for (const item of refs) {
+      if (!isPlainObject(item) || typeof item.collection !== "string" ||
+          item.collection.length === 0 || typeof item.id !== "string" ||
+          item.id.length === 0) return false;
+      const key = `${item.collection}/${item.id}`;
+      if (refKeys.has(key)) return false;
+      refKeys.add(key);
+    }
+
+    if (!Array.isArray(writes)) return false;
+    const writeKeys = new Set();
+    for (const item of writes) {
+      if (!isPlainObject(item) || typeof item.collection !== "string" ||
+          item.collection.length === 0 || typeof item.id !== "string" ||
+          item.id.length === 0 || !isPlainObject(item.data) ||
+          item.data._id !== item.id) return false;
+      const key = `${item.collection}/${item.id}`;
+      if (!refKeys.has(key) || writeKeys.has(key)) return false;
+      writeKeys.add(key);
+    }
+    if (admission.refsDigest !== h4cRefsDigest(refs) ||
+        admission.writesDigest !== h4cWritesDigest(writes)) return false;
+    const { ticket, ...fields } = admission;
+    return ticket === h4cAdmissionTicketDigest(fields, cfg);
+  } catch {
+    return false;
+  }
+}
+
+export function createH4cGate({ config, health = {} } = {}) {
+  const cfg = normalizedConfig(config);
+  if (!isPlainObject(health)) fail("NOT_CONFIGURED", 503);
+  const windowMs = health.windowMs === undefined
+    ? MONITOR_HEALTH_WINDOW_MS : health.windowMs;
+  const skewMs = health.skewMs === undefined ? CLOCK_SKEW_MS : health.skewMs;
+  if (!integer(windowMs, 1) || !integer(skewMs, 0)) fail("NOT_CONFIGURED", 503);
+  const options = Object.freeze({ windowMs, skewMs });
+
+  const gate = {
+    verify({ state, refs, writes, admission, now } = {}) {
+      if (!integer(now)) fail("EVIDENCE_INVALID");
+      if (!AdmissionValid(admission, refs, writes, cfg)) {
+        fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+      }
+      if (!isPlainObject(state)) fail("EVIDENCE_INVALID");
+      const proof = read(state, H4C.auditProofs, admission.proofId);
+      if (!proof || proof._id !== admission.proofId) {
+        fail("EVIDENCE_CHAIN_PROOF_REQUIRED");
+      }
+      if (proof.writeEpoch !== admission.writeEpoch ||
+          proof.writerSetDigest !== admission.writerSetDigest ||
+          proof.admissionPolicyVersion !== admission.admissionPolicyVersion) {
+        fail("EVIDENCE_CHAIN_ADMISSION_REQUIRED");
+      }
+      const marker = read(state, H4C.k3Markers, EVIDENCE_CHAIN_K3_MARKER_ID);
+      const writerPlan = read(state, H4C.plans, proof.writerPlanId);
+      const fence = read(state, H4C.fences, EVIDENCE_CHAIN_FENCE_ID);
+      if (!CoverageValid(proof, marker, writerPlan, cfg, state)) {
+        fail("EVIDENCE_CHAIN_PROOF_REQUIRED");
+      }
+      if (!FenceValid(fence, proof, now, cfg, options)) {
+        if (FenceExpired(fence, proof, now, cfg, options)) {
+          fail("EVIDENCE_CHAIN_FENCE_EXPIRED");
+        }
+        fail("EVIDENCE_CHAIN_HALTED");
+      }
+      return undefined;
+    },
+  };
+  return Object.freeze(gate);
 }

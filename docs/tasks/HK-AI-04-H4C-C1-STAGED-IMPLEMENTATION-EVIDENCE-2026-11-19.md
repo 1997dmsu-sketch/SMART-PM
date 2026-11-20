@@ -791,3 +791,100 @@ stat   1 file changed, 477 insertions(+)
 - **现有 S1 如何验收等待 Codex**；在收到 Stop-0 结论前，不提交/不 push S1、不进入 S2、不自行通过任何阶段。
 - 本节追加提交为 docs-only 普通追加，父 = `a188509`；最终提交 SHA/push 后 `ls-remote` 完整 40 位 SHA 由交付回报给出。
 - 停手点：完成本节 docs-only 提交与普通 push 后立即停手，交 Codex 独立复审。
+
+---
+
+# S1 续派实施与复跑证据（从 84a9a55 追加；不改上文）
+
+> 本段按用户 2026-11-20T10:30:35+08:00 明确授权追加：**仅原批准 C1 S1，从 `84a9a555aca72bb8c60646c1eef8f408f234004f` 继续；不重做 S0、不自行另找 CLI 批准。** Stop-1 仍待 Codex 独立复审；本段不自批，不进入 S2。
+
+## S1-R.0 续派授权与起点
+
+| 项 | 记录 |
+|---|---|
+| 授权时刻 | 2026-11-20T10:30:35+08:00（采样） |
+| 授权范围 | 仅原批准 C1 S1；不重做 S0；不自行调用 CLI 放行；不进入 S2/C2/C3/迁移生产写 |
+| 起点 | `84a9a555aca72bb8c60646c1eef8f408f234004f`（父 `a188509…`） |
+| 分支/远端 | `feat/h4c-c1-s0-s1`；提交前远端 = `84a9a55…`，未前移/分叉 |
+| 保留工作树 | 3 修改 + 1 新增（`h4c-evidence.mjs`、`index.mjs`、`face-h4c-evidence.test.mjs`、`h4c-collections.mjs`）；本轮在此上继续 |
+
+## S1-R.1 保留 diff 的完整盘点与 S1 范围修复
+
+对保留 diff 逐文件核对清单 `ed6f862`、勘误 r4、D4a/D4b/D5、E2/E3/P9、D6 与 S1 验收 A1-01–A1-22。结论：
+
+- **白名单外零改动**：`store.mjs`/`server.mjs`/`lib/face-service/routes.mjs` 与 HEAD 一致；未改设计/勘误/任务卡/package/lock/其他测试。
+- **无实质契约矛盾、无超范围实现**：未实现 18-ref 链层、未接 Store、未改指标 18/27、未新增 C2/C3/迁移/生产写。
+- 现有 26 导出全部保留；`index.mjs` 只增不删；无 bootstrap/create-domain/empty-check/初始化入口。
+- 发现并修复 2 个 S1 范围内的对齐问题（不改契约值，只对齐已批准错误/谓词语义）：
+
+| # | 问题 | 修复 |
+|---:|---|---|
+| 1 | C1 audit 的 targetList 未排序/含 audit/重复等输入错误原抛 `EVIDENCE_INVALID`，与 D4b/V08「→ ADMISSION_REQUIRED」不一致 | `evidenceC1AuditId`/`evidenceC1AuditRecord` 的 C1 audit 输入错误统一改为 `EVIDENCE_CHAIN_ADMISSION_REQUIRED`；`validateEvidenceC1AuditRecord` 仍按重建比较判 ADMISSION |
+| 2 | `CoverageValid` 在未传 state 时跳过 `K3MarkerValid`，与设计 §3.2「CoverageValid 含 K3MarkerValid」不一致 | `CoverageValid` 现在要求 state，并调用 `K3MarkerValid(marker,state,cfg)`；无 state 直接 false |
+
+- 其余保留实现按已批准锚点保留：私有 Set/冻结枚举/只读谓词；8 集合字面名；6/20/9/7/6/7/12/18/24/39 字段；canonical ID；D4a `verified/legacyCount=0/snapshot`；D4b C1 test-only audit 公式；D5 runtime 显式 `null` 白名单；11 digest domain；fence 健康/过期/halted 谓词；plan 39 字段/consumed 分支；gate 冻结纯逻辑。
+- 未把 22 个错误码常量裁剪为 §3.4 的 18 个：其中 4 个为设计/控制层常量（`K3_BOOTSTRAP_DENIED`、`MIGRATION_CAPACITY_EXCEEDED`、`MAINTENANCE_WINDOW_EXPIRED`、`MAINTENANCE_MANIFEST_INVALID`），C1 使用面的 18 个均在；属只增常量，不改变 C1 行为，留 Codex 判定是否需裁剪。
+
+## S1-R.2 本段逐文件范围与 diff
+
+| 文件 | 动作 | 工作树行数 | blob |
+|---|---|---:|---|
+| `admin-web/lib/h4c-collections.mjs` | 新增 | 38 | `57d46ca6f3f90ea420826e0b9041a098d36a7daa` |
+| `admin-web/lib/face-service/h4c-evidence.mjs` | 修改 | 1262 | `fe96c6b03b91eb01b438f679e01fad268b8f8dcb` |
+| `admin-web/lib/face-service/index.mjs` | 修改 | 132 | `400dc2d5b591fedfaf9589159b8dd7d689bbd884` |
+| `admin-web/tests/face-h4c-evidence.test.mjs` | 修改 | 2354 | `a82bbd1e21c1b89cf4b95702382f6539122ccaed` |
+| `docs/tasks/HK-AI-04-H4C-C1-STAGED-IMPLEMENTATION-EVIDENCE-2026-11-19.md` | 追加 | 本节追加 | 提交时由交付回报给最终 SHA |
+
+- `git diff --numstat`（相对 `84a9a55`）：`h4c-evidence.mjs` 800/7；`index.mjs` 72/0；测试 1012/0；新模块 38 行未跟踪。
+- `git diff --check` exit 0；`git show --check` 提交时 exit 0；受保护文件 diff 行数 0。
+- 测试文件 `.listen(`=0、`fetch(`=0；未跑 33/根 7/8 HTTP/glob。
+
+## S1-R.3 测试：之前自测 vs 本次复跑
+
+| 轮次 | 时间/状态 | 结果 | 说明 |
+|---|---|---|---|
+| 之前执行者自测 | 2026-11-20 约 09:5x，修复前 | 43 pass / 0 fail；guard 8/8 | 未独立验收；不作为阶段通过 |
+| **本次复跑** | 2026-11-20 约 10:3x，修复后 | **43 pass / 0 fail；guard 8/8；exit 0** | 仅 S1 定向测试；仍待 Codex Stop-1 |
+
+- 命令（工作目录 `admin-web`）：包装器 `node C:/Users/Administrator/AppData/Local/Temp/c1-staged-guard/run-controls.cjs`；启动前 `NODE_OPTIONS=--require C:/Users/Administrator/AppData/Local/Temp/c1-staged-guard/guard.cjs`；包装器先断言 guard sentinel。
+- 实际测试：`node --test --test-isolation=none tests/face-h4c-evidence.test.mjs`。
+- 计数：tests 43（原 31 + S1 12）；pass 43；fail 0；cancelled 0；skipped 0。
+- Guard 控制 8/8：无 guard 负控（exit 3）、预加载 sentinel、ESM 命名导入（http.request=1）、逐入口 63/63、加载前负控（load_violations=1）、真实子进程继承（network_attempts=1, listen_calls=0）、正控（crypto/fs/K3/LocalStore）、C1 定向测试。
+- 测试进程计数器：`listen_calls=0`、`network_attempts=0`、`dns_calls=0`、`dgram_calls=0`、`provider_calls=0`、`load_violations=0`、`real_leaks=0`。
+- 环境：Node `v24.19.0`、win32；guard 63 入口；guard/控制脚本在工作树外，路径/sha256 同 §S1.3.2。
+
+## S1-R.4 A1 复核结论（本段）
+
+| 验收 | 本段结论 |
+|---|---|
+| A1-01–A1-05 集合门禁/私有 Set/冻结/无 Set 导出 | 满足；测试 1 |
+| A1-06 现有 26 导出/index 只增不删/无初始化 | 满足；`existing26_missing=[]`；index 无 init |
+| A1-07 schema 6/20/9/7/6/7/12/18/24/39 exact | 满足；测试 3 |
+| A1-08 D4a verified/legacy0/V01–V05 | 满足；测试 4 |
+| A1-09 canonical ID/we-<e>/拒绝非规范 | 满足；测试 2 |
+| A1-10 D4b C1 test-audit/V06–V09 | 满足；错误码已对齐 ADMISSION；测试 5 |
+| A1-11 plan 39 字段/空值/consumed 分支 | 满足；测试 6 |
+| A1-12 11 digest domain/canonical/rebuild | 满足；测试 7 |
+| A1-13 谓词分离/WriterPlanValid/FenceValid | 满足；测试 8/9；CoverageValid 现要求 state |
+| A1-14 错误码/区分 | 满足；§3.4 的 18 个均在（另 4 个设计/控制常量待 Codex 判定） |
+| A1-15 纯函数/gate 纯逻辑 | 满足；测试 11 |
+| A1-16 gate 冻结/只 verify/health 默认/非法配置 | 满足；测试 11 |
+| A1-17 Store/server/routes 零 diff/0 写 | 满足；受保护文件 diff 0 |
+| A1-18–A1-21 非监听/guard/ESM/子进程 | 满足；本轮复跑全过 |
+| A1-22 证据追加/Stop-1 请求 | 本节；Stop-1 未自批 |
+
+- refs/writes：**0/0**；S1 仍为纯契约层，不写 Store、不接 Store、不进入 S2。
+
+## S1-R.5 未验证/未做（本段）
+
+- 未运行 33 个非 HTTP 全量、根 7、8 个 HTTP 文件或任何 glob；未做全量回归。
+- 未验证真实 Cloud 并发（D11/C3）；未取得云 `PARALLEL-DISPATCH.md`/`REVIEW.md`；九项裁定列未知。
+- D8（S6 归属）、D10（S4 fixture）仍 OPEN；未解除。
+- 未改 Store/server/routes；未接生产 gate；未做迁移/生产写；未启动 HTTP/UI；未部署；未访问真实 K3/设备/Provider/支付/业务网络。
+- S1 未获独立复审；本段不自批、不宣称 C1/G1 通过。
+
+## S1-R.6 Stop-1 复审请求
+
+- 请求 Codex 独立复审 S1：白名单 4 个代码/测试文件 + 本节证据；重点核对上述 2 个 S1 修复、22/18 错误码边界、`CoverageValid` state 要求、D4b/V08、D5、18/27 未变、Store 零 diff、guard 8/8 与 43/43 复跑。
+- **不自行调用 CLI 放行**；不自批 Stop-1；不进入 S2。
+- 提交为普通追加（父 `84a9a55…`），只 push `feat/h4c-c1-s0-s1`；最终提交 SHA/push 后 `ls-remote` 完整 40 位 SHA 由交付回报给出。

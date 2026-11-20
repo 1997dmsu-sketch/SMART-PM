@@ -1,6 +1,6 @@
 # SMART-PM 需求统一入口
 
-更新基线：2026-11-20；本索引位于独立文档分支 `docs/requirements-register`，不代表已合并或发布。
+更新基线：2026-11-20；本索引位于独立文档分支 `docs/requirements-register`，不代表已合并或发布。2026-11-20 的追加只更正本目录三文件里已核对的事实和状态边界。该追加是编辑者自检，不是独立复审通过。
 
 本目录是项目需求状态的统一入口。先看[需求台账](REQUIREMENTS-REGISTER.md)了解全部已知功能线索及各自状态，再看[待决与阻断](OPEN-DECISIONS.md)了解尚需裁定或外部材料的事项。台账引用工作线原文，不替代或改写各工作线契约。
 
@@ -22,4 +22,4 @@
 
 《A栋合同模板.docx》原件已在用户原聊天中收到并读取；当前执行环境没有该原件。字段映射依据脱敏转录完成文本级核对，版式和签署栏仍未核验。此执行环境中缺原件不等于项目没有原件。
 
-仓库还含既有[跨分支集成地图](https://github.com/1997dmsu-sketch/SMART-PM/blob/3608d97bb142916ebfd460581ab3d9ae88a01dff/docs/tasks/SMART-PM-CROSS-BRANCH-INTEGRATION-MAP.md)，该文档用于集成追踪，不是需求索引。
+仓库还含既有[跨分支集成地图](https://github.com/1997dmsu-sketch/SMART-PM/blob/3608d97bb142916ebfd460581ab3d9ae88a01dff/docs/tasks/SMART-PM-CROSS-BRANCH-INTEGRATION-MAP-2026-11-19.md)。固定提交 `3608d97bb142916ebfd460581ab3d9ae88a01dff` 上的文件名带日期；不带日期的路径在该提交中不存在。该地图自述为只读预演、待独立复审，用于集成追踪，不是需求索引，也不是各阶段验收证书。

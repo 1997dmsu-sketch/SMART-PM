@@ -32,27 +32,27 @@
 
 ### 1.1 固定对象与提交
 
-| 对象 | 固定读取点 | 完整 SHA / blob | 说明 |
+| 对象 | 固定读取点（完整 SHA） | 完整 SHA / blob | 说明 |
 |---|---|---|---|
-| 设计 v8 | `6f96fed` | blob `c4feffa5831f5bf0e04e8e902865cb8e1f1b0183`；sha256 `d769da93c4880409c946e316f2414ca6b1135a96361934abc188111ca6dcbec7` | 1607 行；冲突优先级 §18 > §17 > §16 > §15 > §4–§14 |
-| 勘误 r4 | `6f96fed` | blob `c5797a075f15eadc59c31b80ef258a6717d0af3b` | E1/E2/E3 + D4/D5 回写 |
-| 分阶段任务卡 r5 | `6f96fed` | blob `080c590fb61112c3b061b4b26c9dc017f1bf5c73` | `8e15960` 版 + F45 一行更正（`2b72144` 生效，授权 §9.2） |
-| 授权清单 r2 | `ed6f862` | commit `ed6f862dac5307b0f027a83570fd8a0cb8da1a09`；blob `5922ba81173639e341f7ba9651d7a2e3db4c094a` | 仅覆盖 S0/S1；S2–S6 不在其授权范围（`授权:L105`） |
-| S1 实现 | `403970a` | commit `403970a035be44bb04d0ce5c01154a103a5ec5c5`；tree `cc0a1082055155af97387b6fb8325e17b61ac6fc` | `h4c-evidence.mjs` blob `fe96c6b03b91eb01b438f679e01fad268b8f8dcb`；C1 测试 blob `a82bbd1e21c1b89cf4b95702382f6539122ccaed` |
-| Stop-1 guard 补证 | `6f96fed` | commit `6f96fed9bd478192c8bbffeb52f47c90df89939e`；tree `4a5ef2dd504244df306c9471252903ee1fb105d2` | `403970a` 的 docs-only 子提交；七脚本 + 两份脱敏输出 |
-| 本任务起点 | `6f96fed` | — | 仅新增 `docs/tasks/HK-AI-04-H4C-C1-S2-PREFLIGHT-2026-11-20.md` |
+| 设计 v8 | `6f96fed9bd478192c8bbffeb52f47c90df89939e` | blob `c4feffa5831f5bf0e04e8e902865cb8e1f1b0183`；sha256 `d769da93c4880409c946e316f2414ca6b1135a96361934abc188111ca6dcbec7` | 1607 行；冲突优先级 §18 > §17 > §16 > §15 > §4–§14 |
+| 勘误 r4 | `6f96fed9bd478192c8bbffeb52f47c90df89939e` | blob `c5797a075f15eadc59c31b80ef258a6717d0af3b` | E1/E2/E3 + D4/D5 回写 |
+| 分阶段任务卡 r5 | `6f96fed9bd478192c8bbffeb52f47c90df89939e` | blob `080c590fb61112c3b061b4b26c9dc017f1bf5c73` | `8e15960` 版 + F45 一行更正（`2b72144` 生效，授权 §9.2） |
+| 授权清单 r2 | `ed6f862dac5307b0f027a83570fd8a0cb8da1a09` | commit `ed6f862dac5307b0f027a83570fd8a0cb8da1a09`；blob `5922ba81173639e341f7ba9651d7a2e3db4c094a` | 仅覆盖 S0/S1；S2–S6 不在其授权范围（`授权:L105`） |
+| S1 实现 | `403970a035be44bb04d0ce5c01154a103a5ec5c5` | commit `403970a035be44bb04d0ce5c01154a103a5ec5c5`；tree `cc0a1082055155af97387b6fb8325e17b61ac6fc` | `h4c-evidence.mjs` blob `fe96c6b03b91eb01b438f679e01fad268b8f8dcb`；C1 测试 blob `a82bbd1e21c1b89cf4b95702382f6539122ccaed` |
+| Stop-1 guard 补证 | `6f96fed9bd478192c8bbffeb52f47c90df89939e` | commit `6f96fed9bd478192c8bbffeb52f47c90df89939e`；tree `4a5ef2dd504244df306c9471252903ee1fb105d2` | `403970a` 的 docs-only 子提交；七脚本 + 两份脱敏输出 |
+| 本任务起点 | `6f96fed9bd478192c8bbffeb52f47c90df89939e` | — | 仅新增 `docs/tasks/HK-AI-04-H4C-C1-S2-PREFLIGHT-2026-11-20.md` |
 
 ### 1.2 父链（线性，无 merge）
 
 | 提交 | 父 | 说明 |
 |---|---|---|
 | `8e15960d3b2bc87a6dec7a5f267907f646713547` | `d095a1888a2efba7ac8bfea76dfe120a3a74bf08` | 设计 v8 + 勘误 r4 + 任务卡输入 |
-| `2b72144e459f4353f69e35b849c3838413fa9d45` | `8e15960…` | 授权清单 v1；同时更正任务卡 F45 行 |
-| `ed6f862dac5307b0f027a83570fd8a0cb8da1a09` | `2b72144…` | 授权清单 r2 |
-| `a1885092d389681a73bc99e15ba9946da283adbd` | `ed6f862…` | S0 证据 |
-| `84a9a555aca72bb8c60646c1eef8f408f234004f` | `a188509…` | S0 状态记录 |
-| `403970a035be44bb04d0ce5c01154a103a5ec5c5` | `84a9a55…` | S1 契约层实现 |
-| `6f96fed9bd478192c8bbffeb52f47c90df89939e` | `403970a…` | Stop-1 guard 补证 |
+| `2b72144e459f4353f69e35b849c3838413fa9d45` | `8e15960d3b2bc87a6dec7a5f267907f646713547` | 授权清单 v1；同时更正任务卡 F45 行 |
+| `ed6f862dac5307b0f027a83570fd8a0cb8da1a09` | `2b72144e459f4353f69e35b849c3838413fa9d45` | 授权清单 r2 |
+| `a1885092d389681a73bc99e15ba9946da283adbd` | `ed6f862dac5307b0f027a83570fd8a0cb8da1a09` | S0 证据 |
+| `84a9a555aca72bb8c60646c1eef8f408f234004f` | `a1885092d389681a73bc99e15ba9946da283adbd` | S0 状态记录 |
+| `403970a035be44bb04d0ce5c01154a103a5ec5c5` | `84a9a555aca72bb8c60646c1eef8f408f234004f` | S1 契约层实现 |
+| `6f96fed9bd478192c8bbffeb52f47c90df89939e` | `403970a035be44bb04d0ce5c01154a103a5ec5c5` | Stop-1 guard 补证 |
 
 - `git merge-base --is-ancestor` 三项均 exit 0：`8e15960 → 6f96fed`、`ed6f862 → 6f96fed`、`403970a → 6f96fed`。
 - `git rev-list --count --merges 8e15960..6f96fed` = **0**；`--count` = **6**，全部线性追加。

@@ -311,14 +311,13 @@
    - 若更严格地要求“重启后读回”，可在写完后 `new LocalStore(store.directory).init()` 断言文件内容；但当前测试继续用同一实例，无需新增重启，避免扩大改动。
 
 2. `store-deterministic-audit.test.mjs:219–225`：
-   - 删除对 `store.persist` 的赋值；改为在测试内对 Store 实际使用的 `writeFile` 做**局部故障注入**，保留原错误消息与全部断言：
+   - 删除对 `store.persist` 的赋值；改为在测试内临时把 `store.directory` 定义成抛 `audit persistence failed` 的 getter，让真实的 `#persist` 在读取 `this.directory`（`代码:L269`）时抛出同一错误；`finally` 恢复原 data property。保留原错误消息与全部断言：
      ```js
-     import fs from "node:fs/promises";
-     import { syncBuiltinESMExports } from "node:module";
-     // ...
-     const originalWriteFile = fs.writeFile;
-     fs.writeFile = async () => { throw Error("audit persistence failed"); };
-     syncBuiltinESMExports();
+     const directory = store.directory;
+     Object.defineProperty(store, "directory", {
+       configurable: true,
+       get() { throw Error("audit persistence failed"); },
+     });
      try {
        await assert.rejects(
          () => store.transact([ref("rooms", write.id), auditRef()],
@@ -326,12 +325,13 @@
          /audit persistence failed/,
        );
      } finally {
-       fs.writeFile = originalWriteFile;
-       syncBuiltinESMExports();
+       Object.defineProperty(store, "directory", {
+         value: directory, writable: true, enumerable: true, configurable: true,
+       });
      }
      ```
-   - 该方式不改 `store.mjs`、不保留 public `persist`、不删除/放宽任何断言；`store.get("rooms",...)`/`store.get("admin_audit",...)` 仍断言 null（L226–227）。**机制**已在临时目录外的独立 Node 一行表达式中验证：patch `fs.writeFile` + `syncBuiltinESMExports()` 后，ESM 命名导入调用到 patch 并抛 `audit persistence failed`；该验证不是 Store 测试，未运行 S4、未改仓库。Store 的实际绑定需在 S4 执行时按同一方式断言（若 live binding 不更新，则该项转 BLOCKED，不静默改断言）。
-   - 若 Codex 不接受测试内 patch 内建模块，可退而用“删除/改坏 `store.directory` 使真实 `writeFile` 抛 ENOENT/EACCES”的 fixture；但那会把错误消息断言从 `audit persistence failed` 改为 OS 错误，属于改断言，不推荐；本清单推荐前者。
+   - 该方式不改 `store.mjs`、不保留 public `persist`、不删除/放宽任何断言、不 patch 全局内建模块、无跨测试副作用；`#persist` 在 `writeFile` 之前抛错，`this.data` 不被赋值，`store.get("rooms",...)`/`store.get("admin_audit",...)` 仍断言 null（L226–227）。`store.directory` 仍是 public 属性（§4.6 的独立旁路），本方案只是测试内临时遮蔽，不是生产 API。
+   - 若 Codex 不接受测试内遮蔽 `store.directory`，可退而用“删除/改坏目录使真实 `writeFile` 抛 ENOENT/EACCES”的 fixture；但那会把错误消息断言改为 OS 错误，属于改断言，不推荐。
 
 3. **白名单处置**：`verification.test.mjs` 已由 D10 条件覆盖；`store-deterministic-audit.test.mjs` **不在 D10 原文**，卡面条件（additive gate）也不覆盖 persist fixture，故必须由 Codex **明确批准**将该文件纳入 S4 白名单的“D10 fixture-only 改动”，并确认“不得弱化既有断言”仍成立。未批准前 S4 **BLOCKED**。
 
@@ -454,7 +454,7 @@ node (Join-Path $gd "run-controls.cjs")   # 预期 exit 0；8/8 控制；C1 定�
 
 | ID | 事项 | 原文/代码定位 | 状态 | 建议/最小裁定 |
 |---|---|---|---|---|
-| **R1/D10** | `#persist` 私有破坏两份测试；D10 只列其中一份 | `卡:L972`、`勘误:L296/L363`、`授权:L62/L139`；`代码:L268`；`验证测试:L381`；`审计测试:L219–225` | **BLOCKED** | 批准 §4.7 最小方案：`verification` 用测试内 `persistDemoData` 直写 tmp+rename；`审计测试` 用 `fs.writeFile` + `syncBuiltinESMExports` 注入 `audit persistence failed`；两者保留原断言、不保留 public persist。**同时批准将 `store-deterministic-audit.test.mjs` 纳入 S4 白名单的 D10 fixture-only 改动**；否则 S4 不得开工。 |
+| **R1/D10** | `#persist` 私有破坏两份测试；D10 只列其中一份 | `卡:L972`、`勘误:L296/L363`、`授权:L62/L139`；`代码:L268`；`验证测试:L381`；`审计测试:L219–225` | **BLOCKED** | 批准 §4.7 最小方案：`verification` 用测试内 `persistDemoData` 直写 tmp+rename；`审计测试` 临时把 `store.directory` 定义为抛 `audit persistence failed` 的 getter（`#persist` 读取 `this.directory` 时抛错），`finally` 恢复；两者保留原断言、不保留 public persist、不 patch 全局内建模块。**同时批准将 `store-deterministic-audit.test.mjs` 纳入 S4 白名单的 D10 fixture-only 改动**；否则 S4 不得开工。 |
 | **R2/M23** | `seed` 非空拒绝无执行入口 | `卡:L317`、`设计:L171`；`代码:L127`（无参模块函数）；Store 无 `seed()` 方法 | **UNKNOWN/BLOCKED** | 建议 Codex 判 M23 不适用（`seed()` 是零参默认工厂，8 个 H4-c 静态空数组，M24 覆盖），或明确要求新增 Store `seed()`（属 API 扩大，不建议）；不要猜。 |
 | **R3/G1** | `createH4cGate.verify` 未执行 §3.3c 的“唯一 audit/18 shape” | `卡:L281`、`L342–348`；`H4C:L1697–1724`（只调 `AdmissionValid`）；`H4C:L1628–1660`（`validateH4cAdmission` 已做） | **CONDITIONAL** | 建议 S4 在 gate.verify 内复用 `validateH4cAdmission`（不改 S3 helper 语义），使 M08–M13 可诚实通过；请 Codex 确认这是“接线”而非重开 S3。若不允许，S4 需在 Store 侧实现等价校验并解释 E3 import 边界。 |
 | **R4/旁路** | `store.data` public 可被篡改后由非 H4-c `transact` 持久化 | `代码:L239/L247–265`；`代码:L290/L338`；测试 `C1测试:L411`、`验证测试:L379` | **UNKNOWN** | `#persist` 私有只关闭 public persist 方法；请 Codex 明确 `store.data` 是受信内部/测试 seam，还是要求 S4 增加完整性检查/封装。S4 不自行扩大去封装（会破坏大量测试且不在 E3 范围）。 |

@@ -1369,3 +1369,24 @@ positive.cjs       c34225ccc8854a1720ee51985d777ad29e1c7d85860e293bebeb2f3f7268b
 
 - 本提交仅完成 S4 实施与上述定向测试；M01/M02/M14/M30 等链层用例、33+7 全量、HTTP、UI、真实 Cloud、K3、设备、支付、部署均未做。
 - 不自批、不宣称 Stop-4 通过、不宣称 C1 完成、不授权合并；交 Codex 独立复审。
+
+### G. 复审意见与修复（2026-11-21 00:1x）
+
+自查复审发现两项问题，均已在本提交修复：
+
+1. **B1（阻断）：C1 写预算未被强制。** 原实现只依赖 `gate.verify`，而 `gate.verify` 内部的 `AdmissionValid` 不校验业务写条数与集合白名单（该规则在 `inspectC1FinalWriteSet`，仅由 `validateH4cAdmission` 调用）。后果：持有合法 admission 时可向 `evidence_chain_fences` / `plans` / `k3_markers` / `audits` 写入。
+   - **处置：** 改为在 Store 层强制（`transactFinal` 内）：业务写必须为 2（append）或 3（genesis）条，且业务集合只能是 `device_operation_evidence`、`device_operation_evidence_heads`、`evidence_chain_anchors`；违反 → `EVIDENCE_CHAIN_ADMISSION_REQUIRED`/409 且零写。
+   - **未采用的方案：** 在 `gate.verify` 内复用 `validateH4cAdmission`。实测会让 S1 冻结夹具（`s1GateWrites`，非 18 refs 规范形）失败，等于重开 S1 契约。故 `h4c-evidence.mjs` 保持**零 diff**。
+   - 安全性质等价：生产路径只有 Store 能写，Store 拒绝即封闭；gate 单独使用不构成写路径。
+2. **B2：M13 用例名不副实。** 原 M13 断言的是"写非 H4-c 集合被拒"。已重写为真实向 `fences` / `plans` / `k3Markers` / `auditProofs` 写入，断言 `ADMISSION_REQUIRED`/409 且集合零写。
+
+### H. 复审后复跑结果
+
+| 套件 | 结果 |
+|---|---|
+| `face-h4c-evidence.test.mjs` | **87 / 87** |
+| `verification.test.mjs`（D10-A） | **15 / 15** |
+| `store-deterministic-audit.test.mjs`（D10-B） | **12 / 12** |
+
+- 变更总量（相对 `49ca13ec`）：`store.mjs`、`face-h4c-evidence.test.mjs`、`store-deterministic-audit.test.mjs`、`verification.test.mjs`、本证据文档。
+- `h4c-evidence.mjs` 相对基线**零 diff**（复审 B1 采用 Store 层方案后撤销）。

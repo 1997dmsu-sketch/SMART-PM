@@ -1,4 +1,4 @@
-/**
+﻿/**
  * HK-AI-04 H4-c C1: immutable reconcile evidence foundation.
  *
  * This module deliberately does not implement the reconcile state machine,

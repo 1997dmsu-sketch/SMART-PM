@@ -3770,60 +3770,70 @@ test("S4 M11: audit target and createdAt must match the write set and now", asyn
   }
 });
 
-test("S4 M12/M13: undeclared or non-H4-c business writes are rejected", async (t) => {
+test("S4 M12: undeclared business writes are rejected", async (t) => {
   const { store } = await s4Store(t, { gate: s4Gate() });
   const before = structuredClone(store.data);
-
-  // M12: the anchor is not declared in refs.
   const undeclared = s4Anchor("undeclared");
-  const audit1 = s4Audit([undeclared]);
+  const audit = s4Audit([undeclared]);
   await s4Rejects(store.transactFinal(
-    [ref(H4C_AUDIT_COLLECTION, audit1.id)],
-    () => [undeclared, audit1],
+    [ref(H4C_AUDIT_COLLECTION, audit.id)],
+    () => [undeclared, audit],
     {},
     { now: NOW },
   ), 409, S4_ADMISSION);
-
-  // M13: a declared write on a non-H4-c collection.
-  const house = { collection: "houses", id: "h4c-s4-house", data: { _id: "h4c-s4-house" } };
-  const audit2 = s4Audit([house]);
-  await s4Rejects(store.transactFinal(
-    [ref(house.collection, house.id), ref(H4C_AUDIT_COLLECTION, audit2.id)],
-    () => [house, audit2],
-    {},
-    { now: NOW },
-  ), 409, S4_ADMISSION);
-
   assert.deepEqual(store.data, before);
 });
 
+test("S4 M13: runtime writes to proof/fence/marker/plan are rejected", async (t) => {
+  // Real gate: the C1 collection allowlist must reject these before any write.
+  const gate = createH4cGate({ config: CONFIG });
+  const { store } = await s4Store(t, { gate });
+  const admission = Object.fromEntries(
+    ["kind", "operation", "writeEpoch", "admissionPolicyVersion", "writerSetDigest",
+      "proofId", "refsDigest", "writesDigest", "operationAuthDigest", "ticket"]
+      .map((field) => [field, null]),
+  );
+  for (const forbidden of [H4C.fences, H4C.plans, H4C.k3Markers, H4C.auditProofs]) {
+    const before = structuredClone(store.data);
+    const business = [
+      { collection: H4C.anchors, id: "s4-m13-anchor", data: { _id: "s4-m13-anchor" } },
+      { collection: H4C.evidence, id: "s4-m13-evidence", data: { _id: "s4-m13-evidence" } },
+      { collection: forbidden, id: "s4-m13-forbidden", data: { _id: "s4-m13-forbidden" } },
+    ];
+    const audit = s4Audit(business);
+    const writes = [...business, audit];
+    await s4Rejects(store.transactFinal(
+      writes.map((w) => ref(w.collection, w.id)),
+      () => writes.map((w) => structuredClone(w)),
+      admission,
+      { now: NOW },
+    ), 409, S4_ADMISSION);
+    assert.deepEqual(store.data, before, `${forbidden} 必须零写`);
+  }
+});
 test("S4 M15: create-only conflict is reported as CONFLICT", async (t) => {
   const { store } = await s4Store(t, { gate: s4Gate() });
   const evidenceKey = evidenceId(ORG, JOB_ID, 1);
-  const target = `${EVIDENCE_COLLECTION}/${evidenceKey}`;
-  const auditFor = (id) => ({
-    collection: H4C_AUDIT_COLLECTION,
-    id,
-    data: {
-      _id: id, orgId: ORG, actorId: AUDIT.actorId, actorType: AUDIT.actorType,
-      action: AUDIT.action, target, createdAt: NOW,
-    },
-  });
-  const commit = (auditId) => store.transactFinal(
-    [ref(EVIDENCE_COLLECTION, evidenceKey), ref(H4C_AUDIT_COLLECTION, auditId)],
-    () => [
-      { collection: EVIDENCE_COLLECTION, id: evidenceKey, data: { _id: evidenceKey, orgId: ORG } },
-      auditFor(auditId),
-    ],
-    {},
-    { now: NOW },
-  );
+  const headKey = evidenceHeadId(ORG, JOB_ID);
+  const business = () => [
+    { collection: EVIDENCE_COLLECTION, id: evidenceKey, data: { _id: evidenceKey, orgId: ORG } },
+    { collection: EVIDENCE_HEADS_COLLECTION, id: headKey, data: { _id: headKey, orgId: ORG } },
+  ];
+  const commit = (auditId) => {
+    const items = business();
+    const audit = s4Audit(items, { auditId });
+    return store.transactFinal(
+      items.map((w) => ref(w.collection, w.id)).concat(ref(H4C_AUDIT_COLLECTION, auditId)),
+      () => [...items.map((w) => structuredClone(w)), audit],
+      {},
+      { now: NOW },
+    );
+  };
   await commit("s4-m15-audit-1");
   const before = structuredClone(store.data);
   await s4Rejects(commit("s4-m15-audit-2"), 409, S4_CONFLICT);
   assert.deepEqual(store.data, before);
 });
-
 test("S4 M16: 91 unique refs exceed the Store capacity with 400", async (t) => {
   const { store } = await s4Store(t, { gate: s4Gate() });
   const refs = Array.from({ length: 91 }, (_, i) => ref(H4C.evidence, `s4-cap-${i}`));

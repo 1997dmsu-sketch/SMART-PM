@@ -119,6 +119,12 @@ const createOnlyCollections = new Set([
 // a second time in this module.
 const H4C_STORE_COLLECTIONS = H4C_COLLECTION_NAMES;
 // C1 audit record is exactly these 7 fields (S4 §3.3).
+// C1 runtime may write only these three business collections (S4 §3.4 / M13).
+const C1_WRITABLE_COLLECTIONS = Object.freeze([
+  "device_operation_evidence",
+  "device_operation_evidence_heads",
+  "evidence_chain_anchors",
+]);
 const H4C_AUDIT_FIELDS = Object.freeze([
   "_id",
   "orgId",
@@ -471,6 +477,11 @@ export class LocalStore {
         if (!isH4cCollection(w.collection))
           throw admissionRequired("H4-c 事务不得写非 H4-c 集合");
       }
+      const business = writes.filter((w) => w !== audit);
+      if (business.length !== 2 && business.length !== 3)
+        throw admissionRequired("H4-c 业务写必须为 2 或 3 条");
+      if (business.some((w) => !C1_WRITABLE_COLLECTIONS.includes(w.collection)))
+        throw admissionRequired("H4-c 运行时不得写域/证明/栅栏/标记/计划集合");
       await this.#h4cGate.verify({ state, refs: unique, writes, admission, now });
       for (const w of writes) {
         if (w === audit) continue;
@@ -693,6 +704,11 @@ export class CloudStore {
         if (!isH4cCollection(w.collection))
           throw admissionRequired("H4-c 事务不得写非 H4-c 集合");
       }
+      const business = writes.filter((w) => w !== audit);
+      if (business.length !== 2 && business.length !== 3)
+        throw admissionRequired("H4-c 业务写必须为 2 或 3 条");
+      if (business.some((w) => !C1_WRITABLE_COLLECTIONS.includes(w.collection)))
+        throw admissionRequired("H4-c 运行时不得写域/证明/栅栏/标记/计划集合");
       await this.#h4cGate.verify({ state, refs: unique, writes, admission, now });
       for (const w of writes) {
         if (w === audit) continue;

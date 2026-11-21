@@ -1,5 +1,7 @@
 # SMART-PM 跨分支集成依赖图（只读预演 · 2026-11-19）
 
+> ⚠️ **快照标注**：截至 2026-11-20T06:56 快照；未覆盖 H4-c S0–S4、rental S1、租赁合同 v4、需求台账、OPS、REL-AI-03、07B 候选等新增线；冲突矩阵仅对旧 tip 成立（任一输入前移即作废）。
+
 > 状态：**只读预演 + 单文档交付，待 Codex 独立复审；不构成合并 / 实施 / 部署授权。**
 >
 > 边界：不安装、不跑业务测试、不启动 HTTP/UI、不接设备 / 支付 / 业务云、不部署、不合并；不改全局 Git/TLS；不改无关文件；不 amend / rebase / reset / squash / force / cherry-pick。
@@ -32,6 +34,10 @@
 | 7 | 条件预演（显式 `--merge-base`）：G2 × G3 / G4、G3 / G4 × 07B / G1 / C1 均 clean；G3 / G4 × PRE 冲突同 2 路径 | 条件预演，非本地祖先证明 |
 | 8 | 云参考称 G2→G3→G4、`4f9c43d` 在 G4 链内、`2054404` 不在、预签约与 6face 冲突同 2 路径；本地内容级核对一致，但谱系仍以云参考为准并标注不可本地证 | 云参考 + 内容旁证 |
 | 9 | **只读预演不解决冲突**；冲突路径留待未来获授权的合并动作处理 | 边界声明 |
+
+### 0.1 未覆盖范围
+
+本图只覆盖 6 个 face 固定对象 + codex 预签约代码线（`3bf5951`），不含 staged S 线（H4-c S0–S4、rental S1）与 B 线合同文档（租赁合同 v4），也不含需求台账、OPS、REL-AI-03、07B 候选等新增线；冲突矩阵仅对旧 tip 成立。
 
 ## 1. 固定输入与对象齐全性
 
@@ -76,11 +82,11 @@ git log -1 --format=%P <sha>     # 上表父提交，逐项一致
 | `refs/heads/feat/hk-face-g4-compatibility-review` | `49c5f790992424f2ee5ef4c5a3f0cdbf901623d4` | 一致 |
 | `refs/heads/feat/hk-face-h4c-reconciliation` | `5dff386fe5c9648b04d1623d3e1898c59332639e` | 一致 |
 | `refs/heads/feat/rental-reservations-presigning` | `922c4ab4a4407a4031fac9c3c836bba1797838ce` | 固定输入 `3bf5951` 的父，一致 |
-| `refs/heads/codex/rental-post-payment-review` | `3bf595140088bc71a3939fb67880807965e9c566` | 一致（预签约最新代码） |
+| `refs/heads/codex/rental-post-payment-review` | `3bf595140088bc71a3939fb67880807965e9c566` | 一致（codex 线最新代码；另有 docs-only 后代 `9026f51`，未纳入固定输入） |
 | `refs/heads/docs/smart-pm-cross-branch-integration-map` | **不存在（空输出）** | 本次新建 |
 | `refs/heads/main` | `282a20fca9f64ab80ead50372c9c3e90bf4aeba7` | 未前移 |
 
-结论：**无远端前移、无分叉、无需替换任何固定 SHA**；预签约分析对象取 `3bf5951`（其父为 `922c4ab`，二者都在同一远端链上）。
+结论：**无远端前移、无分叉、无需替换任何固定 SHA**；预签约分析对象取 `3bf5951`（其父为 `922c4ab`，二者都在同一远端链上）；`3bf5951` 之后另有 docs-only 后代 `9026f51`（相对 `3bf5951` 仅新增 `docs/RENTAL-OPEN-ITEMS-CONTRACT-CARD.md`，+214 行），不在本轮矩阵范围。
 
 ## 3. 祖先 / 分叉
 
@@ -295,7 +301,7 @@ git merge-tree --write-tree --name-only --merge-base=5f1d7a409847bc78d860963f13b
 | 路径 | 出现组合 | 说明 |
 |---|---|---|
 | `CHANGELOG.md` | 预签约 × 07B/G1/G2/C1（真实）；× G3/G4（条件） | 双方都在文件顶部追加条目 |
-| `admin-web/lib/store.mjs` | 同上 | 双方都向 `collections` 数组同一位置追加集合名：face 底座新增约 35 行；预签约新增 5 个 `rental_*`；C1 另有 3 个 evidence 集合名 |
+| `admin-web/lib/store.mjs` | 同上 | 双方都向 `collections` 数组同一位置追加集合名：face 底座新增约 35 行；预签约新增 5 个 `rental_*`；C1 另有 3 个 evidence 集合名。计数口径：base=`282a20f`（main），只计 `collections` 数组内新增集合名 **+37**（face 底座 32 个 + 预签约 5 个 `rental_*`）；“约 35 行”= face 侧 32 个集合名 + 3 条注释行；C1 的 3 个 evidence 集合名另计 |
 
 - 除上述 2 条路径外，本轮所有可判定组合**未发现其它冲突路径**。
 - `admin-web/server.mjs` 在预签约合并中为自动合并成功（不属于冲突路径）。
@@ -321,6 +327,7 @@ git merge-tree --write-tree --name-only --merge-base=5f1d7a409847bc78d860963f13b
 5. **未接触真实环境**：HTTP/UI、Provider、设备、支付、生产云、部署上线均未触碰。
 6. **未做逐行代码评审**：本文只做对象/谱系/路径级预演。
 7. **云参考原文未取得**：`PARALLEL-DISPATCH.md` / `REVIEW.md` 本机不可达；本文只引用调度方转述，不声称逐字读取。
+8. **未覆盖范围**：本图只覆盖 6 个 face 固定对象 + codex 预签约代码线，不含 staged S 线与 B 线合同文档（H4-c S0–S4、rental S1、租赁合同 v4、需求台账、OPS、REL-AI-03、07B 候选等新增线）。
 
 ## 8. 冻结与不自批
 
@@ -329,6 +336,7 @@ git merge-tree --write-tree --name-only --merge-base=5f1d7a409847bc78d860963f13b
 - 不实施、不安装、不跑业务测试、不启动 HTTP/UI、不接业务云/设备/支付、不部署上线。
 - 本文件提交**不表示**任何分支已合并、任何门禁已闭合、任何功能可上线。
 - **先停手交 Codex 独立复审；复审通过前不得据此执行合并或实施。**
+- **Codex 复审仅确认文本准确性；合并 / 实施仍须单独授权**，本图不构成该授权。
 
 ## 9. 交付与复现
 
@@ -339,6 +347,6 @@ git merge-tree --write-tree --name-only --merge-base=5f1d7a409847bc78d860963f13b
 | 本文件 | `docs/tasks/SMART-PM-CROSS-BRANCH-INTEGRATION-MAP-2026-11-19.md` |
 | 最终提交 SHA | 由交付回报给出（提交后生成，文内不自指） |
 | 固定 SHA 文件 URL | 由交付回报给出（`.../blob/<final-sha>/docs/tasks/SMART-PM-CROSS-BRANCH-INTEGRATION-MAP-2026-11-19.md`） |
-| 推送 | 普通 `git push origin HEAD:refs/heads/docs/smart-pm-cross-branch-integration-map`；`ls-remote` 复核完整 SHA |
+| 推送 | 普通 `git push origin HEAD:refs/heads/docs/smart-pm-cross-branch-integration-map`；`ls-remote` 复核完整 SHA（**已发生的交付记录，非待执行指令**） |
 
 复现顺序：先核 §1 对象与 §2 远端，再按 §4 的命令逐条执行；`git diff --check` / `git show --check` 应 exit 0；任何输入 SHA 前移即重跑，不沿用本文结论。

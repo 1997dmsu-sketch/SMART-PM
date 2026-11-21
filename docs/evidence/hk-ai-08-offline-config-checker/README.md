@@ -33,7 +33,7 @@ node --test --test-isolation=none --test-reporter=spec tools/hikvision-offline-c
 |---|---|
 | 环境 | Linux x86_64；Node `v24.22.1`；无依赖安装 |
 | 命令退出码 | `0` |
-| 实际测试节点 | `276`，全部通过；14 个顶层 OC01–OC14，子用例另计入总数，不把矩阵 ID 数当测试数 |
+| 实际测试节点 | `284`，全部通过；14 个顶层 OC01–OC14，子用例另计入总数，不把矩阵 ID 数当测试数 |
 | fail / cancelled / skipped / todo | `0 / 0 / 0 / 0` |
 | 加载期网络/进程计数 | 所列 97 个实际 guard 槽全部为 `0`，在自检前保存并断言 |
 | 业务运行窗口计数 | 所列 131 个实际槽增量全部为 `0` |
@@ -41,22 +41,22 @@ node --test --test-isolation=none --test-reporter=spec tools/hikvision-offline-c
 
 ### 原始输出与固定内容
 
-根独立运行的完整原始输出保存在本次云工作区 `/workspace/artifacts/HK-AI-08-OFFLINE-CHECKER-2026-11-21/root-tests.log`，SHA-256 为 `e8fe1a9907d86e37b2ac169317869d5450438c8b406588c3dcfcb5a07a676081`。该绝对路径是本环境取件定位，不保证 Windows 或其他聊天直接可读；原始日志没有作为额外文件加入仓库。以下三个文件的 SHA-256 固定被测源码、测试、内联合成 fixture 与内联 guard；不对本 README 自身预写递归哈希。
+根独立运行修复后内容的完整原始输出保存在本次云工作区 `/workspace/artifacts/HK-AI-08-OFFLINE-CHECKER-2026-11-21/root-tests-final.log`，SHA-256 为 `24d923244c1970079a672ad7d15894639643c3b3bbc0c83f50f38c52ade3cddf`。该绝对路径是本环境取件定位，不保证 Windows 或其他聊天直接可读；原始日志没有作为额外文件加入仓库。以下三个文件的 SHA-256 固定被测源码、测试、内联合成 fixture 与内联 guard；不对本 README 自身预写递归哈希。
 
 | 文件 | SHA-256 |
 |---|---|
-| `tools/hikvision-offline-config-checker/src/check-config.mjs` | `96d8997258411d2aefe448810b09c12c97a0e03535c448ea4c540ce68026cfab` |
-| `tools/hikvision-offline-config-checker/cli.mjs` | `2880f7495b388dbbdc523ac0181ff7fd66b3eaa6e14d0fe49a70fc2053649f2d` |
-| `tools/hikvision-offline-config-checker/test/check-config.test.mjs` | `e5da00b7d025b9dc55099dd18e6039f1d3360cd86becd19e97dea97969c9ab3d` |
+| `tools/hikvision-offline-config-checker/src/check-config.mjs` | `a8dbde46942aca550e13fdddb27e93bd5c9d1902e8cbdfb09cb31befc0eecfb7` |
+| `tools/hikvision-offline-config-checker/cli.mjs` | `9b67473a03afa92e6f64cd34df5d4daa01cce0ecfddf231694f93f2f36ece021` |
+| `tools/hikvision-offline-config-checker/test/check-config.test.mjs` | `04ebad892c6edfbb7fa2495726bc5a954a9939f9c107e97689d1a5cf28d8f71f` |
 
 ### OC01–OC14 覆盖对照
 
 | 矩阵 | 实际断言范围 |
 |---|---|
 | OC01–OC04 | IPv4/IPv6/ASCII DNS 合法输入、trim/lower、精确文本匹配与拒绝地址等价猜测；库/JSON/CLI 共享契约但使用独立固定预期 |
-| OC05–OC08 | 三个主机位置的非法形式、IP 式文本禁止回退、允许列表数量/空项、端口语法/范围/匹配、型号精确匹配 |
+| OC05–OC08 | 三个主机位置的非法形式、Kelvin 字符折叠及混合允许列表、IP 式文本禁止回退、允许列表数量/空项、端口语法/范围/匹配、型号精确匹配；保留 Unicode 边界空白加 ASCII 主体的 trim 正例 |
 | OC09–OC10 | 错误优先顺序、布尔类型、闭式数据形状、隐藏/Symbol/访问器、解码后重复 JSON 键；根及嵌套 Proxy（含撤销 Proxy）反射前拒绝、trap 零调用 |
-| OC11 | 错误 JSON/UTF-8、多字节分块、16 KiB 精确与 +1 字节边界、单字段合法但总体超限、提前停止拉流、固定内部错误、Writable 异常与临时监听恢复 |
+| OC11 | 错误 JSON/UTF-8、多字节分块、16 KiB 精确与 +1 字节边界、单字段合法但总体超限、提前停止拉流、固定内部错误、默认及 20 ms 延迟异步销毁的 Writable 异常与临时监听恢复 |
 | OC12 | 逐场景输入全量快照/特殊描述符不变、冻结与 null 原型记录、返回对象隔离；九组合成入口元数据，不启动旧 Node 或真实 CLI |
 | OC13 | 离线 PASS 不产生审批真实性或后续配置绑定结论，不输出相应字段 |
 | OC14 | 加载前 guard、逐入口正控、保留加载期证据、运行窗口零增量与精确恢复；仅证明下述列明入口和窗口 |
@@ -70,10 +70,19 @@ node --test --test-isolation=none --test-reporter=spec tools/hikvision-offline-c
 ### 检查中发现并修正的事项
 
 - 未知异常对象不作 `instanceof`/反射分类，使用私有 sentinel；所有 Proxy 在反射前拒绝，不能借 trap 修改输入或再抛异常。
-- 输出流失败保持临时 error 监听器到本次 Writable 后续事件排空，再精确移除；失败返回 3，不进行第二次输出或打印异常。
+- 输出流在写前安装本次 error/close 监听器；失败 write callback 不是终结事件，等待真实 error 或 close 后才返回 3 并精确撤除本次监听。成功 write callback 可完成本次写，不等待整个 stdout 关闭；不按固定延时猜排空，不进行第二次输出或打印异常。非遵守 Writable 契约且永不终结的自定义流不被虚报为已结束。
+- 主机主体在 Unicode 转小写前检查 ASCII，防止 U+212A Kelvin 符号折叠为 ASCII 后绕过；非法 Unicode 允许项不被过滤为空，边界空白的既有 trim 语义保留。
 - 超大单 chunk 在复制前检查剩余预算；超限不继续拉取后续输入。
 - 兼容入口的 `main: undefined` 与属性缺失同义；布尔值优先，其他已定义非布尔值失败关闭。真实运行只覆盖上述 Node 版本；Node 20/其他版本以及符号链接入口未实测。
 - 测试 guard 的共享 Resolver 原型槽及继承 listen 快照曾在首轮自检暴露问题，已在最终测试版本修正；这些中间结果不是最终通过证据。
+
+初版提交 `3688632d81066b84cb8e44b56606d441ac03121e` 的合成套件为 276/276，但独立只读终审发现 Kelvin 折叠和延迟异步 Writable 销毁两项 P2，故该初版未通过验收。原日志 `root-tests.log`（SHA-256 `e8fe1a9907d86e37b2ac169317869d5450438c8b406588c3dcfcb5a07a676081`）保留，不覆盖或冒充修复后证据。当前追加修复及新增回归实测为上述 284/284；最终裁定以修复提交的独立复审为准，不以测试全绿自批。
+
+### 受控反证与按字节恢复
+
+根 Codex 保留最终测试文件，仅临时将库与 CLI 两个源文件替换为 `3688632` 的原始内容，运行同一条合成测试命令。实测退出 `1`：共 284 节点，276 pass、8 fail；失败为五个 Kelvin 子例、一个延迟异步销毁子例及两个相应顶层汇总。合法/Unicode 混合列表负例在初版亦已因列表数量拒绝，不冒充它是额外失败。
+
+负控原始日志为本环境 `negative-initial-source.log`（与上述最终日志同目录），SHA-256 `6f2a475522cd71bafe9563806255c837b1b5bb9315323bcb278c51afe592029e`。负控仍在不转发 guard 下，加载计数和业务增量为零；延迟流测试自身保留合成事件观察器，避免用未处理全局异常替代真实返回时序断言。负控后用预先保存的字节恢复修复源码，两个源文件 SHA-256 均重新核对为上表最终值；未改写 Git 历史、未触发设备或网络。
 
 ## 未证明项与停止点
 

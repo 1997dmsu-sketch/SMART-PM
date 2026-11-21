@@ -267,6 +267,7 @@ test("OC03 valid ASCII DNS without resolving", async (t) => {
   for (const host of ["example.invalid", " EXAMPLE.INVALID ", "123.example", "a", `${"a".repeat(63)}.invalid`]) {
     await scenario(t, host, "OK", (value) => allHosts(value, host));
   }
+  await scenario(t, "Unicode boundary whitespace trims around ASCII host", "OK", (value) => allHosts(value, "\u00a0k.example\ufeff"));
 });
 test("OC04 format-valid target mismatches", async (t) => {
   for (const [name, mutate] of [
@@ -279,13 +280,23 @@ test("OC04 format-valid target mismatches", async (t) => {
 test("OC05 forbidden host syntax in all three locations", async (t) => {
   const hosts = ["192.0.2.10/24", "*.invalid", "https://example.invalid", "user@example.invalid", "example.invalid/path",
     "example.invalid?x", "example.invalid#x", "[2001:db8::1]", "fe80::1%eth0", "example.invalid:443", "2001:::1",
-    "-bad.invalid", "bad-.invalid", "a..invalid", "example.invalid.", "é.invalid", `${"x".repeat(64)}.invalid`,
+    "-bad.invalid", "bad-.invalid", "a..invalid", "example.invalid.", "é.invalid", "\u212a.example", `${"x".repeat(64)}.invalid`,
     "127.1", "2130706433", "0x7f000001", "0177.0.0.1", "0x7f.0.0.1", "256.0.0.1", "192.00.2.1", "192.0.2.1.1"];
   for (const [location, set] of [
     ["approved", (v, h) => { v.approvedTarget.host = h; }],
     ["candidate", (v, h) => { v.candidate.host = h; }],
     ["allowed", (v, h) => { v.candidate.allowedHosts = h; }],
   ]) for (const host of hosts) await scenario(t, `${location}:${host}`, "INVALID_TARGET", (v) => set(v, host));
+  await scenario(t, "all Unicode Kelvin host values do not fold into ASCII PASS", "INVALID_TARGET", (v) => allHosts(v, "\u212a.example"));
+  await scenario(t, "ASCII approval and Kelvin candidate/list are still invalid syntax", "INVALID_TARGET", (v) => {
+    allHosts(v, "k.example");
+    v.candidate.host = "\u212a.example";
+    v.candidate.allowedHosts = "\u212a.example";
+  });
+  await scenario(t, "Unicode allowlist item is not silently discarded", "INVALID_TARGET", (v) => {
+    allHosts(v, "k.example");
+    v.candidate.allowedHosts = "k.example,\u212a.example";
+  });
 });
 test("OC06 explicit host/list cardinality and empty-item rule", async (t) => {
   await scenario(t, "missing allowedHosts", "INVALID_INPUT", (v) => { delete v.candidate.allowedHosts; });
@@ -529,6 +540,42 @@ test("OC11 malformed/oversize/UTF-8/chunk failures and fixed internal errors", a
     assert.deepEqual(writable.rawListeners("error"), beforeListeners);
     assert.deepEqual(input, beforeInput);
     guard.assertUnchanged(counters);
+  });
+  await t.test("Writable delayed destruction settles error and close before returning", async () => {
+    const events = [];
+    let writes = 0;
+    const writable = new Writable({
+      write(chunk, encoding, callback) { writes++; callback(new Error("SECRET_SENTINEL")); },
+      destroy(error, callback) { setTimeout(() => callback(error), 20); },
+    });
+    // Test-owned persistent observers prevent an unhandled late event even if
+    // the implementation returns prematurely. They do not make it pass: both
+    // terminal events must already be observed when runCli resolves.
+    const errorObserver = () => events.push("error");
+    const closeObserver = () => events.push("close");
+    writable.on("error", errorObserver);
+    writable.on("close", closeObserver);
+    const beforeError = writable.rawListeners("error");
+    const beforeClose = writable.rawListeners("close");
+    const input = Buffer.from(JSON.stringify(fixture()));
+    const beforeInput = Buffer.from(input);
+    const counters = guard.snapshot();
+    try {
+      const exit = await runCli({ input: Readable.from([input]), output: writable });
+      assert.equal(exit, 3);
+      assert.deepEqual(events, ["error", "close"], "runCli must await actual terminal stream events");
+      assert.deepEqual(writable.rawListeners("error"), beforeError);
+      assert.deepEqual(writable.rawListeners("close"), beforeClose);
+      assert.deepEqual(input, beforeInput);
+      assert.equal(writes, 1);
+      guard.assertUnchanged(counters);
+    } finally {
+      // Cleanup waits only after assertions; it cannot satisfy the return-time
+      // oracle above and protects a failed run from its own late error event.
+      if (!writable.closed) await new Promise((resolve) => writable.once("close", resolve));
+      writable.off("error", errorObserver);
+      writable.off("close", closeObserver);
+    }
   });
   for (const location of ["root", "approvedTarget", "candidate"]) await t.test(`transparent Proxy ${location} cannot mutate via traps`, () => {
     const input = fixture();

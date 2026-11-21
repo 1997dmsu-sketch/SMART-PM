@@ -66,30 +66,35 @@ function safeResult(result) {
 
 async function writeLine(output, result) {
   const line = `${JSON.stringify(result)}\n`;
-  let failed = false;
-  let listener;
-  let attached = false;
+  let errorListener;
+  let closeListener;
+  let errorAttached = false;
+  let closeAttached = false;
+  const writeFailed = Symbol("write-failed");
   try {
-    await new Promise((resolve) => {
-      listener = () => { failed = true; resolve(); };
-      output.on("error", listener);
-      attached = true;
+    await new Promise((resolve, reject) => {
+      // A failed write callback is not a stream terminal event: a legitimate
+      // asynchronous _destroy may emit its error/close considerably later.
+      // Wait for that actual event instead of guessing an event-loop delay.
+      errorListener = () => reject(writeFailed);
+      closeListener = () => reject(writeFailed);
+      output.on("error", errorListener);
+      errorAttached = true;
+      output.on("close", closeListener);
+      closeAttached = true;
       try {
         output.write(line, (error) => {
-          if (error) failed = true;
-          resolve();
+          if (!error) resolve();
         });
       } catch {
-        failed = true;
-        resolve();
+        // A synchronous interface exception is not a conforming asynchronous
+        // Writable failure. Fail closed without claiming destruction finished.
+        reject(writeFailed);
       }
     });
-    // A real Writable invokes its write callback before emitting a queued
-    // "error" event. Keep the temporary handler through that event-loop turn.
-    await new Promise((resolve) => setImmediate(resolve));
-    if (failed) throw new Error();
   } finally {
-    if (attached) output.off("error", listener);
+    if (closeAttached) output.off("close", closeListener);
+    if (errorAttached) output.off("error", errorListener);
   }
 }
 

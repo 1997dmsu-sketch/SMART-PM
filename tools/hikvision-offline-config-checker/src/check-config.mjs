@@ -119,12 +119,18 @@ export function checkOfflineConfig(input) {
     checks.schemaValid = true;
     checks.submittedTargetCount = 1;
 
+    const allowedHostTexts = candidate.allowedHosts.split(",");
+    // Check hostname bodies before case folding: Unicode characters such as
+    // KELVIN SIGN can lowercase to ASCII. Trim-only empty list entries retain
+    // their existing filtering semantics; invalid Unicode is never discarded.
+    const asciiHostTexts = [target.host, candidate.host, ...allowedHostTexts]
+      .every((text) => /^[\x00-\x7f]*$/.test(text.trim()));
     const targetHost = normalizedHost(target.host);
     const candidateHost = normalizedHost(candidate.host);
-    const allowedHosts = candidate.allowedHosts.split(",").map(normalizedHost).filter(Boolean);
+    const allowedHosts = allowedHostTexts.map(normalizedHost).filter(Boolean);
     checks.allowedHostCount = allowedHosts.length;
     checks.hostExplicit = Boolean(targetHost && candidateHost);
-    checks.hostSyntaxValid = checks.hostExplicit && validHost(targetHost) && validHost(candidateHost) &&
+    checks.hostSyntaxValid = checks.hostExplicit && asciiHostTexts && validHost(targetHost) && validHost(candidateHost) &&
       allowedHosts.length === 1 && validHost(allowedHosts[0]);
     if (!target.deviceRef.trim() || !candidate.deviceRef.trim() || !checks.hostSyntaxValid) {
       return makeResult("INVALID_TARGET", checks);

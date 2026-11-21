@@ -225,6 +225,8 @@ async function cliText(text, { chunks, checkJson } = {}) {
   const counters = guard.snapshot();
   const exit = await runCli({ input: Readable.from(source), output: writable, ...(checkJson ? { checkJson } : {}) });
   guard.assertUnchanged(counters);
+  assert.equal(writable.closed, false, "successful output writes need not close stdout");
+  assert.equal(writable.writableEnded, false, "runCli must not end caller-owned stdout");
   assert.deepEqual(source, before, "CLI input chunks unchanged");
   const raw = Buffer.concat(output).toString("utf8");
   assert.equal(raw.endsWith("\n"), true);
@@ -573,6 +575,53 @@ test("OC11 malformed/oversize/UTF-8/chunk failures and fixed internal errors", a
       // Cleanup waits only after assertions; it cannot satisfy the return-time
       // oracle above and protects a failed run from its own late error event.
       if (!writable.closed) await new Promise((resolve) => writable.once("close", resolve));
+      writable.off("error", errorObserver);
+      writable.off("close", closeObserver);
+    }
+  });
+  await t.test("already closed Writable fails without waiting for a new terminal event", async () => {
+    let underlyingWrites = 0;
+    let writeAttempts = 0;
+    const events = [];
+    const writable = new Writable({ write(chunk, encoding, callback) { underlyingWrites++; callback(); } });
+    const errorObserver = () => events.push("error");
+    const closeObserver = () => events.push("close");
+    writable.on("error", errorObserver);
+    writable.on("close", closeObserver);
+    const closed = new Promise((resolve) => writable.once("close", resolve));
+    writable.destroy();
+    await closed;
+    assert.equal(writable.closed, true);
+    assert.deepEqual(events, ["close"]);
+    const beforeError = writable.rawListeners("error");
+    const beforeClose = writable.rawListeners("close");
+    const originalWrite = writable.write;
+    writable.write = function countedWrite(...args) {
+      writeAttempts++;
+      return Reflect.apply(originalWrite, this, args);
+    };
+    const input = Buffer.from(JSON.stringify(fixture()));
+    const beforeInput = Buffer.from(input);
+    const counters = guard.snapshot();
+    let timeout;
+    try {
+      // This timeout is only the negative-test watchdog, never an assumed
+      // stream-settlement delay used to decide that the implementation passed.
+      const outcome = await Promise.race([
+        runCli({ input: Readable.from([input]), output: writable }).then((exit) => ({ returned: true, exit })),
+        new Promise((resolve) => { timeout = setTimeout(() => resolve({ returned: false }), 100); }),
+      ]);
+      assert.equal(outcome.returned, true, "historically closed output must not leave runCli pending");
+      assert.equal(outcome.exit, 3);
+      assert.ok(writeAttempts <= 1, "do not retry writing the failure to the closed stream");
+      assert.equal(underlyingWrites, 0, "no bytes reach an already closed output");
+      assert.deepEqual(writable.rawListeners("error"), beforeError);
+      assert.deepEqual(writable.rawListeners("close"), beforeClose);
+      assert.deepEqual(input, beforeInput);
+      guard.assertUnchanged(counters);
+    } finally {
+      clearTimeout(timeout);
+      delete writable.write;
       writable.off("error", errorObserver);
       writable.off("close", closeObserver);
     }

@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { isAbsolute, normalize } from "node:path";
+import { finished } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { TextDecoder, types } from "node:util";
 import { checkOfflineConfig, checkOfflineConfigJson } from "./src/check-config.mjs";
@@ -66,22 +67,15 @@ function safeResult(result) {
 
 async function writeLine(output, result) {
   const line = `${JSON.stringify(result)}\n`;
-  let errorListener;
-  let closeListener;
-  let errorAttached = false;
-  let closeAttached = false;
+  let cleanup;
   const writeFailed = Symbol("write-failed");
   try {
     await new Promise((resolve, reject) => {
-      // A failed write callback is not a stream terminal event: a legitimate
-      // asynchronous _destroy may emit its error/close considerably later.
-      // Wait for that actual event instead of guessing an event-loop delay.
-      errorListener = () => reject(writeFailed);
-      closeListener = () => reject(writeFailed);
-      output.on("error", errorListener);
-      errorAttached = true;
-      output.on("close", closeListener);
-      closeAttached = true;
+      // Observe actual or already-recorded termination before attempting the
+      // write. A failed callback alone is not termination: asynchronous
+      // _destroy may still be pending; an already-closed stream emits no new
+      // event at all. Node's passive observer handles both states.
+      cleanup = finished(output, { readable: false }, () => reject(writeFailed));
       try {
         output.write(line, (error) => {
           if (!error) resolve();
@@ -93,8 +87,7 @@ async function writeLine(output, result) {
       }
     });
   } finally {
-    if (closeAttached) output.off("close", closeListener);
-    if (errorAttached) output.off("error", errorListener);
+    if (cleanup) cleanup();
   }
 }
 

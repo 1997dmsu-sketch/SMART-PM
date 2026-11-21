@@ -2,7 +2,7 @@
 
 - 日期：2026-11-19（Asia/Shanghai）。任务：独立任务 D，只读调查 + 新增本卡；**不授权执行、不授权集成、不授权合并**。main 与 07B 的合并、实现维持冻结。
 - 修订 r2（2026-11-19）：按独立复审意见只修**依赖安装 / guard 自检 / 测试顺序**三处执行口径；§0.4 与 C3 的已复现无冲突预演事实（tree `0ced1e1…`）**保留不变**。本次仍为**文档修订，不是执行**：未安装依赖、未跑测试、未跑 verifier/guard、未做集成。
-- 修订 r3（2026-11-19）：仅两处**非阻塞更正**，不扩大已批准候选范围、不改变执行步骤。① §2 父链 `cf7c75e` 的完整 SHA 由 `cf7c75efcdbb719caa4d77cc149679248b0a218`（39 位，`git cat-file` 判为无效对象名）更正为 `cf7c75efcdbb719caa47d77cc149679248b0a218`（40 位，`git rev-parse cf7c75e`）；② 与 HEAD/时点相关的提交统计与表述更正：§0.3 的 `origin/main..HEAD = 134`、§1 的 `git rev-parse HEAD`/`HEAD^`、§2 的“当前 HEAD”均改为按候选 tip `1be517e` 的固定表述；§13 旧值“135 提交 / 95 文件 / +30618 −512”只在 `597d2f7` 时点成立，按固定输入 `7de358b` 复算更正为“137 提交 / 95 文件 / +30637 −512”（`git rev-list --count`、`git diff --shortstat`）。另**注明**（不改 tree 值）：§0.4 的预演取证对象为 `origin/main 1be517e`，记录时 HEAD 即该输入；`7de358b` 的 tree 为 `132ac59bba3a8e297dc3e281fdca41ee31b1e33c`，差异仅来自后续文档提交。评审基线 `7de358b`（父 `dfc2143`）。
+- 修订 r3（2026-11-19）：仅两处**非阻塞更正**，不扩大既定候选范围、不改变执行步骤。① §2 父链 `cf7c75e` 的完整 SHA 由 `cf7c75efcdbb719caa4d77cc149679248b0a218`（39 位，`git cat-file` 判为无效对象名）更正为 `cf7c75efcdbb719caa47d77cc149679248b0a218`（40 位，`git rev-parse cf7c75e`）；② 与 HEAD/时点相关的提交统计与表述更正：§0.3 的 `origin/main..HEAD = 134`、§1 的 `git rev-parse HEAD`/`HEAD^`、§2 的“当前 HEAD”均改为按候选 tip `1be517e` 的固定表述；§13 旧值“135 提交 / 95 文件 / +30618 −512”只在 `597d2f7` 时点成立，按固定输入 `7de358b` 复算更正为“137 提交 / 95 文件 / +30637 −512”（`git rev-list --count`、`git diff --shortstat`）。另**注明**（不改 tree 值）：§0.4 的预演取证对象为 `origin/main..1be517e`，记录时 HEAD 即该输入；`7de358b` 的 tree 为 `132ac59bba3a8e297dc3e281fdca41ee31b1e33c`，差异仅来自后续文档提交。评审基线 `7de358b`（父 `dfc2143`）。
 - 本卡是“候选卡”，不是执行卡：给出候选分支起点、拟纳入提交、逐文件非监听回归、guard、来源校验与验收停止点；执行须由调度方另发明确派单。
 - 固定输入（门禁）：`1be517e48cadd810caa4f44df9e38e14c8b2c764`（**固定，不替换**）。
 - 历史参考 main：`282a20fca9f64ab80ead50372c9c3e90bf4aeba7`。
@@ -17,7 +17,7 @@
 3. **祖先关系**：`merge-base(origin/main, 1be517e) = 282a20f`，main 是候选范围 tip 的祖先；`1be517e..origin/main` = 0，`origin/main..1be517e` = 134。**不存在分叉。**候选范围之后仅追加本卡文档提交，不改变该范围。
 4. **只读冲突预演**：`git merge-tree --write-tree --name-only origin/main 1be517e` **exit 0**，tree `0ced1e1723342c7cfcfe8e9f0b6a450fc6d825c2`，无冲突输出。此项只证明合并树可生成；**无冲突不等于批准，也不代替逐文件评审**。
 5. **本工作树不能直接跑来源校验**：当前检出为 CRLF（`i/lf w/crlf` 253 个文件，`core.autocrlf=true`），而 `scripts/verify-import.mjs:18` 对**工作树字节**求 sha256；执行 IG03 必须另建 `core.autocrlf=false` 的 LF 工作树。
-6. **组织停用未关闭**：`queryJob`（`admin-web/lib/face-service/service.mjs:798-802`）只经 `#membership`（同文件 `:154-166`）校验成员 `status === "active"`，**不校验 `org.status`**；该缺口属未来 HTTP 接线门禁前置，本卡不得宣称已修、也不得据此宣称可上线。
+6. **组织停用未关闭**：`queryJob`（`admin-web/lib/face-service/service.mjs:798-802`）只经 `#membership`（同文件 `:154-165`）校验成员 `status === "active"`，**不校验 `org.status`**；该缺口属未来 HTTP 接线门禁前置，本卡不得宣称已修、也不得据此宣称可上线。
 7. 本卡结论仅为“可提交条件与停止点”，不含“通过/恢复/可上线/可合并”的判断。
 
 ## 1. 固定输入与 fetch 记录
@@ -41,7 +41,7 @@
 
 - 起点提交：`1be517e48cadd810caa4f44df9e38e14c8b2c764`（候选 tip，即输入门禁提交；本卡文档提交只追加在其后，不改变候选范围）。
 - 工作树初始状态：`git status --porcelain --untracked-files=all` 为空；无 `node_modules`（admin-web 与 24 个云函数均未安装）；`git status --ignored` 为 0 条。
-- 环境（记录用，非门禁结论）：Windows；`git 2.55.0.windows.3`；`node v24.19.0`；`npm 11.17.0`；`core.autocrlf=true`；`git ls-files --eol` 汇总 `i/lf w/crlf` 253、`i/crlf w/crlf` 1、`-text` 391。
+- 环境（记录用，非门禁结论）：Windows；`git 2.55.0.windows.3`；`node v24.19.0`；`npm 11.17.0`；`core.autocrlf=true`；`git ls-files --eol` 汇总 `i/lf w/crlf` 253、`i/lf w/lf` 2、`i/crlf w/crlf` 1、`-text` 391。
 
 父链（tip → main，完整 SHA）：
 
@@ -58,14 +58,14 @@ cf7c75efcdbb719caa47d77cc149679248b0a218  fix(face): keep queryJob failureReason
 f5844715a4c0f2cb6429bb77c8220b9b46d50fb3  fix(face): fail closed on unapproved queryJob failureReason
 bc2a8b29441f7c8fdf1250b4c6905526d37b9c2f  feat(face): add HK-AI-07B queryJob revision read model
 1155b7ba65991d324fb8b22bb8f7dd87f49428f9  fix(face): close final H4-b cleanup gaps
-…（省略中间 121 条：`a82fe6e..1155b7b^`，即 §3 切片 1–11；可用 `git rev-list --reverse origin/main..1be517e` 完整重放）
+…（省略中间 121 条（含合并侧支）：`a82fe6e..1155b7b^`，即 §3 切片 1–11 除首尾；可用 `git rev-list --reverse origin/main..1be517e` 完整重放）
 a82fe6e442a814fb9880d3b21c63c95be2a1a87e  docs: DB-01 current state, data model, API and migration design
 282a20fca9f64ab80ead50372c9c3e90bf4aeba7  （历史 main；`a82fe6e^`）
 ```
 
 ## 3. 拟纳入提交（候选范围与分类）
 
-候选单位为整段祖先链 `origin/main..1be517e`，共 134 提交。按提交顺序切片的落点如下（区间均含两端，计数已核对合计 134）：
+候选单位为整段祖先链 `origin/main..1be517e`，共 134 提交。按提交顺序切片的落点如下（区间均含起点，等价于 `起^..止`，计数已核对合计 134）：
 
 | # | 切片（完整 SHA 起..止） | 提交数 | 内容 |
 |---|---|---|---|
@@ -245,7 +245,7 @@ a82fe6e442a814fb9880d3b21c63c95be2a1a87e  docs: DB-01 current state, data model,
 
 ## 10. 组织停用：未来 HTTP 接线前置（本卡不外推）
 
-- 现状（本次只读核对）：`queryJob` 在 `admin-web/lib/face-service/service.mjs:798-802` 仅调用 `this.#require("device.audit.read")`；`#require`（`:167-172`）依赖 `#membership`（`:154-166`），后者只校验 `membership.status === "active"` 与 `orgId` 匹配，**未读取 `org.status`**。
+- 现状（本次只读核对）：`queryJob` 在 `admin-web/lib/face-service/service.mjs:798-802` 仅调用 `this.#require("device.audit.read")`；`#require`（`:167-172`）依赖 `#membership`（`:154-165`），后者只校验 `membership.status === "active"` 与 `orgId` 匹配，**未读取 `org.status`**。
 - 前序门禁卡 IG07 已明确：`queryJob` 只校验成员 active，不校验 `org.status`，“组织停用仍需未来 HTTP 接线门禁，07B 服务层现状不得虚报已修”。
 - 未来接线契约引用（不在候选范围内）：`docs/hk-face-http-wiring-design` @ `2f597e33acb3563d92cafd2d70ac238a27d796dc` 的 `docs/tasks/HK-AI-07A-FACE-HTTP-WIRING-CONTRACT.md` 规定“组织/成员不可见 404；组织停用或缺权限 403”。该文件不在本次候选祖先链中，仅作外部引用，不构成本卡证据链的一部分。
 - 结论：组织停用属**未来 HTTP 接线门禁前置**，本卡既不实现、也不宣称关闭；任何“已修/可上线”表述都超出本卡范围。
@@ -270,7 +270,7 @@ a82fe6e442a814fb9880d3b21c63c95be2a1a87e  docs: DB-01 current state, data model,
 ## 13. 交付与本卡自身提交
 
 - 本卡与证据缺口文档为本分支相对 `1be517e` 的**唯一新增**（两份文档），不改任何既有文件。
-- 截至固定输入 `7de358b`（r2 修订后）的分支 tip 相对 main 为 **137 提交 / 95 文件 / +30637 −512**（依据 `git rev-list --count origin/main..7de358b`、`git diff --shortstat origin/main..7de358b`）；候选范围定义仍是 `origin/main..1be517e` = 134 提交 / 93 文件 / +30288 −512，**不因本卡提交而变化**。
+- 截至 r2 基线 `7de358b`（本卡父提交）的分支 tip 相对 main 为 **137 提交 / 95 文件 / +30637 −512**（依据 `git rev-list --count origin/main..7de358b`、`git diff --shortstat origin/main..7de358b`）；r3 tip `5e96ee6` 为 **138 提交 / 95 文件 / +30638 −512**（依据 `git rev-list --count origin/main..5e96ee6`、`git diff --shortstat origin/main..5e96ee6`）；候选范围定义仍是 `origin/main..1be517e` = 134 提交 / 93 文件 / +30288 −512，**不因本卡提交而变化**。
 - 提交方式：普通 `git commit` 追加；推送目标精确为 `refs/heads/docs/hk-face-07b-integration-candidate-task`（**不推 `origin/main`**，不推其他跟踪 ref）。
 - 推送后以 `git ls-remote` 核对远端完整 SHA 与本地一致；本卡自身提交 SHA、父提交与 GitHub 固定 SHA 链接见调度回报（避免在文档内预写未生成的值）。
 - 本卡不自批：交付后由 Codex 独立复审；复审通过前不得据此执行或合并。
@@ -280,7 +280,7 @@ a82fe6e442a814fb9880d3b21c63c95be2a1a87e  docs: DB-01 current state, data model,
 - 门禁任务卡 r3：<https://github.com/1997dmsu-sketch/SMART-PM/blob/1be517e48cadd810caa4f44df9e38e14c8b2c764/docs/tasks/HK-AI-07B-OFFLINE-INTEGRATION-GATE-TASK-DRAFT-2026-11-18.md>
 - 门禁证据：<https://github.com/1997dmsu-sketch/SMART-PM/blob/1be517e48cadd810caa4f44df9e38e14c8b2c764/docs/tasks/HK-AI-07B-OFFLINE-INTEGRATION-GATE-EVIDENCE-2026-11-18.md>
 - `queryJob` 现状：<https://github.com/1997dmsu-sketch/SMART-PM/blob/1be517e48cadd810caa4f44df9e38e14c8b2c764/admin-web/lib/face-service/service.mjs#L798-L802>
-- `#membership`：<https://github.com/1997dmsu-sketch/SMART-PM/blob/1be517e48cadd810caa4f44df9e38e14c8b2c764/admin-web/lib/face-service/service.mjs#L154-L166>
+- `#membership`：<https://github.com/1997dmsu-sketch/SMART-PM/blob/1be517e48cadd810caa4f44df9e38e14c8b2c764/admin-web/lib/face-service/service.mjs#L154-L165>
 - `verify-import`：<https://github.com/1997dmsu-sketch/SMART-PM/blob/1be517e48cadd810caa4f44df9e38e14c8b2c764/scripts/verify-import.mjs#L16-L35>
 - 来源清单：<https://github.com/1997dmsu-sketch/SMART-PM/blob/1be517e48cadd810caa4f44df9e38e14c8b2c764/docs/backend-provenance.json>
 - 变更登记：<https://github.com/1997dmsu-sketch/SMART-PM/blob/1be517e48cadd810caa4f44df9e38e14c8b2c764/docs/backend-changes.json>

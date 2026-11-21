@@ -89,9 +89,11 @@
 | 项目目录内 `.env` / `.env.*` 文件 | **未发现** |
 | 项目目录内 `secrets.local.md` | **未发现** |
 | 当前进程环境变量名含 `HIKVISION`/`ISAPI`/`PROBE` | **未发现** |
-| `admin-web/config.example` @ `282a20f` 是否含设备地址/凭据键 | **不含**；只有 ADMIN/Tencent Cloud/NAS 等配置键 |
+| `admin-web/config.example` @ `282a20f` 是否含设备地址/凭据键 | **不含**；只有 ADMIN / CloudBase / Tencent Cloud 等配置键（`ADMIN_*`、`CLOUDBASE_ENV_ID`、`TENCENTCLOUD_SECRETID/KEY`），**无 NAS 键**；`c97b41d` 处同 blob、键一致 |
 | `.gitignore` 是否排除敏感文件 | 已排除 `.env`、`.env.*`、`secrets.local.md`、`project.private.config.json` |
 | Git 历史中是否有被删除的 `.env` | `git log --all --diff-filter=D -- '*.env' '.env*' '*secrets*'` **无输出** |
+
+> NAS 相关键（`NAS_ENABLED`/`NAS_HOST`/`NAS_SHARE`/`NAS_BASE_PATH`/`NAS_USERNAME`/`NAS_PASSWORD`、`FILE_STORAGE_*` 等）只出现在 `admin-web/config.example` 的**最新修订** `5abfd74`（DB-07 预留接口，未实现、恒不可用，且不在 `main`）；`282a20f` 与 `c97b41d` 处均无 NAS 键。本节以 `main` 基线为准。
 
 **结论：** 仓库内**没有**可读取的凭据文件；凭据的实际保管位置（哪份密封工单、哪个人、哪个受控秘密存储）**未在 Git 中记录**，本轮无法定位到具体保管人/工单编号。这是证据缺口，不是“已恢复”。
 
@@ -111,13 +113,14 @@
 | 项 | 值 |
 |---|---|
 | 路径 | `tools/hikvision-probe` |
-| 分支/提交 | `origin/feat/hk-isapi-capability-probe` @ `558b9c864a4b820e397336200758b143556a4d87`；代码返工点 `59b6437169f7fbeb3ae0af45bc0968e784dcb20d` |
+| 分支/提交 | `origin/feat/hk-isapi-capability-probe` @ `558b9c864a4b820e397336200758b143556a4d87`；版本沿革：`59b6437` 被三项 P0/P1 退回 → `f15160d` 修复并复审通过 → `558b9c8` 仅补 COMPLETION.md，代码与 `f15160d` 一致 |
 | 是否在 `main@282a20f` | **否**（`git ls-tree HEAD tools` 为空；`merge-base --is-ancestor` 失败） |
 | 默认行为 | dry-run；`HIKVISION_PROBE_ALLOW_READ=true` 才发请求 |
-| 白名单 | 6 个 GET，逐字匹配 |
+| 白名单 | 6 个 GET，逐字匹配；`HIKVISION_PROBE_ALLOWED_HOSTS` 接受逗号分隔多主机（工具不强制单主机，E1 单一主机由审批单 + dry-run 校验） |
 | 测试 | 58 项离线测试（Linux 57+1 跳过；Windows 55+3 跳过） |
 | 关键整改 | 型号前置校验、fail-fast、受控凭据输入、输出目录 `0700`/文件 `0600`、指纹固定 |
 | 已知限制 | 仅 Digest；真实能力标签名可能与 fixture 不同；未做并发 |
+| 执行前提 | E1 须在 POSIX（Linux/macOS）执行机运行；Windows 无 `0700`/`0600` mode 语义，需另加目录 ACL/EFS 或改用 Linux |
 
 **缺口：** E1 若直接按 `main` 工作树执行，工具不存在；必须先固定工具提交并提供获取方式，且不得用未复核版本替代。
 
@@ -145,7 +148,7 @@
 
 | 项 | 现状 | 为什么过期/冲突 | 处理 |
 |---|---|---|---|
-| `HK-AI-02-LIVE-APPROVAL-PACK.md` @ `cc5c7fb` | 引用代码 `f15160d`（`f15160da624e3d12beb35e37aeb28c15e8997709`）为“代码侧复审通过” | 其后 `59b6437` 因三项 P0/P1 退回返工并修复（畸形 Digest/`RESPONSE_ERROR` fail-fast、凭据受控输入），实际工具已前进到 `558b9c8` | **不得直接复用**；E1 审批须重新固定 `558b9c8` 并复核差异 |
+| `HK-AI-02-LIVE-APPROVAL-PACK.md` @ `cc5c7fb` | 批准代码 `f15160d`（`f15160da624e3d12beb35e37aeb28c15e8997709`）为“代码侧复审通过”（复审记录 `c97b41d`：三项阻断全部关闭） | 版本沿革：`59b6437` 被三项 P0/P1 退回（畸形 Digest fail-fast、响应流 fail-fast、README 内联凭据）→ `f15160d` 修复并复审通过 → `558b9c8` 仅补 COMPLETION.md（代码与 `f15160d` 一致）；批准对象是 `f15160d`，而 E1 固定 `558b9c8`，SHA 不同 | **不得直接复用**（SHA 重固定）；E1 按 `558b9c8` 重新固定并复核（与已批准的 `f15160d` 代码 diff 为 0，仅文档差异） |
 | `HK-AI-06-HIKVISION-PROVIDER-PREFLIGHT-TASK-2026-11-11.md` | 同样引用 `f15160d` 为基线 | 同上 | 作为历史背景引用，不作为当前工具版本依据 |
 | 06A/06B 的 Q01–Q35 | 全部 `open` | 没有现场只读证据关闭 | 保持 `open`；本卡不关闭任何一项 |
 | 06B 预检卡（2026-11-14） | 最新设备预检，仍为 0 执行 | 日期距本轮 5 天；无新执行证据 | 不是“过期作废”，但其结论只能作为准备基线 |
@@ -177,7 +180,10 @@
 | 2026-11-06 日报 | `docs/tasks/DAILY-REPORT-2026-11-06.md` | `150faccd8f9d01f44cad3b849e9f8d21973acee3` | <https://github.com/1997dmsu-sketch/SMART-PM/blob/150faccd8f9d01f44cad3b849e9f8d21973acee3/docs/tasks/DAILY-REPORT-2026-11-06.md> |
 | 只读执行批准包 | `docs/tasks/HK-AI-02-LIVE-APPROVAL-PACK.md` | `cc5c7fb7cee21dd1965b763077626ba0dc54ada8` | <https://github.com/1997dmsu-sketch/SMART-PM/blob/cc5c7fb7cee21dd1965b763077626ba0dc54ada8/docs/tasks/HK-AI-02-LIVE-APPROVAL-PACK.md> |
 | 只读探针（工具） | `tools/hikvision-probe/README.md` | `558b9c864a4b820e397336200758b143556a4d87` | <https://github.com/1997dmsu-sketch/SMART-PM/blob/558b9c864a4b820e397336200758b143556a4d87/tools/hikvision-probe/README.md> |
-| 探针返工点 | `docs/tasks/HK-AI-02-COMPLETION.md` | `59b6437169f7fbeb3ae0af45bc0968e784dcb20d`（其后 `558b9c8` 仅补文档） | <https://github.com/1997dmsu-sketch/SMART-PM/blob/59b6437169f7fbeb3ae0af45bc0968e784dcb20d/docs/tasks/HK-AI-02-COMPLETION.md> |
+| 探针返工点 | `docs/tasks/HK-AI-02-COMPLETION.md` | `59b6437169f7fbeb3ae0af45bc0968e784dcb20d`（被三项 P0/P1 退回；其后 `f15160d` 修复并复审通过） | <https://github.com/1997dmsu-sketch/SMART-PM/blob/59b6437169f7fbeb3ae0af45bc0968e784dcb20d/docs/tasks/HK-AI-02-COMPLETION.md> |
+| 返工修复 f15160d | `tools/hikvision-probe/README.md` | `f15160da624e3d12beb35e37aeb28c15e8997709`（与 `558b9c8` 代码一致） | <https://github.com/1997dmsu-sketch/SMART-PM/blob/f15160da624e3d12beb35e37aeb28c15e8997709/tools/hikvision-probe/README.md> |
+| 复审批准（f15160d） | `docs/tasks/HK-AI-02-REVIEW-F15160D-2026-11-05.md` | `c97b41dc60e5ebcc128fb980fa1438ee7c9acf48` | <https://github.com/1997dmsu-sketch/SMART-PM/blob/c97b41dc60e5ebcc128fb980fa1438ee7c9acf48/docs/tasks/HK-AI-02-REVIEW-F15160D-2026-11-05.md> |
+| config.example 最新修订 | `admin-web/config.example` | `5abfd746609ab8fac141ce5ecc527479250cc4e2`（含 NAS 预留键，不在 `main`） | <https://github.com/1997dmsu-sketch/SMART-PM/blob/5abfd746609ab8fac141ce5ecc527479250cc4e2/admin-web/config.example> |
 
 > 以上文档除基线两项外，均**不在**本分支工作树；只能按上述固定提交引用。GitHub 链接为固定 SHA 形式，不指向会移动的分支名。
 
@@ -213,3 +219,4 @@
 | 日期 | 变更 |
 |---|---|
 | 2026-11-19 | 首版：基于 `282a20f` 与既有分支证据，记录型号/地址/端口/固件/协议/凭据存放位置的找回结果与缺口；本轮 0 设备动作 |
+| 2026-11-21 | P2 回写：修正工具版本沿革与 §5 登记（`59b6437` 被三项 P0/P1 退回 → `f15160d` 修复并复审通过 → `558b9c8` 仅补文档；补 `f15160d`/`c97b41d`/config.example 最新修订）；config.example 键名改为 ADMIN / CloudBase / Tencent Cloud（`282a20f` 无 NAS 键）；注明 allowlist 逗号列表与 POSIX 执行前提；本轮 0 设备动作 |

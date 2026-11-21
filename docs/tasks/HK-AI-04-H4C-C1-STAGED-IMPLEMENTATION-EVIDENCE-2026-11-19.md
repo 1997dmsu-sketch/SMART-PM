@@ -1404,3 +1404,27 @@ positive.cjs       c34225ccc8854a1720ee51985d777ad29e1c7d85860e293bebeb2f3f7268b
 
 - 未覆盖仍为：M02（append 形态）、M28、M29、M30b（genesis 并发链层判定）。M01 用 S1 规范化夹具而非 18 refs 规范形，故标注 partial。
 - 复跑：ace-h4c-evidence.test.mjs **92 / 92**；erification 15/15；store-deterministic-audit 12/12。
+### J. S4 矩阵补齐（2026-11-21 08:5x）
+
+本轮补齐链层与边界用例，S4 矩阵覆盖达到 **26 / 30**（M01 仍为 partial）：
+
+| 新增用例 | 断言 |
+|---|---|
+| M02（append，规范 18 refs） | `s3AppendContext` 铸造的规范 append admission，经 Store 提交后**只新增 1 条证据**、**不新增 anchor**、只写 1 条审计 |
+| M04 | 缺少 `writerSetDigest` 的 admission → `ADMISSION_REQUIRED`/409 且零写 |
+| M07 | ticket / `writesDigest` / `refsDigest` 三处篡改 → 均 `ADMISSION_REQUIRED`/409 且零写 |
+| M28 | `gate.verify` 对深度冻结的 state/refs/writes/admission 无副作用（纯函数） |
+| M29 | `h4c-collections` 导出面封闭、`H4C`/名单冻结、`isH4cCollection` 边界（非字符串/大小写/尾空格全部 false）、替换 `Set.prototype.has` 无法放宽成员判定 |
+| M30b | 三次并发 genesis：恰一次成功，败者 fail-closed，**anchor 与审计均不重复** |
+
+复跑结果：
+
+| 套件 | 结果 |
+|---|---|
+| `face-h4c-evidence.test.mjs` | **98 / 98** |
+| `verification.test.mjs`（D10-A） | **15 / 15** |
+| `store-deterministic-audit.test.mjs`（D10-B） | **12 / 12** |
+
+仍未覆盖：M01 为 partial（用 S1 规范化夹具，非 18 refs 规范形；规范形 append 已由 M02 覆盖）；33+7 全量、8 个 HTTP 文件、真实 Cloud 并发（D11）、UI/设备/支付/部署均未执行。
+
+已知未强制的点（供复审裁定）：`gate.verify` 走的是 `AdmissionValid`（`Object.keys`），因此 admission 上的**非枚举/Symbol 额外键**不会在 gate 层被拒；该检查仅存在于 `validateH4cAdmission`（`Reflect.ownKeys`）。M04 因此只断言"字段缺失"路径，未声称覆盖隐藏键路径。

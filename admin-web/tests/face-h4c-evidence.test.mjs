@@ -4110,3 +4110,162 @@ test("S4 M30a: concurrent final commits serialise and the last one sees the new 
     true,
   );
 });
+
+// ===========================================================================
+// HK-AI-04 H4-c C1 S4: M28 / M29 / M30b
+// ===========================================================================
+
+test("S4 M28: gate.verify is pure over frozen inputs", async (t) => {
+  const fx = s1Fixture();
+  const gate = createH4cGate({ config: CONFIG });
+  const deepFreeze = (value) => {
+    if (value && typeof value === "object") {
+      for (const key of Reflect.ownKeys(value)) deepFreeze(value[key]);
+      Object.freeze(value);
+    }
+    return value;
+  };
+  const state = deepFreeze(structuredClone(fx.state));
+  const refs = deepFreeze(structuredClone(fx.refs));
+  const writes = deepFreeze(structuredClone(fx.writes));
+  const admission = deepFreeze(structuredClone(fx.admission));
+  const snapshot = JSON.stringify({ state, refs, writes, admission });
+  // Frozen inputs would throw on any mutation attempt in strict mode.
+  assert.equal(gate.verify({ state, refs, writes, admission, now: NOW }), undefined);
+  assert.equal(JSON.stringify({ state, refs, writes, admission }), snapshot);
+});
+
+test("S4 M29: the H4-c collection surface is closed and Set-free", async () => {
+  const ns = await import("../lib/h4c-collections.mjs");
+  assert.deepEqual(Object.keys(ns).sort(), [
+    "H4C", "H4C_AUDIT_COLLECTION", "H4C_COLLECTION_NAMES", "isH4cCollection",
+  ]);
+  assert.equal(Object.hasOwn(ns, "H4C_COLLECTION_SET"), false);
+  assert.equal(Object.isFrozen(ns.H4C), true);
+  assert.equal(Object.isFrozen(ns.H4C_COLLECTION_NAMES), true);
+  assert.equal(ns.H4C_COLLECTION_NAMES.length, 8);
+  for (const name of ns.H4C_COLLECTION_NAMES) {
+    assert.equal(ns.isH4cCollection(name), true, name);
+  }
+  // Boundary: only exact strings from the closed set are members.
+  for (const value of [undefined, null, 0, 1, true, {}, [], "", "admin_audit",
+    "device_operation_evidence ", "DEVICE_OPERATION_EVIDENCE"]) {
+    assert.equal(ns.isH4cCollection(value), false, JSON.stringify(value));
+  }
+  // A replaced Set.prototype.has cannot widen membership.
+  const originalHas = Set.prototype.has;
+  try {
+    Set.prototype.has = () => true;
+    assert.equal(ns.isH4cCollection("not-an-h4c-collection"), false);
+  } finally {
+    Set.prototype.has = originalHas;
+  }
+});
+
+test("S4 M30b: two concurrent genesis commits never create a second anchor", async (t) => {
+  const fx = s1Fixture();
+  const store = await s4GateStore(t, fx.state);
+  const run = () => store.transactFinal(
+    fx.refs,
+    () => fx.writes.map((w) => structuredClone(w)),
+    fx.admission,
+    { now: NOW },
+  ).then(() => "ok", (error) => error.code ?? "error");
+  const results = await Promise.all([run(), run(), run()]);
+  assert.equal(results.filter((r) => r === "ok").length, 1, JSON.stringify(results));
+  // The loser must fail closed with a stable code, never a raw error.
+  for (const code of results.filter((r) => r !== "ok")) {
+    assert.ok(["CONFLICT", "EVIDENCE_CHAIN_ADMISSION_REQUIRED",
+      "EVIDENCE_CHAIN_FENCE_EXPIRED", "EVIDENCE_CHAIN_HALTED"].includes(code), code);
+  }
+  const anchorIds = new Set(store.data[H4C.anchors].map((r) => r._id));
+  assert.equal(anchorIds.size, store.data[H4C.anchors].length, "anchor 重复");
+  assert.equal(
+    store.data.admin_audit.filter((a) => a._id === fx.writes.at(-1).data._id).length,
+    1,
+    "审计记录重复",
+  );
+});
+
+test("S4 M02: append final commit through Store writes only E+head+audit", async (t) => {
+  // Chain fixture: state already holds anchor + E1..E2 + head (append=sequence 3).
+  const ctx = s3AppendContext();
+  const marker = s1Marker();
+  const proof = PROOF;
+  const plan = s1Plan({
+    planKind: "writer",
+    writerEpoch: proof.writeEpoch,
+    sourceKind: "halted-fence",
+    sourceHaltedEpoch: 3,
+    sourceFenceDigest: "d".repeat(64),
+    targetProofId: proof._id,
+    targetWriterSetDigest: proof.writerSetDigest,
+    revokedWriterSetDigest: "e".repeat(64),
+    revocationReceiptDigest: "f".repeat(64),
+    status: "consumed",
+    statusUpdatedAt: NOW + 1,
+  });
+  const fence = s1Fence({ epoch: proof.writeEpoch });
+  const state = {
+    ...ctx.state,
+    [`${H4C.auditProofs}/${proof._id}`]: proof,
+    [`${H4C.k3Markers}/${EVIDENCE_CHAIN_K3_MARKER_ID}`]: marker,
+    [`${H4C.plans}/${plan._id}`]: plan,
+    [`${H4C.fences}/${EVIDENCE_CHAIN_FENCE_ID}`]: fence,
+  };
+  const store = await s4GateStore(t, state);
+  const business = ctx.writes.filter((w) => w.collection !== H4C_AUDIT_COLLECTION);
+  assert.equal(business.length, 2, "append 业务写必须是 2 条");
+  const beforeEvidence = store.data[H4C.evidence].length;
+
+  await store.transactFinal(
+    ctx.refs,
+    () => ctx.writes.map((w) => structuredClone(w)),
+    ctx.admission,
+    { now: ctx.now },
+  );
+
+  assert.equal(store.data[H4C.evidence].length, beforeEvidence + 1, "应只新增 1 条证据");
+  assert.equal(store.data[H4C.anchors].length, 1, "append 不得新增 anchor");
+  const audit = ctx.writes.find((w) => w.collection === H4C_AUDIT_COLLECTION);
+  assert.equal(
+    store.data.admin_audit.filter((a) => a._id === audit.data._id).length,
+    1,
+    "append 应只写 1 条审计",
+  );
+});
+
+test("S4 M04: an incomplete admission is rejected before any write", async (t) => {
+  const fx = s1Fixture();
+  const store = await s4GateStore(t, fx.state);
+  const before = structuredClone(store.data);
+  const incomplete = { ...fx.admission };
+  delete incomplete.writerSetDigest;
+  await s4Rejects(store.transactFinal(
+    fx.refs,
+    () => fx.writes.map((w) => structuredClone(w)),
+    incomplete,
+    { now: NOW },
+  ), 409, S4_ADMISSION);
+  assert.deepEqual(store.data, before);
+});
+
+test("S4 M07: a tampered admission ticket or digest is rejected", async (t) => {
+  const fx = s1Fixture();
+  const store = await s4GateStore(t, fx.state);
+  const before = structuredClone(store.data);
+  const tampered = [
+    { ...fx.admission, ticket: "0".repeat(fx.admission.ticket.length) },
+    { ...fx.admission, writesDigest: "1".repeat(64) },
+    { ...fx.admission, refsDigest: "2".repeat(64) },
+  ];
+  for (const admission of tampered) {
+    await s4Rejects(store.transactFinal(
+      fx.refs,
+      () => fx.writes.map((w) => structuredClone(w)),
+      admission,
+      { now: NOW },
+    ), 409, S4_ADMISSION);
+  }
+  assert.deepEqual(store.data, before);
+});

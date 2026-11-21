@@ -32,7 +32,7 @@
 | 5 | `5f1d7a4 → 49c5f79` 本地可证（直接父） | 本地实测 |
 | 6 | 真实 `merge-tree`：可判定 face 组合 exit 0；预签约 × 07B / G1 / G2 / C1 exit 1，冲突固定 2 路径；G3 / G4 参与的多数组合 exit 128（无 merge base），**不是冲突** | 本地实测 |
 | 7 | 条件预演（显式 `--merge-base`）：G2 × G3 / G4、G3 / G4 × 07B / G1 / C1 均 clean；G3 / G4 × PRE 冲突同 2 路径 | 条件预演，非本地祖先证明 |
-| 8 | 云参考称 G2→G3→G4、`4f9c43d` 在 G4 链内、`2054404` 不在、预签约与 6face 冲突同 2 路径；本地内容级核对一致，但谱系仍以云参考为准并标注不可本地证 | 云参考 + 内容旁证 |
+| 8 | 云参考称 G2→G3→G4、`4f9c43d` 在 G4 链内、`2054404` 不在、预签约与 6face 冲突同 2 路径；独立内容对照仅限 §3.4 所列文件，不能证明整链包含或谱系；C03/C04 不作内容包含旁证 | 云参考转述 + 限定文件对照 |
 | 9 | **只读预演不解决冲突**；冲突路径留待未来获授权的合并动作处理 | 边界声明 |
 
 ### 0.1 未覆盖范围
@@ -117,7 +117,7 @@ git log -1 --format=%P <sha>     # 上表父提交，逐项一致
 | C1 `5dff386` | G3 / G4 | exit 1，`merge-base` 空 | 同上 |
 | 预签约 `3bf5951` | G3 / G4 | exit 1，`merge-base` 空 | 同上 |
 
-> **规则**：`exit 1` 只表示“当前对象库找不到共同祖先”，不等于“历史中一定不存在”。G3 / G4 的祖先判断一律以 §3.3 云参考 + §3.4 内容旁证呈现，不写成“确定非祖先”。
+> **规则**：`exit 1` 只表示“当前对象库找不到共同祖先”，不等于“历史中一定不存在”。该历史快照中的 G3 / G4 祖先关系保持本地不可判定；§3.3 云参考仅作转述单列，§3.4 的限定文件对照不证明谱系，不写成“确定非祖先”。
 
 ### 3.3 云独立参考（非 Windows、非本轮）
 
@@ -129,24 +129,24 @@ git log -1 --format=%P <sha>     # 上表父提交，逐项一致
 
 本文对上述三条的处置：
 
-- 第 1 条：本地因 shallow 不能直接证；条件预演 `G3 × G2 base=c8290db` 得 tree = G3 tree，`G4 × G2 base=c8290db` 得 tree = G4 tree，内容包含成立（§4.3）。
+- 第 1 条：该历史快照中本地因 shallow 不能直接证。§4.3 C03/C04 人为将 base 指定为输入一侧 G2，该侧相对 base 无变更，所得另一侧 tree 不是独立的内容包含或祖先证明；两条仅保留为给定 base 下的条件预演记录，不能据此认定 G3/G4 包含 G2。
 - 第 2 条：本地内容核对与之一致——G4 的 `h3b.mjs` / `h4b.mjs` 与 `4f9c43d` 相同；`2054404` 新增的 `admin-web/tests/helpers/closure-guard.mjs` 在 G4 中**不存在**；G4 的 `face-legacy-requeue-closure.test.mjs` 与 `4f9c43d` 相同（§3.4）。
 - 第 3 条：本地 4/6 可直接复现冲突（07B / G1 / G2 / C1）；G3 / G4 条件预演（base=main）也复现同两路径（§4.2 / §4.3）。**条件预演不是本地祖先证明。**
 
 ### 3.4 内容级旁证（不是谱系判定）
 
-只读树比较，用于说明“内容上包含 / 不包含”，不替代祖先判断：
+既有只读文件对照仅说明各行明确列出的文件相同、不同、存在或缺失；不扩大为整个分支内容包含、不替代祖先判断：
 
 | 核对 | 命令 | 结果 |
 |---|---|---|
-| G4 含 `4f9c43d` 的 G1 代码态 | `git diff --name-only 4f9c43d 49c5f79 -- admin-web/lib/face-service/h3b.mjs admin-web/lib/face-service/h4b.mjs` | 空（相同） |
+| G4 的 `h3b.mjs` / `h4b.mjs` 与 `4f9c43d` 相同 | `git diff --name-only 4f9c43d 49c5f79 -- admin-web/lib/face-service/h3b.mjs admin-web/lib/face-service/h4b.mjs` | 空（相同） |
 | G4 不含 `2054404` 新增 helper | `git cat-file -e 49c5f79:admin-web/tests/helpers/closure-guard.mjs` | exit 128，路径不存在 |
 | G4 的 G1 封闭测试 = `4f9c43d` 版 | `git diff --name-status 4f9c43d 49c5f79 -- admin-web/tests/face-legacy-requeue-closure.test.mjs` | 空（相同） |
 | G3 / G4 内容不含 07B 读模型改动 | `git diff --name-only 1155b7b 5f1d7a4 -- admin-web/lib/face-service/service.mjs`（G4 同） | 空（二者 `service.mjs` = 共同底座；07B 的 +70/−3 未进入） |
-| G3 / G4 不含 C1 代码 | `git cat-file -e 5f1d7a4:admin-web/lib/face-service/h4c-evidence.mjs`（G4 同） | 均不存在 |
-| `5abfd74` 内容 = `dcb36b8` + E07 补丁 | `git diff --name-status 5abfd74 521a0f0` 与 `git diff --name-status c8290db dcb36b8` | 两次均为同 5 个 G3 文件；`git diff c8290db 521a0f0` 仅 `routes.mjs`（−7 行） |
+| G3 / G4 缺少 `h4c-evidence.mjs` 文件 | `git cat-file -e 5f1d7a4:admin-web/lib/face-service/h4c-evidence.mjs`（G4 同） | 均不存在 |
+| `5abfd74` 与 `521a0f0`、`c8290db` 与 `dcb36b8` 的变更路径对照 | `git diff --name-status 5abfd74 521a0f0` 与 `git diff --name-status c8290db dcb36b8` | 两次均为同 5 个 G3 文件；`git diff c8290db 521a0f0` 仅 `routes.mjs`（−7 行） |
 
-> 这些是**内容对照**；`5abfd74` 的真实 parent 对象缺失，因此“5abfd74 的父就是 dcb36b8”仍是推断，不是本地谱系事实。
+> 这些仅是**限定文件/变更路径对照**；相同路径清单本身不证明文件内容或整棵 tree 相等。该历史快照中 `5abfd74` 的真实 parent 对象缺失，因此“5abfd74 的父就是 dcb36b8”仍是推断，不是本地谱系事实。
 
 ## 4. `merge-tree` 只读预演
 
@@ -248,7 +248,7 @@ git merge-tree --write-tree --name-only c8290db0c22bf5e84ceede2d58b6daad7ce2887b
 
 ### 4.3 条件预演（显式 `--merge-base`，仅用于浅历史缺 base 的组合）
 
-> 这些行**以“内容谱系等价”为前提**，不是本地祖先证明；`--merge-base` 是人为给定的 base，不是 git 自动找到的 merge base。
+> 以下是人为指定 base 的**条件预演历史记录**，不是本地祖先或内容包含证明；`--merge-base` 不是 git 自动找到的 merge base。尤其 C03/C04（以及 C11）将 base 设为输入一侧，该侧相对 base 无变更，得到另一侧 tree 不具有独立证明力；原命令、退出码与 tree 值保留，不作为内容包含旁证。
 
 ```text
 # [C01] G3 x PRE, base=main -> exit=1 tree=32dce220e55969cbfd56a2680ee569ea0d725664  conflicts: CHANGELOG.md; admin-web/lib/store.mjs
@@ -311,18 +311,18 @@ git merge-tree --write-tree --name-only --merge-base=5f1d7a409847bc78d860963f13b
 
 | 云参考条目（非 Windows、非本轮） | 本地可证 | 本地内容核对 | 本文判定 |
 |---|---|---|---|
-| G2 → G3 → G4 | 仅 G3→G4 本地 exit 0；G2→G3、G2→G4 因 shallow exit 1 | C03/C04 条件预演 tree = G3/G4 tree；G3/G4 含 G2 的 `retry.mjs` | 采信云参考；本地标注不可直接证 |
-| G1 原 `4f9c43d` 在 G4 祖先链内 | 本地 exit 1（浅，不可判定） | G4 的 `h3b/h4b` 与 `4f9c43d` 相同；G4 的 G1 封闭测试与 `4f9c43d` 相同 | 内容一致；谱系以云参考为准 |
-| G1 后补 `2054404` 不含于 G4 | 本地 exit 1（浅，不可判定） | G4 无 `tests/helpers/closure-guard.mjs`；G4 的封闭测试 = `4f9c43d` 版 | 内容一致；谱系以云参考为准 |
+| G2 → G3 → G4 | 仅 G3→G4 本地 exit 0；G2→G3、G2→G4 因 shallow exit 1 | 本文没有独立的 G2 整体内容包含证明；C03/C04 仅为人为 base 下的条件结果，不作包含旁证 | 云参考仅作转述；该快照本地不可直接证 |
+| G1 原 `4f9c43d` 在 G4 祖先链内 | 本地 exit 1（浅，不可判定） | G4 的 `h3b/h4b` 与 `4f9c43d` 相同；G4 的 G1 封闭测试与 `4f9c43d` 相同 | 仅已列文件对照一致；云参考单列，不由文件对照证明谱系 |
+| G1 后补 `2054404` 不含于 G4 | 本地 exit 1（浅，不可判定） | G4 无 `tests/helpers/closure-guard.mjs`；G4 的封闭测试 = `4f9c43d` 版 | 仅已列文件对照一致；云参考单列，不由文件对照证明谱系 |
 | 预签约与 6face 冲突 `CHANGELOG.md` + `store.mjs` | 07B/G1/G2/C1 真实复现；G3/G4 条件复现 | 冲突路径逐字一致 | 采信；G3/G4 条件结果单独标注 |
 
 > “6face”按本轮 6 个 face 固定对象（07B、G1、G2、G3、G4、C1）逐对核对；本文不把该简称当作某个未知 SHA 或 ref。
 
 ## 7. 未验证 / 未知（不得填补）
 
-1. **G3 / G4 的 shallow 前祖先未知**：`5abfd74` 真实 parent 对象缺失；本地不能证明其父就是 `dcb36b8`，只能证明 tree 等价于 `dcb36b8` + E07 补丁。
-2. **G2→G3→G4 谱系**：本地不可直接证，仅云参考 + 内容旁证。
-3. **条件预演不是事实**：`--merge-base` 为人工给定；不能据此宣布“已合并 / 可合并 / 无冲突”。
+1. **G3 / G4 的 shallow 前祖先未知**：该历史快照中 `5abfd74` 真实 parent 对象缺失，本地不能证明其父就是 `dcb36b8`；§3.4 既有变更路径对照也不能单独证明 tree 等价于 `dcb36b8` + E07 补丁。
+2. **G2→G3→G4 谱系及整体内容包含**：该历史快照本地不可直接证；云参考只作转述，限定文件对照不证明整链，C03/C04 不作内容包含旁证。
+3. **条件预演不证明实际谱系或包含**：`--merge-base` 为人工给定，结果只在该假设下成立；不能据此宣布“已合并 / 可合并 / 无冲突”或整体内容包含。
 4. **未跑任何测试**：未安装依赖、未跑业务/单元/HTTP 测试、未跑 guard、未跑 verify；任何“通过”均不在本文范围。
 5. **未接触真实环境**：HTTP/UI、Provider、设备、支付、生产云、部署上线均未触碰。
 6. **未做逐行代码评审**：本文只做对象/谱系/路径级预演。
@@ -350,3 +350,12 @@ git merge-tree --write-tree --name-only --merge-base=5f1d7a409847bc78d860963f13b
 | 推送 | 普通 `git push origin HEAD:refs/heads/docs/smart-pm-cross-branch-integration-map`；`ls-remote` 复核完整 SHA（**已发生的交付记录，非待执行指令**） |
 
 复现顺序：先核 §1 对象与 §2 远端，再按 §4 的命令逐条执行；`git diff --check` / `git show --check` 应 exit 0；任何输入 SHA 前移即重跑，不沿用本文结论。
+
+## 10. MAP-01 文档修订记录（2026-11-21）
+
+- 修订基线：`820015a560023af781b422d01c8968c0563f2f43`；执行者：Codex 子智能体（文档修订执行，不是独立验收）。
+- 更正摘要、§3.3、§4.3、§6、§7：C03/C04 将 base 人为设为输入一侧，得到另一侧 tree 不构成独立的内容包含或祖先证明；原历史命令、退出码与 tree 值保留。
+- §3.4 的既有对照仅限所列文件/变更路径；不扩大为分支整体包含，也不以相同路径清单证明 tree 相等。
+- 原调查仍是 2026-11-20T06:56+08:00 的 Windows 浅历史快照；本次执行环境的对象齐全程度不覆盖或改写当时记录。本次只修正文档推导，未重跑 `merge-tree`，未新增历史实测。
+- G2/G3/G4 既有关闭结论不变，不重开、不重验；本修订未运行测试/guard/构建/安装，不涉及实现、实际合并或真实环境动作。
+- 状态：**已按 MAP-01 修订，待独立复审；不自批，不构成实施/合并/发布授权。**

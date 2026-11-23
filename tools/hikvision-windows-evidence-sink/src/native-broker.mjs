@@ -77,7 +77,14 @@ function blank(evidenceRef = null, compilerRef = null) {
 }
 function outcome(state, status, code, uncertain = false) {
   const previous = state?.last || blank();
-  return freeze({ ...previous, status, code, newObjectStateUnverified: previous.newObjectStateUnverified || uncertain });
+  const terminal = state?.terminalError;
+  return freeze({ ...previous, status: terminal ? "FAIL" : status, code: terminal || code,
+    newObjectStateUnverified: previous.newObjectStateUnverified || uncertain || Boolean(terminal && state.initSent) });
+}
+function currentResult(state, value = state.last) {
+  if (!state.terminalError) return value;
+  state.last = outcome(state, "FAIL", state.terminalError, state.initSent);
+  return state.last;
 }
 function normalize(value, state) {
   const data = record(value, RESULT_KEYS);
@@ -100,6 +107,7 @@ function abortPending(state, code) {
   if (!state.exited) { try { state.child.kill(); } catch { /* uncertain result remains explicit */ } }
 }
 function rpc(state, op, summary) {
+  if (state.terminalError) return Promise.resolve(currentResult(state));
   if (state.exited) return Promise.resolve(outcome(state, "FAIL", "NATIVE_WORKER_EXITED", state.initSent));
   if (state.pending) return Promise.resolve(outcome(state, "FAIL", "NATIVE_PROTOCOL_BUSY", true));
   return new Promise((resolve) => {
@@ -109,14 +117,18 @@ function rpc(state, op, summary) {
     if (op === "init") state.initSent = true;
     const request = summary === undefined ? { id, op } : { id, op, summary };
     state.child.stdin.write(`${JSON.stringify(request)}\n`, (error) => { if (error) abortPending(state, "NATIVE_STDIN_FAILED"); });
-  });
+  }).then((value) => currentResult(state, value));
 }
 function schedule(state, operation, work) {
+  if (operation !== "close" && state.terminalError) return Promise.resolve(currentResult(state));
   if (operation !== "close" && state.queued >= 16) return Promise.resolve(outcome(state, "FAIL", "NATIVE_PROTOCOL_BUSY", state.initSent));
   state.queued += 1;
   const promise = state.chain.then(async () => {
     state.busy = true; state.operation = operation;
-    try { return await work(); }
+    try {
+      if (operation !== "close" && state.terminalError) return currentResult(state);
+      return currentResult(state, await work());
+    }
     catch { state.last = outcome(state, "FAIL", "NATIVE_BROKER_FAILED", state.initSent); return state.last; }
     finally { state.busy = false; state.operation = "idle"; state.queued -= 1; }
   });
@@ -133,7 +145,7 @@ async function confirmExit(state) {
   }
   if (state.finished) state.last = freeze({ ...state.last, closed: true });
   else state.last = outcome(state, "FAIL", "NATIVE_WORKER_NOT_QUIESCENT", true);
-  return state.last;
+  return currentResult(state);
 }
 function captureChunk(state, kind, chunk) {
   const maximum = kind === "stdout" ? 262144 : 65536;
@@ -186,16 +198,27 @@ export async function createNativeEvidenceBroker() {
   };
   child.stdout.on("data", (chunk) => {
     captureChunk(state, "stdout", chunk);
+    if (state.terminalError) return;
     try {
       state.text += state.decoder.decode(chunk, { stream: true });
       if (state.text.length > 65536) throw 0;
-      let end;
+      let end, completed = null;
       while ((end = state.text.indexOf("\n")) >= 0) {
+        if (completed !== null) throw 0;
         const line = state.text.slice(0, end).replace(/\r$/, ""); state.text = state.text.slice(end + 1);
         const reply = record(JSON.parse(line), ["id", "native"]);
         if (!state.pending || reply.id !== state.pending.id) throw 0;
         const native = normalize(reply.native, state);
-        const pending = state.pending; state.pending = null; clearTimeout(pending.timer); state.last = native; pending.resolve(native);
+        state.last = native;
+        completed = { pending: state.pending, native };
+      }
+      if (completed !== null) {
+        // Only one reply can belong to the sole pending request. Validate the
+        // entire chunk (including an unfinished unsolicited tail) before PASS
+        // is delivered; retain its known quantities if a later byte is invalid.
+        if (state.text !== "" || state.decoder.decode() !== "") throw 0;
+        state.pending = null; clearTimeout(completed.pending.timer);
+        completed.pending.resolve(completed.native);
       }
     } catch { abortPending(state, "NATIVE_PROTOCOL_INVALID"); }
   });
@@ -212,9 +235,10 @@ export async function createNativeEvidenceBroker() {
     else if (!state.intentionalClose && !state.terminalError) state.last = outcome(state, "FAIL", "NATIVE_WORKER_EXITED", state.initSent);
     if (state.last.status === "PASS" && (exitCode !== 0 || signal !== null)) state.last = outcome(state, "FAIL", "NATIVE_HOST_EXIT_FAILED", true);
     await saveHostPipes(state, exitCode, signal);
+    currentResult(state);
     state.finished = true; exitResolve();
   });
-  let result = await rpc(state, "init");
+  let result = currentResult(state, await rpc(state, "init"));
   if (result.status === "PASS" && (ROOT_GATES.some((key) => result.checks[key] !== true) || result.counts.directoriesCreated !== 1 || result.counts.filesCreated !== 0 || result.newObjectStateUnverified || result.closed)) {
     state.last = outcome(state, "FAIL", "NATIVE_ROOT_GATE_INVALID", true); result = state.last;
   }
@@ -223,7 +247,7 @@ export async function createNativeEvidenceBroker() {
     state.intentionalClose = true;
     if (!state.exited && !state.pending) { const closed = await rpc(state, "close"); if (closed.status !== "PASS" || !closed.closed) state.last = closed; }
     await confirmExit(state);
-    if (!["NATIVE_WORKER_NOT_QUIESCENT", "NATIVE_HOST_LOG_WRITE_FAILED", "NATIVE_PROTOCOL_INVALID"].includes(state.last.code) && !(state.last.status === "FAIL" && primary.status === "BLOCKED")) {
+    if (!state.terminalError && !["NATIVE_WORKER_NOT_QUIESCENT", "NATIVE_HOST_LOG_WRITE_FAILED", "NATIVE_PROTOCOL_INVALID"].includes(state.last.code) && !(state.last.status === "FAIL" && primary.status === "BLOCKED")) {
       state.last = freeze({ ...state.last, status: primary.status, code: primary.code,
         newObjectStateUnverified: primary.newObjectStateUnverified || state.last.newObjectStateUnverified });
     }
@@ -235,12 +259,14 @@ export async function createNativeEvidenceBroker() {
 export async function validateNativeEvidence(capability) {
   const state = stateFor(capability);
   if (!state) return outcome(null, "FAIL", "INVALID_NATIVE_CAPABILITY");
+  if (state.terminalError) return currentResult(state);
   if (state.closing || state.last.closed) return outcome(state, "FAIL", "NATIVE_CAPABILITY_CLOSED");
   return schedule(state, "validate", () => rpc(state, "validate"));
 }
 export async function writeNativeEvidence(capability, summary) {
   const state = stateFor(capability);
   if (!state) return outcome(null, "FAIL", "INVALID_NATIVE_CAPABILITY");
+  if (state.terminalError) return currentResult(state);
   if (state.closing || state.last.closed) return outcome(state, "FAIL", "NATIVE_CAPABILITY_CLOSED");
   let copied;
   try { copied = syntheticSummary(summary); } catch { return outcome(state, "FAIL", "SUMMARY_INVALID"); }
@@ -259,6 +285,6 @@ export async function closeNativeEvidence(capability) {
 }
 export function observeNativeEvidence(capability) {
   const state = stateFor(capability);
-  const native = state ? state.last : outcome(null, "FAIL", "INVALID_NATIVE_CAPABILITY");
+  const native = state ? currentResult(state) : outcome(null, "FAIL", "INVALID_NATIVE_CAPABILITY");
   return freeze({ ...native, busy: state ? state.busy : false, operation: state ? state.operation : "idle" });
 }

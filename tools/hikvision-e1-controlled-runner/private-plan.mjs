@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual, types } from "node:util";
 import { checkOfflineConfig } from "../hikvision-offline-config-checker/src/check-config.mjs";
@@ -316,4 +317,385 @@ export function snapshotSyntheticControl(value, confirmed = false) {
         typeof control.approval !== "string" || (confirmed && typeof control.confirmed !== "boolean")) throw INVALID;
     return Object.freeze(control);
   } catch { throw fault("APPROVAL_UNVERIFIED"); }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CR-2 single private runtime owner. The original controller/session
+// implementations are mechanically relocated into this module scope so that
+// plan, session, control state, identity and invoke claim share one owner.
+// The former modules remain byte-compatible facades only. No second plan,
+// control state or session registry is created anywhere.
+
+const IDS = Object.freeze([
+  "deviceInfo", "acsCapabilities", "userInfoCapabilities",
+  "fdlibCapabilities", "fdlibList", "fdlibCount",
+]);
+const FAULTS = Object.freeze([
+  "NONE", "PREFLIGHT_WRITE", "PREFLIGHT_READ", "PREFLIGHT_CLEANUP",
+  "WRITE", "READ", "CLEANUP",
+]);
+const typedArrayLength = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype), "byteLength",
+).get;
+
+function fixedError(code) {
+  const error = new Error(code);
+  Object.defineProperty(error, "code", { value: code, enumerable: true });
+  return error;
+}
+
+function recordData(value, allowed, required = allowed) {
+  if (value === null || typeof value !== "object" || types.isProxy(value) || Array.isArray(value)) {
+    throw fixedError("EVIDENCE_GATE_INVALID");
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) throw fixedError("EVIDENCE_GATE_INVALID");
+  const keys = Reflect.ownKeys(value);
+  if (keys.some((key) => typeof key !== "string" || !allowed.includes(key)) ||
+      required.some((key) => !keys.includes(key))) throw fixedError("EVIDENCE_GATE_INVALID");
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const copy = Object.create(null);
+  for (const key of keys) {
+    const descriptor = descriptors[key];
+    if (!descriptor.enumerable || !Object.hasOwn(descriptor, "value")) throw fixedError("EVIDENCE_GATE_INVALID");
+    copy[key] = descriptor.value;
+  }
+  return copy;
+}
+
+function bodyCopy(body) {
+  let copy;
+  if (typeof body === "string") {
+    if (Buffer.byteLength(body, "utf8") > 262144) throw fixedError("EVIDENCE_WRITE_FAILED");
+    copy = new Uint8Array(Buffer.from(body, "utf8"));
+  } else {
+    if (body === null || typeof body !== "object" || types.isProxy(body) || !types.isUint8Array(body)) {
+      throw fixedError("EVIDENCE_WRITE_FAILED");
+    }
+    const length = Reflect.apply(typedArrayLength, body, []);
+    if (length > 262144) throw fixedError("EVIDENCE_WRITE_FAILED");
+    copy = new Uint8Array(length);
+    // Intrinsic typed-array copying does not read caller accessors or species.
+    Reflect.apply(Uint8Array.prototype.set, copy, [body]);
+  }
+  return copy;
+}
+
+/**
+ * A fixed in-memory CR-1 model. It cannot create a native/Windows resource,
+ * invoke a writer callback, or be supplied to the real public entry point.
+ */
+export function createSyntheticEvidenceModel() {
+  const sessions = new WeakMap();
+  const events = [];
+
+  function get(session, plan) {
+    if (!sessions.has(session)) throw fixedError("EVIDENCE_GATE_INVALID");
+    const state = sessions.get(session);
+    if (!isPlanToken(plan) || state.plan !== plan) trip(state, "EVIDENCE_GATE_INVALID");
+    return state;
+  }
+
+  function trip(state, code) {
+    if (state.state !== "FAILED" && state.state !== "CLOSED") {
+      state.state = "FAILED";
+      state.latched = true;
+      events.push("FAILED");
+    }
+    // A failed evidence attempt consumes this bound plan's usable lifetime;
+    // another model may not reclaim it and manufacture a fresh READY session.
+    stopPlan(state.plan, code);
+    throw fixedError(code);
+  }
+
+  function requireState(state, allowedStates) {
+    if (state.latched || !allowedStates.includes(state.state)) trip(state, "EVIDENCE_GATE_INVALID");
+  }
+
+  function requireLivePlan(state, allowedStates) {
+    const plan = inspectPlan(state.plan);
+    if (plan.stopLatched || !allowedStates.includes(plan.state)) trip(state, "EVIDENCE_GATE_INVALID");
+  }
+
+  function prepare(plan, options = {}) {
+    if (!isPlanToken(plan)) throw fixedError("EVIDENCE_GATE_INVALID");
+    if (inspectPlan(plan).state !== "SEALED" || !claimEvidenceSession(plan)) {
+      stopPlan(plan, "EVIDENCE_GATE_INVALID");
+      throw fixedError("EVIDENCE_GATE_INVALID");
+    }
+    const session = Object.freeze(Object.create(null));
+    const state = {
+      plan, state: "NEW", latched: false, fault: "NONE", records: new Map(),
+      recordCount: 0, bytesWritten: 0, closed: false,
+    };
+    sessions.set(session, state);
+    events.push("NEW");
+    state.state = "PREPARING";
+    events.push("PREPARING");
+    let data;
+    try { data = recordData(options, ["fault"], []); } catch { trip(state, "EVIDENCE_GATE_FAILED"); }
+    const fault = Object.hasOwn(data, "fault") ? data.fault : "NONE";
+    if (typeof fault !== "string" || !FAULTS.includes(fault)) trip(state, "EVIDENCE_GATE_FAILED");
+    state.fault = fault;
+    if (fault.startsWith("PREFLIGHT_")) trip(state, "EVIDENCE_GATE_FAILED");
+    state.state = "READY";
+    events.push("READY");
+    return session;
+  }
+
+  function assertReady(session, plan) {
+    const state = get(session, plan);
+    requireState(state, ["READY"]);
+    requireLivePlan(state, ["SEALED", "EVIDENCE_READY", "ARMED"]);
+    return true;
+  }
+
+  function activate(session, plan, ticket) {
+    const state = get(session, plan);
+    requireState(state, ["READY"]);
+    if (!claimActivationTicket(ticket, plan)) trip(state, "EVIDENCE_GATE_INVALID");
+    state.state = "ACTIVE";
+    events.push("ACTIVE");
+  }
+
+  function writeResponse(session, plan, response) {
+    const state = get(session, plan);
+    requireState(state, ["ACTIVE"]);
+    requireLivePlan(state, ["CONSUMED"]);
+    let data;
+    try { data = recordData(response, ["endpointId", "attempt", "body"]); } catch { trip(state, "EVIDENCE_WRITE_FAILED"); }
+    if (typeof data.endpointId !== "string" || !IDS.includes(data.endpointId) ||
+        !Number.isSafeInteger(data.attempt) || data.attempt < 1 || data.attempt > 2) {
+      trip(state, "EVIDENCE_WRITE_FAILED");
+    }
+    const key = `${data.endpointId}:${data.attempt}`;
+    if (state.records.has(key)) trip(state, "EVIDENCE_WRITE_FAILED");
+    let bytes;
+    try { bytes = bodyCopy(data.body); } catch { trip(state, "EVIDENCE_WRITE_FAILED"); }
+    if (state.fault === "WRITE") trip(state, "EVIDENCE_WRITE_FAILED");
+    state.records.set(key, bytes);
+    state.recordCount += 1;
+    state.bytesWritten += bytes.byteLength;
+    events.push("MEMORY_WRITE");
+    if (state.fault === "READ") trip(state, "EVIDENCE_WRITE_FAILED");
+    // Read-back remains internal. No raw response or writer ability escapes.
+    const readBack = state.records.get(key);
+    if (readBack !== bytes || readBack.byteLength !== bytes.byteLength) trip(state, "EVIDENCE_WRITE_FAILED");
+    events.push("MEMORY_READ");
+    return Object.freeze({ bytes: bytes.byteLength, recordCount: state.recordCount });
+  }
+
+  function seal(session, plan) {
+    const state = get(session, plan);
+    requireState(state, ["ACTIVE"]);
+    requireLivePlan(state, ["CONSUMED"]);
+    state.state = "SEALED";
+    events.push("SEALED");
+  }
+
+  function close(session, plan) {
+    const state = get(session, plan);
+    requireState(state, ["SEALED"]);
+    // Closing only clears already-known private memory; it grants no READY or
+    // write ability and remains safe if the bound plan was stopped after seal.
+    if (state.fault === "CLEANUP") trip(state, "CLEANUP_UNVERIFIED");
+    for (const bytes of state.records.values()) Reflect.apply(Uint8Array.prototype.fill, bytes, [0]);
+    state.records.clear();
+    state.closed = true;
+    state.state = "CLOSED";
+    events.push("CLOSED");
+  }
+
+  function fail(session, plan) {
+    const state = get(session, plan);
+    if (state.state === "CLOSED") throw fixedError("EVIDENCE_GATE_INVALID");
+    if (state.state !== "FAILED") {
+      state.state = "FAILED";
+      state.latched = true;
+      events.push("FAILED");
+    }
+    stopPlan(state.plan, "EVIDENCE_GATE_INVALID");
+  }
+
+  function inspect(session, plan) {
+    const state = get(session, plan);
+    return Object.freeze({
+      scope: "synthetic-memory-only", state: state.state, latched: state.latched,
+      recordCount: state.recordCount, bytesWritten: state.bytesWritten, closed: state.closed,
+    });
+  }
+
+  return Object.freeze({
+    prepare, assertReady, activate, writeResponse, seal, close, fail, inspect,
+    trace: () => Object.freeze([...events]),
+  });
+}
+
+function response(ok, code, state) {
+  return Object.freeze({ ok, code, state });
+}
+
+/**
+ * Pure CR-1 memory model with closed data controls, not a transport adapter.
+ * No caller callback, source loader, writer, clock function or network factory
+ * can be supplied. The production index never imports or accepts this model.
+ */
+export function createSyntheticController(input) {
+  const captured = capturePlan(input);
+  const plan = captured.plan;
+  const model = createSyntheticEvidenceModel();
+  let session = null;
+  let currentControl = null;
+  let lastNow = null;
+  let preparing = false;
+
+  const view = () => plan ? inspectPlan(plan) : Object.freeze({
+    scope: "cr1-synthetic-only", state: "FAILED", code: captured.code,
+    checkerPassed: false, runnerCompatible: false, consumed: false, stopLatched: true,
+    sourceCaptureCount: 0, checkerInvocationCount: 0, mintCount: 0, activationCount: 0,
+    invokeCount: 0, transportInvocationCount: 0, checkerAllowReadDisabled: false,
+    coreFrozen: false, configurationFrozen: false, trace: Object.freeze([]),
+  });
+  function rejected(code) {
+    return response(false, code, view().state);
+  }
+  function stop(code, stateName = "INVALIDATED") {
+    if (plan && !TERMINAL.has(view().state)) stopPlan(plan, code, stateName);
+    if (session) {
+      try { model.fail(session, plan); } catch { /* fixed failure is retained */ }
+    }
+    return rejected(code);
+  }
+  function guardState(expected) {
+    const state = view();
+    if (!plan) return rejected(captured.code);
+    if (state.consumed) return rejected("PLAN_CONSUMED");
+    if (TERMINAL.has(state.state)) return rejected(state.code === "OK" ? "PLAN_INVALID" : state.code);
+    if (!expected.includes(state.state)) return rejected("PLAN_INVALID");
+    return null;
+  }
+  function control(value, requireConfirmed = false) {
+    let next;
+    try { next = snapshotSyntheticControl(value, requireConfirmed); }
+    catch { return stop("APPROVAL_UNVERIFIED"); }
+    if (next.approval !== "VERIFIED_SYNTHETIC" || !next.fresh) return stop("APPROVAL_UNVERIFIED");
+    const { windowStartMs, windowEndMs } = getSyntheticWindow(plan);
+    if (!Number.isSafeInteger(next.nowMs) || next.nowMs < 0 ||
+        (lastNow !== null && next.nowMs < lastNow) ||
+        !Number.isSafeInteger(windowStartMs) || !Number.isSafeInteger(windowEndMs) ||
+        next.nowMs < windowStartMs || next.nowMs >= windowEndMs || next.revoked) {
+      return stop("AUTHORIZATION_INVALID");
+    }
+    lastNow = next.nowMs;
+    currentControl = Object.freeze({ nowMs: next.nowMs, fresh: next.fresh, revoked: next.revoked, approval: next.approval });
+    if (requireConfirmed && !next.confirmed) return rejected("AUTHORIZATION_INVALID");
+    return null;
+  }
+
+  function check(value) {
+    const rejectedState = guardState(["CAPTURED"]);
+    if (rejectedState) return rejectedState;
+    const invalidControl = control(value);
+    if (invalidControl) return invalidControl;
+    try { return checkCapturedPlan(plan); }
+    catch { return stop("INTERNAL_ERROR", "FAILED"); }
+  }
+
+  function setControl(value) {
+    const state = view();
+    if (!plan) return rejected(captured.code);
+    if (TERMINAL.has(state.state)) return rejected(state.code === "OK" ? "PLAN_INVALID" : state.code);
+    const invalidControl = control(value);
+    return invalidControl || response(true, "OK", view().state);
+  }
+
+  async function prepare(options) {
+    const rejectedState = guardState(["SEALED"]);
+    if (rejectedState) return rejectedState;
+    if (preparing) return rejected("PLAN_INVALID");
+    const invalidControl = control(currentControl);
+    if (invalidControl) return invalidControl;
+    preparing = true;
+    try {
+      session = model.prepare(plan, options);
+      // A fixed microtask boundary permits an interleaved data-only revoke or
+      // expiry update; it never invokes a caller supplied callback.
+      await Promise.resolve();
+      const afterPrepare = guardState(["SEALED"]);
+      if (afterPrepare) {
+        model.fail(session, plan);
+        return afterPrepare;
+      }
+      const stale = control(currentControl);
+      if (stale) return stale;
+      model.assertReady(session, plan);
+      return advancePlan(plan, "EVIDENCE_READY");
+    } catch (error) {
+      const code = fixedErrorCode(error);
+      return stop(code === "INTERNAL_ERROR" ? "EVIDENCE_GATE_FAILED" : code, "FAILED");
+    } finally {
+      preparing = false;
+    }
+  }
+
+  function arm(value) {
+    const rejectedState = guardState(["EVIDENCE_READY"]);
+    if (rejectedState) return rejectedState;
+    const invalidControl = control(value, true);
+    if (invalidControl) return invalidControl;
+    try {
+      model.assertReady(session, plan);
+      return advancePlan(plan, "ARMED");
+    } catch { return stop("EVIDENCE_GATE_INVALID"); }
+  }
+
+  function consume(value) {
+    const rejectedState = guardState(["ARMED"]);
+    if (rejectedState) return rejectedState;
+    const invalidControl = control(value);
+    if (invalidControl) return invalidControl;
+    try {
+      model.assertReady(session, plan);
+      // Final checks, CONSUMED, mint and activation all run synchronously.
+      const ticket = consumeCapturedPlan(plan);
+      model.activate(session, plan, ticket);
+      return response(true, "OK", view().state);
+    } catch (error) {
+      const code = fixedErrorCode(error);
+      return stop(code === "INTERNAL_ERROR" ? "EVIDENCE_GATE_INVALID" : code, "FAILED");
+    }
+  }
+
+  function complete() {
+    const state = view();
+    if (!plan || state.state !== "CONSUMED" || state.stopLatched || !session) return rejected(state.consumed ? "PLAN_CONSUMED" : "PLAN_INVALID");
+    try {
+      model.seal(session, plan);
+      model.close(session, plan);
+      return advancePlan(plan, "COMPLETED");
+    } catch { return stop("EVIDENCE_WRITE_FAILED", "FAILED"); }
+  }
+
+  function fail(options) {
+    const state = view();
+    if (!plan || TERMINAL.has(state.state)) return rejected(state.consumed ? "PLAN_CONSUMED" : "PLAN_INVALID");
+    // Use the same closed descriptor reader without inspecting caller getters.
+    try {
+      if (!options || typeof options !== "object" || types.isProxy(options) || Array.isArray(options) ||
+          ![null, Object.prototype].includes(Object.getPrototypeOf(options))) return stop("INTERNAL_ERROR", "FAILED");
+      const own = Reflect.ownKeys(options);
+      const slot = Object.getOwnPropertyDescriptor(options, "unknown");
+      if (own.length !== 1 || own[0] !== "unknown" || !slot || !slot.enumerable ||
+          !Object.hasOwn(slot, "value") || typeof slot.value !== "boolean") return stop("INTERNAL_ERROR", "FAILED");
+      return stop(slot.value ? "REQUEST_OUTCOME_UNKNOWN" : "INTERNAL_ERROR", slot.value ? "UNKNOWN" : "FAILED");
+    } catch { return stop("INTERNAL_ERROR", "FAILED"); }
+  }
+
+  return Object.freeze({
+    check, setControl, prepare, arm, consume, complete, fail,
+    invalidate: () => stop("AUTHORIZATION_INVALID"),
+    snapshot: view,
+    matchesCapturedInput: (other) => matchesCapturedInput(plan, other),
+    matchesNormalizedBinding: (other) => matchesNormalizedBinding(plan, other),
+  });
 }

@@ -1,0 +1,215 @@
+{
+  "schemaVersion": "hk-ai-08-cr2-preflight-source-inventory-v1",
+  "purpose": "SMART-PM CR-2 fixed-probe synthetic wiring preflight: pinned source paths, commits, git blobs, raw byte counts, SHA-256 and static export surface only.",
+  "fixedBaseline": "2712ea7866377d889a78e413fcb7de420b9ad1ab",
+  "fixedCard": "0dc4433a06eff3f15f164e465257a77c709e73b9",
+  "fixedDesignA": "4df33305d488df2797cea4c3d2b286db7d8daa2c",
+  "fixedDesignB": "e6995bcb4dd9943df9745604bfcca7c4d7ea8890",
+  "fixedProbePin": "558b9c864a4b820e397336200758b143556a4d87",
+  "fixedCheckerPin": "31f20c9a372c447f142312f6e95e0400372f9ee8",
+  "note": "This inventory records source paths, commits, blobs, byte counts, SHA-256 and static export names only. It contains no configuration, accounts, credentials, certificates, SIDs, device addresses, or secret digests.",
+  "entries": [
+    {
+      "path": "tools/hikvision-e1-controlled-runner/index.mjs",
+      "kind": "source",
+      "commit": "2712ea7866377d889a78e413fcb7de420b9ad1ab",
+      "blob": "6c90ed93b10d135b26817f8827272031b838769a",
+      "bytes": 775,
+      "sha256": "8eba07ed904549ae58d694aad35e8bdab62e1be33970da6285023795f1dda50c",
+      "exports": ["executeControlledE1"]
+    },
+    {
+      "path": "tools/hikvision-e1-controlled-runner/private-plan.mjs",
+      "kind": "source",
+      "commit": "2712ea7866377d889a78e413fcb7de420b9ad1ab",
+      "blob": "5a2621da92186dfe431fddd415821a9541ac7c2c",
+      "bytes": 15180,
+      "sha256": "f0d1a36ea9b0c134f521d7583c4e3e67358d9bbf20f670d5f83a6cf740dc5c8a",
+      "exports": [
+        "capturePlan",
+        "isPlanToken",
+        "checkCapturedPlan",
+        "advancePlan",
+        "consumeCapturedPlan",
+        "claimEvidenceSession",
+        "claimActivationTicket",
+        "stopPlan",
+        "getSyntheticWindow",
+        "matchesCapturedInput",
+        "matchesNormalizedBinding",
+        "inspectPlan",
+        "fixedErrorCode",
+        "snapshotSyntheticControl"
+      ]
+    },
+    {
+      "path": "tools/hikvision-e1-controlled-runner/controlled-runner.mjs",
+      "kind": "source",
+      "commit": "2712ea7866377d889a78e413fcb7de420b9ad1ab",
+      "blob": "9fbfdc0433a833ceb2557043f15005074c7fd0b3",
+      "bytes": 7550,
+      "sha256": "688d9679b5131f374423f024b1eccccfd0a67377de945846554469f4bc4f77d7",
+      "exports": ["createSyntheticController"]
+    },
+    {
+      "path": "tools/hikvision-e1-controlled-runner/evidence-session.mjs",
+      "kind": "source",
+      "commit": "2712ea7866377d889a78e413fcb7de420b9ad1ab",
+      "blob": "1e248fcc9a6930d36853d6f438d669fbb88c0b96",
+      "bytes": 8160,
+      "sha256": "39e6f3e569e4a959ecac66272e0ecdac74ef7e26f398511fea1b2759711eab49",
+      "exports": ["createSyntheticEvidenceModel"]
+    },
+    {
+      "path": "tools/hikvision-e1-controlled-runner/public-result.mjs",
+      "kind": "source",
+      "commit": "2712ea7866377d889a78e413fcb7de420b9ad1ab",
+      "blob": "bf849e67b6490690c2c41532b3208a9e047bba91",
+      "bytes": 11518,
+      "sha256": "5533fe993cd931463c64098897c0c8637b25f849af6c6203dd67d959275f6669",
+      "exports": ["makePublicResult", "errorToCode"]
+    },
+    {
+      "path": "tools/hikvision-e1-controlled-runner/windows-acl-bridge.mjs",
+      "kind": "source",
+      "commit": "2712ea7866377d889a78e413fcb7de420b9ad1ab",
+      "blob": "1312ed29ecc4186b1b5c03299780e1a060b1ab9d",
+      "bytes": 318,
+      "sha256": "f50d5753ef28f5139b6fcd9a49692267e32d9cb435a4677335c51448f054d0f4",
+      "exports": ["prepareEvidenceGate"]
+    },
+    {
+      "path": "tools/hikvision-offline-config-checker/src/check-config.mjs",
+      "kind": "source",
+      "commit": "2712ea7866377d889a78e413fcb7de420b9ad1ab",
+      "blob": "c813672010bc5d92a04e33eb587e3e9e3c59a290",
+      "bytes": 10463,
+      "sha256": "a8dbde46942aca550e13fdddb27e93bd5c9d1902e8cbdfb09cb31befc0eecfb7",
+      "exports": ["checkOfflineConfig", "checkOfflineConfigJson"],
+      "note": "Blob identical in fixed checker pin 31f20c9a372c447f142312f6e95e0400372f9ee8."
+    },
+    {
+      "path": "tools/hikvision-probe/src/allowlist.mjs",
+      "kind": "source",
+      "commit": "558b9c864a4b820e397336200758b143556a4d87",
+      "blob": "2e2551c45bad21daf86a4767d29c18b0a5823b95",
+      "bytes": 3879,
+      "sha256": "1c965b2b64c0990f92907f4725f7b6fa9ee9ff2c616f8af829218acbf8a73683",
+      "exports": [
+        "READ_ENDPOINTS",
+        "ALLOWED_METHOD",
+        "DEFAULT_ALLOWED_PORTS",
+        "ProbeError",
+        "listEndpoints",
+        "findEndpoint",
+        "parseAllowedHosts",
+        "parseAllowedPorts",
+        "assertAllowedHost",
+        "assertAllowedPort",
+        "assertAllowedRequest",
+        "buildRequestPath"
+      ],
+      "inCr2SixFileWhitelist": true
+    },
+    {
+      "path": "tools/hikvision-probe/src/digest.mjs",
+      "kind": "source",
+      "commit": "558b9c864a4b820e397336200758b143556a4d87",
+      "blob": "3c222fca08a9f1e2b5d07b1c87b276bb826dd239",
+      "bytes": 4639,
+      "sha256": "ce1d4d197a8bf567bdefb7420f550d6ba4d0a5a4593254b9c203b9af5b180b3e",
+      "exports": ["DigestError", "parseChallenge", "makeCnonce", "buildAuthorization", "nextNonceCount"],
+      "inCr2SixFileWhitelist": true
+    },
+    {
+      "path": "tools/hikvision-probe/src/http.mjs",
+      "kind": "source",
+      "commit": "558b9c864a4b820e397336200758b143556a4d87",
+      "blob": "e96481d2954df4efe6ac43dbe8fd915a3e9c5587",
+      "bytes": 7858,
+      "sha256": "e64b04bd10370682f9b4b1ff577b8c481801d1c9976335ce276cdcaa4f6c2573",
+      "exports": [
+        "HttpError",
+        "DEFAULT_TIMEOUT_MS",
+        "DEFAULT_MAX_BYTES",
+        "normalizeFingerprint",
+        "parseFingerprints",
+        "matchFingerprint",
+        "assertContentType",
+        "certificateValidity",
+        "httpsGet"
+      ],
+      "inCr2SixFileWhitelist": true,
+      "note": "httpsGet is the real network entry; copying this file satisfies the assertContentType dependency only and does not authorize calling httpsGet."
+    },
+    {
+      "path": "tools/hikvision-probe/src/probe.mjs",
+      "kind": "source",
+      "commit": "558b9c864a4b820e397336200758b143556a4d87",
+      "blob": "a99c80ac6c4a95989f0ed5fbadc1da405146dc7d",
+      "bytes": 7837,
+      "sha256": "7a261b0291bb97db3c3aae6f112c971c5f72903e8f77ffc5ef02477bbe787f46",
+      "exports": ["runProbe"],
+      "inCr2SixFileWhitelist": true,
+      "note": "runProbe({config, transport, now}) is the only orchestration to reuse; the injected transport must be a non-forwarding synthetic stub."
+    },
+    {
+      "path": "tools/hikvision-probe/src/redact.mjs",
+      "kind": "source",
+      "commit": "558b9c864a4b820e397336200758b143556a4d87",
+      "blob": "fbf97301cfd9307a0b26ad2b832bbe9ebb490225",
+      "bytes": 2166,
+      "sha256": "f221f26e3c27bf618192be8f65315f16d1521895121e977683455d10be53da11",
+      "exports": ["maskIp", "maskSerial", "maskMac", "maskUser", "fingerprintValue", "redactText"],
+      "inCr2SixFileWhitelist": true
+    },
+    {
+      "path": "tools/hikvision-probe/src/report.mjs",
+      "kind": "source",
+      "commit": "558b9c864a4b820e397336200758b143556a4d87",
+      "blob": "19d410ac59db11759542522b1ecdd7bec0bd81d7",
+      "bytes": 5263,
+      "sha256": "b22445deff002dc7c33f0db159bf8e1136a31f4ffabf9c575fbdc921b162c467",
+      "exports": ["parseDeviceInfo", "parseCapabilities", "firstNumber", "parseCount", "parseFdLibList", "buildReport"],
+      "inCr2SixFileWhitelist": true
+    },
+    {
+      "path": "tools/hikvision-probe/src/fs-safe.mjs",
+      "kind": "source",
+      "commit": "558b9c864a4b820e397336200758b143556a4d87",
+      "blob": "61bef04d51de884ac9eeb45d61eb5780e52b0c95",
+      "bytes": 1198,
+      "sha256": "d618507e8ad74479945a36bbc1dd080e4b93b03e241ac53642c7d59b5d98613d",
+      "exports": ["ensurePrivateDir", "writePrivateFile"],
+      "inCr2SixFileWhitelist": false,
+      "note": "Pinned in the same directory but excluded from the CR-2 six-file snapshot; none of the six files import it."
+    },
+    {
+      "path": "docs/tasks/HK-AI-08-E1-CONTROLLED-RUNNER-IMPLEMENTATION-TASK-2026-11-23.md",
+      "kind": "document",
+      "commit": "0dc4433a06eff3f15f164e465257a77c709e73b9",
+      "blob": "ba7e4255e25c1cc5c6e608ab83c62709b95dfbd7",
+      "bytes": 19352,
+      "sha256": "60054aa850a6bf291ae8db89476f560fc135408edc1ddf0477bf2982eea04cfb",
+      "exports": []
+    },
+    {
+      "path": "docs/tasks/HK-AI-08-E1-CONTROLLED-CONFIG-BINDING-DESIGN-2026-11-23.md",
+      "kind": "document",
+      "commit": "4df33305d488df2797cea4c3d2b286db7d8daa2c",
+      "blob": "8b6206df11d9735b85edb7104cd21be4ce84b953",
+      "bytes": 29147,
+      "sha256": "1bcbdadb5decc672c7af270254bb108df501335645d9d1884493142a91b4bef1",
+      "exports": []
+    },
+    {
+      "path": "docs/tasks/HK-AI-08-NODE-WINDOWS-ACL-INTEGRATION-REVIEW-2026-11-23.md",
+      "kind": "document",
+      "commit": "e6995bcb4dd9943df9745604bfcca7c4d7ea8890",
+      "blob": "13af3ec9010ac2a02ef0665655e7e1cc7ace3069",
+      "bytes": 30038,
+      "sha256": "0ff88b55c9f947b63e8ebfa61bf483d56e830ea5b7c3ceba8254ca9f8ba8a9f0",
+      "exports": []
+    }
+  ]
+}

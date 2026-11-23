@@ -2,11 +2,17 @@ import { randomUUID } from "node:crypto";
 import { types } from "node:util";
 import { checkOfflineConfig } from "../../hikvision-offline-config-checker/src/check-config.mjs";
 import { decodeSyntheticConfigBytes } from "../../hikvision-offline-entry/src/bytes.mjs";
+import {
+  createNativeEvidenceBroker, validateNativeEvidence, writeNativeEvidence,
+  closeNativeEvidence, observeNativeEvidence,
+} from "../../hikvision-windows-evidence-sink/src/native-broker.mjs";
 
-// Pure in-memory synthetic model and controlled byte entry. No caller callback,
-// environment/path loader, real transport, filesystem operation or live permit.
+// Legacy modes remain pure-memory. The separate Windows mode owns only a
+// fixed local synthetic evidence broker; it has no real transport/live permit.
 const SCOPE = "synthetic-config-binding-only";
 const ENTRY_SCOPE = "synthetic-offline-entry-only";
+const WINDOWS_SCOPE = "synthetic-windows-evidence-sink-only";
+const WINDOWS_POLICY = "synthetic-windows-handle-acl-v1";
 const INPUT_SCHEMA = "hk-ai-08-synthetic-binding-v1";
 const CHECKER_SCHEMA = "hk-ai-08-offline-config-v1";
 const INVALID = Symbol("invalid-input");
@@ -316,14 +322,18 @@ function handle() { return Object.freeze(Object.create(null)); }
 function belongs(map, value) {
   return value !== null && typeof value === "object" && !types.isProxy(value) && map.has(value);
 }
-function scopedResult(scope, code, fields = {}) {
-  return deepFreeze({ scope, status: code === "OK" ? "PASS" : "FAIL", code, ...fields });
+function scopedResult(scope, code, fields = {}, status = code === "OK" ? "PASS" : "FAIL") {
+  return deepFreeze({ scope, status, code, ...fields });
 }
 
-function createBridge(initialContext, entryMode) {
-  const result = (code, fields = {}) => scopedResult(entryMode ? ENTRY_SCOPE : SCOPE, code, fields);
+function createBridge(initialContext, entryMode, windowsMode = false) {
+  const scope = windowsMode ? WINDOWS_SCOPE : entryMode ? ENTRY_SCOPE : SCOPE;
+  const result = (code, fields = {}, status) => scopedResult(scope, code, fields, status);
   let runtime;
-  try { runtime = copyContext(initialContext); }
+  try {
+    runtime = copyContext(initialContext);
+    if (windowsMode && runtime.output.policyRef !== WINDOWS_POLICY) invalid();
+  }
   catch { throw new TypeError("SYNTHETIC_CONTEXT_INVALID"); }
   let epoch = 0n;
   let now = 0;
@@ -353,7 +363,11 @@ function createBridge(initialContext, entryMode) {
       }
       const binding = handle();
       const configBindingRef = `hk-bind-${randomUUID().replaceAll("-", "")}`;
-      bindings.set(binding, { snapshot, projection, checker: deepFreeze(checker), epoch, configBindingRef, permitIssued: false, cancelled: false });
+      const state = { snapshot, projection, checker: deepFreeze(checker), epoch, configBindingRef, permitIssued: false, cancelled: false };
+      if (windowsMode) Object.assign(state, {
+        nativeClosed: false, nativeFailureCode: null, nativeLast: null, nativeClosePromise: null,
+      });
+      bindings.set(binding, state);
       return result("OK", { binding, configBindingRef, checker });
     } catch (error) {
       return result(error === INVALID ? "INVALID_INPUT" : "INTERNAL_ERROR", { binding: null, configBindingRef: null, checker: null });
@@ -373,6 +387,14 @@ function createBridge(initialContext, entryMode) {
     }
   }
 
+  function copyGrant(state, input) {
+    const grant = dataRecord(input, ["scope", "approvalRef", "windowStart", "windowEnd"]);
+    if (grant.scope !== "synthetic-fake-execution-only" || grant.approvalRef !== state.snapshot.approvalRef ||
+        !Number.isSafeInteger(grant.windowStart) || !Number.isSafeInteger(grant.windowEnd) ||
+        grant.windowStart < 0 || grant.windowEnd <= grant.windowStart) invalid();
+    return grant;
+  }
+
   function issueSyntheticPermit(binding, input) {
     try {
       if (!belongs(bindings, binding)) return result("INVALID_BINDING", { token: null });
@@ -380,10 +402,7 @@ function createBridge(initialContext, entryMode) {
       if (state.cancelled) return result("SESSION_CANCELLED", { token: null });
       if (state.epoch !== epoch) return result("CONTEXT_CHANGED", { token: null });
       if (state.permitIssued) return result("PERMIT_ALREADY_ISSUED", { token: null });
-      const grant = dataRecord(input, ["scope", "approvalRef", "windowStart", "windowEnd"]);
-      if (grant.scope !== "synthetic-fake-execution-only" || grant.approvalRef !== state.snapshot.approvalRef ||
-          !Number.isSafeInteger(grant.windowStart) || !Number.isSafeInteger(grant.windowEnd) ||
-          grant.windowStart < 0 || grant.windowEnd <= grant.windowStart) invalid();
+      const grant = copyGrant(state, input);
       const token = handle();
       permits.set(token, { binding, epoch, windowStart: grant.windowStart, windowEnd: grant.windowEnd, used: false, revoked: false });
       state.permitIssued = true;
@@ -470,6 +489,172 @@ function createBridge(initialContext, entryMode) {
     return prepare(decoded.input);
   }
 
+  function safeNative(record) {
+    if (record === null || typeof record !== "object") return null;
+    // The trusted broker provides fresh closed observations. In particular its
+    // create-only capability never enters a public bridge result.
+    const safe = {};
+    for (const key of ["status", "code", "evidenceRef", "compilerRef", "checks", "counts",
+      "newObjectStateUnverified", "retained", "closed"]) safe[key] = record[key];
+    return deepFreeze(safe);
+  }
+
+  function windowsResult(code, fields, native, status) {
+    return result(code, { ...fields, native },
+      status ?? (native?.status === "BLOCKED" && native.code === code ? "BLOCKED" : undefined));
+  }
+
+  function nativeUnknown(state) {
+    // If an internal/RPC failure escapes the broker, keep the last verified
+    // quantities but explicitly stop treating them as a complete object count.
+    if (state?.nativeLast !== null && state?.nativeLast !== undefined) {
+      state.nativeLast = deepFreeze({ ...state.nativeLast,
+        status: "FAIL", code: "NATIVE_IO_FAILED", newObjectStateUnverified: true,
+      });
+    }
+  }
+
+  function windowsControlCode(state) {
+    if (state.nativeClosed) return "NATIVE_BINDING_CLOSED";
+    if (state.epoch !== epoch) return "CONTEXT_CHANGED";
+    if (state.cancelled) return "SESSION_CANCELLED";
+    if (state.nativeFailureCode !== null) return state.nativeFailureCode;
+    if (state.snapshot.execution.output.policyRef !== WINDOWS_POLICY) return "NATIVE_POLICY_UNSUPPORTED";
+    return "OK";
+  }
+
+  function rootEvidenceVerified(observed) {
+    return observed !== null && observed.checks !== null && typeof observed.checks === "object" &&
+      ["platformSupported", "identitySupported", "locationSupported", "ancestorHandlesHeld",
+        "rootCreatedExclusive", "rootAclValid", "nativeIdentityValid", "rootEntriesValid", "deleteSharingDenied"]
+        .every((name) => observed.checks[name] === true) &&
+      observed.counts?.directoriesCreated === 1 && observed.newObjectStateUnverified === false &&
+      observed.retained === true && observed.closed === false;
+  }
+
+  async function refreshNative(state) {
+    const observed = safeNative(await validateNativeEvidence(state.nativeCapability));
+    if (observed === null) throw new Error("NATIVE_IO_FAILED");
+    state.nativeLast = observed;
+    if (observed.status !== "PASS" || observed.code !== "OK") state.nativeFailureCode = observed.code;
+    else if (!rootEvidenceVerified(observed)) state.nativeFailureCode = "NATIVE_ROOT_UNVERIFIED";
+    return observed;
+  }
+
+  async function closeNativeState(state) {
+    if (state.nativeClosePromise !== null) return state.nativeClosePromise;
+    // Synchronous invalidation precedes the first close await. Closing retains
+    // every directory/file and never permits a new signature or execution.
+    state.nativeClosed = true;
+    state.nativeClosePromise = (async () => {
+      try {
+        const observed = safeNative(await closeNativeEvidence(state.nativeCapability));
+        if (observed === null) {
+          nativeUnknown(state);
+          return windowsResult("NATIVE_IO_FAILED", {}, state.nativeLast);
+        }
+        state.nativeLast = observed;
+        if (observed.status === "PASS" && observed.code === "OK" && observed.closed !== true) {
+          return windowsResult("NATIVE_CLOSE_UNVERIFIED", {}, observed);
+        }
+        return windowsResult(observed.code, {}, observed);
+      } catch {
+        nativeUnknown(state);
+        return windowsResult("NATIVE_IO_FAILED", {}, state.nativeLast);
+      }
+    })();
+    return state.nativeClosePromise;
+  }
+
+  async function prepareWindowsBytes(bytes) {
+    let state = null;
+    try {
+      const prepared = prepareBytes(bytes);
+      if (prepared.code !== "OK") {
+        return windowsResult(prepared.code, { binding: null, configBindingRef: null, checker: null }, null);
+      }
+      state = bindings.get(prepared.binding);
+      let code = windowsControlCode(state);
+      if (code !== "OK") return windowsResult(code, { binding: null, configBindingRef: null, checker: null }, null);
+      const created = await createNativeEvidenceBroker();
+      state.nativeLast = safeNative(created);
+      if (created.capability !== null && created.capability !== undefined) {
+        Object.defineProperty(state, "nativeCapability", {
+          value: created.capability, enumerable: false, writable: false, configurable: false,
+        });
+      }
+      if (created.status !== "PASS" || created.code !== "OK" || !Object.hasOwn(state, "nativeCapability")) {
+        code = created.code === "OK" ? "NATIVE_IO_FAILED" : created.code;
+        const failedStatus = created.status === "BLOCKED" ? "BLOCKED" : undefined;
+        if (Object.hasOwn(state, "nativeCapability")) await closeNativeState(state);
+        return windowsResult(code, { binding: null, configBindingRef: null, checker: null }, state.nativeLast, failedStatus);
+      }
+      code = windowsControlCode(state);
+      if (code === "OK") {
+        const observed = await refreshNative(state);
+        code = observed.status === "PASS" && observed.code === "OK" ? windowsControlCode(state) : observed.code;
+      }
+      if (code !== "OK") {
+        const failedStatus = state.nativeLast?.status === "BLOCKED" ? "BLOCKED" : undefined;
+        await closeNativeState(state);
+        return windowsResult(code, { binding: null, configBindingRef: null, checker: null }, state.nativeLast, failedStatus);
+      }
+      return windowsResult("OK", {
+        binding: prepared.binding, configBindingRef: prepared.configBindingRef, checker: prepared.checker,
+      }, state.nativeLast);
+    } catch {
+      nativeUnknown(state);
+      if (state && Object.hasOwn(state, "nativeCapability")) await closeNativeState(state);
+      return windowsResult("NATIVE_IO_FAILED", { binding: null, configBindingRef: null, checker: null }, state?.nativeLast ?? null);
+    }
+  }
+
+  async function issueWindowsPermit(binding, input) {
+    let state = null;
+    try {
+      if (!belongs(bindings, binding)) return windowsResult("INVALID_BINDING", { token: null }, null);
+      state = bindings.get(binding);
+      let code = windowsControlCode(state);
+      if (code !== "OK") return windowsResult(code, { token: null }, state.nativeLast);
+      if (!Object.hasOwn(state, "nativeCapability")) return windowsResult("INVALID_BINDING", { token: null }, state.nativeLast);
+      if (state.permitIssued) return windowsResult("PERMIT_ALREADY_ISSUED", { token: null }, state.nativeLast);
+      const grant = copyGrant(state, input);
+      const observed = await refreshNative(state);
+      code = observed.status === "PASS" && observed.code === "OK" ? windowsControlCode(state) : observed.code;
+      if (code !== "OK") return windowsResult(code, { token: null }, state.nativeLast);
+      const issued = issueSyntheticPermit(binding, grant);
+      return windowsResult(issued.code, { token: issued.token }, state.nativeLast);
+    } catch (error) {
+      if (error !== INVALID) nativeUnknown(state);
+      return windowsResult(error === INVALID ? "INVALID_INPUT" : "NATIVE_IO_FAILED", { token: null }, state?.nativeLast ?? null);
+    }
+  }
+
+  async function closeWindowsBinding(binding) {
+    if (!belongs(bindings, binding)) return windowsResult("INVALID_BINDING", {}, null);
+    const state = bindings.get(binding);
+    if (!Object.hasOwn(state, "nativeCapability")) return windowsResult("INVALID_BINDING", {}, state.nativeLast);
+    return closeNativeState(state);
+  }
+
+  function observeWindows(binding) {
+    if (!belongs(bindings, binding)) return windowsResult("INVALID_BINDING", {}, null);
+    const state = bindings.get(binding);
+    if (!Object.hasOwn(state, "nativeCapability")) return windowsResult("INVALID_BINDING", {}, state.nativeLast);
+    try {
+      const observed = observeNativeEvidence(state.nativeCapability);
+      const native = safeNative(observed);
+      if (native === null || typeof observed.busy !== "boolean" ||
+          !["idle", "validate", "write", "close"].includes(observed.operation)) {
+        throw new Error("NATIVE_IO_FAILED");
+      }
+      return windowsResult(native.code, {}, deepFreeze({ ...native, busy: observed.busy, operation: observed.operation }));
+    } catch {
+      nativeUnknown(state);
+      return windowsResult("NATIVE_IO_FAILED", {}, state.nativeLast);
+    }
+  }
+
   function copyResponses(value) {
     return deepFreeze(dataArray(value, 12, 1).map((response) => {
       const frame = dataRecord(response, ["endpointId", "attempt", "status", "parseable", "model", "capability", "challenge", "elapsedMs"]);
@@ -547,7 +732,7 @@ function createBridge(initialContext, entryMode) {
     } catch { return result("INTERNAL_ERROR", { calls: 0, last: null }); }
   }
 
-  async function executeOffline(binding, token, fakeTransport, fakeOutput) {
+  async function runOffline(binding, token, fakeTransport, fakeOutput, windowsExecution) {
     let configBindingRef = null;
     let state;
     let permit;
@@ -565,6 +750,10 @@ function createBridge(initialContext, entryMode) {
       if (permit.revoked) return "PERMIT_REVOKED";
       if (state.epoch !== epoch || permit.epoch !== epoch) return "CONTEXT_CHANGED";
       if (state.cancelled) return "SESSION_CANCELLED";
+      if (windowsExecution) {
+        const nativeCode = windowsControlCode(state);
+        if (nativeCode !== "OK") return nativeCode;
+      }
       if (now < permit.windowStart) return "PERMIT_NOT_YET_VALID";
       if (now >= permit.windowEnd) return "PERMIT_EXPIRED";
       if (now - sessionStarted >= state.snapshot.execution.limits.sessionDeadlineMs) return "SESSION_DEADLINE_EXCEEDED";
@@ -581,7 +770,79 @@ function createBridge(initialContext, entryMode) {
       });
     }
 
+    function executionResult(code, summary) {
+      if (windowsExecution) {
+        return windowsResult(code, { configBindingRef, summary }, state?.nativeLast ?? null);
+      }
+      return result(code, { configBindingRef, summary });
+    }
+
+    function markBlocked(code) {
+      if (currentStage !== null && currentStage.transmissions !== 0) {
+        currentStage.state = "blocked";
+        currentStage.code = code;
+      }
+    }
+
+    async function finishWindows(code) {
+      try {
+      let controlCode = sessionCode();
+      if (controlCode !== "OK") {
+        markBlocked(controlCode);
+        return executionResult(controlCode, summaryFor(controlCode));
+      }
+      if (counts.transmissions === 0) return executionResult(code, summaryFor(code));
+      const validated = await refreshNative(state);
+      controlCode = sessionCode();
+      if (controlCode !== "OK") {
+        markBlocked(controlCode);
+        return executionResult(controlCode, summaryFor(controlCode));
+      }
+      if (validated.status !== "PASS" || validated.code !== "OK") {
+        markBlocked(validated.code);
+        return executionResult(validated.code, summaryFor(validated.code));
+      }
+      // Only the closed session projection crosses the broker pipe. Native
+      // files are CreateNew records of this pre-final-output summary; they are
+      // never overwritten to conceal a later control or output failure.
+      const written = safeNative(await writeNativeEvidence(state.nativeCapability, summaryFor(code)));
+      if (written === null) throw new Error("NATIVE_IO_FAILED");
+      state.nativeLast = written;
+      if (written.status !== "PASS" || written.code !== "OK") state.nativeFailureCode = written.code;
+      controlCode = sessionCode();
+      if (controlCode !== "OK") {
+        markBlocked(controlCode);
+        return executionResult(controlCode, summaryFor(controlCode));
+      }
+      if (written.status !== "PASS" || written.code !== "OK") {
+        markBlocked(written.code);
+        return executionResult(written.code, summaryFor(written.code));
+      }
+      const checkNames = ["platformSupported", "identitySupported", "locationSupported", "ancestorHandlesHeld",
+        "rootCreatedExclusive", "rootAclValid", "nativeIdentityValid", "rootEntriesValid", "filesCreatedExclusive",
+        "fileAclsValid", "contentVerified", "flushVerified", "deleteSharingDenied"];
+      if (written.checks === null || typeof written.checks !== "object" ||
+          Object.keys(written.checks).length !== checkNames.length ||
+          !checkNames.every((name) => written.checks[name] === true) ||
+          written.counts?.directoriesCreated !== 1 || written.counts?.filesCreated !== 2 ||
+          !Number.isSafeInteger(written.counts?.bytesWritten) || written.counts.bytesWritten <= 0 ||
+          written.counts.bytesVerified !== written.counts.bytesWritten || written.counts.flushes !== 2 ||
+          written.newObjectStateUnverified !== false || written.retained !== true || written.closed !== false) {
+        state.nativeFailureCode = "NATIVE_WRITE_UNVERIFIED";
+        markBlocked(state.nativeFailureCode);
+        return executionResult(state.nativeFailureCode, summaryFor(state.nativeFailureCode));
+      }
+      return executionResult(code, summaryFor(code));
+      } catch {
+        nativeUnknown(state);
+        state.nativeFailureCode = "NATIVE_IO_FAILED";
+        markBlocked(state.nativeFailureCode);
+        return executionResult(state.nativeFailureCode, summaryFor(state.nativeFailureCode));
+      }
+    }
+
     function finish(code) {
+      if (windowsExecution) return finishWindows(code);
       const controlCode = sessionCode();
       if (controlCode !== "OK") {
         code = controlCode;
@@ -602,7 +863,7 @@ function createBridge(initialContext, entryMode) {
         // the execute result separately records that output failure.
         if (code !== summary.code) summary = summaryFor(code);
       }
-      return result(code, { configBindingRef, summary });
+      return executionResult(code, summary);
     }
 
     function block(code) {
@@ -619,6 +880,12 @@ function createBridge(initialContext, entryMode) {
       await Promise.resolve();
       code = sessionCode();
       if (code !== "OK") return { code, response: null };
+      if (windowsExecution) {
+        const validated = await refreshNative(state);
+        code = sessionCode();
+        if (code !== "OK") return { code, response: null };
+        if (validated.status !== "PASS" || validated.code !== "OK") return { code: validated.code, response: null };
+      }
       if (counts.transmissions >= 12) return { code: "TRANSMISSION_BUDGET_EXCEEDED", response: null };
       const requestStarted = now;
       if (currentStage.transmissions === 0) counts.logicalEndpoints += 1;
@@ -651,18 +918,22 @@ function createBridge(initialContext, entryMode) {
     }
 
     try {
-      if (!belongs(bindings, binding)) return result("INVALID_BINDING", { configBindingRef, summary: null });
+      if (!belongs(bindings, binding)) return executionResult("INVALID_BINDING", null);
       state = bindings.get(binding);
       configBindingRef = state.configBindingRef;
-      if (!belongs(transports, fakeTransport)) return result("INVALID_TRANSPORT", { configBindingRef, summary: null });
-      if (!belongs(outputs, fakeOutput)) return result("INVALID_OUTPUT", { configBindingRef, summary: null });
-      if (!belongs(permits, token)) return result("INVALID_PERMIT", { configBindingRef, summary: null });
-      if (state.cancelled) return result("SESSION_CANCELLED", { configBindingRef, summary: null });
+      if (!belongs(transports, fakeTransport)) return executionResult("INVALID_TRANSPORT", null);
+      if (windowsExecution) {
+        const nativeCode = windowsControlCode(state);
+        if (nativeCode !== "OK") return executionResult(nativeCode, null);
+        if (!Object.hasOwn(state, "nativeCapability")) return executionResult("INVALID_BINDING", null);
+      } else if (!belongs(outputs, fakeOutput)) return executionResult("INVALID_OUTPUT", null);
+      if (!belongs(permits, token)) return executionResult("INVALID_PERMIT", null);
+      if (state.cancelled) return executionResult("SESSION_CANCELLED", null);
       permit = permits.get(token);
       const code = permitCode(binding, state, permit);
-      if (code !== "OK") return result(code, { configBindingRef, summary: null });
+      if (code !== "OK") return executionResult(code, null);
       transport = transports.get(fakeTransport);
-      output = outputs.get(fakeOutput);
+      if (!windowsExecution) output = outputs.get(fakeOutput);
       counts = { logicalEndpoints: 0, transmissions: 0, authRetries: 0, unknownEndpoints: 0 };
       stages = ENDPOINTS.map((endpoint) => ({ id: endpoint.id, state: "NOT_EXECUTED", code: "NOT_EXECUTED", httpStatus: null, transmissions: 0 }));
       sessionStarted = now;
@@ -715,9 +986,31 @@ function createBridge(initialContext, entryMode) {
       if (transport.position !== transport.responses.length) return finish("FAKE_SCRIPT_REMAINS");
       return finish("OK");
     } catch {
-      if (!counts || !stages || !state || !permit || !output) return result("INTERNAL_ERROR", { configBindingRef, summary: null });
+      if (!counts || !stages || !state || !permit || (!windowsExecution && !output)) return executionResult("INTERNAL_ERROR", null);
+      if (windowsExecution) {
+        nativeUnknown(state);
+        state.nativeFailureCode = "NATIVE_IO_FAILED";
+        markBlocked(state.nativeFailureCode);
+        return executionResult(state.nativeFailureCode, summaryFor(state.nativeFailureCode));
+      }
       return block("INTERNAL_ERROR");
     }
+  }
+
+  function executeOffline(binding, token, fakeTransport, fakeOutput) {
+    return runOffline(binding, token, fakeTransport, fakeOutput, false);
+  }
+
+  function executeWindows(binding, token, fakeTransport) {
+    return runOffline(binding, token, fakeTransport, null, true);
+  }
+
+  if (windowsMode) {
+    return Object.freeze({
+      prepareWindowsBytes, createFakeTransport, issueWindowsPermit, executeWindows,
+      closeWindowsBinding, observeWindows, revokeSyntheticPermit, advanceSyntheticTime,
+      replaceSyntheticRuntime, cancelSyntheticBinding, observeTransport,
+    });
   }
 
   if (entryMode) {
@@ -740,4 +1033,8 @@ export function createSyntheticBindingBridge(initialContext) {
 
 export function createSyntheticOfflineEntry(initialContext) {
   return createBridge(initialContext, true);
+}
+
+export function createSyntheticWindowsEvidenceEntry(initialContext) {
+  return createBridge(initialContext, true, true);
 }

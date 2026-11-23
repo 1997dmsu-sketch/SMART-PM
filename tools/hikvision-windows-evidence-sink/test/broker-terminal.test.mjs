@@ -420,7 +420,174 @@ async function bridgeCase(h, check, malformed) {
 test("BR-B01-real-bridge-six-call-positive", (h, check) => bridgeCase(h, check, false));
 test("BR-B02-real-bridge-six-call-terminal-fail", (h, check) => bridgeCase(h, check, true));
 
-console.log(JSON.stringify({ scope: SCOPE, kind: "manifest", declaredCases: 14, caseIds: cases.map(({ id }) => id), sources: SOURCE_AUDIT, actualNativeObjects: 0, actualWorkerSpawns: 0, actualFilesystemWrites: 0 }));
+// These additional cases hold replies only inside the existing fake child pipe.
+// The production modules, entry API and source text receive no test hooks.
+// They distinguish scheduled control boundaries; they do not establish which
+// assertion failed in the historical native CONTROL-006 result.
+async function controlSession(h, check) {
+  const entry = h.entry.createSyntheticWindowsEvidenceEntry(h.realm(contextFixture()));
+  const prepared = await settle(entry.prepareWindowsBytes(h.realm([...Buffer.from(JSON.stringify(inputFixture()))])));
+  check("control.prepare", { status: "PASS", code: "OK", binding: true }, { status: prepared.status, code: prepared.code, binding: prepared.binding !== null });
+  if (!prepared.binding) throw new Error("HARNESS_NO_BINDING");
+  const transport = entry.createFakeTransport(h.realm({
+    expected: expectedFixture(),
+    responses: IDS.map((endpointId) => ({ endpointId, attempt: 1, status: 200, parseable: true, model: "DS-K1T671BM", capability: "confirmed", challenge: null, elapsedMs: 0 })),
+  }));
+  check("control.transport", { status: "PASS", code: "OK", present: true }, { status: transport.status, code: transport.code, present: transport.fakeTransport !== null });
+  const permit = await settle(entry.issueWindowsPermit(prepared.binding, h.realm({ scope: "synthetic-fake-execution-only", approvalRef: "synthetic-approval-terminal", windowStart: 0, windowEnd: 100000 })));
+  check("control.permit", { status: "PASS", code: "OK", present: true }, { status: permit.status, code: permit.code, present: permit.token !== null });
+  if (!transport.fakeTransport || !permit.token) throw new Error("HARNESS_CONTROL_SESSION_INVALID");
+  check("control.rpc.prepared", ops("init", "validate", "validate"), h.requestShape());
+  return { entry, binding: prepared.binding, transport: transport.fakeTransport, token: permit.token };
+}
+
+function applyControl(h, session, code) {
+  switch (code) {
+    case "PERMIT_REVOKED": return session.entry.revokeSyntheticPermit(session.token);
+    case "SESSION_CANCELLED": return session.entry.cancelSyntheticBinding(session.binding);
+    case "PERMIT_EXPIRED": return session.entry.advanceSyntheticTime(100000);
+    case "CONTEXT_CHANGED": return session.entry.replaceSyntheticRuntime(h.realm(contextFixture()));
+    default: throw new Error("HARNESS_CONTROL_UNKNOWN");
+  }
+}
+
+function controlCounts(written) {
+  return { directoriesCreated: 1, filesCreated: written ? 2 : 0, bytesWritten: written ? 128 : 0, bytesVerified: written ? 128 : 0, flushes: written ? 2 : 0, validationCalls: 9 };
+}
+
+async function closeControlSession(h, check, session, written) {
+  const closed = await settle(session.entry.closeWindowsBinding(session.binding));
+  check("control.close.result", { status: "PASS", code: "OK", closed: true }, { status: closed.status, code: closed.code, closed: closed.native?.closed });
+  h.result("control.close.native", closed.native, "OK", false);
+  check("control.close.counts.retained", controlCounts(written), closed.native?.counts);
+  check("control.rpc.final", ops("init", ...Array(9).fill("validate"), ...(written ? ["write"] : []), "close"), h.requestShape());
+}
+
+async function controlBoundaryCase(h, check, code, phase) {
+  const session = await controlSession(h, check);
+  const written = phase === "write-reply-held";
+  let held = null, heldReply = null, observedPhase = "not-reached", released = false, injected = false, settled = false;
+  let signalReached;
+  const reached = new Promise((resolve) => { signalReached = resolve; });
+  h.handler = (request) => {
+    const calls = session.entry.observeTransport(session.transport).calls;
+    if (!held && ((phase === "final-validate-reply-held" && request.op === "validate" && calls === 6) ||
+        (written && request.op === "write"))) {
+      held = request;
+      // Materializing this reply models a completed two-file native write whose
+      // reply has not reached the broker. No actual file or worker exists.
+      if (written) heldReply = h.line(request);
+      observedPhase = phase;
+      signalReached();
+      return;
+    }
+    h.normal(request);
+  };
+  const pending = session.entry.executeWindows(session.binding, session.token, session.transport);
+  const completed = pending.then((value) => { settled = true; return { accepted: true, value }; }, () => { settled = true; return { accepted: false, value: null }; });
+  const first = await settle(Promise.race([reached.then(() => "BOUNDARY_REACHED"), completed.then(() => "EXECUTION_SETTLED")]));
+  check("control.boundary.reached.before.settlement", "BOUNDARY_REACHED", first);
+  if (first !== "BOUNDARY_REACHED" || held === null) throw new Error("HARNESS_CONTROL_BOUNDARY_NOT_REACHED");
+  const expectedRpc = ops("init", ...Array(9).fill("validate"), ...(written ? ["write"] : []));
+  const observed = session.entry.observeWindows(session.binding).native;
+  check("control.boundary.snapshot", {
+    phase, request: { id: written ? 11 : 10, op: written ? "write" : "validate" },
+    calls: 6, validationRequests: 9, writeRequests: written ? 1 : 0,
+    settled: false, injected: false, replyReleased: false, busy: true, operation: written ? "write" : "validate",
+  }, {
+    phase: observedPhase, request: { id: held.id, op: held.op },
+    calls: session.entry.observeTransport(session.transport).calls,
+    validationRequests: h.requests.filter((request) => request.op === "validate").length,
+    writeRequests: h.requests.filter((request) => request.op === "write").length,
+    settled, injected, replyReleased: released, busy: observed?.busy, operation: observed?.operation,
+  });
+  check("control.boundary.rpc.exact", expectedRpc, h.requestShape());
+  if (written) {
+    const modeled = JSON.parse(heldReply.toString("utf8")).native;
+    check("control.boundary.modeled.write.reply", { status: "PASS", code: "OK", retained: true, counts: controlCounts(true) }, { status: modeled.status, code: modeled.code, retained: modeled.retained, counts: modeled.counts });
+    check("control.boundary.unreceived.write.not.in.last.dto", controlCounts(false), observed?.counts);
+  } else {
+    check("control.boundary.prewrite.files", 0, observed?.counts.filesCreated);
+  }
+  const action = applyControl(h, session, code);
+  injected = true;
+  check("control.action.accepted", { status: "PASS", code: "OK" }, { status: action.status, code: action.code });
+  check("control.action.before.reply", { injected: true, settled: false, replyReleased: false }, { injected, settled, replyReleased: released });
+  check("control.action.no.new.rpc", expectedRpc, h.requestShape());
+  released = true;
+  if (written) h.output("stdout", heldReply); else h.normal(held);
+  const completion = await settle(completed);
+  check("control.execute.fulfilled", true, completion.accepted);
+  if (!completion.accepted) throw new Error("HARNESS_CONTROL_EXECUTE_REJECTED");
+  const result = completion.value;
+  check("control.execute.result", { status: "FAIL", code }, { status: result.status, code: result.code });
+  check("control.execute.boundary.completed", { injected: true, settled: true, replyReleased: true }, { injected, settled, replyReleased: released });
+  check("control.summary.result", { status: "FAIL", code, allowReadStayedFalse: true }, { status: result.summary?.status, code: result.summary?.code, allowReadStayedFalse: result.summary?.allowReadStayedFalse });
+  check("control.summary.counts", { logicalEndpoints: 6, transmissions: 6, authRetries: 0, unknownEndpoints: 0 }, result.summary?.counts);
+  check("control.summary.stages", summaryFixture().stages, result.summary?.stages);
+  h.result("control.execute.native", result.native, "OK", false);
+  check("control.execute.native.counts", controlCounts(written), result.native?.counts);
+  check("control.execute.native.checks", Object.fromEntries(CHECKS.map((key) => [key, !FILE_CHECKS.has(key) || written])), result.native?.checks);
+  check("control.execute.transport.calls", 6, session.entry.observeTransport(session.transport).calls);
+  check("control.execute.no.extra.rpc", expectedRpc, h.requestShape());
+  const retry = await settle(session.entry.executeWindows(session.binding, session.token, session.transport));
+  const retryCode = code === "SESSION_CANCELLED" || code === "CONTEXT_CHANGED" ? code : "PERMIT_USED";
+  check("control.retry.rejected", { status: "FAIL", code: retryCode, summary: null }, { status: retry.status, code: retry.code, summary: retry.summary });
+  check("control.retry.no.new.rpc", expectedRpc, h.requestShape());
+  check("control.retry.calls.unchanged", 6, session.entry.observeTransport(session.transport).calls);
+  check("control.retry.native.counts.retained", controlCounts(written), session.entry.observeWindows(session.binding).native?.counts);
+  await closeControlSession(h, check, session, written);
+}
+
+for (const [id, code] of [
+  ["BR-C01-final-validate-permit-revoked", "PERMIT_REVOKED"],
+  ["BR-C02-final-validate-session-cancelled", "SESSION_CANCELLED"],
+  ["BR-C03-final-validate-permit-expired", "PERMIT_EXPIRED"],
+  ["BR-C04-final-validate-context-changed", "CONTEXT_CHANGED"],
+]) test(id, (h, check) => controlBoundaryCase(h, check, code, "final-validate-reply-held"));
+for (const [id, code] of [
+  ["BR-C05-write-reply-permit-revoked", "PERMIT_REVOKED"],
+  ["BR-C06-write-reply-session-cancelled", "SESSION_CANCELLED"],
+]) test(id, (h, check) => controlBoundaryCase(h, check, code, "write-reply-held"));
+
+test("BR-C07-completed-calls-six-is-not-a-boundary", async (h, check) => {
+  const session = await controlSession(h, check);
+  let settled = false;
+  const result = await settle(session.entry.executeWindows(session.binding, session.token, session.transport).then((value) => { settled = true; return value; }));
+  const observed = session.entry.observeWindows(session.binding).native;
+  check("control.completed.snapshot", {
+    callsEqualSix: true, settled: true, busy: false, operation: "idle", writeRequests: 1, filesCreated: 2,
+  }, {
+    callsEqualSix: session.entry.observeTransport(session.transport).calls === 6,
+    settled, busy: observed?.busy, operation: observed?.operation,
+    writeRequests: h.requests.filter((request) => request.op === "write").length, filesCreated: observed?.counts.filesCreated,
+  });
+  check("control.completed.result", { status: "PASS", code: "OK" }, { status: result.status, code: result.code });
+  check("control.completed.summary.allowReadStayedFalse", true, result.summary?.allowReadStayedFalse);
+  h.result("control.completed.native", result.native, "OK", false);
+  check("control.completed.native.counts", controlCounts(true), result.native?.counts);
+  check("control.completed.result.frozen", true, Object.isFrozen(result));
+  const completedView = () => ({
+    status: result.status, code: result.code,
+    summaryStatus: result.summary?.status, summaryCode: result.summary?.code,
+    allowReadStayedFalse: result.summary?.allowReadStayedFalse,
+    nativeStatus: result.native?.status, nativeCode: result.native?.code,
+    counts: result.native?.counts, retained: result.native?.retained,
+    uncertain: result.native?.newObjectStateUnverified,
+  });
+  const before = plain(completedView());
+  const action = applyControl(h, session, "SESSION_CANCELLED");
+  check("control.completed.late.cancel.accepted", { status: "PASS", code: "OK" }, { status: action.status, code: action.code });
+  check("control.completed.result.not.retroactively.changed", before, completedView());
+  const retry = await settle(session.entry.executeWindows(session.binding, session.token, session.transport));
+  check("control.completed.retry.rejected", { status: "FAIL", code: "SESSION_CANCELLED", summary: null }, { status: retry.status, code: retry.code, summary: retry.summary });
+  check("control.completed.calls.still.six", 6, session.entry.observeTransport(session.transport).calls);
+  check("control.completed.no.new.rpc", ops("init", ...Array(9).fill("validate"), "write"), h.requestShape());
+  check("control.completed.native.counts.retained", controlCounts(true), session.entry.observeWindows(session.binding).native?.counts);
+  await closeControlSession(h, check, session, true);
+});
+
+console.log(JSON.stringify({ scope: SCOPE, kind: "manifest", declaredCases: 21, caseIds: cases.map(({ id }) => id), sources: SOURCE_AUDIT, actualNativeObjects: 0, actualWorkerSpawns: 0, actualFilesystemWrites: 0 }));
 const records = [];
 for (const { id, run } of cases) {
   const checks = [];
@@ -445,7 +612,7 @@ for (const { id, run } of cases) {
   records.push(record); console.log(JSON.stringify(record));
 }
 const failedCases = records.filter((record) => record.status === "FAIL");
-const manifestValid = cases.length === 14 && new Set(cases.map(({ id }) => id)).size === 14 && records.length === 14;
-const final = { scope: SCOPE, kind: "summary", status: failedCases.length === 0 && manifestValid ? "PASS" : "FAIL", expected: { cases: 14, passed: 14, failed: 0, uniqueIds: 14 }, actual: { cases: records.length, passed: records.length - failedCases.length, failed: failedCases.length, uniqueIds: new Set(records.map(({ id }) => id)).size }, failedIds: failedCases.map(({ id }) => id), actualNativeObjects: 0, actualWorkerSpawns: 0, actualFilesystemWrites: 0 };
+const manifestValid = cases.length === 21 && new Set(cases.map(({ id }) => id)).size === 21 && records.length === 21;
+const final = { scope: SCOPE, kind: "summary", status: failedCases.length === 0 && manifestValid ? "PASS" : "FAIL", expected: { cases: 21, passed: 21, failed: 0, uniqueIds: 21 }, actual: { cases: records.length, passed: records.length - failedCases.length, failed: failedCases.length, uniqueIds: new Set(records.map(({ id }) => id)).size }, failedIds: failedCases.map(({ id }) => id), actualNativeObjects: 0, actualWorkerSpawns: 0, actualFilesystemWrites: 0 };
 console.log(JSON.stringify(final));
 if (final.status !== "PASS") process.exitCode = 1;

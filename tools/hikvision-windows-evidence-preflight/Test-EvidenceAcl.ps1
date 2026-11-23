@@ -81,16 +81,17 @@ function Get-HkNativeAclSnapshot {
         }
         [int] $inheritance = 0
         [int] $propagation = 0
-        if (($ace.AceFlags -band [System.Security.AccessControl.AceFlags]::ContainerInherit) -ne 0) {
+        # Windows PowerShell 5.1 cannot apply -band directly to byte-backed AceFlags.
+        if (([int] $ace.AceFlags -band [int] [System.Security.AccessControl.AceFlags]::ContainerInherit) -ne 0) {
             $inheritance = $inheritance -bor [int] [System.Security.AccessControl.InheritanceFlags]::ContainerInherit
         }
-        if (($ace.AceFlags -band [System.Security.AccessControl.AceFlags]::ObjectInherit) -ne 0) {
+        if (([int] $ace.AceFlags -band [int] [System.Security.AccessControl.AceFlags]::ObjectInherit) -ne 0) {
             $inheritance = $inheritance -bor [int] [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
         }
-        if (($ace.AceFlags -band [System.Security.AccessControl.AceFlags]::NoPropagateInherit) -ne 0) {
+        if (([int] $ace.AceFlags -band [int] [System.Security.AccessControl.AceFlags]::NoPropagateInherit) -ne 0) {
             $propagation = $propagation -bor [int] [System.Security.AccessControl.PropagationFlags]::NoPropagateInherit
         }
-        if (($ace.AceFlags -band [System.Security.AccessControl.AceFlags]::InheritOnly) -ne 0) {
+        if (([int] $ace.AceFlags -band [int] [System.Security.AccessControl.AceFlags]::InheritOnly) -ne 0) {
             $propagation = $propagation -bor [int] [System.Security.AccessControl.PropagationFlags]::InheritOnly
         }
         $rules += [pscustomobject]@{

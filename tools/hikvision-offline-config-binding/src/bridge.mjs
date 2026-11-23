@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { types } from "node:util";
 import { checkOfflineConfig } from "../../hikvision-offline-config-checker/src/check-config.mjs";
+import { decodeSyntheticConfigBytes } from "../../hikvision-offline-entry/src/bytes.mjs";
 
-// Pure in-memory synthetic model. There is deliberately no caller callback,
-// configuration loader, real transport, filesystem operation or live permit.
+// Pure in-memory synthetic model and controlled byte entry. No caller callback,
+// environment/path loader, real transport, filesystem operation or live permit.
 const SCOPE = "synthetic-config-binding-only";
+const ENTRY_SCOPE = "synthetic-offline-entry-only";
 const INPUT_SCHEMA = "hk-ai-08-synthetic-binding-v1";
 const CHECKER_SCHEMA = "hk-ai-08-offline-config-v1";
 const INVALID = Symbol("invalid-input");
@@ -272,11 +274,9 @@ function projectionMatches(projection, snapshot, view) {
     candidate.allowRead === false && view.allowRead === false && frozenTree(projection);
 }
 
-function fakeInvocation(fake, binding) {
-  fake.calls += 1;
+function compareExecution(binding, expected) {
   const snapshot = binding.snapshot;
   const view = executionView(snapshot);
-  const expected = fake.expected;
   // This mutable material is exclusively owned by the internal fake transport;
   // the canonical bytes stay a frozen, non-aliased private ordinary array.
   const transportCa = Uint8Array.from(snapshot.execution.tls.caBytes);
@@ -300,7 +300,13 @@ function fakeInvocation(fake, binding) {
       transportCa.buffer !== snapshot.execution.tls.caBytes,
   };
   observation.matched = Object.values(observation).every((value) => value === true);
-  fake.last = deepFreeze(observation);
+  return deepFreeze(observation);
+}
+
+function fakeInvocation(fake, binding) {
+  fake.calls += 1;
+  const observation = compareExecution(binding, fake.expected);
+  fake.last = observation;
   if (!observation.matched) return "FAKE_EXPECTATION_MISMATCH";
   if (fake.outcome === "throw") throw SIMULATED_FAILURE;
   return fake.outcome === "fail" ? "FAKE_EXECUTOR_FAILED" : "OK";
@@ -310,11 +316,12 @@ function handle() { return Object.freeze(Object.create(null)); }
 function belongs(map, value) {
   return value !== null && typeof value === "object" && !types.isProxy(value) && map.has(value);
 }
-function result(code, fields = {}) {
-  return deepFreeze({ scope: SCOPE, status: code === "OK" ? "PASS" : "FAIL", code, ...fields });
+function scopedResult(scope, code, fields = {}) {
+  return deepFreeze({ scope, status: code === "OK" ? "PASS" : "FAIL", code, ...fields });
 }
 
-export function createSyntheticBindingBridge(initialContext) {
+function createBridge(initialContext, entryMode) {
+  const result = (code, fields = {}) => scopedResult(entryMode ? ENTRY_SCOPE : SCOPE, code, fields);
   let runtime;
   try { runtime = copyContext(initialContext); }
   catch { throw new TypeError("SYNTHETIC_CONTEXT_INVALID"); }
@@ -323,6 +330,8 @@ export function createSyntheticBindingBridge(initialContext) {
   const bindings = new WeakMap();
   const permits = new WeakMap();
   const fakes = new WeakMap();
+  const transports = new WeakMap();
+  const outputs = new WeakMap();
 
   function prepare(input) {
     let checker = null;
@@ -344,7 +353,7 @@ export function createSyntheticBindingBridge(initialContext) {
       }
       const binding = handle();
       const configBindingRef = `hk-bind-${randomUUID().replaceAll("-", "")}`;
-      bindings.set(binding, { snapshot, projection, checker: deepFreeze(checker), epoch, configBindingRef, permitIssued: false });
+      bindings.set(binding, { snapshot, projection, checker: deepFreeze(checker), epoch, configBindingRef, permitIssued: false, cancelled: false });
       return result("OK", { binding, configBindingRef, checker });
     } catch (error) {
       return result(error === INVALID ? "INVALID_INPUT" : "INTERNAL_ERROR", { binding: null, configBindingRef: null, checker: null });
@@ -368,6 +377,7 @@ export function createSyntheticBindingBridge(initialContext) {
     try {
       if (!belongs(bindings, binding)) return result("INVALID_BINDING", { token: null });
       const state = bindings.get(binding);
+      if (state.cancelled) return result("SESSION_CANCELLED", { token: null });
       if (state.epoch !== epoch) return result("CONTEXT_CHANGED", { token: null });
       if (state.permitIssued) return result("PERMIT_ALREADY_ISSUED", { token: null });
       const grant = dataRecord(input, ["scope", "approvalRef", "windowStart", "windowEnd"]);
@@ -452,8 +462,282 @@ export function createSyntheticBindingBridge(initialContext) {
     } catch { return result("INTERNAL_ERROR", { calls: 0, last: null }); }
   }
 
+  function prepareBytes(bytes) {
+    const decoded = decodeSyntheticConfigBytes(bytes);
+    if (decoded.code !== "OK") {
+      return result(decoded.code, { binding: null, configBindingRef: null, checker: null });
+    }
+    return prepare(decoded.input);
+  }
+
+  function copyResponses(value) {
+    return deepFreeze(dataArray(value, 12, 1).map((response) => {
+      const frame = dataRecord(response, ["endpointId", "attempt", "status", "parseable", "model", "capability", "challenge", "elapsedMs"]);
+      if (!ENDPOINTS.some((endpoint) => endpoint.id === frame.endpointId) ||
+          (frame.attempt !== 1 && frame.attempt !== 2) || !Number.isInteger(frame.status) ||
+          frame.status < 100 || frame.status > 599 || typeof frame.parseable !== "boolean" ||
+          !["DS-K1T671BM", "SYNTHETIC_OTHER_MODEL", "SYNTHETIC_UNKNOWN_MODEL"].includes(frame.model) ||
+          !["confirmed", "unsupported", "unknown"].includes(frame.capability) ||
+          !Number.isInteger(frame.elapsedMs) || frame.elapsedMs < 0 || frame.elapsedMs > 600000) invalid();
+      if (frame.status !== 401 && frame.challenge !== null) invalid();
+      if (frame.challenge !== null) {
+        const challenge = dataRecord(frame.challenge, ["algorithm", "qop"]);
+        if (!["SHA-256", "MD5", "unsupported", "malformed", "absent"].includes(challenge.algorithm) ||
+            !["auth", "auth-int", "unsupported", "malformed", "absent"].includes(challenge.qop)) invalid();
+        frame.challenge = challenge;
+      }
+      return frame;
+    }));
+  }
+
+  function createFakeTransport(input) {
+    try {
+      const data = dataRecord(input, ["expected", "responses"]);
+      const expected = copyExpected(data.expected);
+      const responses = copyResponses(data.responses);
+      const fakeTransport = handle();
+      transports.set(fakeTransport, { expected, responses, position: 0, calls: 0, trace: [], last: null });
+      return result("OK", { fakeTransport });
+    } catch (error) {
+      return result(error === INVALID ? "INVALID_INPUT" : "INTERNAL_ERROR", { fakeTransport: null });
+    }
+  }
+
+  function createFakeOutput(input) {
+    try {
+      const data = dataRecord(input, ["outcome"]);
+      if (!["success", "fail", "throw"].includes(data.outcome)) invalid();
+      const fakeOutput = handle();
+      outputs.set(fakeOutput, { outcome: data.outcome, calls: 0, last: null });
+      return result("OK", { fakeOutput });
+    } catch (error) {
+      return result(error === INVALID ? "INVALID_INPUT" : "INTERNAL_ERROR", { fakeOutput: null });
+    }
+  }
+
+  function cancelSyntheticBinding(binding) {
+    try {
+      if (!belongs(bindings, binding)) return result("INVALID_BINDING");
+      bindings.get(binding).cancelled = true;
+      return result("OK");
+    } catch { return result("INTERNAL_ERROR"); }
+  }
+
+  function observeTransport(fakeTransport) {
+    try {
+      if (!belongs(transports, fakeTransport)) {
+        return result("INVALID_TRANSPORT", { calls: 0, trace: [], last: null, remainingResponses: 0 });
+      }
+      const transport = transports.get(fakeTransport);
+      // Observing an in-flight session must not freeze its private trace array.
+      return result("OK", {
+        calls: transport.calls, trace: transport.trace.map((entry) => ({ ...entry })),
+        last: transport.last, remainingResponses: transport.responses.length - transport.position,
+      });
+    } catch {
+      return result("INTERNAL_ERROR", { calls: 0, trace: [], last: null, remainingResponses: 0 });
+    }
+  }
+
+  function observeOutput(fakeOutput) {
+    try {
+      if (!belongs(outputs, fakeOutput)) return result("INVALID_OUTPUT", { calls: 0, last: null });
+      const output = outputs.get(fakeOutput);
+      return result("OK", { calls: output.calls, last: output.last });
+    } catch { return result("INTERNAL_ERROR", { calls: 0, last: null }); }
+  }
+
+  async function executeOffline(binding, token, fakeTransport, fakeOutput) {
+    let configBindingRef = null;
+    let state;
+    let permit;
+    let transport;
+    let output;
+    let sessionStarted;
+    let counts;
+    let stages;
+    let currentStage = null;
+
+    function sessionCode() {
+      // Only private records captured after brand validation reach this helper.
+      if (!belongs(bindings, binding) || bindings.get(binding) !== state ||
+          !belongs(permits, token) || permits.get(token) !== permit || permit.binding !== binding) return "INVALID_PERMIT";
+      if (permit.revoked) return "PERMIT_REVOKED";
+      if (state.epoch !== epoch || permit.epoch !== epoch) return "CONTEXT_CHANGED";
+      if (state.cancelled) return "SESSION_CANCELLED";
+      if (now < permit.windowStart) return "PERMIT_NOT_YET_VALID";
+      if (now >= permit.windowEnd) return "PERMIT_EXPIRED";
+      if (now - sessionStarted >= state.snapshot.execution.limits.sessionDeadlineMs) return "SESSION_DEADLINE_EXCEEDED";
+      return "OK";
+    }
+
+    function summaryFor(code) {
+      return deepFreeze({
+        schemaVersion: "hk-ai-08-offline-summary-v1", phase: "synthetic-offline-only",
+        status: code === "OK" ? "PASS" : "FAIL", code,
+        counts: { ...counts, unknownEndpoints: stages.filter((stage) => stage.state === "unknown").length },
+        stages: stages.map((stage) => ({ ...stage })),
+        allowReadStayedFalse: state.snapshot.candidate.allowRead === false,
+      });
+    }
+
+    function finish(code) {
+      const controlCode = sessionCode();
+      if (controlCode !== "OK") {
+        code = controlCode;
+        if (currentStage !== null && currentStage.transmissions !== 0) {
+          currentStage.state = "blocked";
+          currentStage.code = code;
+        }
+      }
+      let summary = summaryFor(code);
+      if (counts.transmissions !== 0 && controlCode === "OK") {
+        output.calls += 1;
+        output.last = summary;
+        try {
+          if (output.outcome === "throw") throw SIMULATED_FAILURE;
+          if (output.outcome === "fail") code = "FAKE_OUTPUT_FAILED";
+        } catch { code = "FAKE_OUTPUT_FAILED"; }
+        // A failed output attempt keeps its attempted summary in output.last;
+        // the execute result separately records that output failure.
+        if (code !== summary.code) summary = summaryFor(code);
+      }
+      return result(code, { configBindingRef, summary });
+    }
+
+    function block(code) {
+      if (currentStage !== null && currentStage.transmissions !== 0) {
+        currentStage.state = "blocked";
+        currentStage.code = code;
+      }
+      return finish(code);
+    }
+
+    async function invoke(endpoint, attempt) {
+      let code = sessionCode();
+      if (code !== "OK") return { code, response: null };
+      await Promise.resolve();
+      code = sessionCode();
+      if (code !== "OK") return { code, response: null };
+      if (counts.transmissions >= 12) return { code: "TRANSMISSION_BUDGET_EXCEEDED", response: null };
+      const requestStarted = now;
+      if (currentStage.transmissions === 0) counts.logicalEndpoints += 1;
+      currentStage.transmissions += 1;
+      currentStage.state = "blocked";
+      currentStage.code = "INTERNAL_ERROR";
+      counts.transmissions += 1;
+      if (attempt === 2) counts.authRetries += 1;
+      transport.calls += 1;
+      transport.last = compareExecution(state, transport.expected);
+      const trace = { endpointId: endpoint.id, attempt, authenticated: attempt === 2, requestMatched: false };
+      transport.trace.push(trace);
+      if (!transport.last.matched) return { code: "FAKE_EXPECTATION_MISMATCH", response: null };
+      if (transport.position >= transport.responses.length) return { code: "FAKE_SCRIPT_EXHAUSTED", response: null };
+      const response = transport.responses[transport.position++];
+      trace.requestMatched = response.endpointId === endpoint.id && response.attempt === attempt;
+      if (!trace.requestMatched) return { code: "FAKE_SCRIPT_MISMATCH", response: null };
+      await Promise.resolve();
+      code = sessionCode();
+      if (code !== "OK") return { code, response: null };
+      if (!Number.isSafeInteger(now + response.elapsedMs)) return { code: "CLOCK_OVERFLOW", response: null };
+      now += response.elapsedMs;
+      code = sessionCode();
+      if (code !== "OK") return { code, response: null };
+      const elapsed = now - requestStarted;
+      const limits = state.snapshot.execution.limits;
+      if (elapsed >= limits.requestDeadlineMs) return { code: "REQUEST_DEADLINE_EXCEEDED", response: null };
+      if (elapsed >= limits.timeoutMs) return { code: "INACTIVITY_TIMEOUT", response: null };
+      return { code: "OK", response };
+    }
+
+    try {
+      if (!belongs(bindings, binding)) return result("INVALID_BINDING", { configBindingRef, summary: null });
+      state = bindings.get(binding);
+      configBindingRef = state.configBindingRef;
+      if (!belongs(transports, fakeTransport)) return result("INVALID_TRANSPORT", { configBindingRef, summary: null });
+      if (!belongs(outputs, fakeOutput)) return result("INVALID_OUTPUT", { configBindingRef, summary: null });
+      if (!belongs(permits, token)) return result("INVALID_PERMIT", { configBindingRef, summary: null });
+      if (state.cancelled) return result("SESSION_CANCELLED", { configBindingRef, summary: null });
+      permit = permits.get(token);
+      const code = permitCode(binding, state, permit);
+      if (code !== "OK") return result(code, { configBindingRef, summary: null });
+      transport = transports.get(fakeTransport);
+      output = outputs.get(fakeOutput);
+      counts = { logicalEndpoints: 0, transmissions: 0, authRetries: 0, unknownEndpoints: 0 };
+      stages = ENDPOINTS.map((endpoint) => ({ id: endpoint.id, state: "NOT_EXECUTED", code: "NOT_EXECUTED", httpStatus: null, transmissions: 0 }));
+      sessionStarted = now;
+      // One permit authorizes only this synthetic session; it is consumed
+      // before the first await and never restored by any finish/error path.
+      permit.used = true;
+      await Promise.resolve();
+      let controlCode = sessionCode();
+      if (controlCode !== "OK") return finish(controlCode);
+      for (let index = 0; index < ENDPOINTS.length; index += 1) {
+        const endpoint = ENDPOINTS[index];
+        currentStage = stages[index];
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          const invocation = await invoke(endpoint, attempt);
+          if (invocation.code !== "OK") return block(invocation.code);
+          controlCode = sessionCode();
+          if (controlCode !== "OK") return block(controlCode);
+          const response = invocation.response;
+          currentStage.httpStatus = response.status;
+          if (response.status === 401) {
+            if (attempt === 2) return block("AUTH_RETRY_EXHAUSTED");
+            if (!response.parseable || response.challenge === null ||
+                response.challenge.algorithm !== "SHA-256" || response.challenge.qop !== "auth") {
+              return block("AUTH_CHALLENGE_REJECTED");
+            }
+            continue;
+          }
+          if (index === 0) {
+            if (response.status !== 200) return block("G1_HTTP_STATUS");
+            if (!response.parseable) return block("G1_RESPONSE_INVALID");
+            if (response.model !== state.snapshot.target.model) return block("G1_MODEL_MISMATCH");
+            currentStage.state = "confirmed";
+            currentStage.code = "OK";
+          } else if (response.status !== 200) {
+            currentStage.state = "unknown";
+            currentStage.code = "HTTP_STATUS";
+          } else if (!response.parseable) {
+            currentStage.state = "unknown";
+            currentStage.code = "RESPONSE_INVALID";
+          } else {
+            currentStage.state = response.capability;
+            currentStage.code = "OK";
+          }
+          break;
+        }
+      }
+      currentStage = null;
+      controlCode = sessionCode();
+      if (controlCode !== "OK") return finish(controlCode);
+      if (transport.position !== transport.responses.length) return finish("FAKE_SCRIPT_REMAINS");
+      return finish("OK");
+    } catch {
+      if (!counts || !stages || !state || !permit || !output) return result("INTERNAL_ERROR", { configBindingRef, summary: null });
+      return block("INTERNAL_ERROR");
+    }
+  }
+
+  if (entryMode) {
+    return Object.freeze({
+      prepareBytes, createFakeTransport, createFakeOutput, issueSyntheticPermit,
+      revokeSyntheticPermit, advanceSyntheticTime, replaceSyntheticRuntime,
+      cancelSyntheticBinding, executeOffline, observeTransport, observeOutput,
+    });
+  }
+
   return Object.freeze({
     prepare, createFakeExecutor, issueSyntheticPermit, executeSynthetic,
     revokeSyntheticPermit, advanceSyntheticTime, replaceSyntheticRuntime, observeFake,
   });
+}
+
+export function createSyntheticBindingBridge(initialContext) {
+  return createBridge(initialContext, false);
+}
+
+export function createSyntheticOfflineEntry(initialContext) {
+  return createBridge(initialContext, true);
 }

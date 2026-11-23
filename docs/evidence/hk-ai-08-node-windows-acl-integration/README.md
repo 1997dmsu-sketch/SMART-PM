@@ -149,3 +149,47 @@ N1/N2 是 before 正控失败使测试正文取消，正式套件的 cancelled �
 **Stop-CR1：本轮只到纯合成核心，下一阶段 CR-2 尚未启动。** 真实审批/目标/账号证书材料、同份执行绑定、真正 Node/Windows ACL/对象身份与存活 writer 能力仍未验证；本地 W 任务只待既有回报、不重派。用户取消隔离网络前置继续有效。
 
 不接真实设备/支付/云，不启动 HTTP/UI，不安装依赖、native addon 或修改全局 Git/TLS。S4、预签约 S2–S6、H4-c C2/C3、07B 执行、集成/合并、部署发布均未启动。只追加提交、普通显式 refspec push、远端 SHA 核验；最终提交与远端结果由根交付消息报告，不预填本记录自身 SHA。
+
+## 7. CR-2 固定探针合成接线（2026-11-23 追加，前 151 行 CR-1 原字节保留）
+
+状态：**CR-2 实施与离线验证完成，停在 Stop-CR2，交 Codex 独立复审；未宣称 CR-2 已验收，未启动 CR-3/E1/E2。** 本段只追加，不改写上方 CR-1 历史正文、旧哈希与旧计数。
+
+### 7.1 授权、固定对象与环境
+
+- 最终技术裁定 `716b1f0053d5ad34b45fc78d5cf79e5739f2aa36`（含 Codex 复审记录）、原实施卡 `0dc4433a06eff3f15f164e465257a77c709e73b9`、前置报告 `b29bc88f49cec92b0e5dc78f46716b2466d5c510`（含 SOURCE-INVENTORY）均按完整 SHA 固定对象读取；代码基线 `2712ea7866377d889a78e413fcb7de420b9ad1ab`。
+- 实施分支 `feat/hk-ai-08-e1-cr2-synthetic`（起点 2712ea7，线性两步提交）；远端核对时该分支在 origin 不存在，无既有执行者。
+- 环境：Windows 10 教育版 10.0.19042；Node **v24.19.0**——非裁定首选的 v24.22.1、也非候选 v22.22.2，属“其他版本，先报告”情形，已如实记录；未安装、升级或切换隔离模式。NODE_OPTIONS 与 NODE_PATH 在 Process/Machine/User 三层均不存在（只查存在性，未读值）。
+- 本会话工作区是共享 SMART-PM 克隆的 linked worktree（H3），其共享 gitdir 位于工作区外，沙箱按预期拒绝写入（`Permission denied`，属预期 confinement 而非文件 ACL 故障；未运行任何 ACL 修复，未重复派发本地 Windows ACL 工作）。执行方改用平台可写的会话临时区建立**独立本地克隆**（HTTPS 克隆），在其中创建分支与实现，满足“独立 worktree + 分支”；H3 检出（`docs/hk-face-h4-revoke-reconcile-design` @ 9fd088d）保持不动。
+- Git 网络操作（实际发生并单独记录）：HTTPS 克隆、`git fetch origin`、`git ls-remote`（核对基线/裁定分支与目标分支）、`git push`。不得写成“所有网络操作为零”。项目代码/测试/guard 未发起任何业务网络、文件 I/O、子进程或设备调用。
+
+### 7.2 两步实施与文件范围
+
+- 第一步（6343ebe）：原 controller/session 实现机械重定位到 `private-plan.mjs` 单一私有 owner；`controlled-runner.mjs`/`evidence-session.mjs` 变纯 facade；原三份测试**保持原字节**，重定位后实测 262/262 全通过（exit 0）。
+- 第二步：新增九个白名单文件（`probe-binding.mjs`、`test/probe-integration.test.mjs`、`vendor/probe-558b9c8/VENDOR-SOURCES.json` 与六份 vendor 原字节），`private-plan.mjs` 增加 `createSyntheticProbeController` 固定 profile，`controlled-runner.mjs` 再导出新工厂，两份 README 只追加本 CR-2 内容。
+- 六份 vendor 由固定提交 `558b9c864a4b820e397336200758b143556a4d87` 经 `git checkout <sha> -- <path>` 二进制取件（未用 PowerShell 文本重定向），逐项核对 git blob、字节与 SHA-256：allowlist 3879B/1c965b2b…、digest 4639B/ce1d4d19…、http 7858B/e64b04bd…、probe 7837B/7a261b02…、redact 2166B/f221f26e…、report 5263B/b22445de…，**6/6 与卡内表一致**；`fs-safe.mjs`、旧 CLI、证书与原测试未复制。
+- 零差异核对：`index.mjs`、`windows-acl-bridge.mjs`、`public-result.mjs`、`test/testkit.mjs`、原三份测试、依赖清单/锁文件与业务代码 blob 与基线一致（`git diff --stat HEAD` 仅含白名单文件）。
+
+### 7.3 最终实测与 guard
+
+| 项目 | 实际记录 |
+|---|---|
+| 最终命令 | 显式四文件：原三份 test 加 `test/probe-integration.test.mjs`，`--test --test-isolation=none --test-reporter=spec`；未跑 npm 全量/HTTP/旧 probe/设备套件 |
+| 最终结果 | **339/339 通过，4 suites，退出 0**；fail/cancelled/skipped/todo = 0 |
+| 分文件 | 原三份 262（22/19/12 顶层，字节不变）；新增 integration 77（16 顶层，单独复跑 exit 0） |
+| stderr | 171 字节，Node DEP0176/fs.F_OK 弃用警告，原样保留 |
+| guard 实际槽 | **232＝92 network＋8 process＋132 运行期 fs**（本机 Node v24.19.0 实测逐槽清单，不沿用旧数字）；新导入树加载窗网络/进程槽全 0；逐槽正控不转发、累计基线、成败窗口零违规、函数身份/描述符/ESM 绑定精确恢复 |
+| 加载窗预载 | guard 安装后预载 probe-binding+六 vendor，并用一次 warm-up prepare 预热 owner 的字面动态导入解析对，之后才装运行期 fs guard；加载期加载器 fs 读不计入“零文件调用”声明 |
+
+### 7.4 场景覆盖与负控
+
+覆盖：六端点成功（唯一 invoke、6 逻辑/6 下游/6 确认）、首次合法 401→200（下游 7）、每端点一次 401（下游 12）、二次 401 拒绝、G1 最终非 200/错型号/不可解析 latch（保留 G1 事实、G2–G6 下游 0）、G2–G6 非 200 沿原 loop 继续至 PROBE_FAILED、requestFault 十种篡改固定码拒绝、撤销/到期/fresh=false/资源失效（首请求前与响应间）、在途 invalidate/revoke 黏性未知（首因保留、status UNKNOWN）、WRITE/READ/REPORT_SEAL/CLEANUP 故障（EVIDENCE_WRITE_FAILED、事实保留、后续下游 0）、三种 submission（CONFIRMED_SUBMITTED 的 TIMEOUT/RESPONSE_ERROR 仍 UNKNOWN＋黏性；NOT_SUBMITTED 不清零计数）、并发 invoke 唯一认领、无手工消费接口、敌意场景输入 CONFIG_UNVERIFIED（getter/proxy/隐藏键零执行）、闭式 DTO 脱敏与 raw report 拒绝负例。每个独立场景保留 before/after 快照与 guard 零违规断言。
+
+五套负控（工件副本单点变异，源树从未修改，副本变异前全文件 SHA-256 与源一致；变异器逐次核对恰好一处替换）：NC1 禁 G1 latch → “T15 G1 final non-200” 精确失败；NC2 写故障不停止 → WRITE/READ 失败；NC3 全禁请求 base 门禁 → HOST/PORT/PIN/TLS_CA/TIMEOUT/MAXBYTES_SWAP 六子例失败；NC4 未知事实降级 → 三个 CONFIRMED/UNKNOWN 子例失败；NC5 被拒调用者计 invokeCount → before-first-request 与 T13 并发失败。均退出 1，未转发真实系统函数。
+
+### 7.5 原始工件与本阶段边界
+
+原始工件根（本机）：`C:\Users\Administrator\AppData\Local\Temp\dsh-km05nh\hk-ai-08-cr2\artifacts\`。最终四文件运行 `attempt-8\stdout.log`（48297B，SHA-256 13fcbf00…）、`stderr.log`（171B，01bc7fb8…）；第一步三文件运行 `step1-original-three\`；负控在 `negative-controls\NC1..NC5\`（各含 run/stdout.log、exitcode、变异前后哈希与片段）。
+
+BLOCKED（不用 skip/todo/deferred 冒充）：真实 Node writer、Windows 原生 ACL/对象身份、真实文件 I/O、真实设备/TLS/网络、真实审批材料——继续 BLOCKED，等各自阶段与授权。合成 COMPLETED/checks 不是真实审批、ACL 或设备证据，不进入 `executeControlledE1` 返回值。
+
+**Stop-CR2：本轮只到固定探针合成接线及离线验证。** 最终 HEAD/父链、文件范围、vendor 哈希、远端核对与派单回报见交付消息；独立验收归 Codex，实施方不自批。

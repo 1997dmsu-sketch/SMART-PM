@@ -67,3 +67,49 @@ complete 仅表示合成生命周期结束，不代表六端点通过或 E1 通�
 用户取消隔离网络前置保持有效。本阶段不读取真实配置/凭据，不运行本地
 已派 ACL 任务，不安装环境/依赖、不启动 HTTP/UI/监听或设备动作。Windows
 运行结果与实际 Node writer/native ACL 能力仍待其各自阶段验证。
+
+## CR-2 合成探针接线（2026-11-23 追加）
+
+本阶段按最终技术裁定 `716b1f0053d5ad34b45fc78d5cf79e5739f2aa36` 实施，
+代码基线固定 `2712ea7866377d889a78e413fcb7de420b9ad1ab`。`private-plan.mjs`
+成为单一私有运行时 owner：原 controller/session 实现机械重定位到该模块，
+`controlled-runner.mjs` 与 `evidence-session.mjs` 只保留兼容 facade 再导出，
+原工厂的方法、返回形状与 CR-1 行为不变；原三份测试保持原字节并继续全通过。
+
+新增固定工厂 `createSyntheticProbeController(input)`（由
+`controlled-runner.mjs` 再导出），固定只提供
+`check / prepare / arm / setControl / invokeScenario / invalidate / snapshot`，
+无手工 consume/complete、无 session/config/原始 report getter、无 writer、
+不接受任何 transport/adapter/callback 注入。
+
+- `prepare({fault})` 只接受闭式枚举 `NONE / PREFLIGHT_WRITE / PREFLIGHT_READ /
+  PREFLIGHT_CLEANUP / WRITE / READ / CLEANUP / REPORT_SEAL`；前三个在预检拒绝，
+  WRITE/READ 用于响应保存/回读故障，CLEANUP 用于 close 故障，REPORT_SEAL 用于
+  原始报告私有封存前固定失败（仅本 profile）。prepare 是唯一允许预载固定
+  模块树的入口（字面 `import("./probe-binding.mjs")`）。
+- `invokeScenario(scenario)` 只接受闭式 v1 场景
+  `{schemaVersion:'hk-ai-08-cr2-scenario-v1', steps, events, requestFault}`，
+  消费前一次安全复制并完整校验；结构非法以 `CONFIG_UNVERIFIED` 终止。
+  唯一消费、mint、ACTIVE 与 invoke 认领在无 await 的同步段内完成，之后才
+  真正调用固定 vendor `runProbe`（transport 为 owner 私有不转发合成桩，
+  now 为 owner 内部合成时钟闭包）。
+- 返回冻结合成 envelope：
+  `{schemaVersion:'hk-ai-08-cr2-simulation-result-v1',
+  scope:'cr2-synthetic-fixed-probe-only', result, simulation, trace}`。
+  `result` 是原 `makePublicResult` 的闭式 DTO（由 owner 自有事实构造），
+  `simulation` 只含 invokeClaimed/invokeCount/identityConfirmed/recordCount/
+  bytesWritten，`trace` 只含固定枚举类型与 null/六端点 ID、attempt 0/1/2。
+
+六份 vendor（`vendor/probe-558b9c8/`）为固定提交
+`558b9c864a4b820e397336200758b143556a4d87` 的原字节快照，来源/blob/字节/
+SHA-256 见 `VENDOR-SOURCES.json`；只复制 `http.mjs` 以满足 `assertContentType`
+依赖，不授权调用 `httpsGet`。G1 最终 200 且同一私有 body 经固定
+`parseDeviceInfo` 完整型号核验成功后才允许 G2–G6；写/读/报告封存/close
+故障、撤销/到期/资源失效与 stop latch 均先终止且不继续下游；确认提交
+不等于结果已知（CONFIRMED_SUBMITTED/TIMEOUT/RESPONSE_ERROR 仍
+UNKNOWN＋黏性），NOT_SUBMITTED 不清零已发生调用。全部结果均为合成假设，
+不是真实审批、ACL 或设备证据；真实入口 `index.mjs` 原字节不变，仍固定拒绝。
+
+最终验证命令只显式列原三份测试加 `test/probe-integration.test.mjs`
+（`--test --test-isolation=none --test-reporter=spec`）；真实 Node/native/
+Windows ACL/文件 I/O 与真实设备部分继续 BLOCKED，不进入 CR-3/E1/E2。

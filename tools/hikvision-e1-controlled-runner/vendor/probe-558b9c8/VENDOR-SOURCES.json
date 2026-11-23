@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "hk-ai-08-cr2-vendor-sources-v1",
+  "purpose": "CR-2 fixed-probe synthetic wiring: records the six pinned vendor sources copied byte-exact from the fixed Git commit 558b9c864a4b820e397336200758b143556a4d87 into this vendor directory. Contains no configuration, credentials, certificates, secrets or device data.",
+  "fixedProbeCommit": "558b9c864a4b820e397336200758b143556a4d87",
+  "sourceRoot": "tools/hikvision-probe/src/",
+  "destinationRoot": "tools/hikvision-e1-controlled-runner/vendor/probe-558b9c8/",
+  "notes": [
+    "All six files were extracted from the fixed Git commit via git checkout of the pinned tree paths (binary-safe object reads), then verified per entry by git blob, raw byte count and SHA-256 over the original blob bytes. No PowerShell text redirection was used to copy source.",
+    "fs-safe.mjs (blob 61bef04d51de884ac9eeb45d61eb5780e52b0c95, 1198 bytes) lives in the same pinned directory but is excluded from the CR-2 six-file whitelist; none of the six files import it, and it was not copied.",
+    "http.mjs is copied only because runProbe depends on assertContentType; this does not authorize calling httpsGet, which remains a real network entry and is never invoked by the CR-2 owner or tests.",
+    "The old probe CLI, original probe tests, TLS fixtures and certificates were not copied.",
+    "The six files form a closed import set: only relative imports among themselves plus node:https and node:crypto; no other local modules."
+  ],
+  "entries": [
+    {
+      "file": "allowlist.mjs",
+      "sourcePath": "tools/hikvision-probe/src/allowlist.mjs",
+      "commit": "558b9c864a4b820e397336200758b143556a4d87",
+      "blob": "2e2551c45bad21daf86a4767d29c18b0a5823b95",
+      "bytes": 3879,
+      "sha256": "1c965b2b64c0990f92907f4725f7b6fa9ee9ff2c616f8af829218acbf8a73683"
+    },
+    {
+      "file": "digest.mjs",
+      "sourcePath": "tools/hikvision-probe/src/digest.mjs",
+      "commit": "558b9c864a4b820e397336200758b143556a4d87",
+      "blob": "3c222fca08a9f1e2b5d07b1c87b276bb826dd239",
+      "bytes": 4639,
+      "sha256": "ce1d4d197a8bf567bdefb7420f550d6ba4d0a5a4593254b9c203b9af5b180b3e"
+    },
+    {
+      "file": "http.mjs",
+      "sourcePath": "tools/hikvision-probe/src/http.mjs",
+      "commit": "558b9c864a4b820e397336200758b143556a4d87",
+      "blob": "e96481d2954df4efe6ac43dbe8fd915a3e9c5587",
+      "bytes": 7858,
+      "sha256": "e64b04bd10370682f9b4b1ff577b8c481801d1c9976335ce276cdcaa4f6c2573"
+    },
+    {
+      "file": "probe.mjs",
+      "sourcePath": "tools/hikvision-probe/src/probe.mjs",
+      "commit": "558b9c864a4b820e397336200758b143556a4d87",
+      "blob": "a99c80ac6c4a95989f0ed5fbadc1da405146dc7d",
+      "bytes": 7837,
+      "sha256": "7a261b0291bb97db3c3aae6f112c971c5f72903e8f77ffc5ef02477bbe787f46"
+    },
+    {
+      "file": "redact.mjs",
+      "sourcePath": "tools/hikvision-probe/src/redact.mjs",
+      "commit": "558b9c864a4b820e397336200758b143556a4d87",
+      "blob": "fbf97301cfd9307a0b26ad2b832bbe9ebb490225",
+      "bytes": 2166,
+      "sha256": "f221f26e3c27bf618192be8f65315f16d1521895121e977683455d10be53da11"
+    },
+    {
+      "file": "report.mjs",
+      "sourcePath": "tools/hikvision-probe/src/report.mjs",
+      "commit": "558b9c864a4b820e397336200758b143556a4d87",
+      "blob": "19d410ac59db11759542522b1ecdd7bec0bd81d7",
+      "bytes": 5263,
+      "sha256": "b22445deff002dc7c33f0db159bf8e1136a31f4ffabf9c575fbdc921b162c467"
+    }
+  ]
+}

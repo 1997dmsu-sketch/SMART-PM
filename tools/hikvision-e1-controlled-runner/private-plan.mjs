@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual, types } from "node:util";
 import { checkOfflineConfig } from "../hikvision-offline-config-checker/src/check-config.mjs";
+import { makePublicResult } from "./public-result.mjs";
 
 // CR-1 has only a synthetic memory model. These registries never constitute
 // externally verified approval, a native evidence capability, or device access.
@@ -697,5 +698,782 @@ export function createSyntheticController(input) {
     snapshot: view,
     matchesCapturedInput: (other) => matchesCapturedInput(plan, other),
     matchesNormalizedBinding: (other) => matchesNormalizedBinding(plan, other),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CR-2 synthetic probe profile. This closed orchestration runs the FIXED
+// vendor runProbe once per consumed plan with an owner-private non-forwarding
+// transport. Every result is synthetic evidence material only; it never
+// constitutes real approval, ACL or device evidence and is never returned by
+// the production entry point.
+
+const SIM_SCOPE = "cr2-synthetic-fixed-probe-only";
+const SIM_SCENARIO_SCHEMA = "hk-ai-08-cr2-scenario-v1";
+const SIM_RESULT_SCHEMA = "hk-ai-08-cr2-simulation-result-v1";
+const SIM_FAULTS = Object.freeze([
+  "NONE", "PREFLIGHT_WRITE", "PREFLIGHT_READ", "PREFLIGHT_CLEANUP",
+  "WRITE", "READ", "CLEANUP", "REPORT_SEAL",
+]);
+const SIM_FAULT_KINDS = Object.freeze([
+  "NETWORK", "TIMEOUT", "RESPONSE_ERROR", "TOO_LARGE", "FINGERPRINT_MISMATCH", "REDIRECT",
+]);
+const SIM_SUBMISSIONS = Object.freeze(["NOT_SUBMITTED", "CONFIRMED_SUBMITTED", "UNKNOWN"]);
+const SIM_REQUEST_FAULTS = Object.freeze([
+  "METHOD_POST", "HOST_SWAP", "PORT_SWAP", "PATH_SWAP", "QUERY_SWAP",
+  "PIN_SWAP", "TLS_CA", "TIMEOUT_SWAP", "MAXBYTES_SWAP", "ORDER_SWAP",
+]);
+const SIM_TRACE_TYPES = new Set([
+  "CAPTURED", "CHECKER", "CHECKED", "PLAN_SEALED", "GATE_PREPARING",
+  "SESSION_NEW", "SESSION_PREPARING", "SESSION_READY", "EVIDENCE_READY", "ARMED",
+  "CONSUMED", "SYNTHETIC_MINT", "SESSION_ACTIVE", "INVOKE_CLAIM", "PROBE_INVOKE",
+  "WRAPPER", "BOUNDARY_REJECT", "SYNTHETIC_DOWNSTREAM", "SUBMISSION_NOT_SENT",
+  "SUBMISSION_CONFIRMED", "SUBMISSION_UNKNOWN", "RESPONSE", "MEMORY_WRITE",
+  "MEMORY_READ", "BODY_VERIFIED", "IDENTITY_CONFIRMED", "CONTROL_UPDATED",
+  "RESOURCE_INVALIDATED", "LATCH", "REPORT_SEALED", "SESSION_SEALED",
+  "SESSION_CLOSED", "COMPLETED", "FAILED", "UNKNOWN", "INVALIDATED",
+]);
+
+function simEvent(type, endpointId = null, attempt = 0) {
+  return Object.freeze({ type, endpointId, attempt });
+}
+
+function simRecord(value, allowed, required = allowed) {
+  if (value === null || typeof value !== "object" || types.isProxy(value) || Array.isArray(value)) throw INVALID;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) throw INVALID;
+  const keys = Reflect.ownKeys(value);
+  if (keys.some((key) => typeof key !== "string" || !allowed.includes(key)) ||
+      required.some((key) => !keys.includes(key))) throw INVALID;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const copy = Object.create(null);
+  for (const key of keys) {
+    const descriptor = descriptors[key];
+    if (!descriptor.enumerable || !Object.hasOwn(descriptor, "value")) throw INVALID;
+    copy[key] = descriptor.value;
+  }
+  return copy;
+}
+
+function simArray(value, minimum, maximum) {
+  if (!value || typeof value !== "object" || types.isProxy(value) || !Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== Array.prototype) throw INVALID;
+  const desc = Object.getOwnPropertyDescriptors(value);
+  const length = desc.length?.value;
+  if (!Number.isInteger(length) || length < minimum || length > maximum) throw INVALID;
+  const allowed = ["length", ...Array.from({ length }, (_, i) => String(i))];
+  const own = Reflect.ownKeys(value);
+  if (own.length !== allowed.length || own.some((key) => typeof key !== "string" || !allowed.includes(key))) throw INVALID;
+  return Array.from({ length }, (_, i) => {
+    const slot = desc[String(i)];
+    if (!slot || !slot.enumerable || !Object.hasOwn(slot, "value")) throw INVALID;
+    return slot.value;
+  });
+}
+
+function copyScenarioBody(value, maxBytes) {
+  let bytes;
+  if (typeof value === "string") {
+    if (Buffer.byteLength(value, "utf8") > maxBytes) throw INVALID;
+    bytes = new Uint8Array(Buffer.from(value, "utf8"));
+  } else {
+    if (value === null || typeof value !== "object" || types.isProxy(value) || !types.isUint8Array(value)) throw INVALID;
+    const length = Reflect.apply(typedArrayLength, value, []);
+    if (length > maxBytes) throw INVALID;
+    bytes = new Uint8Array(length);
+    Reflect.apply(Uint8Array.prototype.set, bytes, [value]);
+  }
+  // The bytes are already a private exclusive copy; a non-empty typed array
+  // cannot be Object.freeze'd, so it stays an owner-only mutable reference
+  // that is never exposed (the wrapper hands P a fresh Buffer copy).
+  return bytes;
+}
+
+/** One closed validation + private copy of a scenario; nothing is repaired. */
+function copyScenario(value, maxBytes) {
+  const root = simRecord(value, ["schemaVersion", "steps", "events", "requestFault"]);
+  if (root.schemaVersion !== SIM_SCENARIO_SCHEMA) throw INVALID;
+  const steps = simArray(root.steps, 1, 12).map((step) => {
+    const data = simRecord(step, ["endpointId", "attempt", "outcome"]);
+    if (!IDS.includes(data.endpointId) || !Number.isSafeInteger(data.attempt) ||
+        data.attempt < 1 || data.attempt > 2) throw INVALID;
+    const kindData = simRecord(data.outcome,
+      ["kind", "status", "contentType", "challenge", "body", "code", "submission"], ["kind"]);
+    if (kindData.kind === "RESPONSE") {
+      const item = simRecord(data.outcome, ["kind", "status", "contentType", "challenge", "body"]);
+      if (!Number.isInteger(item.status) || item.status < 100 || item.status > 599) throw INVALID;
+      if (typeof item.contentType !== "string" || item.contentType.length > 128) throw INVALID;
+      if (item.challenge !== null && (typeof item.challenge !== "string" || item.challenge.length > 4096)) throw INVALID;
+      return Object.freeze({
+        endpointId: data.endpointId, attempt: data.attempt,
+        outcome: Object.freeze({
+          kind: "RESPONSE", status: item.status, contentType: item.contentType,
+          challenge: item.challenge, body: copyScenarioBody(item.body, maxBytes),
+        }),
+      });
+    }
+    if (kindData.kind === "FAULT") {
+      const item = simRecord(data.outcome, ["kind", "code", "submission"]);
+      if (!SIM_FAULT_KINDS.includes(item.code) || !SIM_SUBMISSIONS.includes(item.submission)) throw INVALID;
+      return Object.freeze({
+        endpointId: data.endpointId, attempt: data.attempt,
+        outcome: Object.freeze({ kind: "FAULT", code: item.code, submission: item.submission }),
+      });
+    }
+    throw INVALID;
+  });
+  let previous = 0;
+  const events = simArray(root.events, 0, 12).map((event) => {
+    const data = simRecord(event, ["afterResponse", "kind", "control"], ["afterResponse", "kind"]);
+    if (!Number.isSafeInteger(data.afterResponse) || data.afterResponse < 1 ||
+        data.afterResponse > steps.length || data.afterResponse <= previous) throw INVALID;
+    previous = data.afterResponse;
+    if (data.kind === "CONTROL") {
+      const item = simRecord(event, ["afterResponse", "kind", "control"]);
+      const control = simRecord(item.control, ["nowMs", "fresh", "revoked", "approval"]);
+      if (typeof control.nowMs !== "number" || typeof control.fresh !== "boolean" ||
+          typeof control.revoked !== "boolean" || typeof control.approval !== "string") throw INVALID;
+      return Object.freeze({ afterResponse: data.afterResponse, kind: "CONTROL", control: Object.freeze(control) });
+    }
+    if (data.kind === "RESOURCE_INVALIDATED") {
+      return Object.freeze({ afterResponse: data.afterResponse, kind: "RESOURCE_INVALIDATED" });
+    }
+    throw INVALID;
+  });
+  let requestFault = null;
+  if (root.requestFault !== null) {
+    const item = simRecord(root.requestFault, ["atWrapper", "kind"]);
+    if (!Number.isSafeInteger(item.atWrapper) || item.atWrapper < 1 || item.atWrapper > 12 ||
+        !SIM_REQUEST_FAULTS.includes(item.kind)) throw INVALID;
+    requestFault = Object.freeze({ atWrapper: item.atWrapper, kind: item.kind });
+  }
+  return Object.freeze({
+    schemaVersion: SIM_SCENARIO_SCHEMA,
+    steps: Object.freeze(steps), events: Object.freeze(events), requestFault,
+  });
+}
+
+/** Only used by the CR-2 finalize to repair a fixed public code after the
+ * memory model already latched the plan with an internal-only code. */
+function recordTerminalCode(plan, code) {
+  if (!CODES.has(code)) return;
+  const state = states.get(plan);
+  if (state && TERMINAL.has(state.state)) state.code = code;
+}
+
+function perturbRequest(request, kind, cursorId, bindingModule) {
+  const copy = { ...request };
+  if (copy.headers && typeof copy.headers === "object") copy.headers = { ...copy.headers };
+  switch (kind) {
+    case "METHOD_POST": copy.method = "POST"; break;
+    case "HOST_SWAP": copy.host = "synthetic-host-swap.test"; break;
+    case "PORT_SWAP": copy.port = 8443; break;
+    case "PATH_SWAP": copy.path = "/ISAPI/Synthetic/path-swap"; break;
+    case "QUERY_SWAP": copy.query = "synthetic=1"; break;
+    case "PIN_SWAP": copy.fingerprints = ["FF".repeat(32)]; break;
+    case "TLS_CA": copy.ca = "SYNTHETIC-CA-NOT-A-CERTIFICATE"; break;
+    case "TIMEOUT_SWAP": copy.timeoutMs += 1; break;
+    case "MAXBYTES_SWAP": copy.maxBytes += 1; break;
+    case "ORDER_SWAP": {
+      // Another legal endpoint's exact path; the frozen expected order never moves.
+      const nextId = IDS[(IDS.indexOf(cursorId) + 1) % IDS.length];
+      copy.path = bindingModule.requestPathFor(nextId);
+      break;
+    }
+    default: break;
+  }
+  return copy;
+}
+
+/**
+ * CR-2 synthetic probe controller. Fixed API surface:
+ * check / prepare / arm / setControl / invokeScenario / invalidate / snapshot.
+ * No manual consume/complete, no session/config/raw-report getter, no writer,
+ * no adapter or transport injection, and no real network or file I/O.
+ */
+export function createSyntheticProbeController(input) {
+  const captured = capturePlan(input);
+  const plan = captured.plan;
+  const model = createSyntheticEvidenceModel();
+  let session = null;
+  let currentControl = null;
+  let lastNow = null;
+  let preparing = false;
+  let bindingModule = null;
+  let evidenceRef = null;
+  let profileFault = "NONE";
+  let invokeClaimed = false;
+  let invokeCount = 0;
+  let wrapperAttemptCount = 0;
+  let transportInvocationCount = 0;
+  let logicalEndpointsAttempted = 0;
+  let confirmedResponses = 0;
+  let identityConfirmed = false;
+  let requestOutcomeUnknown = false;
+  let firstTerminalCode = null;
+  let stepIndex = 0;
+  let eventIndex = 0;
+  let processedResponses = 0;
+  let inFlight = false;
+  const trace = [];
+  const endpointProgress = new Map(IDS.map((id) => [id, { touched: false, confirmed200: false, unknown: false }]));
+  const perEndpointAttempts = new Map(IDS.map((id) => [id, 0]));
+
+  function pushEvent(type, endpointId = null, attempt = 0) {
+    trace.push(simEvent(type, endpointId, attempt));
+  }
+
+  function sessionFacts() {
+    if (!session) return { recordCount: 0, bytesWritten: 0 };
+    try {
+      const facts = model.inspect(session, plan);
+      return { recordCount: facts.recordCount, bytesWritten: facts.bytesWritten };
+    } catch {
+      return { recordCount: 0, bytesWritten: 0 };
+    }
+  }
+
+  function view() {
+    if (!plan) return Object.freeze({
+      scope: SIM_SCOPE, state: "FAILED", code: captured.code, planRef: null, evidenceRef: null,
+      checkerPassed: false, runnerCompatible: false, consumed: false, stopLatched: true,
+      invokeClaimed: false, invokeCount: 0, identityConfirmed: false,
+      wrapperAttemptCount: 0, transportInvocationCount: 0, logicalEndpointsAttempted: 0,
+      confirmedResponses: 0, requestOutcomeUnknown: false, recordCount: 0, bytesWritten: 0,
+      trace: Object.freeze([]),
+    });
+    const state = stateFor(plan);
+    const facts = sessionFacts();
+    return Object.freeze({
+      scope: SIM_SCOPE, state: state.state, code: state.code, planRef: state.planRef, evidenceRef,
+      checkerPassed: state.checkerPassed, runnerCompatible: state.runnerCompatible,
+      consumed: state.consumed, stopLatched: state.stopLatched,
+      invokeClaimed, invokeCount, identityConfirmed,
+      wrapperAttemptCount, transportInvocationCount, logicalEndpointsAttempted, confirmedResponses,
+      requestOutcomeUnknown, recordCount: facts.recordCount, bytesWritten: facts.bytesWritten,
+      trace: Object.freeze(trace.map((entry) => Object.freeze({ ...entry }))),
+    });
+  }
+
+  function rejected(code) {
+    return response(false, code, view().state);
+  }
+
+  function stop(code, stateName = "INVALIDATED") {
+    if (!firstTerminalCode) firstTerminalCode = code;
+    const wasLatched = plan ? stateFor(plan).stopLatched : true;
+    if (plan && !TERMINAL.has(stateFor(plan).state)) stopPlan(plan, code, stateName);
+    if (session) {
+      try { model.fail(session, plan); } catch { /* fixed failure is retained */ }
+    }
+    if (!wasLatched) {
+      pushEvent("LATCH");
+      pushEvent(stateName);
+    }
+    return rejected(code);
+  }
+
+  function guardState(expected) {
+    const state = view();
+    if (!plan) return rejected(captured.code);
+    if (state.consumed) return rejected("PLAN_CONSUMED");
+    if (TERMINAL.has(state.state)) return rejected(state.code === "OK" ? "PLAN_INVALID" : state.code);
+    if (!expected.includes(state.state)) return rejected("PLAN_INVALID");
+    return null;
+  }
+
+  function control(value, requireConfirmed = false, recordUpdate = false) {
+    let next;
+    try { next = snapshotSyntheticControl(value, requireConfirmed); }
+    catch {
+      if (recordUpdate) pushEvent("CONTROL_UPDATED");
+      return stop("APPROVAL_UNVERIFIED");
+    }
+    if (recordUpdate) pushEvent("CONTROL_UPDATED");
+    if (next.approval !== "VERIFIED_SYNTHETIC" || !next.fresh) return stop("APPROVAL_UNVERIFIED");
+    const { windowStartMs, windowEndMs } = getSyntheticWindow(plan);
+    if (!Number.isSafeInteger(next.nowMs) || next.nowMs < 0 ||
+        (lastNow !== null && next.nowMs < lastNow) ||
+        !Number.isSafeInteger(windowStartMs) || !Number.isSafeInteger(windowEndMs) ||
+        next.nowMs < windowStartMs || next.nowMs >= windowEndMs || next.revoked) {
+      return stop("AUTHORIZATION_INVALID");
+    }
+    lastNow = next.nowMs;
+    currentControl = Object.freeze({ nowMs: next.nowMs, fresh: next.fresh, revoked: next.revoked, approval: next.approval });
+    if (requireConfirmed && !next.confirmed) return rejected("AUTHORIZATION_INVALID");
+    return null;
+  }
+
+  function check(value) {
+    const rejectedState = guardState(["CAPTURED"]);
+    if (rejectedState) return rejectedState;
+    const invalidControl = control(value, false, true);
+    if (invalidControl) return invalidControl;
+    pushEvent("CHECKER");
+    try {
+      const checked = checkCapturedPlan(plan);
+      if (checked.ok) {
+        pushEvent("CHECKED");
+        pushEvent("PLAN_SEALED");
+      } else if (stateFor(plan).stopLatched) {
+        pushEvent("LATCH");
+        pushEvent(stateFor(plan).state);
+      }
+      return checked;
+    } catch { return stop("INTERNAL_ERROR", "FAILED"); }
+  }
+
+  function setControl(value) {
+    const state = view();
+    if (!plan) return rejected(captured.code);
+    if (TERMINAL.has(state.state)) return rejected(state.code === "OK" ? "PLAN_INVALID" : state.code);
+    const invalidControl = control(value, false, true);
+    return invalidControl || response(true, "OK", view().state);
+  }
+
+  async function prepare(options = {}) {
+    const rejectedState = guardState(["SEALED"]);
+    if (rejectedState) return rejectedState;
+    if (preparing) return rejected("PLAN_INVALID");
+    const invalidControl = control(currentControl);
+    if (invalidControl) return invalidControl;
+    pushEvent("GATE_PREPARING");
+    let data;
+    try { data = simRecord(options, ["fault"], []); }
+    catch { return stop("EVIDENCE_GATE_FAILED", "FAILED"); }
+    const requestedFault = Object.hasOwn(data, "fault") ? data.fault : "NONE";
+    if (typeof requestedFault !== "string" || !SIM_FAULTS.includes(requestedFault)) {
+      return stop("EVIDENCE_GATE_FAILED", "FAILED");
+    }
+    preparing = true;
+    try {
+      // Only this synthetic prepare preloads the fixed module tree; a failed
+      // preload never produces execution capability. The literal dynamic import
+      // below is the only probe-binding import in this owner.
+      try {
+        bindingModule = await import("./probe-binding.mjs");
+      } catch {
+        return stop("EVIDENCE_GATE_FAILED", "FAILED");
+      }
+      profileFault = requestedFault;
+      const modelFault = requestedFault === "REPORT_SEAL" ? "NONE" : requestedFault;
+      pushEvent("SESSION_NEW");
+      pushEvent("SESSION_PREPARING");
+      session = model.prepare(plan, { fault: modelFault });
+      evidenceRef = "evidence-" + randomUUID();
+      pushEvent("SESSION_READY");
+      // A fixed microtask boundary permits an interleaved data-only revoke or
+      // expiry update; it never invokes a caller supplied callback.
+      await Promise.resolve();
+      const afterPrepare = guardState(["SEALED"]);
+      if (afterPrepare) {
+        model.fail(session, plan);
+        return afterPrepare;
+      }
+      const stale = control(currentControl);
+      if (stale) return stale;
+      model.assertReady(session, plan);
+      const advanced = advancePlan(plan, "EVIDENCE_READY");
+      pushEvent("EVIDENCE_READY");
+      return advanced;
+    } catch (error) {
+      const code = fixedErrorCode(error);
+      return stop(code === "INTERNAL_ERROR" ? "EVIDENCE_GATE_FAILED" : code, "FAILED");
+    } finally {
+      preparing = false;
+    }
+  }
+
+  function arm(value) {
+    const rejectedState = guardState(["EVIDENCE_READY"]);
+    if (rejectedState) return rejectedState;
+    const invalidControl = control(value, true, true);
+    if (invalidControl) return invalidControl;
+    try {
+      model.assertReady(session, plan);
+      const advanced = advancePlan(plan, "ARMED");
+      pushEvent("ARMED");
+      return advanced;
+    } catch { return stop("EVIDENCE_GATE_INVALID"); }
+  }
+
+  function invalidate() {
+    pushEvent("RESOURCE_INVALIDATED");
+    return stop("AUTHORIZATION_INVALID");
+  }
+
+  function executionView() {
+    const binding = cores.get(plan).binding;
+    return Object.freeze({
+      host: binding.host, port: binding.port,
+      allowedHosts: Object.freeze([...binding.allowedHosts]),
+      allowedPorts: Object.freeze([...binding.allowedPorts]),
+      username: binding.username, password: binding.password,
+      expectedModel: binding.expectedModel,
+      fingerprints: Object.freeze([...binding.fingerprints]),
+      timeoutMs: binding.timeoutMs, maxBytes: binding.maxBytes,
+      tlsMode: binding.tlsMode, allowRead: true,
+    });
+  }
+
+  function endpointStateFor(id) {
+    const progress = endpointProgress.get(id);
+    if (progress.unknown) return "UNKNOWN";
+    if (id === "deviceInfo") {
+      if (identityConfirmed) return "OK";
+      return progress.touched ? "FAILED" : "NOT_ATTEMPTED";
+    }
+    if (progress.confirmed200) return "OK";
+    if (progress.touched) return "FAILED";
+    return "NOT_ATTEMPTED";
+  }
+
+  function resultEnvelope(status, code, gateVerified = false) {
+    const state = plan ? stateFor(plan) : null;
+    const facts = sessionFacts();
+    const endpoints = IDS.map((id) => ({ id, state: endpointStateFor(id) }));
+    const dto = makePublicResult({
+      status, code,
+      planRef: state ? state.planRef : null,
+      evidenceRef,
+      checks: {
+        checkerPassed: state ? state.checkerPassed : false,
+        runnerCompatible: state ? state.runnerCompatible : false,
+        evidenceGateVerified: gateVerified,
+        singleUseConsumed: state ? state.consumed : false,
+      },
+      counts: {
+        logicalEndpointsAttempted, wrapperAttemptCount,
+        transportInvocationCount, confirmedResponses,
+      },
+      requestOutcomeUnknown,
+      endpoints,
+    });
+    return Object.freeze({
+      schemaVersion: SIM_RESULT_SCHEMA,
+      scope: SIM_SCOPE,
+      result: dto,
+      simulation: Object.freeze({
+        invokeClaimed, invokeCount, identityConfirmed,
+        recordCount: facts.recordCount, bytesWritten: facts.bytesWritten,
+      }),
+      trace: Object.freeze(trace.map((entry) => Object.freeze({ ...entry }))),
+    });
+  }
+
+  function invokeEnvelope(code) {
+    return resultEnvelope("FAILED", code, false);
+  }
+
+  function matchesBase(request, view) {
+    if (request.host !== view.host || request.port !== view.port ||
+        request.timeoutMs !== view.timeoutMs || request.maxBytes !== view.maxBytes ||
+        request.ca !== undefined) return false;
+    return isDeepStrictEqual(request.fingerprints, view.fingerprints);
+  }
+
+  function rejectRequest(code, endpointId, attempt) {
+    pushEvent("BOUNDARY_REJECT", endpointId, attempt);
+    stop(code, "FAILED");
+    throw fault(code);
+  }
+
+  function applyScenarioEvents() {
+    while (eventIndex < scenario.events.length && scenario.events[eventIndex].afterResponse === processedResponses) {
+      const event = scenario.events[eventIndex];
+      eventIndex += 1;
+      if (event.kind === "CONTROL") {
+        // Closed data-only control update; invalid values stop the plan here,
+        // so subsequent downstream calls are rejected before the next wrapper.
+        control(event.control, false, true);
+      } else {
+        pushEvent("RESOURCE_INVALIDATED");
+        stop("EVIDENCE_GATE_INVALID", "FAILED");
+      }
+    }
+  }
+
+  function syntheticDownstream(cursor) {
+    const outcome = cursor.outcome;
+    if (outcome.kind === "FAULT") {
+      const error = fault(outcome.code);
+      Object.defineProperty(error, "submission", { value: outcome.submission });
+      return Promise.reject(error);
+    }
+    const headers = Object.freeze({
+      ...(outcome.contentType ? { "content-type": outcome.contentType } : {}),
+      ...(outcome.challenge !== null ? { "www-authenticate": outcome.challenge } : {}),
+    });
+    return Promise.resolve(Object.freeze({ status: outcome.status, headers, body: outcome.body }));
+  }
+
+  function handleFault(error, cursor) {
+    const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "RESPONSE_ERROR";
+    const slot = error && typeof error === "object" && !types.isProxy(error)
+      ? Object.getOwnPropertyDescriptor(error, "submission") : null;
+    const submission = slot && Object.hasOwn(slot, "value") ? slot.value : null;
+    if (submission === "NOT_SUBMITTED") {
+      pushEvent("SUBMISSION_NOT_SENT", cursor.endpointId, cursor.attempt);
+      if (!requestOutcomeUnknown) {
+        // Known fatal without prior unknown facts; already-counted downstream
+        // calls are never zeroed.
+        if (!firstTerminalCode) firstTerminalCode = "PROBE_FAILED";
+        stop("PROBE_FAILED", "FAILED");
+      }
+      throw fault(code);
+    }
+    if (submission === "CONFIRMED_SUBMITTED" || submission === "UNKNOWN") {
+      // Submission confirmation is not result knowledge: without a complete
+      // confirmable result this stays UNKNOWN and sticky (TIMEOUT and
+      // RESPONSE_ERROR included).
+      requestOutcomeUnknown = true;
+      endpointProgress.get(cursor.endpointId).unknown = true;
+      pushEvent(submission === "CONFIRMED_SUBMITTED" ? "SUBMISSION_CONFIRMED" : "SUBMISSION_UNKNOWN",
+        cursor.endpointId, cursor.attempt);
+      if (!firstTerminalCode) firstTerminalCode = "REQUEST_OUTCOME_UNKNOWN";
+      throw fault(code);
+    }
+    throw fault(code);
+  }
+
+  let scenario = null;
+
+  async function wrapper(request, view) {
+    const ordinal = wrapperAttemptCount + 1;
+    wrapperAttemptCount += 1;
+    const cursor = scenario.steps[stepIndex];
+    const cursorId = cursor ? cursor.endpointId : null;
+    const cursorAttempt = cursor ? cursor.attempt : 0;
+    pushEvent("WRAPPER", cursorId, cursorAttempt);
+
+    // requestFault only perturbs a private copy of the actual request; the
+    // frozen expectations, endpoint cursor and validators never change.
+    let effective = request;
+    if (scenario.requestFault && scenario.requestFault.atWrapper === ordinal) {
+      effective = perturbRequest(request, scenario.requestFault.kind, cursorId, bindingModule);
+    }
+
+    const entryState = stateFor(plan);
+    if (entryState.stopLatched || TERMINAL.has(entryState.state)) {
+      pushEvent("BOUNDARY_REJECT", cursorId, cursorAttempt);
+      throw fault(firstTerminalCode ?? "PROBE_FAILED");
+    }
+    if (Object.hasOwn(effective, "method") && effective.method !== "GET") {
+      return rejectRequest("REQUEST_OUT_OF_SCOPE", cursorId, cursorAttempt);
+    }
+    if (Object.hasOwn(effective, "query")) {
+      return rejectRequest("REQUEST_OUT_OF_SCOPE", cursorId, cursorAttempt);
+    }
+    const endpointId = bindingModule.endpointIdForPath(effective.path);
+    if (!endpointId || !cursor || endpointId !== cursor.endpointId) {
+      return rejectRequest("REQUEST_OUT_OF_SCOPE", cursorId, cursorAttempt);
+    }
+    if (perEndpointAttempts.get(endpointId) + 1 !== cursor.attempt) {
+      return rejectRequest("REQUEST_OUT_OF_SCOPE", cursorId, cursorAttempt);
+    }
+    if (endpointId !== "deviceInfo" && !identityConfirmed) {
+      return rejectRequest("PROBE_FAILED", cursorId, cursorAttempt);
+    }
+    if (!matchesBase(effective, view)) {
+      return rejectRequest("PLAN_INVALID", cursorId, cursorAttempt);
+    }
+    const invalidControl = control(currentControl);
+    if (invalidControl) {
+      return rejectRequest(firstTerminalCode ?? "PROBE_FAILED", cursorId, cursorAttempt);
+    }
+
+    // Accepted: consume the cursor step, count the logical endpoint and the
+    // synthetic downstream, then wait for the fixed scenario outcome.
+    stepIndex += 1;
+    perEndpointAttempts.set(endpointId, cursor.attempt);
+    if (!endpointProgress.get(endpointId).touched) {
+      endpointProgress.get(endpointId).touched = true;
+      logicalEndpointsAttempted += 1;
+    }
+    pushEvent("SYNTHETIC_DOWNSTREAM", cursor.endpointId, cursor.attempt);
+    transportInvocationCount += 1;
+    inFlight = true;
+    let outcome;
+    try {
+      outcome = await syntheticDownstream(cursor);
+    } catch (error) {
+      inFlight = false;
+      await Promise.resolve();
+      handleFault(error, cursor);
+    } finally {
+      inFlight = false;
+    }
+    // Fixed microtask boundary between the downstream result and processing;
+    // in-flight setControl/invalidate changes stay deterministically reachable.
+    await Promise.resolve();
+
+    const invalidInWindow = control(currentControl);
+    if (invalidInWindow) {
+      requestOutcomeUnknown = true;
+      endpointProgress.get(cursor.endpointId).unknown = true;
+      throw fault(firstTerminalCode ?? "PROBE_FAILED");
+    }
+    const afterState = stateFor(plan);
+    if (afterState.stopLatched || TERMINAL.has(afterState.state)) {
+      requestOutcomeUnknown = true;
+      endpointProgress.get(cursor.endpointId).unknown = true;
+      throw fault(firstTerminalCode ?? "PROBE_FAILED");
+    }
+
+    // Writer boundary: the same memory session re-verifies plan and session.
+    try {
+      model.writeResponse(session, plan, { endpointId: cursor.endpointId, attempt: cursor.attempt, body: outcome.body });
+    } catch (error) {
+      const raw = fixedErrorCode(error);
+      const code = raw === "EVIDENCE_WRITE_FAILED" || raw === "EVIDENCE_GATE_INVALID" ? raw : "EVIDENCE_WRITE_FAILED";
+      return rejectRequest(code, cursor.endpointId, cursor.attempt);
+    }
+    pushEvent("MEMORY_WRITE", cursor.endpointId, cursor.attempt);
+    pushEvent("MEMORY_READ", cursor.endpointId, cursor.attempt);
+    pushEvent("BODY_VERIFIED", cursor.endpointId, cursor.attempt);
+    confirmedResponses += 1;
+    pushEvent("RESPONSE", cursor.endpointId, cursor.attempt);
+
+    const status = outcome.status;
+    if (status === 200) endpointProgress.get(cursor.endpointId).confirmed200 = true;
+
+    if (cursor.endpointId === "deviceInfo") {
+      if (status === 200) {
+        let parsed;
+        try { parsed = bindingModule.fixedProbe.parseDeviceInfo(Buffer.from(outcome.body).toString("utf8")); }
+        catch { parsed = {}; }
+        const modelText = String(parsed.model ?? "").trim();
+        if (!modelText || modelText !== view.expectedModel) {
+          // Keep the recorded G1 response facts; latch before P continues.
+          return rejectRequest("PROBE_FAILED", cursor.endpointId, cursor.attempt);
+        }
+        identityConfirmed = true;
+        pushEvent("IDENTITY_CONFIRMED", cursor.endpointId, cursor.attempt);
+      } else if (status !== 401) {
+        // Final G1 outcome is not the legal challenge: latch with G1 facts kept.
+        return rejectRequest("PROBE_FAILED", cursor.endpointId, cursor.attempt);
+      }
+    }
+
+    processedResponses += 1;
+    applyScenarioEvents();
+
+    // Hand the confirmed response back to the fixed vendor control flow.
+    return Object.freeze({ status, headers: outcome.headers, body: Buffer.from(outcome.body) });
+  }
+
+  async function invokeFixedProbe() {
+    const view = executionView();
+    const fixedNow = () => {
+      const date = new Date(currentControl.nowMs);
+      if (Number.isNaN(date.getTime())) throw fault("PROBE_FAILED");
+      return date.toISOString();
+    };
+    pushEvent("PROBE_INVOKE");
+    return bindingModule.fixedProbe.runProbe({
+      config: view,
+      transport: (request) => wrapper(request, view),
+      now: fixedNow,
+    });
+  }
+
+  async function invokeScenario(value) {
+    const rejectedState = guardState(["ARMED"]);
+    if (rejectedState) return invokeEnvelope(rejectedState.code);
+    const invalidControl = control(currentControl);
+    if (invalidControl) return invokeEnvelope(invalidControl.code);
+    try {
+      scenario = copyScenario(value, executionView().maxBytes);
+    } catch {
+      stop("CONFIG_UNVERIFIED", "FAILED");
+      return invokeEnvelope("CONFIG_UNVERIFIED");
+    }
+    try {
+      model.assertReady(session, plan);
+      // D3: final verification, CONSUMED, mint, ACTIVE and the invoke claim
+      // all run in one await-free synchronous segment; the fixed runProbe is
+      // only called after the claim, and invokeCount increments only in front
+      // of that call expression.
+      const ticket = consumeCapturedPlan(plan);
+      model.activate(session, plan, ticket);
+      invokeClaimed = true;
+      pushEvent("CONSUMED");
+      pushEvent("SYNTHETIC_MINT");
+      pushEvent("SESSION_ACTIVE");
+      invokeCount += 1;
+      pushEvent("INVOKE_CLAIM");
+      const probe = await invokeFixedProbe();
+      return finalizeProbe(probe);
+    } catch (error) {
+      return finalizeError(error);
+    }
+  }
+
+  function finalizeProbe(probe) {
+    if (profileFault === "REPORT_SEAL") {
+      stop("EVIDENCE_WRITE_FAILED", "FAILED");
+      return resultEnvelope("FAILED", "EVIDENCE_WRITE_FAILED", false);
+    }
+    let gateVerified = false;
+    try {
+      pushEvent("REPORT_SEALED");
+      model.seal(session, plan);
+      pushEvent("SESSION_SEALED");
+      model.close(session, plan);
+      pushEvent("SESSION_CLOSED");
+      gateVerified = true;
+    } catch {
+      if (!firstTerminalCode) {
+        // The seal/close failure is the first terminal cause; repair the
+        // public code after the memory model latched with an internal one.
+        firstTerminalCode = "EVIDENCE_WRITE_FAILED";
+        recordTerminalCode(plan, "EVIDENCE_WRITE_FAILED");
+      }
+      if (session) {
+        try { model.fail(session, plan); } catch { /* fixed failure is retained */ }
+      }
+      const wasLatched = stateFor(plan).stopLatched;
+      if (!wasLatched) {
+        pushEvent("LATCH");
+        pushEvent("FAILED");
+      }
+      const status = requestOutcomeUnknown ? "UNKNOWN" : "FAILED";
+      const code = firstTerminalCode ?? "EVIDENCE_WRITE_FAILED";
+      return resultEnvelope(status, code, false);
+    }
+    const success = gateVerified && !requestOutcomeUnknown && !firstTerminalCode && identityConfirmed &&
+      IDS.every((id) => endpointProgress.get(id).confirmed200);
+    if (success) {
+      advancePlan(plan, "COMPLETED");
+      pushEvent("COMPLETED");
+      return resultEnvelope("COMPLETED", "OK", true);
+    }
+    const status = requestOutcomeUnknown ? "UNKNOWN" : "FAILED";
+    const code = firstTerminalCode ?? (requestOutcomeUnknown ? "REQUEST_OUTCOME_UNKNOWN" : "PROBE_FAILED");
+    const wasLatched = stateFor(plan).stopLatched;
+    stopPlan(plan, code, status);
+    if (!wasLatched) pushEvent(status);
+    return resultEnvelope(status, code, gateVerified);
+  }
+
+  function finalizeError(error) {
+    const raw = fixedErrorCode(error);
+    const code = CODES.has(raw) && raw !== "OK" && raw !== "INTERNAL_ERROR" ? raw : "PROBE_FAILED";
+    if (!firstTerminalCode) firstTerminalCode = code;
+    const wasLatched = plan ? stateFor(plan).stopLatched : true;
+    if (plan && !TERMINAL.has(stateFor(plan).state)) stopPlan(plan, code, "FAILED");
+    if (session) {
+      try { model.fail(session, plan); } catch { /* fixed failure is retained */ }
+    }
+    if (!wasLatched) {
+      pushEvent("LATCH");
+      pushEvent("FAILED");
+    }
+    const status = requestOutcomeUnknown ? "UNKNOWN" : "FAILED";
+    return resultEnvelope(status, firstTerminalCode, false);
+  }
+
+  return Object.freeze({
+    check, setControl, prepare, arm, invokeScenario, invalidate, snapshot: view,
   });
 }

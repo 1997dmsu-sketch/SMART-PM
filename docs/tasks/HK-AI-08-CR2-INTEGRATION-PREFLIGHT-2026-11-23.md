@@ -2,7 +2,7 @@
 
 - 状态：**前置核对交付；交 Codex 技术裁定后停止。本报告不构成 CR-2 实施通过、CR-3 或任何后续阶段授权。**
 - 执行方：Harness 根代理（负责来源核验、静态接口盘点与文档交付；接口变更裁定与最终验收归 Codex）。
-- 本报告只做静态阅读与 git 对象核对。**未运行任何项目代码、Node 测试、guard、构建、PowerShell 预检、CLI、HTTP/UI、网络或设备操作；未读取真实配置、凭据、证书、计划任务或秘密材料；未重复派发本地 Windows ACL 任务；未恢复隔离网络前置；未启动 CR-3/E1/E2 或任何冻结工作线。**
+- 本报告只做静态阅读、git 对象核对与 Git 取件/交付操作。**Git fetch、远端查询（ls-remote）与 push 属实际 Git 网络操作；worktree add、分支创建、FETCH_HEAD/refs 更新与 commit 属工作树或 Git 元数据写入，均非“只读”。**执行为零仅限本任务确实未运行的项目代码、Node 测试、guard、构建、项目 CLI、PowerShell 预检、业务网络与设备操作；未读取真实配置、凭据、证书、计划任务或秘密材料；未重复派发本地 Windows ACL 任务；未恢复隔离网络前置；未启动 CR-3/E1/E2 或任何冻结工作线。
 - 固定组合与本报告的实际读取对象全部按完整 SHA 取件，不从可变 tip 取“最新版”。
 
 ## 1. 固定来源、父提交与取件结果
@@ -20,7 +20,7 @@
 
 ### 1.2 fetch 与远端状态
 
-- `git fetch origin` 最终退出 0。首次尝试被会话沙箱拒绝（`cannot open .../SMART-PM/.git/worktrees/SMART-PM-H3/FETCH_HEAD: Permission denied`，原因为当时策略限制对工作区外共享 gitdir 的写入；经诊断确认为预期限制而非文件 ACL 故障，未运行任何 ACL 修复）。会话策略随后切换为完全访问后 fetch 成功。**全程未修改全局/系统 Git、TLS、代理或安全配置，未关闭证书校验。**
+- `git fetch origin` 最终退出 0。首次尝试被会话沙箱拒绝（`cannot open .../SMART-PM/.git/worktrees/SMART-PM-H3/FETCH_HEAD: Permission denied`，原因为当时策略限制对工作区外共享 gitdir 的写入；经诊断确认为预期限制而非文件 ACL 故障，未运行任何 ACL 修复）。会话策略随后切换为完全访问后 fetch 成功。**全程未修改全局/系统 Git、TLS、代理或安全配置，未关闭证书校验。**（本条沙箱边界、ACL 诊断与完全访问切换均为 Harness 交付方环境自述，非 Codex 独立核验事实，也不构成本会话权限或业务授权。）
 - 基线分支核对：`origin/feat/hk-ai-08-e1-controlled-runner` tip = `2712ea7866377d889a78e413fcb7de420b9ad1ab`，**与固定 SHA 一致，远端未前移**；本地不存在同名本地分支（仅 remote-tracking ref），不移动、不改写。
 - 远端其余分支有前移/新增（不影响核对对象）：例 `docs/hikvision-interface-test-readiness 81c6124→e9e3bbb`；新增 `docs/hk-ai-08-*` 与 `feat/hk-ai-08-*` 系列分支。本任务仍以固定 SHA 为核对对象，不自动改用新 tip。
 - 交付目标分支 `docs/hk-ai-08-cr2-integration-preflight` 在远端尚不存在（fetch 后 `git ls-remote` 为空）。
@@ -58,6 +58,8 @@
 ## 2. CR-1 实际导出接口清单与数据流
 
 以下行号对应基线 `2712ea7` 树内文件（同 blob 见表 §1.5 与 SOURCE-INVENTORY.json）。
+
+**盘点口径**：CR-1 六个新增模块共 **20** 个显式导出；固定外部 checker（`tools/hikvision-offline-config-checker/src/check-config.mjs`）另 **2** 个（`checkOfflineConfig`、`checkOfflineConfigJson`），组合盘点为 **22** 个；checker 的 2 个不记为 CR-1 新接口。
 
 ### 2.1 `tools/hikvision-e1-controlled-runner/index.mjs`（生产入口，775 字节）
 
@@ -145,10 +147,11 @@
 - 有：`writeResponse` 每次核 session 同 plan、plan 状态 CONSUMED、未 latch（evidence-session.mjs L139–163）；`assertReady`/`requireLivePlan` 复核。
 - 无：**不存在任何 transport 级/请求级边界**。授权/时间/撤销核验只存在于 controller 的 `control()`，且只在 `check/setControl/prepare/arm/consume` 状态推进时执行（controlled-runner.mjs L53–69）；没有可供 CR-2 在“每次实际 transport 提交前”调用的受控检查导出；`requestOutcomeUnknown` 计数无任何产生点（仅 DTO 层可表达）。设计 A §5“每次请求入口再核同 plan/session、未 latch、当前授权/时间及六端点进度”在 CR-1 中无对应代码。
 
-### 3.5 原始 body 的私有保存与公共 DTO 的分离 — **部件各自存在，真实 runProbe 接线缺失（G5）**
+### 3.5 原始 body 的私有保存与公共 DTO 的分离 — **部件各自存在，真实 runProbe 接线缺失（关联 G2/G6）**
 
+- 编号以 §4 表格为唯一定义：**G5 仅指 G1 identityConfirmed 私有状态与门禁**；本节两项事实分别对应 G2（同一私有 session 的写入能力对外不可达）与 G6（evidenceRef 无产生源）。
 - 有：`writeResponse` 私有复制且不返还引用；`makePublicResult` 闭式白名单、永不外发原 error/stack/body（T19/NA13 已验）。
-- 无：runProbe 的响应 body/headers/原 report 如何进入同一私有 session 的路径不存在（CR-1 根本没有 runProbe）；最终 report 归私有 session 的 `seal` 语义只对内存记录生效；DTO 的 `evidenceRef` 字段目前没有任何产生源（model 无 ref 概念）。
+- 无：runProbe 的响应 body/headers/原 report 如何进入同一私有 session 的路径不存在（CR-1 根本没有 runProbe）；最终 report 归私有 session 的 `seal` 语义只对内存记录生效；DTO 的 `evidenceRef` 字段目前没有任何产生源（model 无 ref 概念，即 §4 G6）。
 
 ### 3.6 固定探针六文件 — **全部核验通过**（见 §1.5）
 
@@ -195,7 +198,7 @@
 | G4 | 每次实际 transport 提交前的授权/时间/session/latch 检查点与 `requestOutcomeUnknown` 事实登记 | `control()` 只在状态推进时执行（controlled-runner.mjs L53–69）；`fail({unknown:true})` 仅在 controller 层（L155–168）；无 transport 层 | `controlled-runner.mjs`、`private-plan.mjs` | 是否增加“per-attempt 检查”内部导出，或允许 CR-2 wrapper 在注入 transport 前调用某一受控谓词；未知提交事实由哪层登记 |
 | G5 | G1 identityConfirmed 私有状态与更新接口（仅 wrapper 内部可写） | 无此状态；DTO 也无该字段（不属公共 schema）；`inspectPlan` 无 identity 项 | `private-plan.mjs`、`probe-binding.mjs` | identity 门状态放在 runState 哪一侧、谁能写、如何保证“最终 200 且同一私有 body 核验成功”后才置位 |
 | G6 | `evidenceRef` 的产生源 | `makePublicResult` 要求 COMPLETED 时 evidenceRef 非空（public-result.mjs L203–208），但 CR-1 无任何 ref 生成器 | `evidence-session.mjs`、`public-result.mjs` | evidenceRef 由 session 创建时生成并绑定 plan，还是由结果层生成；不得成为恢复入口 |
-| G7 | 记录 probe invoke/wrapper/downstream/response/latch/seal 顺序的受控事件（CR-2 trace 要求） | plan trace 到 `SYNTHETIC_ACTIVE` 止；model events 到 `ACTIVE` 止；无后续事件枚举 | `private-plan.mjs`（EVENTS 集合）、`evidence-session.mjs` | 是否扩展固定事件枚举（只能追加，不改语义）以满足 A/B §7.1 的证据要求 |
+| G7 | 请求窗口编排事件（probe-invoke、wrapper、downstream 等）及其与已有生命周期的组合证据 | 已有 plan trace 枚举含 COMPLETED/FAILED/UNKNOWN/INVALIDATED 等终态事件（private-plan.mjs EVENTS，L17–21）；已有 session 事件含 MEMORY_WRITE/MEMORY_READ/SEALED/CLOSED/FAILED（evidence-session.mjs L81、L110–120、L136、L157、L162、L171、L184、L193）；缺口仅为 probe-invoke/wrapper/downstream 等请求窗口编排事件及其与上述已有生命周期事件的组合证据 | `private-plan.mjs`（EVENTS 集合）、`evidence-session.mjs` | 是否扩展固定事件枚举（只能追加，不改语义）以满足 A/B §7.1 的证据要求 |
 
 - 不允许的绕过方式（记录为禁止项，不作为方案）：重读另一份配置恢复执行值、公开 ref/JSON 恢复、导出秘密或 binding 值到公共面、任意 adapter 注入、仿写 probe loop、把 `matchesNormalizedBinding` 的布尔当作“已取得执行视图”。
 - 不列为缺口的项（事实记录）：`CLEANUP_UNVERIFIED`/`CAPABILITY_UNAVAILABLE` 是 B 的内部拟状态（B §5），不进公共 DTO，CR-1 CODES 不含它们是正确行为；`getSyntheticWindow` 返回时间窗值但只用于 controller 内部活控制核验，不构成配置外泄入口。
@@ -215,6 +218,19 @@
 
 ## 7. 本轮实际执行与运行边界
 
-- 实际执行：git fetch/rev-parse/cat-file/ls-tree/ls-remote/worktree add/show 等只读元数据操作；对固定对象原字节做 SHA-256 与字节数计算。**项目代码、Node 测试、guard、构建、PowerShell 预检、CLI、HTTP/UI、网络请求、设备探针：全部 0。**
+- Git 网络操作（实际发生）：`git fetch origin`、远端查询（`git ls-remote`）、`git push`。
+- Git 元数据与工作树写入（实际发生）：`worktree add` 与分支创建、FETCH_HEAD/remote-tracking refs 更新、`commit`。
+- 只读静态操作：`rev-parse`/`cat-file`/`ls-tree`/`show` 对象读取、固定对象原字节 SHA-256 与字节数计算、文档与源码阅读。
+- **执行为零（本任务确实未运行）**：项目代码、Node 测试、guard、构建、项目 CLI（旧 probe/checker CLI）、PowerShell 预检、业务网络、HTTP/UI、设备探针。
+- 本机环境与权限自述（工作区沙箱边界、ACL 诊断、完全访问切换）为 Harness 交付方自述，不构成 Codex 独立核验事实，也不构成本会话权限或业务授权。
 - 未读取任何真实配置、凭据、证书、SID、计划任务或秘密材料；本报告与 JSON 只含源码路径、提交/blob/字节/哈希与静态导出名。
 - 主工作树与既有分支零改动；新增文件仅限本文档与 `docs/evidence/hk-ai-08-cr2-preflight/SOURCE-INVENTORY.json`。
+
+## 8. 修订记录（Codex 裁定回写，2026-11-23）
+
+依据 Codex 技术裁定提交 `716b1f0053d5ad34b45fc78d5cf79e5739f2aa36`（`docs/tasks/HK-AI-08-CR2-INTERFACE-DECISIONS-2026-11-23.md`、`docs/evidence/hk-ai-08-cr2-preflight/CODEX-REVIEW-2026-11-23.md`）对本文追加勘误；仅修改本文档，`SOURCE-INVENTORY.json` 相对固定基线 `1d726020756460ffb368dd2f92b895306c3243b4` 保持零差异。本文形成时第 3 行的“交 Codex 技术裁定后停止”为交付时点状态，本次回写即该裁定的落实，原句不改写。
+
+- **CR2-PF-01（P2）**：§4 G7 行改写——保留 plan 已有 COMPLETED/FAILED/UNKNOWN/INVALIDATED 终态事件与 session 已有 MEMORY_WRITE/MEMORY_READ/SEALED/CLOSED/FAILED 事件事实；缺口收窄为 probe-invoke/wrapper/downstream 等请求窗口编排事件及其与已有生命周期的组合证据。全文无其它“事件止于 ACTIVE”的相反表述。
+- **CR2-PF-02（P2）**：§3.5 不再标注 G5，改为关联 G2/G6；G1–G7 编号以 §4 表格为唯一定义，G5 仅指 G1 identityConfirmed 私有状态与门禁。G1–G7 技术结论未变，未新增任何接口方案。
+- **CR2-PF-03（P3）**：§0 与 §7 明确 Git 网络操作（fetch/远端查询/push）与 Git 元数据/工作树写入（worktree add、refs、commit）实际发生，不再统称只读或零网络；“执行为零”仅限定于本任务确实未运行的项目代码、Node 测试、guard、构建、项目 CLI、PowerShell 预检、业务网络与设备操作；本机环境与权限自述已明确为交付方自述，不写成 Codex 独立核验事实。
+- **导出口径**：§2 明确 CR-1 六个新增模块 20 个显式导出、固定外部 checker 2 个、组合盘点 22 个。

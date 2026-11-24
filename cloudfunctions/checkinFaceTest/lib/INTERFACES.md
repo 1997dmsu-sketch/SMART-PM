@@ -59,6 +59,9 @@ CODEX-REVIEW-2026-11-24.md（R01/R03/R04/R06）。
 5. 照片内容：仅在前四项通过之后，服务端才用 `cloud.downloadFile({ fileID })`
    做 JPEG 魔数 + ≤ 200 KiB 校验。**能下载到文件不构成归属证据**；
    归属以 1–4 的确定性绑定为准，下载只用于内容校验。
+6. 下载完成后，在创建/替换任务的真实事务中，按事务内当前配置再次核验
+   **同一 fileID** 的命名空间、本人及本申请路径。下载期间 namespace 变化
+   导致不匹配时拒绝，事务零写；不能把旧文件绑定到新 configRevision。
 
 ### 1.4 拒绝类别（闭式错误码）
 
@@ -110,6 +113,8 @@ CODEX-REVIEW-2026-11-24.md（R01/R03/R04/R06）。
   `WORKER_UNAUTHORIZED` 语义，与 claimTask/reportTask 一致）。
 - `workerId`：`/^[A-Za-z0-9_-]{1,64}$/`；`taskId`：与任务确定性 id 相同
   模式；`claimId`：`/^[A-Za-z0-9-]{16,80}$/`；`revision`：安全整数且 ≥ 2。
+- claimTask 同样强制非空合法 workerId；旧空 workerId 领取记录不能再次 begin。
+  begin 严格要求任务绑定、已鉴权请求与校验后的 workerId 三者相等，不做空值兼容。
 
 ### 2.2 服务端在真实事务内逐项复核（全部点读，无集合查询）
 
@@ -243,7 +248,7 @@ CODEX-REVIEW-2026-11-24.md（R01/R03/R04/R06）。
 - 102 唯一性 count（`where({displayNo:'102'}).count()`）是集合查询，
   事务内不可用。稳定守卫 = **确定性 `_id` 单点读**（永远绑定负责人配置的
   唯一稳定文档，绝不按显示房号取任意第一条）+ **管理员写入时 count 门禁**
-  （`upsertRoomBinding` 写前计数，写路径在事务外、被真实 SDK 支持）。
+  （`upsertRoomBinding` 事务前计数，绑定/配置 revision/审计写入同一事务）。
   云函数侧在 apply/create 的**非事务预检**中仍执行完整 count 防歧义；
   事务内复核依赖确定性点读。**已知边界**：绕过公开方法直接注入同号重复
   文档、且发生在预检与提交之间的场景，事务内无法用 count 检出；
@@ -262,8 +267,44 @@ CODEX-REVIEW-2026-11-24.md（R01/R03/R04/R06）。
   不重置 claim、不回退 revision、不换 employeeNo。
 - 所有推进路径 revision 恰好 +1；claimId 只在 claim 时生成一次；
   终态不覆盖；employeeNo 由申请生成后永不改变（换照片、失效、超时均不变）。
-- report 幂等：终态 + 输出指纹一致 → 幂等返回，不重复推进；
+- report 幂等：终态 + 完整报告规范化指纹一致 + 原 report 请求 revision 一致，
+  才幂等返回，不重复推进。指纹包含完整已校验 output（含 verify steps），
+  对象键顺序不改变指纹。不同报告或错误 revision 返回 `REPORT_CONFLICT` 零写；
+  不允许 FAILED_REVIEW/UNKNOWN_RESULT/INVALIDATED 等终态被新成功报告覆盖。
+- 设备确认型成功只接受 `DEVICE_PROCESSING`，使用 begin 推进后的 revision。
+  `CLAIMED` 仅允许执行前失败的闭式形状：exit2 + `invalid-input`，或 exit5 +
+  `stopped`；mode=device、validityMode=fixed、enrollment 缺失/null、无已确认
+  人脸事实。否则 `TASK_NOT_EXECUTING` 零写。合法下载/本地预检失败无需伪造 begin。
+  begin 已将任务原子置为 UNKNOWN_RESULT/INVALIDATED 时，随后旧失败报告不能覆盖；
+  返回 `REPORT_CONFLICT` 并保留已有终态/审计，不把首次报告冒充幂等。
   重传 CAS 与审计不破坏状态。
+
+### 3.5 管理员配置事务与名单索引
+
+- 所有公开配置写方法均要求真实 `db.runTransaction`，每次调用建立独立的私有
+  事务实例；不改变共享 this.db，不接受外部 transaction=true 旁路。
+- 配置当前值、房间/租约/名单点读、业务修改、configRevision+1 和对应 audit
+  同事务提交；冲突由 SDK 重试并重新读取当前配置，不能用陈旧整文档复活开关。
+  缺少事务能力返回 `TRANSACTION_UNAVAILABLE`，不降级；审计 ID 使用随机 UUID。
+- setAllowlist 使用配置内 `allowlistOpenids` 作为事务内名单点读索引，以当前
+  索引撤销移除者。首次初始化仅接受配置 revision 绑定的空名单盘点；已有非空
+  旧名单却缺索引、索引损坏或盘点 revision 过期时，`ALLOWLIST_INDEX_UNVERIFIED`
+  零写失败关闭，不自动回填/迁移真实旧数据。配置与索引冲突重试时使用当前索引，
+  不复用事务外捕获的旧成员列表。旧库补索引需要另案授权和核验。
+- 102 count 仍是事务外只读预检，不宣称覆盖 §3.3 中直接改库的重复记录旁路。
+  管理端不能提供 count 时 `ROOM_UNIQUENESS_UNVERIFIED` 失败关闭。
+
+### 3.6 getMyTask 的只读资格与历史事实
+
+- 本人申请缺失/跨人仍为 `APPLICATION_FORBIDDEN`。非终态或未建任务时，必须
+  重新确认申请本体 auto_approved、当前名单/开关/版本/房间/租约窗口以及申请的
+  roomRevision/leaseRevision；名单撤销为 `ACCOUNT_NOT_ALLOWED`，其他不满足为
+  `APPLICATION_NOT_APPROVED`，不返回可上传路径。
+- 返回新增 `uploadEligible`：仅资格全部满足且 NOT_FOUND/QUEUED_FOR_DISPATCH
+  时为 true。页面恢复上传必须显式看到 true，旧申请可查询或全局开关为 true
+  不能替代这一事实。合法重新授权且原申请关联仍有效时可再次得到 true。
+- 终态任务继续返回原状态/设备事实供本人查询，固定 uploadEligible=false；
+  查询历史事实不代表重新批准申请或授予上传权限。所有轮询路径零业务写入。
 
 ---
 
@@ -303,6 +344,7 @@ CODEX-REVIEW-2026-11-24.md（R01/R03/R04/R06）。
 `TASK_NOT_FOUND` / `TASK_NOT_CLAIMED` / `EXECUTION_ALREADY_STARTED` /
 `CLAIM_MISMATCH` / `WORKER_MISMATCH` / `REVISION_CONFLICT` /
 `CLAIM_EXPIRED` / `EXECUTION_INVALIDATED` / `DISPATCH_DISABLED` /
+`REPORT_CONFLICT` / `TASK_NOT_EXECUTING` /
 `TRANSACTION_UNAVAILABLE` / `TX_UNSUPPORTED_QUERY` / `INTERNAL_ERROR`。
 其中 `ACCOUNT_NOT_ALLOWED` 不对外暴露：普通账号返回
 `{code:0, data:{applicationId:'', result:'pending_review', idempotent:false}}`，

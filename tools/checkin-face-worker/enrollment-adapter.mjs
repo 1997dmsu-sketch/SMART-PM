@@ -99,6 +99,8 @@ function normalizeInput(input, platform) {
   // worker 链路编号必须显式下发；缺省即拒绝，不自动生成（不换号、不自造）。
   const employeeNo = input.employeeNo;
   if (typeof employeeNo !== "string" || !/^[A-Za-z0-9]{1,32}$/.test(employeeNo)) invalidInput();
+  const accessPlanFingerprint = input.accessPlanFingerprint;
+  if (typeof accessPlanFingerprint !== "string" || !/^[a-f0-9]{64}$/i.test(accessPlanFingerprint)) invalidInput();
   const hasLibrary = input.FDID !== undefined || input.faceLibType !== undefined;
   const FDID = hasLibrary ? text(input.FDID, 128) : undefined;
   const faceLibType = hasLibrary ? text(input.faceLibType, 64) : undefined;
@@ -114,7 +116,7 @@ function normalizeInput(input, platform) {
     const expectedModel = text(input.expectedModel === undefined ? "DS-K1T671BM" : input.expectedModel, 128);
     connection = { origin, username: input.username, password: input.password, certificatePath, developmentTls, planTemplateNo, expectedModel };
   }
-  return { mode, name, room, employeeNo, doorNo, validityMode, validFrom, validTo, FDID, faceLibType, connection };
+  return { mode, name, room, employeeNo, doorNo, validityMode, validFrom, validTo, accessPlanFingerprint, FDID, faceLibType, connection };
 }
 
 function selectLibrary(capabilities, input) {
@@ -224,6 +226,13 @@ export async function runInMemoryEnrollment(request, deps = {}) {
     if (normalized.mode === "device" && state?.device?.model !== normalized.connection.expectedModel)
       throw new AdapterError("DEVICE_MODEL_MISMATCH", "设备型号与本次明确目标不一致，未开始业务写入。", 5);
     const library = selectLibrary(state?.capabilities, normalized);
+    // Bind the authoritative cloud authorization to the device plan before the
+    // service can create a person, submit a face, or grant door access. The
+    // service's own later plan recheck remains in force for subsequent changes.
+    const actualPlan = state?.capabilities?.allDayPlan;
+    if (typeof actualPlan?.fingerprint !== "string" || actualPlan.fingerprint !== normalized.accessPlanFingerprint) {
+      throw new AdapterError("ACCESS_PLAN_MISMATCH", "设备每天24小时计划与获准任务不一致，未开始业务写入。", 5);
+    }
     phase = "enroll";
     enrollmentStarted = true;
     const row = await service.enroll({

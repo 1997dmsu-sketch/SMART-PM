@@ -7,12 +7,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { FaceEnrollmentService } from '../../../admin-web/lib/face-enrollment.mjs';
 import { HttpError } from '../../../admin-web/lib/model.mjs';
-import { SYNTHETIC_CERT } from '../../../admin-web/tests/fixtures/hikvision-synthetic-certificates.mjs';
+import { SYNTHETIC_CERT, SYNTHETIC_OTHER_CERT } from '../../../admin-web/tests/fixtures/hikvision-synthetic-certificates.mjs';
 import { loadWorkerConfig, runEnrollment, buildInMemoryDeviceRequest } from '../worker-runtime.mjs';
 import { runInMemoryEnrollment } from '../enrollment-adapter.mjs';
 import { main } from '../claim-and-enroll.mjs';
@@ -151,6 +151,7 @@ test('R08：内存照片正例——模式/租期/门号/计划指纹保留，�
   const cfg = await config();
   const task = makeTask();
   const request = buildInMemoryDeviceRequest(task, cfg);
+  assert.equal(request.accessPlanFingerprint, task.accessPlanFingerprint, '获准指纹必须贯通内存请求');
   const provider = new CountingDeviceProvider();
   const result = await runInMemoryEnrollment(request, {
     createService: () => new FaceEnrollmentService({ providerFactory: () => provider }),
@@ -178,6 +179,106 @@ test('R08：内存照片正例——模式/租期/门号/计划指纹保留，�
   assert.equal(result.output.enrollment.validityMode, 'fixed');
   assert.equal(result.output.enrollment.status, 'ready');
 });
+
+test('CF-R2-04：获准计划B与稳定设备计划C不同，建人/传脸/授权各零次', async () => {
+  const cfg = await config();
+  const task = makeTask({ accessPlanFingerprint: 'b'.repeat(64) });
+  const request = buildInMemoryDeviceRequest(task, cfg);
+  const provider = new CountingDeviceProvider({ planFingerprint: 'c'.repeat(64) });
+  const result = await runInMemoryEnrollment(request, {
+    createService: () => new FaceEnrollmentService({ providerFactory: () => provider }),
+    photoBuffer: JPEG,
+    readBoundedFile: async () => Buffer.from(SYNTHETIC_CERT),
+    commandDeps: { platform: 'win32' },
+  });
+  assert.equal(request.accessPlanFingerprint, 'b'.repeat(64));
+  assert.equal(result.exitCode, 5);
+  assert.equal(result.output.outcome, 'stopped');
+  assert.equal(result.output.error.code, 'ACCESS_PLAN_MISMATCH');
+  assert.equal(result.output.error.requiresInspection, false, '预执行拒绝没有设备写事实');
+  assert.deepEqual(
+    { createPerson: provider.calls.createPerson, putFace: provider.calls.putFace, grantAccess: provider.calls.grantAccess },
+    { createPerson: 0, putFace: 0, grantAccess: 0 },
+  );
+  assert.equal(provider.calls.describe, 1, '必须实际检查设备返回的计划');
+});
+
+for (const [label, prefix] of [['ASCII-space', ' '], ['U+3000', '\u3000']]) {
+  test(`CF-R2-09：${label}前导路径经真实配置/请求/默认受限读取选择原证书，不能选trim后的另一文件`, async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'checkin-face-path-'));
+    const originalCwd = process.cwd();
+    const rawPath = `${prefix}public.cer`;
+    let receivedCertificate;
+    try {
+      // These top-level tests are sequential. Relative leading whitespace is
+      // deliberate: whitespace only in an absolute basename would not expose trim.
+      process.chdir(dir);
+      await writeFile(rawPath, SYNTHETIC_CERT, 'utf8');
+      await writeFile('public.cer', SYNTHETIC_OTHER_CERT, 'utf8');
+      const configPath = `${prefix}worker.local.json`;
+      await writeFile(configPath, JSON.stringify({
+        cloudEnv: 'synthetic-cloud-env', workerId: 'synthetic-worker-01', deviceKey: 'device-key-stable',
+        name: ' 合成人员 ', roomNote: ' 102 ', sdkModulePath: `${prefix}sdk-directory `,
+        device: {
+          origin: 'https://synthetic-device.invalid', certificatePath: rawPath,
+          expectedModel: 'DS-K1T671BM', planTemplateNo: '1', developmentTls: false,
+        },
+      }), 'utf8');
+      // No fake JSON reader and no fake certificate reader.
+      const cfg = await loadWorkerConfig({ configPath, env: {
+        CHECKIN_FACE_WORKER_TOKEN: TOKEN,
+        CHECKIN_FACE_DEVICE_USERNAME: 'synthetic-device-admin',
+        CHECKIN_FACE_DEVICE_PASSWORD: 'synthetic-device-password-only',
+      } });
+      assert.equal(cfg.configPath, resolve(configPath));
+      assert.equal(cfg.device.deviceCertificatePath, rawPath);
+      assert.equal(cfg.sdkModulePath, resolve(`${prefix}sdk-directory `));
+      assert.equal(cfg.name, '合成人员', '普通文本仍按既有语义trim');
+      assert.equal(cfg.roomNote, '102');
+      const originalStderr = process.stderr.write;
+      let mainCode;
+      process.stderr.write = () => true;
+      try {
+        mainCode = await main({
+          argv: ['--once', '--config', configPath],
+          env: {
+            CHECKIN_FACE_WORKER_TOKEN: TOKEN,
+            CHECKIN_FACE_DEVICE_USERNAME: 'synthetic-device-admin',
+            CHECKIN_FACE_DEVICE_PASSWORD: 'synthetic-device-password-only',
+          },
+          createClient: async ({ config: loaded }) => {
+            assert.equal(loaded.configPath, resolve(configPath), 'CLI不得trim原始配置路径');
+            return { callFunction: async (action) => {
+              assert.equal(action, 'claimTask');
+              return { task: null };
+            } };
+          },
+        });
+      } finally { process.stderr.write = originalStderr; }
+      assert.equal(mainCode, 0, '实际CLI参数解析与默认JSON读取必须命中原始配置文件');
+      const request = buildInMemoryDeviceRequest(makeTask(), cfg);
+      assert.equal(request.certificatePath, resolve(rawPath));
+      assert.notEqual(request.certificatePath, resolve(rawPath.trim()));
+      const provider = new CountingDeviceProvider();
+      const result = await runInMemoryEnrollment(request, {
+        createService: () => new FaceEnrollmentService({ providerFactory: (connection) => {
+          receivedCertificate = Buffer.from(connection.certificate);
+          return provider;
+        } }),
+        photoBuffer: JPEG,
+        commandDeps: { platform: 'win32' },
+      });
+      assert.equal(result.exitCode, 0);
+      assert.deepEqual(receivedCertificate, Buffer.from(SYNTHETIC_CERT), '默认受限读取必须读取原文指向的真实合成文件');
+      assert.notDeepEqual(receivedCertificate, Buffer.from(SYNTHETIC_OTHER_CERT), '不得静默切换到trim后文件');
+      assert.equal(provider.calls.describe, 1);
+    } finally {
+      receivedCertificate?.fill(0);
+      process.chdir(originalCwd);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 test('R08：证书受限读取走真实文件路径（合成证书字节，不读真实材料）', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'checkin-face-cert-'));

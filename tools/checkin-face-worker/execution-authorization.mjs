@@ -7,7 +7,7 @@
  * 或任何新目标（新 employeeNo/新租期/新房间不在白名单，无法传入）。
  *
  * 成功条件（清单 §2.3/§2.5，全部满足才返回可执行快照）：
- *   - code===0 且 data 含 task/authorizedAt；authorizedAt 为服务端正整数毫秒且 ≤ claimExpiresAt；
+ *   - code===0 且 data 含 task/authorizedAt；authorizedAt 为服务端正整数毫秒且 < claimExpiresAt；
  *   - 快照 status==='DEVICE_PROCESSING'、revision===请求值+1、claimExpiresAt 与领取时一致（不延长）；
  *   - 快照与已领取/实际下载对象的全部业务字段一致：taskId/claimId/applicationId/fileId/cloudPath/
  *     employeeNo/deviceKey/doorNo/validFrom/validTo/timezone/dailyHours/accessPlanFingerprint/name；
@@ -31,7 +31,8 @@
  *   BEGIN_SNAPSHOT_MISMATCH
  *       code===0 但快照不满足上述成功条件（本地完整性校验，无服务端码）。
  *   BEGIN_AUTH_EXPIRED
- *       仅 C 本地预检（下载前后/执行前最后检查）发现本地 now ≥ claimExpiresAt，尚未发起云端调用；
+ *       C 本地预检（下载前后/执行前最后检查）发现本地 now ≥ claimExpiresAt，不执行设备；
+ *       若 begin 已获确认，仍保存推进后 revision 上报失败，不新增或重试 begin；
  *       若由服务端先行判定过期，表现为 BEGIN_AUTH_REJECTED:CLAIM_EXPIRED。
  *
  * 以上任何失败均零设备执行、不自动重领/续期/重试开始；重复开始、旧 revision、已过期、失效、
@@ -121,7 +122,7 @@ export function verifyAuthorizedSnapshot({ claimed, snapshot, authorizedAt, work
   for (const key of ["roomBindingId", "leaseSnapshotId"]) {
     if (typeof snapshot[key] !== "string" || !snapshot[key]) mismatch(`缺少关联标识 ${key}`);
   }
-  if (authorizedAt > claimed.claimExpiresAt) mismatch("authorizedAt 晚于 claim 到期时间");
+  if (authorizedAt >= claimed.claimExpiresAt) mismatch("authorizedAt 已到或晚于 claim 到期时间");
   return snapshot;
 }
 

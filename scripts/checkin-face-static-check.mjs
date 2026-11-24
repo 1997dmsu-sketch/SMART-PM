@@ -46,17 +46,77 @@ function checkLines(file, checks) {
 }
 
 /**
- * 剔除注释后取代码行：`//` 行、`/* ... *​/` 块（含行内）不参与匹配，
- * 因此把关键构造写进注释不能冒充实际请求（R10：注释命中不算证据）。
+ * Restricted JavaScript lexer for the static gate. Comments are removed across
+ * line boundaries; quoted strings, templates and regex literals are opaque.
+ * This is deliberately not a general evaluator: uncertain syntax fails closed
+ * when inspecting the explicit request object below.
  */
+function lexSource(source) {
+  const tokens = [];
+  const masked = source.split('');
+  let index = 0;
+  const token = (type, value, start, end) => tokens.push({ type, value, start, end });
+  const mask = (start, end) => {
+    for (let at = start; at < end; at++) if (masked[at] !== '\n' && masked[at] !== '\r') masked[at] = ' ';
+  };
+  while (index < source.length) {
+    const char = source[index];
+    if (/\s/.test(char)) { index += 1; continue; }
+    const start = index;
+    if (source.startsWith('//', index)) {
+      while (index < source.length && source[index] !== '\n') index += 1;
+      mask(start, index);
+      continue;
+    }
+    if (source.startsWith('/*', index)) {
+      const end = source.indexOf('*/', index + 2);
+      index = end < 0 ? source.length : end + 2;
+      mask(start, index);
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      const quote = char;
+      index += 1;
+      while (index < source.length) {
+        if (source[index] === '\\') { index += 2; continue; }
+        if (source[index++] === quote) break;
+      }
+      const raw = source.slice(start, index);
+      // Escaped/templated values are intentionally not accepted as gate facts.
+      const value = quote !== '`' && !raw.includes('\\') && raw.at(-1) === quote ? raw.slice(1, -1) : null;
+      token(quote === '`' ? 'opaque' : 'string', value, start, index);
+      continue;
+    }
+    const previous = tokens.at(-1);
+    const regexPosition = !previous || ['=', '(', '[', '{', ',', ':', ';', '!', '&&', '||', '?', 'return', 'throw', '=>'].includes(previous.value);
+    if (char === '/' && regexPosition) {
+      let inClass = false;
+      index += 1;
+      while (index < source.length && source[index] !== '\n') {
+        if (source[index] === '\\') { index += 2; continue; }
+        if (source[index] === '[') inClass = true;
+        if (source[index] === ']') inClass = false;
+        if (source[index++] === '/' && !inClass) break;
+      }
+      while (/[A-Za-z]/.test(source[index] || '') && index < source.length) index += 1;
+      token('opaque', null, start, index);
+      continue;
+    }
+    if (/[A-Za-z_$]/.test(char)) {
+      index += 1;
+      while (/[\w$]/.test(source[index] || '') && index < source.length) index += 1;
+      token('identifier', source.slice(start, index), start, index);
+      continue;
+    }
+    if (source.startsWith('...', index)) index += 3;
+    else index += 1;
+    token('punctuation', source.slice(start, index), start, index);
+  }
+  return { tokens, code: masked.join('') };
+}
+
 function codeLinesOf(file) {
-  return readFileSync(file, 'utf8')
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\/\*[\s\S]*?\*\//g, ''))
-    .filter((line) => {
-      const trimmed = line.trim();
-      return trimmed !== '' && !trimmed.startsWith('//') && !trimmed.startsWith('/*') && !trimmed.startsWith('*');
-    });
+  return lexSource(readFileSync(file, 'utf8')).code.split(/\r?\n/);
 }
 
 function codeTextOf(file) {
@@ -76,31 +136,48 @@ function requireEachText(file, pairs) {
 }
 
 /**
- * R10 请求构造段落断言：mode=device 与 validityMode=fixed 必须成对出现在
- * 与 consent:true 硬要求共置的请求构造处；文件里其他位置的同名字符串
- * （上报脱敏/失败输出里的 validityMode 常量）不算数。不绑定函数名，
- * 对 worker 内部重构（Core/wrapper 拆分、内存/落盘两个入口）保持健壮。
+ * Inspect the actual `const request = { ... }` constructor, rather than tokens
+ * near any consent anchor. Only direct literal fields in that same object are
+ * facts; comments, strings, nested/fake objects, duplicates and spreads cannot
+ * supply or override the mandatory mode/validity/consent contract.
  */
 function requireRequestConstruction(file, pairs) {
   const rel = relative(ROOT, file).replaceAll('\\', '/');
-  const lines = codeLinesOf(file);
-  const anchors = [];
-  lines.forEach((line, index) => {
-    if (/\bconsent\s*:\s*true\b/.test(line)) anchors.push(index);
-  });
-  if (anchors.length === 0) {
-    issues.push(`${rel}:1: 找不到请求构造锚点（consent:true 硬要求缺失或整体被注释），无法校验 mode/validityMode`);
+  const { tokens } = lexSource(readFileSync(file, 'utf8'));
+  const constructors = [];
+  for (let at = 0; at < tokens.length - 3; at++) {
+    if (!['const', 'let'].includes(tokens[at].value) || tokens[at + 1].value !== 'request'
+      || tokens[at + 2].value !== '=' || tokens[at + 3].value !== '{') continue;
+    const fields = new Map();
+    let depth = 1;
+    let unsafe = false;
+    for (let item = at + 4; item < tokens.length && depth > 0; item++) {
+      const current = tokens[item];
+      if (depth === 1 && current.type === 'punctuation' && ['...', '['].includes(current.value)) unsafe = true;
+      if (depth === 1 && ['mode', 'validityMode', 'consent'].includes(current.value)
+        && tokens[item + 1]?.value === ':') {
+        const value = tokens[item + 2];
+        const ended = [',', '}'].includes(tokens[item + 3]?.value);
+        if (fields.has(current.value) || !ended) unsafe = true;
+        fields.set(current.value, { type: value?.type, value: value?.value });
+      }
+      if (['{', '[', '('].includes(current.value)) depth += 1;
+      if (['}', ']', ')'].includes(current.value)) depth -= 1;
+    }
+    constructors.push({ fields, unsafe: unsafe || depth !== 0 });
+  }
+  if (constructors.length !== 1) {
+    issues.push(`${rel}:1: 找不到唯一实际 request 对象构造，不能以其他 consent 锚点或字符串替代`);
     return;
   }
-  const found = new Set();
-  for (const anchor of anchors) {
-    const window = lines.slice(Math.max(0, anchor - 15), anchor + 16).join('\n');
-    for (const [pattern, message] of pairs) {
-      if (pattern.test(window)) found.add(message);
-    }
+  const { fields, unsafe } = constructors[0];
+  if (fields.get('consent')?.type !== 'identifier' || fields.get('consent')?.value !== 'true' || unsafe) {
+    issues.push(`${rel}:1: 实际 request 构造必须直接 consent:true 且无重复、扩展或动态覆盖`);
   }
-  for (const [pattern, message] of pairs) {
-    if (!found.has(message)) issues.push(`${rel}:1: ${message}`);
+  const expected = [['mode', 'device'], ['validityMode', 'fixed']];
+  for (let item = 0; item < expected.length; item++) {
+    const [key, value] = expected[item];
+    if (unsafe || fields.get(key)?.type !== 'string' || fields.get(key)?.value !== value) issues.push(`${rel}:1: ${pairs[item][1]}`);
   }
 }
 

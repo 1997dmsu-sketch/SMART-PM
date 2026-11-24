@@ -95,7 +95,7 @@ function parseArgs(argv) {
     } else if (arg === "--config") {
       const value = argv[++index];
       if (typeof value !== "string" || !value.trim()) throw new WorkerConfigError("WORKER_ARG_INVALID", "--config 缺少路径");
-      options.configPath = resolve(value.trim());
+      options.configPath = resolve(value);
     } else throw new WorkerConfigError("WORKER_ARG_INVALID", `未知参数：${arg.slice(0, 64)}`);
   }
   return options;
@@ -234,8 +234,10 @@ async function processOnce({ config, cloud, options, logger, runEnrollmentImpl, 
       checkClaimTime(task, nowMs());
       const authorized = await authorizeTaskExecution({ cloud, config, task, workerId });
       logger("info", "execution authorized", logFields(authorized.snapshot));
-      checkClaimTime(authorized.snapshot, nowMs());
+      // The accepted begin receipt is already an authoritative revision advance.
+      // Preserve it even when the final local deadline check stops device execution.
       reportTaskRef = authorized.snapshot; // 后续 report 使用推进后 revision；不把新租期/新目标覆盖进旧任务
+      checkClaimTime(authorized.snapshot, nowMs());
       const request = buildInMemoryDeviceRequest(authorized.snapshot, config);
       result = await runEnrollmentImpl(request, {
         config,

@@ -72,7 +72,12 @@ function nonEmptyText(value, label, max = 2048) {
 }
 
 function localFilePath(value, label) {
-  const text = nonEmptyText(value, label, 4096);
+  // A path is an identity, not display text: leading/trailing whitespace can select
+  // a different local file. Validate without silently rewriting that identity.
+  if (typeof value !== "string" || !value.trim() || value.length > 4096 || /[\x00-\x1f\x7f]/.test(value)) {
+    throw new WorkerInputError("WORKER_FIELD_INVALID", `${label} 格式无效`);
+  }
+  const text = value;
   if (/^[\\/]{2}/.test(text) || /^\\\?\?\\/.test(text)) {
     throw new WorkerInputError("WORKER_FIELD_INVALID", `${label} 必须是本机普通文件路径`);
   }
@@ -153,7 +158,7 @@ export async function loadWorkerConfig({
   let sdkModulePath = "";
   if (typeof file.sdkModulePath === "string" && file.sdkModulePath.trim()) {
     try {
-      sdkModulePath = resolve(file.sdkModulePath.trim());
+      sdkModulePath = localFilePath(file.sdkModulePath, "sdkModulePath");
     } catch {
       throw new WorkerConfigError("SDK_MODULE_PATH_INVALID", "sdkModulePath 必须是本机普通目录路径");
     }
@@ -219,7 +224,7 @@ export async function loadWorkerConfig({
     devicePassword: typeof env.CHECKIN_FACE_DEVICE_PASSWORD === "string"
       ? env.CHECKIN_FACE_DEVICE_PASSWORD
       : (typeof deviceFile.password === "string" ? deviceFile.password : ""),
-    deviceCertificatePath: typeof deviceFile.certificatePath === "string" ? deviceFile.certificatePath.trim() : "",
+    deviceCertificatePath: typeof deviceFile.certificatePath === "string" ? deviceFile.certificatePath : "",
   };
   for (const [key, value] of Object.entries(secrets)) {
     Object.defineProperty(key === "workerToken" || key.startsWith("cloudSecret") ? config : config.device, key, {
@@ -406,7 +411,13 @@ export function buildDeviceRequest(task, config, photoPath) {
 
 /** R08：内存照片版本——不含 photoPath，照片由适配层以 Buffer 直接驱动业务服务，不在本机落盘。 */
 export function buildInMemoryDeviceRequest(task, config) {
-  return Object.freeze(buildDeviceRequestCore(task, config));
+  const accessPlanFingerprint = requireField(task, "accessPlanFingerprint", (value) => {
+    if (typeof value !== "string" || !/^[a-f0-9]{64}$/i.test(value)) {
+      throw new WorkerInputError("TASK_FIELD_INVALID", "任务 accessPlanFingerprint 必须是 64 位十六进制指纹");
+    }
+    return value;
+  }, "accessPlanFingerprint");
+  return Object.freeze({ ...buildDeviceRequestCore(task, config), accessPlanFingerprint });
 }
 
 /** R05：领取后、任何下载/执行前，任务与本地 deviceKey 必须非空且精确一致。 */
@@ -597,7 +608,7 @@ export async function runEnrollment(request, { run = runFaceEnrollment, commandD
  */
 async function loadCloudbaseSdkModule(explicitModulePath = "") {
   const base = typeof explicitModulePath === "string" && explicitModulePath.trim()
-    ? resolve(explicitModulePath.trim())
+    ? localFilePath(explicitModulePath, "sdkModulePath")
     : SDK_MODULE_DIR;
   const requireFrom = createRequire(join(base, "noop.js"));
   const candidate = join(base, "node_modules", "@cloudbase", "node-sdk");

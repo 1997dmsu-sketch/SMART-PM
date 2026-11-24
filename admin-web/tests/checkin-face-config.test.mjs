@@ -26,16 +26,42 @@ const clone = (value) => value === undefined ? undefined : JSON.parse(JSON.strin
 
 class MemoryDB {
   constructor() {
-    this.buckets = new Map();
-    this.writes = 0;
+    this.collections = new Map();
+    this.buckets = this.collections;
+    this.writes = 0;              // 仅统计已提交（含 base 直接）写入
+    this.whereGets = [];
+    this.seq = 0;
+    this.contextLog = [];
+    this.commitLog = [];
+    this.txCount = 0;
+    this.keyVersions = new Map();
+    this.keyCommitSeq = new Map();
+    this.commitSeq = 0;
+    this.retryLimit = 5;
+    this.beforeCommit = null;
+    this.failCommits = 0;
   }
 
   bucket(name) {
-    if (!this.buckets.has(name)) this.buckets.set(name, new Map());
-    return this.buckets.get(name);
+    if (!this.collections.has(name)) this.collections.set(name, new Map());
+    return this.collections.get(name);
   }
 
   rows(name) { return [...this.bucket(name).values()].map(clone); }
+  row(name, id) { const value = this.bucket(name).get(id); return value ? clone(value) : null; }
+
+  _log(op, collection, id, contextFlag) {
+    this.contextLog.push({ op, collection, id: id ?? null, context: contextFlag });
+  }
+
+  _version(key) { return this.keyVersions.get(key) ?? 0; }
+
+  _commitKey(collection, id) {
+    this.commitSeq += 1;
+    const key = `${collection}::${id}`;
+    this.keyVersions.set(key, (this.keyVersions.get(key) ?? 0) + 1);
+    this.keyCommitSeq.set(key, this.commitSeq);
+  }
 
   collection(name) {
     const db = this;
@@ -44,23 +70,143 @@ class MemoryDB {
     return {
       doc: (id) => ({
         get: async () => {
-          const row = store.get(id);
-          if (!row) throw Object.assign(new Error('document not found'), { errCode: -1 });
-          return { data: clone(row) };
+          db._log('get', name, id, 'base');
+          const value = store.get(id);
+          if (!value) throw Object.assign(new Error('document does not exist'), { errCode: -1 });
+          return { data: clone(value) };
         },
-        set: async ({ data }) => { db.writes += 1; store.set(id, clone({ ...data, _id: id })); return {}; },
+        set: async ({ data }) => {
+          db._log('set', name, id, 'base');
+          db.writes += 1;
+          store.set(id, clone({ ...data, _id: id }));
+          db._commitKey(name, id);
+          return {};
+        },
       }),
       where: (where) => ({
-        get: async () => ({ data: db.rows(name).filter((row) => matches(row, where)) }),
+        get: async () => {
+          db._log('query', name, null, 'base');
+          db.whereGets.push({ collection: name, where: clone(where), kind: 'get' });
+          return { data: db.rows(name).filter((row) => matches(row, where)) };
+        },
         count: async () => ({ total: db.rows(name).filter((row) => matches(row, where)).length }),
+        update: async ({ data }) => {
+          let updated = 0;
+          for (const [id, row] of store) {
+            if (matches(row, where)) {
+              db.writes += 1;
+              store.set(id, clone({ ...row, ...data }));
+              db._commitKey(name, id);
+              updated += 1;
+            }
+          }
+          return { stats: { updated } };
+        },
       }),
       add: async ({ data }) => {
+        const id = data._id || `auto-${++db.seq}`;
+        db._log('add', name, id, 'base');
         db.writes += 1;
-        const id = data._id || `auto-${db.writes}`;
         store.set(id, clone({ ...data, _id: id }));
+        db._commitKey(name, id);
         return { _id: id };
       },
+      get: async () => ({ data: db.rows(name) }),
     };
+  }
+
+  runTransaction(fn) {
+    const db = this;
+    const attempt = async (attemptNo) => {
+      const txId = `${++db.txCount}`;
+      const startSeq = db.commitSeq;
+      const stage = new Map();
+      const readVersions = new Map();
+      const writeKeys = new Set();
+      const tx = {
+        collection: (name) => {
+          const store = db.bucket(name);
+          return {
+            doc: (id) => ({
+              get: async () => {
+                db._log('get', name, id, 'tx');
+                const key = `${name}::${id}`;
+                if (stage.has(key)) return { data: clone(stage.get(key).data) };
+                const value = store.get(id);
+                if (!value) {
+                  readVersions.set(key, 0);
+                  throw Object.assign(new Error('document does not exist'), { errCode: -1 });
+                }
+                readVersions.set(key, db._version(key));
+                return { data: clone(value) };
+              },
+              set: async ({ data }) => {
+                db._log('set', name, id, 'tx');
+                const key = `${name}::${id}`;
+                stage.set(key, { collection: name, id, data: { ...data, _id: id } });
+                writeKeys.add(key);
+                return {};
+              },
+            }),
+            add: async ({ data }) => {
+              const id = data._id || `auto-${++db.seq}`;
+              db._log('add', name, id, 'tx');
+              const key = `${name}::${id}`;
+              stage.set(key, { collection: name, id, data: { ...data, _id: id } });
+              writeKeys.add(key);
+              return { _id: id };
+            },
+            where: () => { throw Object.assign(new Error('TX_UNSUPPORTED_QUERY'), { code: 'TX_UNSUPPORTED_QUERY' }); },
+            get: () => { throw Object.assign(new Error('TX_UNSUPPORTED_QUERY'), { code: 'TX_UNSUPPORTED_QUERY' }); },
+          };
+        },
+      };
+      let result;
+      try {
+        result = await fn(tx);
+      } catch (error) {
+        db.commitLog.push({ tx: txId, attempt: attemptNo, outcome: 'callback-error', code: error && (error.code || error.name) });
+        throw error; // 业务错误：stage 丢弃 = 全回滚
+      }
+      if (typeof db.beforeCommit === 'function') {
+        try { await db.beforeCommit(txId, attemptNo); }
+        catch (error) {
+          db.commitLog.push({ tx: txId, attempt: attemptNo, outcome: 'before-commit-error', code: error && (error.code || error.name) });
+          throw error;
+        }
+      }
+      let conflict = [...readVersions].some(([key, version]) => db._version(key) !== version);
+      for (const key of writeKeys) {
+        const readVersion = readVersions.get(key);
+        const currentVersion = db._version(key);
+        if (readVersion === undefined) {
+          if ((db.keyCommitSeq.get(key) ?? 0) > startSeq) { conflict = true; break; }
+        } else if (currentVersion !== readVersion) {
+          conflict = true; break;
+        }
+      }
+      if (conflict && attemptNo < db.retryLimit) {
+        db.commitLog.push({ tx: txId, attempt: attemptNo, outcome: 'conflict-retry' });
+        return attempt(attemptNo + 1);
+      }
+      if (conflict) {
+        db.commitLog.push({ tx: txId, attempt: attemptNo, outcome: 'conflict-exhausted' });
+        throw Object.assign(new Error('TRANSACTION_CONFLICT'), { code: 'TRANSACTION_CONFLICT' });
+      }
+      if (db.failCommits > 0) {
+        db.failCommits -= 1;
+        db.commitLog.push({ tx: txId, attempt: attemptNo, outcome: 'commit-failure' });
+        throw Object.assign(new Error('SIMULATED_COMMIT_FAILURE'), { code: 'SIMULATED_COMMIT_FAILURE' });
+      }
+      for (const entry of stage.values()) {
+        db.writes += 1;
+        db.bucket(entry.collection).set(entry.id, clone(entry.data));
+        db._commitKey(entry.collection, entry.id);
+      }
+      db.commitLog.push({ tx: txId, attempt: attemptNo, outcome: 'committed', writes: stage.size });
+      return result;
+    };
+    return attempt(1);
   }
 }
 
@@ -409,4 +555,138 @@ test('publicDoc 过滤秘密字段；后台路由保持 admin-only + CSRF/origin
   assert.match(server, /CHECKIN_FACE_STORAGE_NAMESPACE_PATTERN/, '路由必须复用云端命名空间正则');
   assert.match(server, /\$\{CHECKIN_FACE_TEST_API\}storage/, '必须存在 /api/checkin-face-test/storage 路由');
   assert.match(server, /setStorageNamespace/, '路由必须调用配置服务的 setStorageNamespace');
+});
+
+
+function fullSnapshot(db) {
+  return structuredClone([...db.buckets].map(([name, rows]) => [name, [...rows]]));
+}
+
+test('CF-R2-02：namespace 与关停交错时自动重试，不能复活开关或复用 revision', async () => {
+  const { db, config } = await configuredService();
+  await config.setWorkerToken(TOKEN);
+  await config.setStorageNamespace(STORAGE_NAMESPACE);
+  await config.setSwitch(true);
+  const initial = await config.getConfig();
+  let pause;
+  let resume;
+  const paused = new Promise((resolve) => { pause = resolve; });
+  const resumed = new Promise((resolve) => { resume = resolve; });
+  let first = true;
+  const pauseOnce = async () => { if (first) { first = false; pause(); await resumed; } };
+  db.beforeCommit = pauseOnce;
+  // Also schedule a base set: disabling the production transaction wrapper
+  // must reproduce the old lost-disable assertion, not merely hang the test.
+  const originalCollection = db.collection.bind(db);
+  db.collection = (name) => {
+    const collection = originalCollection(name);
+    if (name !== 'test_program_config') return collection;
+    return { ...collection, doc(id) {
+      const doc = collection.doc(id);
+      return { ...doc, async set(argument) {
+        if (argument.data.storageNamespace === 'replacement-synthetic-env') await pauseOnce();
+        return doc.set(argument);
+      } };
+    } };
+  };
+  const savingNamespace = config.setStorageNamespace('replacement-synthetic-env');
+  await paused;
+  const disabled = await config.setSwitch(false);
+  assert.equal((await config.getConfig()).config.enabled, false);
+  resume();
+  await savingNamespace;
+  const after = await config.getConfig();
+  assert.equal(after.config.enabled, false);
+  assert.equal(after.config.storageNamespace, 'replacement-synthetic-env');
+  assert.equal(disabled.revision, initial.revision + 1);
+  assert.equal(after.revision, disabled.revision + 1);
+  assert.ok(db.commitLog.some((entry) => entry.outcome === 'conflict-retry'));
+  const revisions = db.rows('test_checkin_face_audit').filter((row) => ['STORAGE_NAMESPACE_SET', 'setSwitch'].includes(row.action))
+    .map((row) => row.revision);
+  assert.equal(new Set(revisions).size, revisions.length, '已提交配置审计 revision 不重复');
+});
+
+test('CF-R2-02：全部公开配置写与审计同事务，任一提交失败全库回滚', async () => {
+  const mutations = [
+    (config) => config.setWorkerToken(TOKEN + '-rotated'),
+    (config) => config.setApplicationVersion('test-v2'),
+    (config) => config.setDispatchEnabled(true),
+    (config) => config.setStorageNamespace(STORAGE_NAMESPACE),
+    (config) => config.setSwitch(false),
+    (config) => config.upsertRoomBinding({ ...ROOM_INPUT, doorNo: 8 }),
+    (config) => config.upsertLease({ startDate: '2026-12-02', endDate: '2026-12-06' }),
+    (config) => config.setAllowlist(['test-user-02']),
+  ];
+  for (const mutate of mutations) {
+    const { db, config } = await configuredService();
+    await config.setAllowlist(['test-user-01']);
+    const before = fullSnapshot(db);
+    const writes = db.writes;
+    db.failCommits = 1;
+    await assert.rejects(() => mutate(config), (error) => error.code === 'SIMULATED_COMMIT_FAILURE');
+    const after = fullSnapshot(db);
+    assert.deepEqual(after, before);
+    assert.equal(db.writes, writes);
+  }
+});
+
+test('CF-R2-02：并发替换名单以事务内当前索引撤销，不遗留孤立 active 账号', async () => {
+  const { db, config } = await configuredService();
+  await config.setAllowlist(['test-user-01']);
+  let pause;
+  let resume;
+  const paused = new Promise((resolve) => { pause = resolve; });
+  const resumed = new Promise((resolve) => { resume = resolve; });
+  let first = true;
+  db.beforeCommit = async () => { if (first) { first = false; pause(); await resumed; } };
+  const firstReplacement = config.setAllowlist(['test-user-02']);
+  await paused;
+  await config.setAllowlist(['test-user-03']);
+  resume();
+  await firstReplacement;
+  const snapshot = await config.getConfig();
+  assert.deepEqual(snapshot.allowlist.filter((row) => row.status === 'active').map((row) => row.openid), ['test-user-02']);
+  assert.deepEqual(snapshot.config.allowlistOpenids, ['test-user-02']);
+  assert.equal(snapshot.allowlist.find((row) => row.openid === 'test-user-03').status, 'inactive');
+  assert.ok(db.commitLog.some((entry) => entry.outcome === 'conflict-retry'));
+});
+
+test('CF-R2-02：旧非空名单无索引不自动回填；版本未绑定的空盘点也失败关闭', async () => {
+  const { db, config } = await configuredService();
+  await config.setAllowlist(['test-user-01']);
+  const row = (await db.collection('test_program_config').doc(`${ENV}|config`).get()).data;
+  delete row.allowlistOpenids;
+  await db.collection('test_program_config').doc(row._id).set({ data: row });
+  const before = fullSnapshot(db);
+  await assert.rejects(() => config.setAllowlist(['test-user-02']), (error) => error.code === 'ALLOWLIST_INDEX_UNVERIFIED');
+  const after = fullSnapshot(db);
+  assert.deepEqual(after, before);
+
+  const empty = await configuredService();
+  const originalCollection = empty.db.collection.bind(empty.db);
+  let injectChange = true;
+  empty.db.collection = (name) => {
+    const collection = originalCollection(name);
+    if (name !== 'test_account_allowlist') return collection;
+    return { ...collection, where(query) {
+      const ref = collection.where(query);
+      return { ...ref, async get() {
+        if (injectChange) { injectChange = false; await empty.config.setDispatchEnabled(false); }
+        return ref.get();
+      } };
+    } };
+  };
+  // The observed config revision is now stale when the transaction begins.
+  await assert.rejects(() => empty.config.setAllowlist(['test-user-02']), (error) => error.code === 'ALLOWLIST_INDEX_UNVERIFIED');
+  assert.equal((await empty.config.getConfig()).allowlist.length, 0);
+});
+
+test('CF-R2-02：无真实事务不降级，外部 constructor transaction=true 也不能绕过', async () => {
+  const db = new MemoryDB();
+  db.runTransaction = undefined;
+  const config = new AdminCheckinFaceTestConfig(null, { database: db, environment: ENV, transaction: true });
+  const before = fullSnapshot(db);
+  await assert.rejects(() => config.setDispatchEnabled(true), (error) => error.code === 'TRANSACTION_UNAVAILABLE');
+  const after = fullSnapshot(db);
+  assert.deepEqual(after, before);
 });

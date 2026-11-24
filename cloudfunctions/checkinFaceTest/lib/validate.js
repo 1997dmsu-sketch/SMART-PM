@@ -205,7 +205,7 @@ function validateReportInput(input) {
   // Nested device facts may legitimately reuse names such as `mode` or
   // `status`; only the outer client payload is subject to the client ban.
   assertAllowedFields(input.output, OUTPUT_ALLOWED_FIELDS, '执行输出', false);
-  if (input.output.enrollment !== undefined) {
+  if (input.output.enrollment !== undefined && input.output.enrollment !== null) {
     assertAllowedFields(input.output.enrollment, [
       'employeeNo', 'name', 'doorNo', 'validFrom', 'validTo', 'validityMode', 'mode',
       'status', 'faceSubmitted', 'faceModelingVerified', 'faceAssociationConfirmed',

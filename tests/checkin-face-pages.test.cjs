@@ -204,7 +204,7 @@ test('房号与租期只读来自服务端，提交载荷只有 applicationVersi
 
 test('六态文案逐项映射；ready 与 pending-site 都显示待现场刷脸验证', async () => {
   const expected = [
-    [{ status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg' }, '尚未上传照片'],
+    [{ status: 'NOT_FOUND', uploadEligible: true, cloudPath: 'test-face/e/o/a/p.jpg' }, '尚未上传照片'],
     [{ status: 'PHOTO_RECEIVED' }, '照片收件'],
     [{ status: 'QUEUED_FOR_DISPATCH' }, '等待下发'],
     [{ status: 'DEVICE_PROCESSING' }, '设备处理中'],
@@ -301,7 +301,7 @@ test('R02：勾选/取消勾选与提交按钮状态联动（真实数组事件�
 
 test('R02：用途确认勾选/取消与上传按钮状态联动', async () => {
   const api = {
-    getFaceTask: async () => ({ status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
+    getFaceTask: async () => ({ status: 'NOT_FOUND', uploadEligible: true, cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
     getCheckinFaceConfig: async () => FULL_CONFIG,
   };
   const { page } = facePage(api, makeWx().wx);
@@ -400,7 +400,7 @@ test('face-enroll：名单撤销后上传前复核拒绝——零照片上传、
   const uploads = [];
   const creates = [];
   const api = {
-    getFaceTask: async () => { polls += 1; return polls === 1 ? { status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} } : { status: 'NOT_FOUND', cloudPath: '', room: {}, lease: {} }; },
+    getFaceTask: async () => { polls += 1; return polls === 1 ? { status: 'NOT_FOUND', uploadEligible: true, cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} } : { status: 'NOT_FOUND', uploadEligible: true, cloudPath: '', room: {}, lease: {} }; },
     getCheckinFaceConfig: async () => ({ enabled: true, configured: true, accountEligible: false }),
     uploadTestFace: async (input) => { uploads.push(input); return 'cloud://synthetic/f.jpg'; },
     createFaceTask: async (input) => { creates.push(input); return {}; },
@@ -424,7 +424,7 @@ test('face-enroll：上传前复核发现存储命名空间未配置（§1.2）�
   const uploads = [];
   const creates = [];
   const api = {
-    getFaceTask: async () => ({ status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
+    getFaceTask: async () => ({ status: 'NOT_FOUND', uploadEligible: true, cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
     getCheckinFaceConfig: async () => ({ enabled: true, configured: true, accountEligible: true, storageNamespaceConfigured: false }),
     uploadTestFace: async (input) => { uploads.push(input); return 'cloud://synthetic/f.jpg'; },
     createFaceTask: async (input) => { creates.push(input); return {}; },
@@ -468,7 +468,7 @@ test('face-enroll：createFaceTask 被服务端以审核码拒绝时不显示成
   const uploads = [];
   let createCalls = 0;
   const api = {
-    getFaceTask: async () => ({ status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
+    getFaceTask: async () => ({ status: 'NOT_FOUND', uploadEligible: true, cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
     getCheckinFaceConfig: async () => ({ enabled: true, configured: true, accountEligible: true }),
     uploadTestFace: async (input) => { uploads.push(input); return 'cloud://synthetic/f.jpg'; },
     createFaceTask: async () => { createCalls += 1; throw err; },
@@ -494,7 +494,7 @@ test('照片上传成功仅显示照片收件；上传 cloudPath 原样取服务
     getFaceTask: async () => {
       poll += 1;
       return poll === 1
-        ? { status: 'NOT_FOUND', cloudPath: serverPath, room: FULL_CONFIG.room, lease: FULL_CONFIG.lease }
+        ? { status: 'NOT_FOUND', uploadEligible: true, cloudPath: serverPath, room: FULL_CONFIG.room, lease: FULL_CONFIG.lease }
         : { status: 'PHOTO_RECEIVED', cloudPath: serverPath, room: FULL_CONFIG.room, lease: FULL_CONFIG.lease };
     },
     getCheckinFaceConfig: async () => FULL_CONFIG,
@@ -520,7 +520,7 @@ test('上传按钮 busy 锁：并发点击只建一次任务，未勾选用途�
   let uploads = 0;
   let creates = 0;
   const api = {
-    getFaceTask: async () => ({ status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
+    getFaceTask: async () => ({ status: 'NOT_FOUND', uploadEligible: true, cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
     getCheckinFaceConfig: async () => FULL_CONFIG,
     uploadTestFace: async () => { uploads += 1; await new Promise((r) => setTimeout(r, 5)); return 'cloud://synthetic/f.jpg'; },
     createFaceTask: async () => { creates += 1; return {}; },
@@ -563,4 +563,156 @@ test('资料页入口按 runtime.checkinFaceTestEntry && authenticated 显隐', 
   }
   const wxml = fs.readFileSync(path.join(ROOT, 'miniprogram/pages/profile/index.wxml'), 'utf8');
   assert.match(wxml, /checkinFaceEntry\s*&&\s*authenticated/);
+});
+
+
+// CF-R2-10：实际 Page.refreshTask 编排，旧可查询记录不能重获上传资格。
+test('CF-R2-10：撤权锁存跨旧任务轮询，权威重授权后恢复且真实调用上传一次', async (t) => {
+  const events = [];
+  let currentEligible = false;
+  let view = {
+    status: 'NOT_FOUND', uploadEligible: true,
+    cloudPath: 'test-face/synthetic-env/openid/app-1/photo.jpg',
+    room: FULL_CONFIG.room, lease: FULL_CONFIG.lease,
+  };
+  const uploads = [];
+  const creates = [];
+  const api = {
+    getFaceTask: async () => { events.push('task'); return structuredClone(view); },
+    getCheckinFaceConfig: async () => {
+      events.push('config');
+      return { ...FULL_CONFIG, storageNamespaceConfigured: true, accountEligible: currentEligible };
+    },
+    uploadTestFace: async (input) => { events.push('upload'); uploads.push(input); return 'cloud://synthetic-env.synthetic-bucket/photo.jpg'; },
+    createFaceTask: async (input) => {
+      events.push('create'); creates.push(input);
+      view = { ...view, status: 'PHOTO_RECEIVED', uploadEligible: false };
+      return { status: 'PHOTO_RECEIVED' };
+    },
+  };
+  const { wx } = makeWx();
+  const chooseMedia = wx.chooseMedia;
+  wx.chooseMedia = (options) => { events.push('choose'); chooseMedia(options); };
+  const { page } = facePage(api, wx);
+  page._applicationId = 'app-1';
+  await page.refreshTask();
+  page.onConsentChange({ detail: { value: ['consent'] } });
+  assert.equal(page.data.canUpload, true);
+
+  await page.chooseAndUpload();
+  assert.equal(page.data.reviewRequired, true);
+  assert.equal(page.data.showUpload, false);
+  assert.equal(page.data.canUpload, false);
+  assert.equal(uploads.length, 0);
+  assert.equal(creates.length, 0);
+
+  // 缺/false 权威标记：旧 SDK 形状 cloudPath 仍返回，但不能清审核态。
+  for (const flag of [false, undefined]) {
+    view = { ...view, uploadEligible: flag };
+    await page.refreshTask();
+    assert.equal(page.data.reviewRequired, true);
+    assert.equal(page.data.showUpload, false);
+    assert.equal(page.data.cloudPathReady, false);
+    assert.equal(page.data.canUpload, false);
+  }
+  assert.equal(events.filter((name) => name === 'task').length, 3, '必须真实调用轮询依赖');
+  assert.equal(events.filter((name) => name === 'config').length, 1, '无申请资格标记时不以全局名单代替');
+
+  // 即使旧/在途任务声称 uploadEligible，名单仍撤销时也不能恢复。
+  view = { ...view, uploadEligible: true };
+  await page.refreshTask();
+  page.applyTask(structuredClone(view));
+  assert.equal(page.data.reviewRequired, true, 'applyTask 显示旧数据不能清审核锁存');
+  assert.equal(page.data.showUpload, false);
+  assert.equal(page.data.canUpload, false);
+  assert.equal(uploads.length, 0);
+  assert.equal(creates.length, 0);
+
+  currentEligible = true;
+  await page.refreshTask();
+  assert.equal(page.data.reviewRequired, false, '本人申请和当前名单均重新授权后可恢复');
+  assert.equal(page.data.showUpload, true);
+  assert.equal(page.data.canUpload, true);
+  await page.chooseAndUpload();
+  assert.equal(uploads.length, 1, '正向恢复必须真实走页面上传依赖，不是永远为零的计数');
+  assert.equal(creates.length, 1);
+  assert.equal(page.data.taskView.label, '照片收件');
+  assert.equal(page.data.showUpload, false);
+  assert.deepEqual(events.slice(-5), ['config', 'choose', 'upload', 'create', 'task']);
+  assert.equal(events.filter((name) => name === 'task').length, 6);
+  assert.equal(events.filter((name) => name === 'config').length, 4);
+  t.diagnostic(`CF-R2-10 calls=${JSON.stringify({ polls: events.filter((name) => name === 'task').length, currentEligibility: events.filter((name) => name === 'config').length, uploads: uploads.length, creates: creates.length })}`);
+});
+
+test('CF-R2-10：资格读取失败及非法/关闭配置保持审核态，终态历史查询也不恢复上传', async () => {
+  const attempts = [];
+  let gate;
+  let view = { status: 'NOT_FOUND', uploadEligible: true, cloudPath: 'test-face/e/o/app-1/photo.jpg' };
+  const api = {
+    getFaceTask: async () => { attempts.push('task'); return structuredClone(view); },
+    getCheckinFaceConfig: async () => {
+      attempts.push('config');
+      if (gate instanceof Error) throw gate;
+      return gate;
+    },
+    uploadTestFace: async () => { attempts.push('upload'); throw new Error('unexpected upload'); },
+    createFaceTask: async () => { attempts.push('create'); throw new Error('unexpected create'); },
+  };
+  const { page } = facePage(api, makeWx().wx);
+  page._applicationId = 'app-1';
+  page.toReviewRequired('资格已撤销');
+  const invalidGates = [
+    new Error('synthetic eligibility unavailable'), null, {},
+    { ...FULL_CONFIG, enabled: false },
+    { ...FULL_CONFIG, configured: false },
+    { ...FULL_CONFIG, accountEligible: false },
+    { ...FULL_CONFIG, accountEligible: 'true' },
+    { ...FULL_CONFIG, storageNamespaceConfigured: false },
+  ];
+  for (gate of invalidGates) {
+    await page.refreshTask();
+    assert.equal(page.data.reviewRequired, true);
+    assert.equal(page.data.showUpload, false);
+    assert.equal(page.data.canUpload, false);
+    await page.chooseAndUpload();
+  }
+  assert.equal(attempts.filter((name) => name === 'task').length, invalidGates.length);
+  assert.equal(attempts.filter((name) => name === 'config').length, invalidGates.length);
+  assert.equal(attempts.filter((name) => name === 'upload').length, 0);
+  assert.equal(attempts.filter((name) => name === 'create').length, 0);
+
+  // 终态事实仍更新显示；不能用终态记录或只恢复全局名单恢复上传。
+  view = { status: 'PENDING_SITE_VERIFICATION', uploadEligible: false, cloudPath: 'test-face/e/o/app-1/photo.jpg' };
+  gate = FULL_CONFIG;
+  await page.refreshTask();
+  assert.equal(page.data.taskView.label, '待现场刷脸验证');
+  assert.equal(page.data.reviewRequired, true);
+  assert.equal(page.data.showUpload, false);
+  assert.equal(attempts.filter((name) => name === 'config').length, invalidGates.length);
+});
+
+test('CF-R2-10：撤权前已开始的旧任务查询晚返回，不能覆盖新的审核锁存', async () => {
+  let releaseOldQuery;
+  const oldQuery = new Promise((resolve) => { releaseOldQuery = resolve; });
+  const calls = [];
+  const oldView = { status: 'NOT_FOUND', uploadEligible: true, cloudPath: 'test-face/e/o/app-1/photo.jpg' };
+  const api = {
+    getFaceTask: async () => { calls.push('task'); return oldQuery; },
+    getCheckinFaceConfig: async () => { calls.push('config'); return { ...FULL_CONFIG, accountEligible: false }; },
+    uploadTestFace: async () => { calls.push('upload'); throw new Error('unexpected upload'); },
+    createFaceTask: async () => { calls.push('create'); throw new Error('unexpected create'); },
+  };
+  const { page } = facePage(api, makeWx().wx);
+  page._applicationId = 'app-1';
+  page.applyTask(structuredClone(oldView));
+  page.onConsentChange({ detail: { value: ['consent'] } });
+  const polling = page.refreshTask();
+  await page.chooseAndUpload();
+  assert.equal(page.data.reviewRequired, true);
+  releaseOldQuery(structuredClone(oldView));
+  await polling;
+  assert.equal(page.data.reviewRequired, true);
+  assert.equal(page.data.showUpload, false);
+  assert.equal(page.data.canUpload, false);
+  assert.deepEqual(calls, ['task', 'config', 'config']);
 });

@@ -62,6 +62,16 @@ function error(code, message) {
   throw new configGate.WorkflowError(code, message);
 }
 
+// Bind idempotence to the complete validated report, including verify steps.
+// Object property order is not a distinct report; array order remains factual.
+function canonicalReportValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalReportValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalReportValue(value[key])]));
+  }
+  return value;
+}
+
 function hasJpegHeader(buffer) {
   return buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
 }
@@ -310,6 +320,14 @@ class CheckinFaceWorkflow {
       });
       if (!gate.ok) error(gate.code, gate.reason);
 
+      // The asynchronous photo check may overlap an administrator changing
+      // the trusted namespace. Rebind the SAME fileID to the authoritative
+      // transaction snapshot; a fresh config revision alone is not proof.
+      validate.validateFileOwnership(ownership.fileId, {
+        environment: this.environment, openid, applicationId,
+        storageNamespace: gate.config.storageNamespace,
+      });
+
       const existing = await tx.get(COLLECTIONS.TASK, taskId);
       if (existing) {
         if (existing.openid !== openid) error('TASK_FORBIDDEN', '任务不属于本人');
@@ -385,6 +403,20 @@ class CheckinFaceWorkflow {
     if (!application || application.openid !== openid) error('APPLICATION_FORBIDDEN', '未找到本人申请');
     const task = await this.store.get(COLLECTIONS.TASK, ids.taskId(this.environment, applicationId));
     const view = taskPublicView(task);
+    // Terminal facts remain readable; they never authorize a new upload.
+    view.uploadEligible = false;
+    if (task && TERMINAL_STATUSES.includes(task.status)) return view;
+    if (application.result !== 'auto_approved') error('APPLICATION_NOT_APPROVED', '申请当前未通过');
+    const gate = await configGate.evaluateApply({
+      store: this.store, openid, applicationVersion: application.applicationVersion, now: this.now(),
+    });
+    if (!gate.ok) {
+      error(gate.code === 'ACCOUNT_NOT_ALLOWED' ? 'ACCOUNT_NOT_ALLOWED' : 'APPLICATION_NOT_APPROVED', '申请当前不具备上传资格');
+    }
+    if (application.roomRevision !== gate.room.revision || application.leaseRevision !== gate.lease.revision) {
+      error('APPLICATION_NOT_APPROVED', '申请关联快照已变化');
+    }
+    view.uploadEligible = !task || task.status === STATUS.QUEUED_FOR_DISPATCH;
     if (!task) {
       view.cloudPath = `test-face/${this.environment}/${openid}/${applicationId}/photo.jpg`;
       view.room = application.room || null;
@@ -395,6 +427,7 @@ class CheckinFaceWorkflow {
 
   /** Worker-only claim with a fresh revalidation and CAS QUEUED -> CLAIMED. */
   async claimTask(workerId = '') {
+    validate.validateWorkerId(workerId);
     const config = await configGate.loadConfig(this.store);
     if (config.enabled !== true || config.dispatchEnabled !== true) {
       error('DISPATCH_DISABLED', '派发当前未启用');
@@ -499,11 +532,11 @@ class CheckinFaceWorkflow {
         }
         error('TASK_NOT_CLAIMED', '任务当前不在待执行状态');
       }
-      if (typeof task.workerId === 'string' && task.workerId && task.workerId !== workerId) {
+      if (!task.workerId || task.workerId !== workerId || req.workerId !== workerId) {
         error('WORKER_MISMATCH', 'worker 与领取者不一致');
       }
       const authorizedAt = this.time();
-      if (Number(task.claimExpiresAt || 0) < authorizedAt) {
+      if (Number(task.claimExpiresAt || 0) <= authorizedAt) {
         // The original claim expired: keep the unknown/possible device facts,
         // advance UNKNOWN_RESULT atomically, and refuse without extending.
         const next = {
@@ -558,23 +591,34 @@ class CheckinFaceWorkflow {
     if (task.claimId !== report.claimId) error('CLAIM_MISMATCH', '领取标识不匹配');
 
     const facts = validate.sanitizeOutputFacts(report.output);
-    const fingerprint = sha256Hex(JSON.stringify({ exitCode: report.exitCode, facts }));
-    if (TERMINAL_STATUSES.includes(task.status) && task.lastReportFingerprint === fingerprint) {
-      return { taskId: task._id, status: task.status, idempotent: true };
-    }
-
+    const fingerprint = sha256Hex(JSON.stringify({ exitCode: report.exitCode, output: canonicalReportValue(report.output) }));
     return this.store.withTransaction(async (tx) => {
       const current = await tx.get(COLLECTIONS.TASK, report.taskId);
       if (!current) error('TASK_NOT_FOUND', '任务不存在');
       if (current.claimId !== report.claimId) error('CLAIM_MISMATCH', '领取标识不匹配');
+      if (TERMINAL_STATUSES.includes(current.status)) {
+        if (current.lastReportFingerprint === fingerprint && current.lastReportRevision === report.revision) {
+          return { taskId: current._id, status: current.status, idempotent: true };
+        }
+        error('REPORT_CONFLICT', '任务已有终态，不能覆盖原结果');
+      }
       if (current.revision !== report.revision) error('REVISION_CONFLICT', '任务版本不匹配');
-      if (TERMINAL_STATUSES.includes(current.status) && current.lastReportFingerprint === fingerprint) {
-        return { taskId: current._id, status: current.status, idempotent: true };
+      if (current.status !== STATUS.DEVICE_PROCESSING) {
+        // Downloads and local prechecks may fail before begin. Only their
+        // closed failure shapes may consume CLAIMED; no claimed-only report
+        // can assert device success or carry confirmed enrollment facts.
+        const preExecutionFailure = current.status === STATUS.CLAIMED
+          && ((report.exitCode === 2 && report.output.outcome === 'invalid-input')
+            || (report.exitCode === 5 && report.output.outcome === 'stopped'))
+          && report.output.mode === 'device' && report.output.validityMode === 'fixed'
+          && (report.output.enrollment === undefined || report.output.enrollment === null)
+          && facts.faceAssociationConfirmed !== true && facts.faceModelingVerified !== true;
+        if (!preExecutionFailure) error('TASK_NOT_EXECUTING', '尚未取得设备执行授权，不能上报设备结果');
       }
 
       let status;
       let resultCode;
-      if (Number(current.claimExpiresAt || 0) < this.time()) {
+      if (Number(current.claimExpiresAt || 0) <= this.time()) {
         status = STATUS.UNKNOWN_RESULT;
         resultCode = 'CLAIM_TIMEOUT';
       } else {
@@ -618,6 +662,7 @@ class CheckinFaceWorkflow {
         },
         outputFingerprint: fingerprint,
         lastReportFingerprint: fingerprint,
+        lastReportRevision: report.revision,
         siteVerification: 'PENDING',
         faceModelingVerified: status === STATUS.PENDING_SITE_VERIFICATION && facts.faceModelingVerified === true,
         reportedAt: this.time(),

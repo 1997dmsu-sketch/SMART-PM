@@ -200,12 +200,12 @@ class MemoryDB {
           throw error;
         }
       }
-      let conflict = false;
+      let conflict = [...readVersions].some(([key, version]) => db._version(key) !== version);
       for (const key of writeKeys) {
         const readVersion = readVersions.get(key);
         const currentVersion = db._version(key);
         if (readVersion === undefined) {
-          if ((db.keyCommitSeq.get(key) ?? 0) >= startSeq) { conflict = true; break; }
+          if ((db.keyCommitSeq.get(key) ?? 0) > startSeq) { conflict = true; break; }
         } else if (currentVersion !== readVersion) {
           conflict = true; break;
         }
@@ -325,6 +325,16 @@ function begin(ctx, task, overrides = {}) {
   });
 }
 
+async function executingTask(ctx, task) {
+  const result = await begin(ctx, task);
+  assert.equal(result.code, 0, JSON.stringify(result));
+  return result.data.task;
+}
+
+function fullSnapshot(ctx) {
+  return structuredClone([...ctx.db.collections].map(([name, rows]) => [name, [...rows]]));
+}
+
 function successOutput(task, overrides = {}) {
   return {
     protocolVersion: 1,
@@ -409,6 +419,7 @@ test('公开方法轮换版本后租期快照同步，云端全流程仍通过�
   const claimed = await claim(ctx);
   assert.equal(claimed.code, 0, `轮换后 claim 失败：${JSON.stringify(claimed)}`);
   assert.ok(claimed.data.task);
+  claimed.data.task = await executingTask(ctx, claimed.data.task);
   const reported = await ctx.main({
     action: 'reportTask', workerToken: TOKEN, taskId: claimed.data.task.taskId,
     claimId: claimed.data.task.claimId, revision: claimed.data.task.revision,
@@ -719,7 +730,7 @@ test('report 成功逐项校验：日期/模式/全天指纹/门号/编号/关�
   const ctx = await queuedFixture();
   const claimed = await claim(ctx);
   assert.equal(claimed.code, 0);
-  const task = claimed.data.task;
+  const task = await executingTask(ctx, claimed.data.task);
   const reported = await ctx.main({
     action: 'reportTask', workerToken: TOKEN, taskId: task.taskId, claimId: task.claimId,
     revision: task.revision, exitCode: 0, output: successOutput(task),
@@ -752,6 +763,7 @@ test('report 输出被篡改任一项 → FAILED_REVIEW（不确认、不换号�
   for (const [name, mutate] of Object.entries(mutations)) {
     const ctx = await queuedFixture();
     const claimed = await claim(ctx);
+    claimed.data.task = await executingTask(ctx, claimed.data.task);
     const output = successOutput(claimed.data.task);
     mutate(output);
     const reported = await ctx.main({
@@ -770,7 +782,7 @@ test('退出码 4/5 → FAILED_REVIEW/UNKNOWN_RESULT，无 requeue、不换号�
   for (const [exitCode, status, outcome] of [[4, STATUS.FAILED_REVIEW, 'failed'], [5, STATUS.UNKNOWN_RESULT, 'stopped']]) {
     const ctx = await queuedFixture();
     const claimed = await claim(ctx);
-    const task = claimed.data.task;
+    const task = await executingTask(ctx, claimed.data.task);
     const reported = await ctx.main({
       action: 'reportTask', workerToken: TOKEN, taskId: task.taskId, claimId: task.claimId,
       revision: task.revision, exitCode, output: { protocolVersion: 1, outcome, mode: 'device', validityMode: 'fixed', siteVerification: 'PENDING' },
@@ -789,7 +801,7 @@ test('退出码 4/5 → FAILED_REVIEW/UNKNOWN_RESULT，无 requeue、不换号�
 test('重复 report 幂等；worker token 常量时间比对失败返回 WORKER_UNAUTHORIZED', async () => {
   const ctx = await queuedFixture();
   const claimed = await claim(ctx);
-  const task = claimed.data.task;
+  const task = await executingTask(ctx, claimed.data.task);
   const payload = {
     action: 'reportTask', taskId: task.taskId, claimId: task.claimId,
     revision: task.revision, exitCode: 4, output: { protocolVersion: 1, outcome: 'failed', mode: 'device', validityMode: 'fixed', siteVerification: 'PENDING' },
@@ -882,6 +894,7 @@ test('R03：无 runTransaction 能力时申请与建任务失败关闭且零写�
 test('R03：提交失败时业务写与审计全回滚，不回落到外层 DB', async () => {
   const ctx = await fixture();
   const auditBefore = ctx.db.rows(COLLECTIONS.AUDIT).length;
+  ctx.db.commitLog = [];
   ctx.db.failCommits = 1;
   const beforeWrites = ctx.db.writes;
   const result = await ctx.apply();
@@ -1019,6 +1032,7 @@ test('R06 拒绝矩阵：错 claim/错 revision/错 worker/重复开始/未领�
 
   // 终态任务同样不得再次授权。
   const terminal = await claimedFixture();
+  terminal.task = await executingTask(terminal, terminal.task);
   const reported = await terminal.main({
     action: 'reportTask', workerToken: TOKEN, taskId: terminal.task.taskId, claimId: terminal.task.claimId,
     revision: terminal.task.revision, exitCode: 4,
@@ -1147,4 +1161,174 @@ test('云函数路径无 console.log 请求体、无 unlimited 兜底', () => {
     assert.ok(!/console\.(log|info|debug)\s*\(/.test(source), `${path.relative(ROOT, file)} 不得输出请求体`);
     assert.ok(!/\bunlimited\b/.test(source), `${path.relative(ROOT, file)} 不得有 unlimited 兜底`);
   }
+});
+
+test('CF-R2-01：下载期间切换 namespace，权威事务拒绝旧文件且零任务/审计写入', async () => {
+  const ctx = await approvedFixture();
+  let enterDownload;
+  let releaseDownload;
+  const entered = new Promise((resolve) => { enterDownload = resolve; });
+  const released = new Promise((resolve) => { releaseDownload = resolve; });
+  ctx.cloud.downloadFile = async () => { enterDownload(); await released; return { fileContent: JPEG }; };
+  const creating = ctx.main({ action: 'createFaceTask', applicationId: ctx.applicationId,
+    fileId: fileId(ctx.applicationId), consent: true });
+  await entered;
+  await ctx.admin.setStorageNamespace(OTHER_NAMESPACE);
+  const before = fullSnapshot(ctx);
+  releaseDownload();
+  const result = await creating;
+  const after = fullSnapshot(ctx);
+  assert.equal(result.code, 'FILE_NAMESPACE_MISMATCH');
+  assert.deepEqual(after, before, '被拒创建不得留下任何集合的业务/审计变动');
+});
+
+test('CF-R2-03：CLAIMED 不能绕过 begin 报设备成功或已执行失败', async () => {
+  for (const [exitCode, output] of [[0, null], [4, { outcome: 'failed', mode: 'device', validityMode: 'fixed' }]]) {
+    const ctx = await claimedFixture();
+    const task = ctx.claimed.data.task;
+    const before = fullSnapshot(ctx);
+    const result = await ctx.main({ action: 'reportTask', workerToken: TOKEN,
+      taskId: task.taskId, claimId: task.claimId, revision: task.revision,
+      exitCode, output: output || successOutput(task) });
+    const after = fullSnapshot(ctx);
+    assert.equal(result.code, 'TASK_NOT_EXECUTING');
+    assert.deepEqual(after, before);
+  }
+});
+
+test('CF-R2-03：真实 worker 形状的 begin 前输入失败/下载未知报告仍可记账', async () => {
+  for (const [exitCode, outcome, expected] of [[2, 'invalid-input', STATUS.FAILED_REVIEW], [5, 'stopped', STATUS.UNKNOWN_RESULT]]) {
+    const ctx = await claimedFixture();
+    const task = ctx.claimed.data.task;
+    const before = fullSnapshot(ctx);
+    const result = await ctx.main({ action: 'reportTask', workerToken: TOKEN,
+      taskId: task.taskId, claimId: task.claimId, revision: task.revision, exitCode,
+      output: { protocolVersion: 1, outcome, mode: 'device', validityMode: 'fixed',
+        enrollment: null, device: null, siteVerification: 'PENDING',
+        error: { code: exitCode === 2 ? 'DEVICE_KEY_MISSING' : 'PHOTO_PREPARE_FAILED' } } });
+    const after = fullSnapshot(ctx);
+    assert.equal(result.code, 0, JSON.stringify(result));
+    assert.equal(result.data.status, expected);
+    assert.notDeepEqual(after, before);
+    const stored = ctx.taskFor(ctx.applicationId);
+    assert.equal(stored.revision, task.revision + 1);
+    assert.equal(stored.employeeNo, task.employeeNo);
+    assert.equal(ctx.db.rows(COLLECTIONS.AUDIT).filter((row) => row.action === 'beginTaskExecution').length, 0);
+  }
+});
+
+test('CF-R2-03：终态不可翻绿，严格同报告/原请求 revision 才幂等', async () => {
+  const ctx = await claimedFixture();
+  const task = await executingTask(ctx, ctx.claimed.data.task);
+  const payload = { action: 'reportTask', workerToken: TOKEN, taskId: task.taskId,
+    claimId: task.claimId, revision: task.revision, exitCode: 4,
+    output: { outcome: 'failed', mode: 'device', validityMode: 'fixed', steps: [{ key: 'verify', state: 'failed' }] } };
+  const failed = await ctx.main(payload);
+  assert.equal(failed.data.status, STATUS.FAILED_REVIEW);
+  const terminal = ctx.taskFor(ctx.applicationId);
+  for (const request of [
+    { ...payload, revision: terminal.revision, exitCode: 0, output: successOutput(task) },
+    { ...payload, revision: terminal.revision },
+    { ...payload, output: { ...payload.output, steps: [{ key: 'verify', state: 'success' }] } },
+  ]) {
+    const before = fullSnapshot(ctx);
+    const response = await ctx.main(request);
+    const after = fullSnapshot(ctx);
+    assert.equal(response.code, 'REPORT_CONFLICT');
+    assert.deepEqual(after, before);
+  }
+  const before = fullSnapshot(ctx);
+  const replay = await ctx.main(payload);
+  const after = fullSnapshot(ctx);
+  assert.equal(replay.code, 0);
+  assert.equal(replay.data.idempotent, true);
+  assert.equal(replay.data.status, STATUS.FAILED_REVIEW);
+  assert.deepEqual(after, before);
+});
+
+test('CF-R2-06：begin 截止前 1ms 可授权，等于/之后 1ms 均过期且不延长 claim', async () => {
+  for (const offset of [-1, 0, 1]) {
+    const ctx = await claimedFixture();
+    const task = ctx.claimed.data.task;
+    ctx.setNow(new Date(task.claimExpiresAt + offset));
+    const before = fullSnapshot(ctx);
+    const result = await begin(ctx, task);
+    const after = fullSnapshot(ctx);
+    assert.equal(result.code, offset < 0 ? 0 : 'CLAIM_EXPIRED');
+    const stored = ctx.taskFor(ctx.applicationId);
+    assert.equal(stored.claimExpiresAt, task.claimExpiresAt);
+    assert.equal(stored.status, offset < 0 ? STATUS.DEVICE_PROCESSING : STATUS.UNKNOWN_RESULT);
+    assert.notDeepEqual(after, before);
+  }
+});
+
+test('CF-R2-06：report 与超时清扫都采用 now >= claimExpiresAt', async () => {
+  for (const offset of [-1, 0, 1]) {
+    const ctx = await claimedFixture();
+    const task = await executingTask(ctx, ctx.claimed.data.task);
+    ctx.setNow(new Date(task.claimExpiresAt + offset));
+    const result = await ctx.main({ action: 'reportTask', workerToken: TOKEN,
+      taskId: task.taskId, claimId: task.claimId, revision: task.revision,
+      exitCode: 0, output: successOutput(task) });
+    assert.equal(result.code, 0);
+    assert.equal(result.data.status, offset < 0 ? STATUS.PENDING_SITE_VERIFICATION : STATUS.UNKNOWN_RESULT);
+    assert.equal(ctx.taskFor(ctx.applicationId).claimExpiresAt, task.claimExpiresAt);
+  }
+  const ctx = await claimedFixture();
+  ctx.setNow(new Date(ctx.claimed.data.task.claimExpiresAt));
+  const claimed = await claim(ctx);
+  assert.equal(claimed.data.task, null);
+  assert.equal(ctx.taskFor(ctx.applicationId).status, STATUS.UNKNOWN_RESULT);
+});
+
+test('CF-R2-07：claim 缺失/空/非法 worker 均零写拒绝，旧空绑定 begin 也失败关闭', async () => {
+  for (const workerId of [undefined, '', 'bad worker', 'x'.repeat(65)]) {
+    const ctx = await queuedFixture();
+    const before = fullSnapshot(ctx);
+    const result = await ctx.main({ action: 'claimTask', workerToken: TOKEN, ...(workerId === undefined ? {} : { workerId }) });
+    const after = fullSnapshot(ctx);
+    assert.equal(result.code, 'INVALID_WORKER_ID');
+    assert.deepEqual(after, before);
+  }
+  const ctx = await claimedFixture();
+  const task = ctx.taskFor(ctx.applicationId);
+  await ctx.db.collection(COLLECTIONS.TASK).doc(task._id).set({ data: { ...task, workerId: '' } });
+  const before = fullSnapshot(ctx);
+  const result = await begin(ctx, ctx.claimed.data.task);
+  const after = fullSnapshot(ctx);
+  assert.equal(result.code, 'WORKER_MISMATCH');
+  assert.deepEqual(after, before);
+});
+
+test('CF-R2-10 云门：轮询旧申请不恢复上传；合法重新授权可恢复，终态事实只读保留', async () => {
+  const ctx = await approvedFixture();
+  const poll = () => ctx.main({ action: 'getMyTask', applicationId: ctx.applicationId });
+  assert.equal((await poll()).data.uploadEligible, true);
+  await ctx.admin.setAllowlist([]);
+  let before = fullSnapshot(ctx);
+  const rejected = await poll();
+  let after = fullSnapshot(ctx);
+  assert.equal(rejected.code, 'ACCOUNT_NOT_ALLOWED');
+  assert.deepEqual(after, before);
+  await ctx.admin.setAllowlist([OPENID]);
+  assert.equal((await poll()).data.uploadEligible, true, '合法重获当前资格可恢复，不能永久锁住');
+  const app = ctx.db.row(COLLECTIONS.APPLICATION, ctx.applicationId);
+  await ctx.db.collection(COLLECTIONS.APPLICATION).doc(app._id).set({ data: { ...app, result: 'pending_review' } });
+  before = fullSnapshot(ctx);
+  assert.equal((await poll()).code, 'APPLICATION_NOT_APPROVED');
+  after = fullSnapshot(ctx);
+  assert.deepEqual(after, before);
+
+  const terminalCtx = await claimedFixture();
+  const task = await executingTask(terminalCtx, terminalCtx.claimed.data.task);
+  await terminalCtx.main({ action: 'reportTask', workerToken: TOKEN, taskId: task.taskId,
+    claimId: task.claimId, revision: task.revision, exitCode: 0, output: successOutput(task) });
+  await terminalCtx.admin.setAllowlist([]);
+  before = fullSnapshot(terminalCtx);
+  const terminalView = await terminalCtx.main({ action: 'getMyTask', applicationId: terminalCtx.applicationId });
+  after = fullSnapshot(terminalCtx);
+  assert.equal(terminalView.code, 0);
+  assert.equal(terminalView.data.status, STATUS.PENDING_SITE_VERIFICATION);
+  assert.equal(terminalView.data.uploadEligible, false);
+  assert.deepEqual(after, before);
 });

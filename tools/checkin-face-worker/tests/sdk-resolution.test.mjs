@@ -119,6 +119,16 @@ test('R07：解析失败给出 worker 自有安装指引（含 npm install 提�
   });
 });
 
+test('CF-R2-09：显式SDK边界路径尾部空格不被解析器trim（仅合成假SDK）', async () => {
+  await withTemp(async (dir) => {
+    const rawBoundary = join(dir, ' sdk-boundary ');
+    await installFakeSdk(rawBoundary);
+    const client = await createCloudClient({ config: { cloudEnv: 'synthetic-env' }, env: {}, sdkModulePath: rawBoundary });
+    assert.equal(typeof client.callFunction, 'function');
+    assert.deepEqual(await client.callFunction('claimTask', { workerToken: 'synthetic-token', workerId: 'synthetic-worker' }), { task: null });
+  });
+});
+
 test('R07：sdkModulePath 经 loadWorkerConfig 解析为绝对路径，缺省为空（默认 worker 自有边界）', async () => {
   const readJson = (extra) => loadWorkerConfig({
     configPath: 'C:/synthetic/worker.local.json',

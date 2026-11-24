@@ -91,6 +91,8 @@ const ALLOWED_LOCAL = [
   'tests/support/',
   'scripts/checkin-face-static-check.mjs',
   'scripts/verify-checkin-face-sources.mjs',
+  'scripts/package-release.py',
+  'scripts/test-package-release.py',
   'docs/evidence/',
 ];
 

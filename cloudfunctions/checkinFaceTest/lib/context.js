@@ -9,7 +9,7 @@
  */
 
 const { createHash, timingSafeEqual } = require('node:crypto');
-const { ValidationError, validateToken } = require('./validate');
+const { ValidationError, validateToken, validateWorkerId } = require('./validate');
 
 const MINIPROGRAM_ACTIONS = Object.freeze(['getConfig', 'applyCheckin', 'createFaceTask', 'getMyTask']);
 const WORKER_ACTIONS = Object.freeze(['claimTask', 'beginTaskExecution', 'reportTask']);
@@ -70,8 +70,7 @@ function authenticateWorker(event, expectedHash) {
   if (!constantTimeEqualHex(tokenDigest, expectedHash)) {
     throw new ContextError('WORKER_UNAUTHORIZED', 'worker 凭据无效');
   }
-  const workerId = typeof event.workerId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(event.workerId)
-    ? event.workerId : '';
+  const workerId = event.action === 'reportTask' ? '' : validateWorkerId(event.workerId);
   return { kind: 'worker', action: event.action, workerId, tokenDigest };
 }
 

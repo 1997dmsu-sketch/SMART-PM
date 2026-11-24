@@ -163,6 +163,7 @@ test('buildDeviceRequest 显式 mode=device/validityMode=fixed，日期/门号/�
 test('R08：buildInMemoryDeviceRequest 不含 photoPath（内存照片不落盘）', async () => {
   const cfg = await config();
   const request = buildInMemoryDeviceRequest(task, cfg);
+  assert.equal(request.accessPlanFingerprint, task.accessPlanFingerprint, 'authoritative plan fingerprint must reach the in-memory adapter');
   assert.equal(request.mode, 'device');
   assert.equal(request.validityMode, 'fixed');
   assert.equal(request.doorNo, 7);

@@ -33,6 +33,15 @@ const { createMain } = require(path.join(CLOUD_DIR, 'index.js'));
 const { ENVIRONMENT, COLLECTIONS } = require(path.join(CLOUD_DIR, 'lib/store.js'));
 const validate = require(path.join(CLOUD_DIR, 'lib/validate.js'));
 const { AdminCheckinFaceTestConfig } = require(path.join(ROOT, 'admin-web/lib/checkin-face-test-config.mjs'));
+const networkGuard = globalThis.__DSH_D_NETWORK_GUARD__;
+const businessBaselines = new Map();
+test.before(() => {
+  assert.ok(networkGuard, 'The D guard must be preloaded before business modules');
+  networkGuard.assertLoadTimeClean();
+});
+test.beforeEach((t) => { businessBaselines.set(t.name, networkGuard.snapshot()); });
+test.afterEach((t) => { networkGuard.assertNoViolations(businessBaselines.get(t.name), t.name); });
+
 
 const OPENID = 'test-user-01';
 const OTHER_OPENID = 'other-user-99';
@@ -840,117 +849,152 @@ async function s6Claim(ctx) {
   return task;
 }
 
-test('S6a 执行前复核成功：revision+1 推进 DEVICE_PROCESSING、claim 不延长、执行一次、report 用新 revision', async (t) => {
+/** Actual worker orchestration; only transport and device executor are synthetic.
+ * Every cloud action goes through createMain, so the executor counter measures
+ * a call made by production main rather than an increment in the assertion.
+ */
+async function runWorkerThroughMain(ctx, { afterDownload = async () => {}, nowMs = () => FIXED.getTime() } = {}) {
+  const { main } = await import(pathToFileURL(path.join(WORKER_DIR, 'claim-and-enroll.mjs')).href);
+  const observed = { claimed: null, authorized: null, downloads: [], begins: [], reports: [], executorCalls: 0, requests: [] };
+  const cloud = {
+    callFunction: async (action, payload) => {
+      const beforeReport = action === 'reportTask' ? structuredClone(ctx.db.snapshot().collections) : null;
+      const result = await ctx.main({ action, ...payload });
+      if (action === 'claimTask' && result.code === 0) observed.claimed = clone(result.data.task);
+      if (action === 'beginTaskExecution') {
+        observed.begins.push({ payload: clone(payload), result: clone(result) });
+        if (result.code === 0) observed.authorized = clone(result.data.task);
+      }
+      if (action === 'reportTask') observed.reports.push({ payload: clone(payload), result: clone(result), before: beforeReport, after: structuredClone(ctx.db.snapshot().collections) });
+      if (result.code !== 0) {
+        const error = new Error('SYNTHETIC_CLOUD_REJECTED');
+        error.cloudCode = result.code;
+        throw error;
+      }
+      return result.data;
+    },
+    downloadFile: async (fileId) => {
+      assert.equal(fileId, observed.claimed.fileId, 'worker must download the exact claimed SDK fileID');
+      observed.downloads.push(fileId);
+      await afterDownload(observed);
+      return Buffer.from(JPEG);
+    },
+  };
+  observed.exitCode = await main({
+    argv: ['--once'], env: {},
+    loadConfig: async () => ({ ...WORKER_LOCAL_CONFIG, workerToken: TOKEN }),
+    createClient: async () => cloud,
+    nowMs,
+    runEnrollmentImpl: async (request, deps) => {
+      observed.executorCalls += 1;
+      assert.ok(observed.authorized, 'production main must obtain authority before the injected executor');
+      assert.ok(Buffer.isBuffer(deps.photoBuffer));
+      assert.deepEqual(deps.photoBuffer, JPEG);
+      assert.equal(request.mode, 'device');
+      assert.equal(request.validityMode, 'fixed');
+      assert.equal(request.accessPlanFingerprint, FINGERPRINT);
+      observed.requests.push({ employeeNo: request.employeeNo, validFrom: request.validFrom, validTo: request.validTo });
+      return { exitCode: 0, output: successOutput(observed.authorized) };
+    },
+    stdout: { write: () => {} },
+  });
+  return observed;
+}
+
+test('S6a 实际worker编排：权威begin一次、假设备执行器一次、report使用推进revision', async (t) => {
   markPendingIntegration(t, 'R06/A');
-  requireBegin('R06/A', 'S6a 需要云端 beginTaskExecution');
-  const { authorizeTaskExecution, checkClaimTime } = await import(pathToFileURL(path.join(WORKER_DIR, 'execution-authorization.mjs')).href);
+  requireBegin('R06/A', 'S6a needs the production beginTaskExecution action');
   const ctx = await approvedFixture();
   const created = await ctx.main({ action: 'createFaceTask', applicationId: ctx.applicationId, fileId: sdkFileId(ctx.applicationId), consent: true });
   assert.equal(created.code, 0, JSON.stringify(created));
-  const task = await s6Claim(ctx);
-
-  checkClaimTime(task, FIXED.getTime()); // 领取时效预检
-  const config = { workerToken: TOKEN };
-  const executorCalls = { count: 0 };
-  const authorized = await authorizeTaskExecution({
-    cloud: { callFunction: callCloudThroughMain(ctx) },
-    config,
-    task,
-    workerId: WORKER_ID,
-  });
-  assert.equal(authorized.snapshot.status, 'DEVICE_PROCESSING');
-  assert.equal(authorized.snapshot.revision, task.revision + 1);
-  assert.equal(authorized.snapshot.claimExpiresAt, task.claimExpiresAt, '成功不得延长原 claim');
+  const observed = await runWorkerThroughMain(ctx);
+  const task = observed.claimed;
+  const authorized = observed.authorized;
+  assert.equal(observed.begins.length, 1, 'no retry of one-time authority');
+  assert.equal(observed.begins[0].result.code, 0);
+  assert.equal(authorized.status, 'DEVICE_PROCESSING');
+  assert.equal(authorized.revision, task.revision + 1);
+  assert.equal(authorized.claimExpiresAt, task.claimExpiresAt, 'success must not extend the claim');
+  assert.equal(authorized.workerId, WORKER_ID);
+  assert.equal(authorized.authorizedAt, observed.begins[0].result.data.authorizedAt);
   assert.ok(Number.isSafeInteger(authorized.authorizedAt) && authorized.authorizedAt > 0);
-  assert.ok(authorized.authorizedAt <= task.claimExpiresAt);
-  // §2.3 成功响应字段（字面值来自接口清单，不调用生产 helper）：
-  assert.equal(authorized.snapshot.workerId, WORKER_ID, '快照必须携带领取者');
-  assert.equal(authorized.snapshot.authorizedAt, authorized.authorizedAt, 'task.authorizedAt 与 data.authorizedAt 为同一服务端时间事实');
-  assert.ok(typeof authorized.snapshot.cloudPath === 'string' && authorized.snapshot.cloudPath.startsWith('test-face/'), 'cloudPath 必须是规范对象路径');
-  assert.equal(authorized.snapshot.timezone, 'Asia/Shanghai');
-  assert.equal(authorized.snapshot.dailyHours, '24x7');
-  assert.ok(typeof authorized.snapshot.roomBindingId === 'string' && authorized.snapshot.roomBindingId.length > 0, '必须携带 roomBindingId');
-  assert.ok(typeof authorized.snapshot.leaseSnapshotId === 'string' && authorized.snapshot.leaseSnapshotId.length > 0, '必须携带 leaseSnapshotId');
-
-  executorCalls.count += 1;
-  const report = await ctx.main({
-    action: 'reportTask', workerToken: TOKEN, taskId: task.taskId, claimId: task.claimId,
-    revision: authorized.snapshot.revision, exitCode: 0, output: successOutput(authorized.snapshot),
-  });
-  assert.equal(report.code, 0, JSON.stringify(report));
-  assert.equal(report.data.status, 'PENDING_SITE_VERIFICATION');
-  assert.equal(executorCalls.count, 1);
-  const row = ctx.taskRows()[0];
-  assert.ok(row.revision >= task.revision + 1, 'revision 不得回退');
-  assert.equal(row.siteVerification, 'PENDING');
+  assert.ok(authorized.authorizedAt < task.claimExpiresAt);
+  assert.ok(authorized.cloudPath.startsWith('test-face/'));
+  assert.equal(authorized.timezone, 'Asia/Shanghai');
+  assert.equal(authorized.dailyHours, '24x7');
+  assert.ok(authorized.roomBindingId && authorized.leaseSnapshotId);
+  assert.equal(observed.executorCalls, 1, 'counter is incremented only by the real main executor callback');
+  assert.equal(observed.requests.length, 1);
+  assert.equal(observed.reports.length, 1);
+  assert.equal(observed.reports[0].payload.revision, task.revision + 1);
+  assert.equal(observed.reports[0].result.code, 0, JSON.stringify(observed.reports[0].result));
+  assert.equal(observed.exitCode, 0);
+  assert.equal(ctx.taskRows()[0].status, 'PENDING_SITE_VERIFICATION');
+  assert.equal(ctx.taskRows()[0].siteVerification, 'PENDING');
 });
 
-test('S6b 下载后过期：本地预检 BEGIN_AUTH_EXPIRED + 云端拒绝，零设备执行', async (t) => {
-  markPendingIntegration(t, 'R06/A');
-  requireBegin('R06/A', 'S6b 需要云端 beginTaskExecution');
-  const { authorizeTaskExecution, checkClaimTime } = await import(pathToFileURL(path.join(WORKER_DIR, 'execution-authorization.mjs')).href);
+test('S6b 实际worker下载后到期：本地或权威云门均阻断，假执行器零调用', async (t) => {
+  for (const localClockFresh of [true, false]) {
+    await t.test(localClockFresh ? 'local clock observes the exact deadline' : 'stale local clock still cannot bypass server deadline', async () => {
+      const ctx = await approvedFixture();
+      const created = await ctx.main({ action: 'createFaceTask', applicationId: ctx.applicationId, fileId: sdkFileId(ctx.applicationId), consent: true });
+      assert.equal(created.code, 0, JSON.stringify(created));
+      let localNow = FIXED.getTime();
+      const observed = await runWorkerThroughMain(ctx, {
+        afterDownload: async (state) => {
+          const deadline = state.claimed.claimExpiresAt;
+          ctx.setNow(new Date(deadline));
+          if (localClockFresh) localNow = deadline;
+        },
+        nowMs: () => localNow,
+      });
+      assert.equal(observed.downloads.length, 1);
+      assert.equal(observed.executorCalls, 0, 'the actual main executor callback must remain untouched');
+      assert.equal(observed.requests.length, 0);
+      assert.equal(observed.reports.length, 1, 'failure is reported once, without retry');
+      assert.equal(observed.reports[0].payload.exitCode, 5);
+      assert.equal(observed.reports[0].payload.output.outcome, 'stopped');
+      if (localClockFresh) {
+        assert.equal(observed.begins.length, 0, 'local rejection happens before authority acquisition');
+        assert.equal(observed.reports[0].payload.output.error.code, 'BEGIN_AUTH_EXPIRED');
+        assert.equal(observed.reports[0].result.code, 0, 'closed pre-execution failure report remains legal');
+        assert.equal(observed.exitCode, 5);
+      } else {
+        assert.equal(observed.begins.length, 1);
+        assert.equal(observed.begins[0].result.code, 'CLAIM_EXPIRED');
+        assert.equal(observed.reports[0].payload.output.error.code, 'BEGIN_AUTH_REJECTED:CLAIM_EXPIRED');
+        assert.equal(observed.reports[0].result.code, 'REPORT_CONFLICT');
+        assert.equal(observed.exitCode, 3, 'report rejection is not an additional device attempt');
+        assert.deepEqual(observed.reports[0].after, observed.reports[0].before, 'failed report must preserve the already recorded timeout facts');
+      }
+      assert.equal(ctx.taskRows()[0].status, 'UNKNOWN_RESULT');
+      assert.equal(ctx.taskRows()[0].resultCode, 'CLAIM_TIMEOUT');
+      assert.ok(ctx.db.rows(COLLECTIONS.AUDIT).some((row) => row.targetId === observed.claimed.taskId));
+    });
+  }
+});
+
+test('S6c 实际worker下载后撤权：begin拒绝，假设备执行器零调用且不重领/重试', async () => {
   const ctx = await approvedFixture();
   const created = await ctx.main({ action: 'createFaceTask', applicationId: ctx.applicationId, fileId: sdkFileId(ctx.applicationId), consent: true });
   assert.equal(created.code, 0, JSON.stringify(created));
-  const task = await s6Claim(ctx);
-
-  const expiredMs = task.claimExpiresAt + 1;
-  ctx.setNow(new Date(expiredMs));
-  let timeCheckError = null;
-  try { checkClaimTime(task, expiredMs); } catch (error) { timeCheckError = error; }
-  assert.equal(timeCheckError && timeCheckError.code, 'BEGIN_AUTH_EXPIRED', '本地时效预检必须拒绝过期 claim');
-  // 即使强行请求云端，也必须拒绝（服务端 now >= claimExpiresAt）。
-  const forced = await ctx.main({
-    action: 'beginTaskExecution', workerToken: TOKEN, workerId: WORKER_ID,
-    taskId: task.taskId, claimId: task.claimId, revision: task.revision,
-  });
-  assert.equal(forced.code, 'CLAIM_EXPIRED', `过期 claim 云端必须拒绝为 CLAIM_EXPIRED：${JSON.stringify(forced)}`);
-  const rowAfterExpiry = ctx.taskRows()[0];
-  assert.equal(rowAfterExpiry.status, 'UNKNOWN_RESULT', '过期必须推进 UNKNOWN_RESULT 保留事实');
-  assert.equal(rowAfterExpiry.resultCode, 'CLAIM_TIMEOUT');
-  assert.ok(
-    ctx.db.rows(COLLECTIONS.AUDIT).some((row) => row.targetId === task.taskId),
-    '§2.4：CLAIM_EXPIRED 副作用必须同事务写审计',
-  );
-  let deviceExecutions = 0;
-  await assert.rejects(
-    () => authorizeTaskExecution({ cloud: { callFunction: callCloudThroughMain(ctx) }, config: { workerToken: TOKEN }, task, workerId: WORKER_ID }),
-    (error) => /^BEGIN_AUTH_(EXPIRED|REJECTED|UNAVAILABLE)/.test(error.code),
-    '过期 claim 不得获得可执行授权',
-  );
-  assert.equal(deviceExecutions, 0, '零设备执行');
-});
-
-test('S6c 领取后租期/配置撤权：begin 被云端拒绝 → BEGIN_AUTH_REJECTED，零设备执行', async (t) => {
-  markPendingIntegration(t, 'R06/A');
-  requireBegin('R06/A', 'S6c 需要云端 beginTaskExecution');
-  const { authorizeTaskExecution } = await import(pathToFileURL(path.join(WORKER_DIR, 'execution-authorization.mjs')).href);
-  const ctx = await approvedFixture();
-  const created = await ctx.main({ action: 'createFaceTask', applicationId: ctx.applicationId, fileId: sdkFileId(ctx.applicationId), consent: true });
-  assert.equal(created.code, 0, JSON.stringify(created));
-  const task = await s6Claim(ctx);
-
-  await ctx.admin.upsertLease(LEASE_INPUT); // 租期快照版本变化 = 撤权
-  const rejected = await ctx.main({
-    action: 'beginTaskExecution', workerToken: TOKEN, workerId: WORKER_ID,
-    taskId: task.taskId, claimId: task.claimId, revision: task.revision,
-  });
-  assert.equal(rejected.code, 'EXECUTION_INVALIDATED', JSON.stringify(rejected));
+  const observed = await runWorkerThroughMain(ctx, { afterDownload: async () => ctx.admin.upsertLease(LEASE_INPUT) });
+  assert.equal(observed.downloads.length, 1);
+  assert.equal(observed.executorCalls, 0, 'production main must never call the injected device executor');
+  assert.equal(observed.begins.length, 1);
+  assert.equal(observed.begins[0].result.code, 'EXECUTION_INVALIDATED');
+  assert.equal(observed.authorized, null);
+  assert.equal(observed.requests.length, 0);
+  assert.equal(observed.reports.length, 1);
+  assert.equal(observed.reports[0].payload.exitCode, 5);
+  assert.equal(observed.reports[0].payload.output.error.code, 'BEGIN_AUTH_REJECTED:EXECUTION_INVALIDATED');
+  assert.equal(observed.reports[0].result.code, 'REPORT_CONFLICT');
+  assert.equal(observed.exitCode, 3);
+  assert.deepEqual(observed.reports[0].after, observed.reports[0].before, 'rejected report preserves the full revoked-state snapshot');
   const row = ctx.taskRows()[0];
-  assert.equal(row.status, 'INVALIDATED', '撤权后任务必须原子失效');
-  assert.ok(typeof row.resultCode === 'string' && row.resultCode.length > 0, '§2.4：必须携带具体 gate 码 resultCode');
-  assert.ok(
-    ctx.db.rows(COLLECTIONS.AUDIT).some((entry) => entry.targetId === task.taskId),
-    '§2.4：EXECUTION_INVALIDATED 副作用必须同事务写审计',
-  );
-  assert.notEqual(row.status, 'DEVICE_PROCESSING', '未授权不得推进设备执行状态');
-  let deviceExecutions = 0;
-  await assert.rejects(
-    () => authorizeTaskExecution({ cloud: { callFunction: callCloudThroughMain(ctx) }, config: { workerToken: TOKEN }, task, workerId: WORKER_ID }),
-    (error) => /^BEGIN_AUTH_REJECTED:/.test(error.code),
-    '撤权后复核必须被云端拒绝',
-  );
-  assert.equal(deviceExecutions, 0, '零设备执行');
+  assert.equal(row.status, 'INVALIDATED');
+  assert.ok(row.resultCode);
+  assert.ok(ctx.db.rows(COLLECTIONS.AUDIT).some((entry) => entry.targetId === observed.claimed.taskId));
 });
 
 test('S6d 错误 worker / 旧 revision / 重复开始：均不得返回可执行授权', async (t) => {

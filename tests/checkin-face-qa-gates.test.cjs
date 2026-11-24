@@ -27,13 +27,28 @@ const WORKER_RUNTIME = path.join(ROOT, 'tools', 'checkin-face-worker', 'worker-r
 
 const MODE_MSG = 'worker 请求构造必须显式 mode=device（缺失即失败）';
 const VALIDITY_MSG = 'worker 请求构造必须显式 validityMode=fixed（缺失即失败）';
+const networkGuard = globalThis.__DSH_D_NETWORK_GUARD__;
+const businessBaselines = new Map();
+test.before(() => {
+  assert.ok(networkGuard, 'The D guard must be preloaded before any test or business import');
+  networkGuard.assertLoadTimeClean();
+});
+test.beforeEach((t) => { businessBaselines.set(t.name, networkGuard.snapshot()); });
+test.afterEach((t) => {
+  if (!t.name.startsWith('guard：')) networkGuard.assertNoViolations(businessBaselines.get(t.name), t.name);
+});
+
 
 function tmpdir(label) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `d-qa-${label}-`));
 }
 
 function runNode(args, cwd) {
-  return spawnSync(process.execPath, args, { cwd, encoding: 'utf8' });
+  const env = { ...process.env };
+  // A deliberately nested test-runner negative control needs a fresh runner
+  // context. Keep NODE_OPTIONS intact so the network guard still propagates.
+  if (args.includes('--test')) delete env.NODE_TEST_CONTEXT;
+  return spawnSync(process.execPath, args, { cwd, env, encoding: 'utf8' });
 }
 
 function copyTree(src, dest, relPaths) {
@@ -45,7 +60,7 @@ function copyTree(src, dest, relPaths) {
   }
 }
 
-function copyFullTree(src, dest, { excludeDirs = ['.git'] } = {}) {
+function copyFullTree(src, dest, { excludeDirs = ['.git', 'node_modules', 'dist', '.data', '.cache', '.artifacts'] } = {}) {
   const walk = (dir, base) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
@@ -53,6 +68,8 @@ function copyFullTree(src, dest, { excludeDirs = ['.git'] } = {}) {
         if (excludeDirs.includes(entry.name)) continue;
         walk(full, base);
       } else {
+        if (entry.isSymbolicLink()) throw new Error('SYNTHETIC_COPY_SYMLINK_REJECTED');
+        if (/^\.env(?:\.|$)|\.local\.json$|\.(?:pem|pfx|key)$/i.test(entry.name) || entry.name === 'project.private.config.json') continue;
         const rel = path.relative(base, full).replaceAll('\\', '/');
         const to = path.join(dest, ...rel.split('/'));
         fs.mkdirSync(path.dirname(to), { recursive: true });
@@ -156,18 +173,33 @@ function writeManifest(dir, manifest) {
 // 网络守卫：加载前安装、命名绑定、自检不转发、子进程继承、原始/降级分列
 // ---------------------------------------------------------------------------
 
-test('guard：本进程在业务模块加载前已安装命名守卫，自检证明拦截且不转发', () => {
+test('guard：本进程在业务模块加载前已安装命名守卫，逐槽哨兵与ESM绑定均受控', async (t) => {
   const guard = globalThis.__DSH_D_NETWORK_GUARD__;
   assert.ok(
     guard,
     '未安装 d-network-guard（本套件要求 --require tests/support/d-network-guard.cjs 预载）；原始模式运行视为降级，另行记录',
   );
   assert.equal(guard.name, 'd-network-guard');
-  assert.ok(guard.patchedCount >= 10, `网络入口覆盖不足：${guard.patchedCount}`);
+  for (const label of [
+    'net.Server.prototype.listen', 'net.Socket.prototype.connect', 'dgram.createSocket',
+    'dgram.Socket.prototype.send', 'dgram.Socket.prototype.bind', 'dgram.Socket.prototype.connect',
+    'dns.reverse', 'dns.promises.lookupService', 'dns.Resolver.prototype.resolve',
+    'dns.promises.Resolver.prototype.resolve',
+  ]) assert.ok(guard.patchedEntries.includes(label), `missing required network/listen entry: ${label}`);
+  assert.equal(guard.patchedCount, guard.patchedEntries.length);
+  const loadTime = guard.loadTimeSnapshot();
+  assert.equal(loadTime.blocked, 0);
+  assert.equal(loadTime.forwarded, 0);
+  assert.ok(loadTime.entries.every((entry) => entry.blocked === 0 && entry.forwarded === 0));
   const self = guard.selfTest();
   assert.equal(self.ok, true, JSON.stringify(self));
   assert.equal(self.forwarded, 0, '任何守卫入口都不得转发真实目标');
+  assert.equal(self.attempts, guard.patchedCount, 'every installed slot must have an actual positive control');
   assert.ok(self.caught === self.attempts && self.blockedDelta === self.attempts);
+  const bindings = await guard.verifyNamedBindings();
+  assert.equal(bindings.ok, true);
+  assert.ok(bindings.checked > 0, 'ESM named imports must point at the guarded functions');
+  t.diagnostic(JSON.stringify({ entries: guard.patchedEntries, loadTime, selfTest: self, esm: bindings }));
 });
 
 test('guard：子进程经 --require 继承守卫（继承后同样拦截且不转发）', () => {
@@ -188,7 +220,7 @@ test('guard：子进程经 --require 继承守卫（继承后同样拦截且不�
   assert.equal(report.self.forwarded, 0, '子进程守卫同样不转发');
 });
 
-test('guard：无 --require 的原始子进程不继承守卫（降级模式可观测区分）', () => {
+test('guard：未显式 --require 的子进程仍经 NODE_OPTIONS 自动继承守卫', () => {
   const childCode = [
     "const guard = globalThis.__DSH_D_NETWORK_GUARD__;",
     "process.stdout.write(JSON.stringify({ present: !!guard, name: guard && guard.name }));",
@@ -196,7 +228,8 @@ test('guard：无 --require 的原始子进程不继承守卫（降级模式可�
   const result = runNode(['-e', childCode], ROOT);
   assert.equal(result.status, 0, result.stderr);
   const report = JSON.parse(result.stdout);
-  assert.equal(report.present, false, '未预载守卫的子进程不得意外继承');
+  assert.equal(report.present, true, '嵌套 Node 子进程必须自动继承守卫');
+  assert.equal(report.name, 'd-network-guard');
 });
 
 // ---------------------------------------------------------------------------
@@ -278,43 +311,47 @@ test('R10：把两项改成注释 → 仍双双失败（注释命中不算证据
   assert.match(result.stderr, /必须显式 validityMode=fixed/);
 });
 
+test('R10：真实字段删除后多行块注释不能冒充请求构造', () => {
+  const dir = buildStaticTree('multiline-comment');
+  const file = path.join(dir, 'tools/checkin-face-worker/worker-runtime.mjs');
+  const mutated = realWorkerSource.replace(
+    /    mode: "device",\r?\n    validityMode: "fixed",/,
+    '    /*\n    mode: "device",\n    validityMode: "fixed",\n    */',
+  );
+  assert.notEqual(mutated, realWorkerSource);
+  fs.writeFileSync(file, mutated);
+  const result = runNode([path.join(dir, 'scripts/checkin-face-static-check.mjs')], dir);
+  assert.equal(result.status, 1, 'cross-line comment literals are not executable request fields');
+  assert.match(result.stderr, /必须显式 mode=device/);
+  assert.match(result.stderr, /必须显式 validityMode=fixed/);
+});
+
+test('R10：分散假consent锚点、字符串及其他对象不能补齐真实request字段', () => {
+  const dir = buildStaticTree('decoy-anchors');
+  const file = path.join(dir, 'tools/checkin-face-worker/worker-runtime.mjs');
+  const mutated = realWorkerSource.replace(/    mode: "device",\r?\n    validityMode: "fixed",/, '')
+    + '\nconst decoyMode = { consent: true, mode: "device" };\n'
+    + 'const decoyValidity = { consent: true, validityMode: "fixed" };\n'
+    + `const decoyText = "const request = { consent: true, mode: 'device', validityMode: 'fixed' }";\n`;
+  assert.notEqual(mutated, realWorkerSource);
+  fs.writeFileSync(file, mutated);
+  const result = runNode([path.join(dir, 'scripts/checkin-face-static-check.mjs')], dir);
+  assert.equal(result.status, 1, 'facts cannot be accumulated across unrelated objects or quoted source');
+  assert.match(result.stderr, /必须显式 mode=device/);
+  assert.match(result.stderr, /必须显式 validityMode=fixed/);
+});
+
 // ---------------------------------------------------------------------------
 // C1：新文件来源清单校验器 + 精确负控（全部在自有副本上）
 // ---------------------------------------------------------------------------
 
-test('C1：共享树清单校验——清单与磁盘一致时通过；落后时失败关闭（待 lead 集成冻结后统一复算）', () => {
+test('C1：共享树冻结清单必须与磁盘一致，任何来源违规均失败关闭', () => {
   const result = runNode([SOURCE_VERIFY], ROOT);
-  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs', 'checkin-face-experience-source-hashes.json'), 'utf8'));
-  const registeredPaths = new Set(manifest.files.map((entry) => entry.path));
-  const hashStale = manifest.files.some((entry) => {
-    const absolute = path.join(ROOT, ...entry.path.split('/'));
-    if (!fs.existsSync(absolute)) return true;
-    return blobSha256(fs.readFileSync(absolute)).toLowerCase() !== String(entry.sha256).toLowerCase();
-  });
-  // 新云函数目录闭合：.js/.json/.md 全部必须入册（含 INTERFACES.md）
-  const cloudRoot = path.join(ROOT, 'cloudfunctions', 'checkinFaceTest');
-  const collect = (abs, base) => {
-    const found = [];
-    for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
-      const full = path.join(abs, entry.name);
-      if (entry.isDirectory()) found.push(...collect(full, base));
-      else if (/\.(js|json|md)$/.test(entry.name)) found.push(`cloudfunctions/checkinFaceTest/${path.relative(base, full).replaceAll('\\', '/')}`);
-    }
-    return found;
-  };
-  const coverageStale = collect(cloudRoot, cloudRoot).some((entryPath) => !registeredPaths.has(entryPath));
-  const stale = hashStale || coverageStale;
-  if (stale) {
-    // A/B/C 并行编辑期间清单由 lead 冻结后统一更新；此期间门禁必须失败关闭。
-    assert.equal(result.status, 1, '清单落后于工作树时必须失败关闭');
-    assert.match(result.stderr, /磁盘哈希|闭合缺口|本地导入闭包未登记/);
-  } else {
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /entries hash-verified/);
-    assert.match(result.stdout, /covered \d+ source files/);
-    assert.match(result.stdout, /verify-import\.mjs/);
-    assert.match(result.stdout, /无伪造/);
-  }
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /entries hash-verified/);
+  assert.match(result.stdout, /covered \d+ source files/);
+  assert.match(result.stdout, /verify-import\.mjs/);
+  assert.match(result.stdout, /无伪造/);
 });
 
 test('C1：未变更副本校验通过（负控基线）', () => {
@@ -407,4 +444,24 @@ test('C1：本地导入闭包未闭合（新文件导入未登记的体验版新
   assert.equal(result.status, 1);
   assert.match(result.stderr, /本地导入闭包未登记/);
   assert.match(result.stderr, /fake-helper\.js/);
+});
+
+
+test('C1：源码漂移但不更新清单，专用校验与正式共享树用例均必须失败', () => {
+  const dir = buildSourcesTree('frozen-source-drift');
+  const file = path.join(dir, 'cloudfunctions/checkinFaceTest/lib/workflow.js');
+  const manifestFile = path.join(dir, 'docs/checkin-face-experience-source-hashes.json');
+  const beforeManifest = fs.readFileSync(manifestFile);
+  fs.appendFileSync(file, '\n// Synthetic review source drift; frozen manifest stays unchanged.\n');
+  const verifier = runNode([path.join(dir, 'scripts/verify-checkin-face-sources.mjs')], dir);
+  assert.equal(verifier.status, 1);
+  assert.match(verifier.stderr, /cloudfunctions\/checkinFaceTest\/lib\/workflow\.js: 磁盘哈希/);
+  const formal = runNode([
+    '--test', '--test-reporter=tap', '--test-name-pattern=^C1：共享树冻结清单',
+    path.join(dir, 'tests/checkin-face-qa-gates.test.cjs'),
+  ], dir);
+  assert.equal(formal.status, 1, `the actual frozen-tree test must not count source-verifier rejection as PASS: ${formal.stdout} ${formal.stderr}`);
+  assert.match(formal.stdout, /not ok .*C1：共享树冻结清单/);
+  assert.match(formal.stdout, /# fail 1\b/);
+  assert.deepEqual(fs.readFileSync(manifestFile), beforeManifest);
 });

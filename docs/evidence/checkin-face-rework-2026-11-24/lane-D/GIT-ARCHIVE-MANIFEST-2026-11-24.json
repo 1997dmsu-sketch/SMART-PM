@@ -1,0 +1,420 @@
+{
+  "schema": "checkin-face-fixed-git-archive-manifest/v1",
+  "date": "2026-11-24",
+  "finding": "CF-R2-14",
+  "sourceCommit": "5398d1e06769dc1be7e0c81e060084d412ae0665",
+  "root": "docs/evidence/checkin-face-rework-2026-11-24/lane-D",
+  "hashBasis": "Raw bytes of git show <sourceCommit>:<root>/<file>; no CRLF, BOM or encoding normalization.",
+  "scope": "Exactly the 61 file paths recorded in the historical MANIFEST.json; the historical manifest and these two new correction documents are not entries in files.",
+  "historicalManifest": {
+    "file": "MANIFEST.json",
+    "bytes": 10652,
+    "sha256": "85a6ac50f4c4bf238bd31504efbec58371a01773e4c65484d3ec9390e00c1123",
+    "preserved": true
+  },
+  "fileCount": 61,
+  "totalBytes": 169097,
+  "comparison": {
+    "matched": 54,
+    "mismatched": 7,
+    "differences": [
+      {
+        "file": "files.sha256",
+        "historical": {
+          "bytes": 908,
+          "sha256": "35f8c23be2014542aa742cab14548d131d45eceddb8d33dc226095bd365803ba"
+        },
+        "gitArchive": {
+          "bytes": 908,
+          "sha256": "9d97dde5dce5ac2815b0056d4bf9723f568f9c3621eb539e12efa3ab3f254cce"
+        },
+        "classification": "CONTENT_DIGEST_MISMATCH_NOT_EOL_OR_BOM"
+      },
+      {
+        "file": "run-cross-module-frozen-candidate.exit-code.txt",
+        "historical": {
+          "bytes": 3,
+          "sha256": "f1b2f662800122bed0ff255693df89c4487fbdcf453d3524a42d4ec20c3d9c04"
+        },
+        "gitArchive": {
+          "bytes": 2,
+          "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+        },
+        "classification": "EXIT_CODE_CRLF_TO_LF",
+        "exitCode": 1
+      },
+      {
+        "file": "run-cross-module.exit-code.txt",
+        "historical": {
+          "bytes": 3,
+          "sha256": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354"
+        },
+        "gitArchive": {
+          "bytes": 2,
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        "classification": "EXIT_CODE_CRLF_TO_LF",
+        "exitCode": 0
+      },
+      {
+        "file": "run-qa-gates-raw.exit-code.txt",
+        "historical": {
+          "bytes": 3,
+          "sha256": "f1b2f662800122bed0ff255693df89c4487fbdcf453d3524a42d4ec20c3d9c04"
+        },
+        "gitArchive": {
+          "bytes": 2,
+          "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+        },
+        "classification": "EXIT_CODE_CRLF_TO_LF",
+        "exitCode": 1
+      },
+      {
+        "file": "run-qa-gates.exit-code.txt",
+        "historical": {
+          "bytes": 3,
+          "sha256": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354"
+        },
+        "gitArchive": {
+          "bytes": 2,
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        "classification": "EXIT_CODE_CRLF_TO_LF",
+        "exitCode": 0
+      },
+      {
+        "file": "run-source-verify.exit-code.txt",
+        "historical": {
+          "bytes": 3,
+          "sha256": "f1b2f662800122bed0ff255693df89c4487fbdcf453d3524a42d4ec20c3d9c04"
+        },
+        "gitArchive": {
+          "bytes": 2,
+          "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+        },
+        "classification": "EXIT_CODE_CRLF_TO_LF",
+        "exitCode": 1
+      },
+      {
+        "file": "run-static-check.exit-code.txt",
+        "historical": {
+          "bytes": 3,
+          "sha256": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354"
+        },
+        "gitArchive": {
+          "bytes": 2,
+          "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+        },
+        "classification": "EXIT_CODE_CRLF_TO_LF",
+        "exitCode": 0
+      }
+    ]
+  },
+  "files": [
+    {
+      "file": "files.sha256",
+      "bytes": 908,
+      "sha256": "9d97dde5dce5ac2815b0056d4bf9723f568f9c3621eb539e12efa3ab3f254cce"
+    },
+    {
+      "file": "negative-controls/c1-baseline.exit-code.txt",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "file": "negative-controls/c1-baseline.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "negative-controls/c1-baseline.stdout.txt",
+      "bytes": 11950,
+      "sha256": "931265cbc38315f28135f706152193db46f77946ab0224ccf65f06551ebc0aab"
+    },
+    {
+      "file": "negative-controls/c1-closure.exit-code.txt",
+      "bytes": 1,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "file": "negative-controls/c1-closure.stderr.txt",
+      "bytes": 229,
+      "sha256": "aa54877f93622f60df3e95eb46d370270a975b76122e2f981587c1533fec30da"
+    },
+    {
+      "file": "negative-controls/c1-closure.stdout.txt",
+      "bytes": 11575,
+      "sha256": "bb67399509e302297e2747ad939a3616b3a6453dd462fc4bb11fce249b022927"
+    },
+    {
+      "file": "negative-controls/c1-dup.exit-code.txt",
+      "bytes": 1,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "file": "negative-controls/c1-dup.stderr.txt",
+      "bytes": 187,
+      "sha256": "7801d8f0c879f0ef60b3f5fe2931b7483f48ca72456ef20b18a6d3fd27ec69d9"
+    },
+    {
+      "file": "negative-controls/c1-dup.stdout.txt",
+      "bytes": 11575,
+      "sha256": "bb67399509e302297e2747ad939a3616b3a6453dd462fc4bb11fce249b022927"
+    },
+    {
+      "file": "negative-controls/c1-fake-baseline.exit-code.txt",
+      "bytes": 1,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "file": "negative-controls/c1-fake-baseline.stderr.txt",
+      "bytes": 175,
+      "sha256": "7b59a70e8f8bc507d618f8681a77ca059f62689d39bf315f7ebd25786049925c"
+    },
+    {
+      "file": "negative-controls/c1-fake-baseline.stdout.txt",
+      "bytes": 11575,
+      "sha256": "bb67399509e302297e2747ad939a3616b3a6453dd462fc4bb11fce249b022927"
+    },
+    {
+      "file": "negative-controls/c1-hash.exit-code.txt",
+      "bytes": 1,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "file": "negative-controls/c1-hash.stderr.txt",
+      "bytes": 249,
+      "sha256": "71b0d0494fa090587c7decdea82fc66251fde760fe314417b68dad7418c86d98"
+    },
+    {
+      "file": "negative-controls/c1-hash.stdout.txt",
+      "bytes": 11575,
+      "sha256": "bb67399509e302297e2747ad939a3616b3a6453dd462fc4bb11fce249b022927"
+    },
+    {
+      "file": "negative-controls/c1-illegal.exit-code.txt",
+      "bytes": 1,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "file": "negative-controls/c1-illegal.stderr.txt",
+      "bytes": 114,
+      "sha256": "517d986bd6720fa4ffcdb238111abe3694aef7873dab6d3896fa291cc47f9dd5"
+    },
+    {
+      "file": "negative-controls/c1-illegal.stdout.txt",
+      "bytes": 11575,
+      "sha256": "bb67399509e302297e2747ad939a3616b3a6453dd462fc4bb11fce249b022927"
+    },
+    {
+      "file": "negative-controls/c1-missing.exit-code.txt",
+      "bytes": 1,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "file": "negative-controls/c1-missing.stderr.txt",
+      "bytes": 540,
+      "sha256": "716966893e68706742a37fb5b8c30b74d16cc209bc54a2e51b1b19685c794cad"
+    },
+    {
+      "file": "negative-controls/c1-missing.stdout.txt",
+      "bytes": 11575,
+      "sha256": "bb67399509e302297e2747ad939a3616b3a6453dd462fc4bb11fce249b022927"
+    },
+    {
+      "file": "negative-controls/c1-scope.exit-code.txt",
+      "bytes": 1,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "file": "negative-controls/c1-scope.stderr.txt",
+      "bytes": 816,
+      "sha256": "7d6d28a5a69a5b48e23ea1985e8c68d4cad2b178ce3dadadebefa8f8a5ff28d6"
+    },
+    {
+      "file": "negative-controls/c1-scope.stdout.txt",
+      "bytes": 11548,
+      "sha256": "d41dcefa8d45d0e6eebac538632332324259700024e66d0f20ab20d8d5c4c455"
+    },
+    {
+      "file": "negative-controls/r10-baseline.exit-code.txt",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "file": "negative-controls/r10-baseline.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "negative-controls/r10-baseline.stdout.txt",
+      "bytes": 73,
+      "sha256": "bfa3c9834861a1a7a83ee6aa59ca5e8c5a03c0a7ff9b83ff4075760385110028"
+    },
+    {
+      "file": "negative-controls/r10-commented.exit-code.txt",
+      "bytes": 1,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "file": "negative-controls/r10-commented.stderr.txt",
+      "bytes": 290,
+      "sha256": "def43e421c89c526506560dc5fa28164330dd49fdfc315a8535437eeb5f88a8f"
+    },
+    {
+      "file": "negative-controls/r10-commented.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "negative-controls/r10-neither.exit-code.txt",
+      "bytes": 1,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "file": "negative-controls/r10-neither.stderr.txt",
+      "bytes": 290,
+      "sha256": "def43e421c89c526506560dc5fa28164330dd49fdfc315a8535437eeb5f88a8f"
+    },
+    {
+      "file": "negative-controls/r10-neither.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "negative-controls/r10-no-mode.exit-code.txt",
+      "bytes": 1,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "file": "negative-controls/r10-no-mode.stderr.txt",
+      "bytes": 166,
+      "sha256": "daefa613953043699eb5285ecbf8cc36b3c9dc658e4a6b406e6fe603f9cc49f4"
+    },
+    {
+      "file": "negative-controls/r10-no-mode.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "negative-controls/r10-no-validity.exit-code.txt",
+      "bytes": 1,
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "file": "negative-controls/r10-no-validity.stderr.txt",
+      "bytes": 173,
+      "sha256": "9f4b850afc135251b4aa999eee9d6a11014631022eb83ab0b6f1d481151048ba"
+    },
+    {
+      "file": "negative-controls/r10-no-validity.stdout.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "negative-controls/results.json",
+      "bytes": 3056,
+      "sha256": "580aaec8afef94debaca77467461dbca8dd773908ffe9dea6989cc8da92a0a5b"
+    },
+    {
+      "file": "negative-controls/run-negatives.cjs",
+      "bytes": 11195,
+      "sha256": "d570b1158ebe9209205e1178b752dfcb89bf0fd2bfd4b039d47de235d3be4db8"
+    },
+    {
+      "file": "README.md",
+      "bytes": 12099,
+      "sha256": "37d26294d63bcc551afe83ce542000f348928ae12859913565e828b7a523e509"
+    },
+    {
+      "file": "run-cross-module-frozen-candidate.exit-code.txt",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "file": "run-cross-module-frozen-candidate.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "run-cross-module-frozen-candidate.stdout.txt",
+      "bytes": 25056,
+      "sha256": "2030c39716b4bcd427f0b113769715c943e4271fbe7b9c4553e82870c10167c9"
+    },
+    {
+      "file": "run-cross-module.exit-code.txt",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "file": "run-cross-module.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "run-cross-module.stdout.txt",
+      "bytes": 10146,
+      "sha256": "8439603f57cd846ce302ae667064de2f092a21a72270bc4b842737c112fd058e"
+    },
+    {
+      "file": "run-qa-gates-raw.exit-code.txt",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "file": "run-qa-gates-raw.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "run-qa-gates-raw.stdout.txt",
+      "bytes": 3540,
+      "sha256": "31c4f2cfe5161657e466f9c25b093437dc55c2767365e39b6b2f860ec0647cf5"
+    },
+    {
+      "file": "run-qa-gates.exit-code.txt",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "file": "run-qa-gates.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "run-qa-gates.stdout.txt",
+      "bytes": 1920,
+      "sha256": "314d44cdb740fdaeaefe64e3a84b3a55c08ca0399ab2386c6f5ecfbf6678daf0"
+    },
+    {
+      "file": "run-source-verify.exit-code.txt",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "file": "run-source-verify.stderr.txt",
+      "bytes": 3680,
+      "sha256": "9a103f5980d82b0764162661cf71e737607751cf793faf91abf42e9985955bde"
+    },
+    {
+      "file": "run-source-verify.stdout.txt",
+      "bytes": 1072,
+      "sha256": "fdf445895f6534e55a350fee8a1d9bb8fe849e2da7fb2f75dac93d5e71981cdf"
+    },
+    {
+      "file": "run-static-check.exit-code.txt",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "file": "run-static-check.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "run-static-check.stdout.txt",
+      "bytes": 150,
+      "sha256": "5e4c2d53cb3b5fab02de2f620b6a5301afec6002343501726b295b699e61d588"
+    }
+  ]
+}

@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadWorkerConfig, WorkerConfigError } from '../worker-runtime.mjs';
-import { AuthorizationError, authorizeTaskExecution } from '../execution-authorization.mjs';
+import { AuthorizationError, authorizeTaskExecution, checkClaimTime, verifyAuthorizedSnapshot } from '../execution-authorization.mjs';
 import { main } from '../claim-and-enroll.mjs';
 
 const TOKEN = 'SyntheticWorkerToken-0123456789abcdef';
@@ -133,6 +133,76 @@ function lastReport(calls) {
   const reports = calls.filter((entry) => entry.action === 'reportTask');
   return reports[reports.length - 1]?.payload || null;
 }
+
+test('CF-R2-06：claim 与授权回执在截止前1ms放行，等于及之后1ms拒绝', () => {
+  const claimed = makeTask({ nowMs: 1_800_000_000_000 });
+  for (const delta of [-1, 0, 1]) {
+    const at = claimed.claimExpiresAt + delta;
+    const snapshot = { ...authorizedSnapshot(claimed), authorizedAt: at };
+    const verify = () => verifyAuthorizedSnapshot({ claimed, snapshot, authorizedAt: at, workerId: baseConfig.workerId });
+    if (delta < 0) {
+      assert.equal(checkClaimTime(claimed, at), claimed.claimExpiresAt);
+      assert.equal(verify(), snapshot);
+    } else {
+      assert.throws(() => checkClaimTime(claimed, at), (error) => error instanceof AuthorizationError && error.code === 'BEGIN_AUTH_EXPIRED');
+      assert.throws(verify, (error) => error instanceof AuthorizationError && error.code === 'BEGIN_SNAPSHOT_MISMATCH');
+    }
+  }
+});
+
+test('CF-R2-08：begin已推进后本地恰好到期，仍用新revision上报失败且设备零执行', async () => {
+  const cfg = await config();
+  const task = makeTask({ nowMs: 1_800_000_000_000 });
+  const actions = [];
+  let beginCommitted = false;
+  let cloudRevision = task.revision;
+  let executorCalls = 0;
+  let report;
+  const times = [];
+  const photo = Buffer.from(JPEG);
+  const cloud = {
+    callFunction: async (action, payload) => {
+      actions.push(action);
+      if (action === 'claimTask') return { task };
+      if (action === 'beginTaskExecution') {
+        assert.equal(payload.revision, task.revision);
+        cloudRevision += 1;
+        beginCommitted = true;
+        return { task: authorizedSnapshot(task), authorizedAt: task.claimExpiresAt - 5000 };
+      }
+      if (action === 'reportTask') {
+        report = payload;
+        if (payload.revision !== cloudRevision) throw Object.assign(new Error('synthetic revision conflict'), { code: 'REVISION_CONFLICT' });
+        return { ok: true };
+      }
+      throw new Error('unexpected synthetic action');
+    },
+    downloadFile: async () => photo,
+  };
+  const original = process.stderr.write;
+  process.stderr.write = () => true;
+  let code;
+  try {
+    code = await main({
+      argv: ['--once'], env: {}, loadConfig: async () => cfg, createClient: async () => cloud,
+      platform: 'win32', runEnrollmentImpl: async () => { executorCalls++; throw new Error('must not execute'); },
+      nowMs: () => {
+        const value = task.claimExpiresAt - (beginCommitted ? 0 : 1000);
+        times.push(value);
+        return value;
+      },
+    });
+  } finally { process.stderr.write = original; }
+  assert.equal(code, 5, '失败报告应被接受，不是因陈旧revision变为上报失败3');
+  assert.deepEqual(actions, ['claimTask', 'beginTaskExecution', 'reportTask'], '不重发begin或报告');
+  assert.deepEqual(times, [task.claimExpiresAt - 1000, task.claimExpiresAt - 1000, task.claimExpiresAt]);
+  assert.equal(cloudRevision, 3);
+  assert.equal(report.revision, cloudRevision, '必须保留已获准的新revision');
+  assert.equal(report.exitCode, 5);
+  assert.equal(report.output.error.code, 'BEGIN_AUTH_EXPIRED');
+  assert.equal(executorCalls, 0);
+  assert.ok(photo.every((value) => value === 0), '过期失败同样清理内存照片');
+});
 
 test('R05：任务缺/空/不同 deviceKey → 0 次执行器、0 次 begin、上报 exit 2（invalid-input）', async () => {
   const cfg = await config();

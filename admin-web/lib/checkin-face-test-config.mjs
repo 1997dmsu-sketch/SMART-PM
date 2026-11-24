@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 // Reuse the cloud function's deterministic ids and date rules so the admin
 // configuration and the server gates can never disagree.
@@ -74,6 +74,29 @@ function isNotFound(error) {
  * it never touches device connection material or existing import functions.
  */
 export class AdminCheckinFaceTestConfig {
+  #transaction = false;
+  #allowlistPreflight = null;
+
+  // Each concurrent call gets its own instance bound to the SDK transaction.
+  // A caller cannot enable this private mode with constructor options.
+  async #withTransaction(work, allowlistPreflight = null) {
+    if (typeof this.db.runTransaction !== "function") {
+      fail("TRANSACTION_UNAVAILABLE", "配置写入需要真实数据库事务");
+    }
+    return this.db.runTransaction(async (transaction) => {
+      if (!transaction || typeof transaction.collection !== "function") {
+        fail("INVALID_TRANSACTION", "数据库事务上下文无效");
+      }
+      const scoped = new AdminCheckinFaceTestConfig(null, {
+        database: transaction, environment: this.environment,
+        now: this.now, operator: this.operator,
+      });
+      scoped.#transaction = true;
+      scoped.#allowlistPreflight = allowlistPreflight;
+      return work(scoped);
+    });
+  }
+
   constructor(app, options = {}) {
     const database = options.database || (app && typeof app.database === "function" ? app.database() : app);
     if (!database || typeof database.collection !== "function") fail("INVALID_DATABASE", "数据库未正确注入");
@@ -106,7 +129,7 @@ export class AdminCheckinFaceTestConfig {
 
   async #audit(action, targetId, before, after, reason, revision, operator = this.operator) {
     const data = {
-      _id: `admin-audit-${this.environment}-${action}-${revision}-${Date.now()}`,
+      _id: `admin-audit-${this.environment}-${randomUUID()}`,
       action,
       operator: operator || this.operator,
       targetId,
@@ -141,11 +164,10 @@ export class AdminCheckinFaceTestConfig {
   }
 
   /** Bump the config revision so queued tasks become INVALIDATED on changes. */
-  async #bumpConfigRevision(action, reason) {
+  async #bumpConfigRevision() {
     const config = await this.#config();
     const next = { ...config, revision: (Number(config.revision) || 0) + 1 };
     await this.#set(COLLECTIONS.CONFIG, next._id, next);
-    await this.#audit(action, next._id, config, { revision: next.revision }, reason, next.revision);
     return next.revision;
   }
 
@@ -194,6 +216,7 @@ export class AdminCheckinFaceTestConfig {
     const operator = typeof options?.operator === "string" && options.operator.trim()
       ? options.operator.trim() : this.operator;
     const reason = typeof options?.reason === "string" ? options.reason.slice(0, 500) : "";
+    if (!this.#transaction) return this.#withTransaction((scoped) => scoped.setWorkerToken(plainToken, options));
     const digest = createHash("sha256").update(plainToken, "utf8").digest("hex");
     const current = await this.#config();
     const next = {
@@ -229,6 +252,7 @@ export class AdminCheckinFaceTestConfig {
     const operator = typeof options?.operator === "string" && options.operator.trim()
       ? options.operator.trim() : this.operator;
     const reason = typeof options?.reason === "string" ? options.reason.slice(0, 500) : "";
+    if (!this.#transaction) return this.#withTransaction((scoped) => scoped.setApplicationVersion(version, options));
     const current = await this.#config();
     // Keep an already configured lease pinned to the current program version.
     // Otherwise a later version change would leave lease.applicationVersion
@@ -271,6 +295,7 @@ export class AdminCheckinFaceTestConfig {
     const operator = typeof options?.operator === "string" && options.operator.trim()
       ? options.operator.trim() : this.operator;
     const reason = typeof options?.reason === "string" ? options.reason.slice(0, 500) : "";
+    if (!this.#transaction) return this.#withTransaction((scoped) => scoped.setDispatchEnabled(enabled, options));
     const current = await this.#config();
     const next = {
       ...current,
@@ -308,6 +333,7 @@ export class AdminCheckinFaceTestConfig {
     const operator = typeof options?.operator === "string" && options.operator.trim()
       ? options.operator.trim() : this.operator;
     const reason = typeof options?.reason === "string" ? options.reason.slice(0, 500) : "";
+    if (!this.#transaction) return this.#withTransaction((scoped) => scoped.setStorageNamespace(namespace, options));
     const current = await this.#config();
     const next = {
       ...current,
@@ -331,6 +357,7 @@ export class AdminCheckinFaceTestConfig {
    */
   async setSwitch(enabled, reason = "", options = {}) {
     if (typeof enabled !== "boolean") fail("INVALID_INPUT", "开关必须是布尔值");
+    if (!this.#transaction) return this.#withTransaction((scoped) => scoped.setSwitch(enabled, reason, options));
     const current = await this.#config();
     if (enabled) {
       if (typeof current.applicationVersion !== "string" || !current.applicationVersion.trim()) {
@@ -392,10 +419,12 @@ export class AdminCheckinFaceTestConfig {
       value.accessPlanFingerprint = input.accessPlanFingerprint.toLowerCase();
     }
     const id = ids.roomBindingId(this.environment);
-    const query = this.db.collection(COLLECTIONS.ROOM).where({ environment: this.environment, displayNo: "102" });
-    if (typeof query.count === "function") {
+    if (!this.#transaction) {
+      const query = this.db.collection(COLLECTIONS.ROOM).where({ environment: this.environment, displayNo: "102" });
+      if (typeof query.count !== "function") fail("ROOM_UNIQUENESS_UNVERIFIED", "无法核验 102 唯一性");
       const result = await query.count();
       if (Number(result?.total || 0) > 1) fail("ROOM_NOT_UNIQUE", "102 已有多条绑定，未选择任何一条");
+      return this.#withTransaction((scoped) => scoped.upsertRoomBinding(input, options));
     }
     const before = await this.#get(COLLECTIONS.ROOM, id);
     const next = await this.#set(COLLECTIONS.ROOM, id, { ...value, revision: (Number(before?.revision) || 0) + 1 });
@@ -410,6 +439,7 @@ export class AdminCheckinFaceTestConfig {
     const window = dates.buildLeaseWindow(input.startDate, input.endDate);
     const status = input.status === undefined ? "active" : input.status;
     if (!["active", "cancelled"].includes(status)) fail("INVALID_LEASE_STATUS", "租期状态无效");
+    if (!this.#transaction) return this.#withTransaction((scoped) => scoped.upsertLease(input, options));
     const room = await this.#get(COLLECTIONS.ROOM, ids.roomBindingId(this.environment));
     if (!room) fail("ROOM_UNCONFIGURED", "请先绑定 102");
     const config = await this.#config();
@@ -450,12 +480,33 @@ export class AdminCheckinFaceTestConfig {
     if (seen.size !== entries.length) fail("DUPLICATE_OPENID", "名单不能包含重复账号");
 
     const collection = COLLECTIONS.ALLOWLIST;
-    const previous = typeof this.db.collection(collection).where === "function"
-      ? (await this.db.collection(collection).where({ environment: this.environment }).get()).data || []
-      : [];
-    for (const row of previous) {
-      if (!seen.has(row.openid)) {
-        await this.#set(collection, row._id, { ...row, status: "inactive", revision: (Number(row.revision) || 0) + 1 });
+    if (!this.#transaction) {
+      const observed = await this.#config();
+      const query = this.db.collection(collection).where({ environment: this.environment });
+      if (typeof query.get !== "function") fail("ALLOWLIST_INDEX_UNVERIFIED", "无法核验名单索引");
+      const result = await query.get();
+      if (!Array.isArray(result?.data)) fail("ALLOWLIST_INDEX_UNVERIFIED", "无法核验名单索引");
+      const preflight = { revision: observed.revision, empty: result.data.length === 0 };
+      return this.#withTransaction((scoped) => scoped.setAllowlist(openids, options), preflight);
+    }
+    const config = await this.#config();
+    let previousOpenids = config.allowlistOpenids;
+    if (!Array.isArray(previousOpenids)) {
+      if (!this.#allowlistPreflight?.empty || this.#allowlistPreflight.revision !== config.revision) {
+        fail("ALLOWLIST_INDEX_UNVERIFIED", "旧名单缺少可信索引，需另案核验，不自动回填");
+      }
+      previousOpenids = [];
+    }
+    if (previousOpenids.some((openid) => typeof openid !== "string" || !/^[A-Za-z0-9_-]{6,128}$/.test(openid))
+      || new Set(previousOpenids).size !== previousOpenids.length) {
+      fail("ALLOWLIST_INDEX_UNVERIFIED", "名单索引无效，未写入");
+    }
+    for (const openid of previousOpenids) {
+      if (!seen.has(openid)) {
+        const id = ids.allowlistId(this.environment, openid);
+        const row = await this.#get(collection, id);
+        if (!row || row.openid !== openid) fail("ALLOWLIST_INDEX_UNVERIFIED", "名单索引与记录不一致");
+        await this.#set(collection, id, { ...row, status: "inactive", revision: (Number(row.revision) || 0) + 1 });
       }
     }
     for (const entry of entries) {
@@ -463,7 +514,10 @@ export class AdminCheckinFaceTestConfig {
       const before = await this.#get(collection, id);
       await this.#set(collection, id, { ...entry, _id: id, revision: (Number(before?.revision) || 0) + 1 });
     }
-    const revision = await this.#bumpConfigRevision("setAllowlist", options.reason || "更新测试账号名单");
+    const revision = (Number(config.revision) || 0) + 1;
+    await this.#set(COLLECTIONS.CONFIG, config._id, {
+      ...config, allowlistOpenids: entries.map((entry) => entry.openid), revision,
+    });
     await this.#audit("setAllowlist", ids.configId(this.environment), null, { count: entries.length }, options.reason || "", revision);
     return { count: entries.length, revision };
   }

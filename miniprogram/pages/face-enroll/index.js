@@ -72,6 +72,17 @@ function extractFilePath(response) {
 // 任务不存在/尚未创建的云端码；其余错误按审核渠道码分类走既有审核渠道或明确错误。
 const TASK_NOT_FOUND_CODES = ['TASK_NOT_FOUND', 'NO_TASK'];
 
+function hasCurrentEligibility(gate) {
+  return !!gate && gate.enabled === true && gate.configured === true
+    && gate.accountEligible === true && gate.storageNamespaceConfigured !== false;
+}
+
+function unavailableReviewReason(gate) {
+  return gate && gate.accountEligible === false
+    ? '当前账号不在测试名单，请走既有审核流程。'
+    : '测试自动通过当前不可用，请走既有审核流程。';
+}
+
 Page({
   data: {
     statusBarHeight: 20,
@@ -146,6 +157,24 @@ Page({
       const response = await api.getFaceTask(this._applicationId);
       const result = response && typeof response === 'object' ? response : {};
       const task = result.task && typeof result.task === 'object' ? result.task : result;
+      if (this._destroyed) return;
+      // 查询旧申请/任务不等于重新取得自动审批资格。审核态保持锁存，只有当前申请
+      // 的服务端查询通过，并重新确认当前配置/名单资格，才可恢复上传入口。
+      if (this.data.reviewRequired) {
+        if (task.uploadEligible !== true) {
+          this.toReviewRequired('当前申请的登记资格尚未确认，请重新查询或走既有审核流程。');
+          this.applyTask(task);
+          return;
+        }
+        const gate = await api.getCheckinFaceConfig();
+        if (this._destroyed) return;
+        if (!hasCurrentEligibility(gate)) {
+          this.toReviewRequired(unavailableReviewReason(gate));
+          this.applyTask(task);
+          return;
+        }
+        this.setData({ reviewRequired: false, reviewReason: '' });
+      }
       if (!this._destroyed) this.applyTask(task);
     } catch (err) {
       if (this._destroyed) return;
@@ -174,18 +203,22 @@ Page({
     const projectBuilding = [projectName, buildingName].filter(Boolean).join(' / ') || '—';
     const leaseText = lease.startDate && lease.endDate ? `${lease.startDate} 至 ${lease.endDate}` : '待配置';
     const view = resolveTaskView(safe);
-    const showUpload = view.key === 'no-task';
+    // 缺字段不兼容放行：该标记只能由服务端当前申请资格复核产生，旧 cloudPath
+    // 或可查询的历史记录不能替代。终态仍可显示事实，但不产生上传资格。
+    if (view.key === 'no-task' && safe.uploadEligible !== true && !this.data.reviewRequired) {
+      this.toReviewRequired('当前申请的登记资格尚未确认，请重新查询或走既有审核流程。');
+    }
+    const reviewRequired = this.data.reviewRequired === true;
+    const showUpload = view.key === 'no-task' && safe.uploadEligible === true && !reviewRequired;
     this.setData({
       task: Object.assign({ room: {}, lease: {} }, safe, { room, lease }),
       taskView: view,
       projectBuilding,
       leaseText,
-      cloudPathReady: Boolean(safe.cloudPath),
+      cloudPathReady: Boolean(safe.cloudPath) && !reviewRequired,
       showUpload,
-      loading: false,
-      // 服务端返回有效任务即代表申请仍可查询；审核态随最新结果复位，不会永久锁死。
-      reviewRequired: false,
-      reviewReason: ''
+      // 这里只更新显示数据；不得以旧 NOT_FOUND/cloudPath 清除审核态。
+      loading: false
     }, () => this.refreshCanUpload());
   },
 
@@ -229,13 +262,8 @@ Page({
       // 新下发字段；setSwitch(true) 前置要求命名空间已配置，此处显式失败关闭
       // （仅 false 阻断，旧服务端缺字段不误伤）。
       const gate = await api.getCheckinFaceConfig();
-      const eligible = !!gate && gate.enabled === true && gate.configured === true
-        && gate.accountEligible === true && gate.storageNamespaceConfigured !== false;
-      if (!eligible) {
-        const reason = !!gate && gate.accountEligible === false
-          ? '当前账号不在测试名单，请走既有审核流程。'
-          : '测试自动通过当前不可用，请走既有审核流程。';
-        if (!this._destroyed) this.toReviewRequired(reason);
+      if (!hasCurrentEligibility(gate)) {
+        if (!this._destroyed) this.toReviewRequired(unavailableReviewReason(gate));
         return;
       }
       const picked = await choosePhoto();

@@ -33,6 +33,8 @@ Page({
   onLoad() {
     this.setData(getNavigationLayout());
     this._destroyed = false;
+    // 重入锁用独立实例标志，不复用渲染用的 data.loading。
+    this._configLoading = false;
     this.loadConfig();
   },
 
@@ -49,7 +51,8 @@ Page({
   },
 
   async loadConfig() {
-    if (this.data.loading) return;
+    if (this._configLoading) return;
+    this._configLoading = true;
     this.setData({ loading: true, error: '' });
     try {
       const response = await api.getCheckinFaceConfig();
@@ -77,6 +80,8 @@ Page({
           loading: false
         });
       }
+    } finally {
+      this._configLoading = false;
     }
   },
 

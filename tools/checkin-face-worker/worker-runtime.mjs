@@ -12,8 +12,9 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { resolve } from "node:path";
+import { createRequire } from "node:module";
+import { join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { runFaceEnrollment } from "../../admin-web/lib/face-enrollment-command.mjs";
 
 const DEFAULT_CONFIG_FILE = fileURLToPath(new URL("./checkin-face-worker.local.json", import.meta.url));
@@ -21,6 +22,9 @@ const DEFAULT_TOKEN_ENV = "CHECKIN_FACE_WORKER_TOKEN";
 const DEFAULT_SECRET_ID_ENV = "TENCENTCLOUD_SECRETID";
 const DEFAULT_SECRET_KEY_ENV = "TENCENTCLOUD_SECRETKEY";
 const DEFAULT_FUNCTION_NAME = "checkinFaceTest";
+/** R07：SDK 默认解析边界 = worker 自有 node_modules（本目录），不依赖偶然根 node_modules / NODE_PATH / admin-web 下层依赖。 */
+const SDK_MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
+const ALLOWED_ACTIONS = Object.freeze(["claimTask", "reportTask", "beginTaskExecution"]);
 const DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const EMPLOYEE_RE = /^[A-Za-z0-9]{1,32}$/;
@@ -146,6 +150,14 @@ export async function loadWorkerConfig({
   const cloudEnv = typeof file.cloudEnv === "string" ? file.cloudEnv.trim() : "";
   const workerId = typeof file.workerId === "string" && file.workerId.trim() ? file.workerId.trim() : "";
   const deviceKey = typeof file.deviceKey === "string" && file.deviceKey.trim() ? file.deviceKey.trim() : "";
+  let sdkModulePath = "";
+  if (typeof file.sdkModulePath === "string" && file.sdkModulePath.trim()) {
+    try {
+      sdkModulePath = resolve(file.sdkModulePath.trim());
+    } catch {
+      throw new WorkerConfigError("SDK_MODULE_PATH_INVALID", "sdkModulePath 必须是本机普通目录路径");
+    }
+  }
   const functionName = typeof file.functionName === "string" && file.functionName.trim()
     ? file.functionName.trim()
     : DEFAULT_FUNCTION_NAME;
@@ -167,6 +179,12 @@ export async function loadWorkerConfig({
     throw new WorkerConfigError("WORKER_TOKEN_INVALID", "worker token 格式无效");
   }
   if (!cloudEnv) throw new WorkerConfigError("CLOUD_ENV_MISSING", "本地配置缺少 cloudEnv");
+  // R06 对齐清单 §2.1：workerId 格式预检（云端 INVALID_WORKER_ID 语义的本地失败关闭）。
+  if (workerId && !/^[A-Za-z0-9_-]{1,64}$/.test(workerId)) {
+    throw new WorkerConfigError("WORKER_ID_INVALID", "本地配置 workerId 格式无效（仅限字母数字、下划线、连字符，1–64 位）");
+  }
+  // R05：本地 deviceKey 必须明确、非空；缺失在配置加载即失败关闭（退出 1），不进领取/执行。
+  if (!deviceKey) throw new WorkerConfigError("DEVICE_KEY_MISSING", "本地配置缺少非空 deviceKey；设备绑定校验要求本地与任务设备标识精确一致");
 
   const name = typeof file.name === "string" ? file.name.trim() : "";
   const roomNote = typeof file.roomNote === "string" ? file.roomNote.trim() : "102";
@@ -181,6 +199,7 @@ export async function loadWorkerConfig({
     workerId,
     deviceKey,
     functionName,
+    sdkModulePath,
     workerTokenEnv,
     cloudSecretIdEnv: secretIdEnv,
     cloudSecretKeyEnv: secretKeyEnv,
@@ -294,13 +313,7 @@ export function safeLog(level, message, fields = {}, config = null) {
   process.stderr.write(`${line}\n`);
 }
 
-/**
- * 构造登记命令入参。全部关键字段显式赋值；任何缺项立即抛错，不回落到命令默认的
- * simulation / 长期模式 / doorNo=1 / 自造 employeeNo。
- *
- * 注意：返回的 request 含设备秘密，只能直接交给 runFaceEnrollment，禁止写日志或上报。
- */
-export function buildDeviceRequest(task, config, photoPath) {
+function buildDeviceRequestCore(task, config) {
   if (!isObject(task)) throw new WorkerInputError("TASK_INVALID", "云任务格式无效");
 
   // 任务若试图改写模式/有效期语义，一律拒绝（不接受降级为模拟或长期模式）。
@@ -340,14 +353,19 @@ export function buildDeviceRequest(task, config, photoPath) {
   if (planTemplateNo && !/^[1-9]\d{0,9}$/.test(planTemplateNo)) {
     throw new WorkerInputError("DEVICE_CONFIG_INVALID", "全天计划模板号格式无效");
   }
+  // developmentTls 只是 TLS 校验模式，不绕过任何材料核验：型号/证书/门号/租期/全天计划校验独立保留。
   const developmentTls = device.developmentTls === true;
 
   const name = nonEmptyText(task.name || config?.name, "登记姓名", 128);
   const room = nonEmptyText(task.roomNote || task.room || config?.roomNote, "房号备注", 128);
-  const photo = localFilePath(photoPath, "本机临时照片路径");
-  const taskDeviceKey = task.deviceKey === undefined ? "" : taskText(task.deviceKey, "deviceKey");
+
+  // R05：任务与本地 deviceKey 都必须明确、非空且精确一致；缺任一或不同立即拒绝（不进入执行器）。
+  const taskDeviceKey = requireField(task, "deviceKey", taskText, "deviceKey");
   const configDeviceKey = typeof config?.deviceKey === "string" ? config.deviceKey.trim() : "";
-  if (taskDeviceKey && configDeviceKey && taskDeviceKey !== configDeviceKey) {
+  if (!configDeviceKey) {
+    throw new WorkerInputError("DEVICE_KEY_MISSING", "本地配置缺少 deviceKey，拒绝执行");
+  }
+  if (taskDeviceKey !== configDeviceKey) {
     throw new WorkerInputError("DEVICE_KEY_CONFLICT", "任务设备标识与本地配置不一致，拒绝执行");
   }
 
@@ -360,7 +378,6 @@ export function buildDeviceRequest(task, config, photoPath) {
     doorNo,
     validFrom,
     validTo,
-    photoPath: photo,
     name,
     room,
     origin: parsedOrigin.href,
@@ -371,7 +388,66 @@ export function buildDeviceRequest(task, config, photoPath) {
     expectedModel,
   };
   if (planTemplateNo) request.planTemplateNo = planTemplateNo;
+  return request;
+}
+
+/**
+ * 构造登记命令入参（落盘照片路径版本，保留旧调用方兼容）。
+ * 全部关键字段显式赋值；任何缺项立即抛错，不回落到命令默认的
+ * simulation / 长期模式 / doorNo=1 / 自造 employeeNo。
+ *
+ * 注意：返回的 request 含设备秘密，只能直接交给 runFaceEnrollment，禁止写日志或上报。
+ */
+export function buildDeviceRequest(task, config, photoPath) {
+  const request = buildDeviceRequestCore(task, config);
+  request.photoPath = localFilePath(photoPath, "本机临时照片路径");
   return Object.freeze(request);
+}
+
+/** R08：内存照片版本——不含 photoPath，照片由适配层以 Buffer 直接驱动业务服务，不在本机落盘。 */
+export function buildInMemoryDeviceRequest(task, config) {
+  return Object.freeze(buildDeviceRequestCore(task, config));
+}
+
+/** R05：领取后、任何下载/执行前，任务与本地 deviceKey 必须非空且精确一致。 */
+export function assertDeviceKeyMatch(task, config) {
+  if (!isObject(task)) throw new WorkerInputError("TASK_INVALID", "云任务格式无效");
+  const taskKey = requireField(task, "deviceKey", taskText, "deviceKey");
+  const configKey = typeof config?.deviceKey === "string" ? config.deviceKey.trim() : "";
+  if (!configKey) throw new WorkerInputError("DEVICE_KEY_MISSING", "本地配置缺少 deviceKey，拒绝执行");
+  if (taskKey !== configKey) throw new WorkerInputError("DEVICE_KEY_CONFLICT", "任务设备标识与本地配置不一致，拒绝执行");
+  return taskKey;
+}
+
+/** R06：领取任务身份字段校验，在下载前失败关闭（避免为坏任务下载材料）。 */
+export function validateClaimedTask(task) {
+  if (!isObject(task)) throw new WorkerInputError("TASK_INVALID", "claimTask 返回的任务格式无效");
+  requireField(task, "taskId", taskId, "taskId");
+  requireField(task, "claimId", taskId, "claimId");
+  requireField(task, "revision", taskRevision, "revision");
+  const claimExpiresAt = requireField(task, "claimExpiresAt", (v, label) => {
+    if (!Number.isSafeInteger(v) || v <= 0) throw new WorkerInputError("TASK_FIELD_INVALID", `任务字段 ${label} 必须是正整数毫秒`);
+    return v;
+  }, "claimExpiresAt");
+  requireField(task, "fileId", (v, label) => {
+    const text = taskText(v, label);
+    if (!text.startsWith("cloud://")) throw new WorkerInputError("FILE_ID_INVALID", `任务字段 ${label} 不属于云存储`);
+    return text;
+  }, "fileId");
+  requireField(task, "employeeNo", (v) => {
+    const text = taskText(v, "employeeNo");
+    if (!EMPLOYEE_RE.test(text)) throw new WorkerInputError("TASK_FIELD_INVALID", "任务 employeeNo 格式无效");
+    return text;
+  }, "employeeNo");
+  requireField(task, "doorNo", taskDoorNo, "doorNo");
+  requireField(task, "validFrom", taskDate, "validFrom");
+  requireField(task, "validTo", taskDate, "validTo");
+  requireField(task, "accessPlanFingerprint", (v) => {
+    const text = taskText(v, "accessPlanFingerprint");
+    if (!/^[a-f0-9]{64}$/i.test(text)) throw new WorkerInputError("TASK_FIELD_INVALID", "任务 accessPlanFingerprint 必须是 64 位十六进制指纹");
+    return text;
+  }, "accessPlanFingerprint");
+  return claimExpiresAt;
 }
 
 /** 生成上报载荷；只从任务取身份字段，不接收新 employeeNo / 新日期。 */
@@ -388,6 +464,28 @@ export function buildReportPayload(task, result, config) {
     revision: requireField(task, "revision", taskRevision, "revision"),
     exitCode,
     output: result.output,
+  };
+}
+
+/**
+ * R09：清理结果进入整体终态。清理未确认（cleanupOk === false）时保留已发生/未知的设备事实
+ * （output 中的 device/enrollment 原样保留），但整体记为 stopped（exitCode 5），绝不误报清理成功，
+ * 也不因清理失败重发设备操作。
+ */
+export function applyCleanupResult(result, cleanupOk) {
+  if (cleanupOk !== false) return result;
+  const output = isObject(result?.output) ? { ...result.output } : {};
+  return {
+    exitCode: 5,
+    output: {
+      ...output,
+      outcome: "stopped",
+      error: {
+        code: "CLEANUP_FAILED",
+        message: "本地材料清理未确认完成；已保留设备事实，请人工核查，不自动重发。",
+        requiresInspection: true,
+      },
+    },
   };
 }
 
@@ -450,10 +548,10 @@ export function sanitizeEnrollmentOutput(output, config = null, photoPath = "") 
  * 调用既有登记命令，并把任何未知结果收敛为 exitCode 5 / stopped / 需人工核查。
  * 不做业务重试、不换 employeeNo、不删除设备残留。
  */
-export async function runEnrollment(request, { run = runFaceEnrollment, commandDeps = {}, config = null, photoPath = "" } = {}) {
+export async function runEnrollment(request, { run = runFaceEnrollment, commandDeps = {}, config = null, photoPath = "", photoBuffer = null } = {}) {
   let raw;
   try {
-    raw = await run(request, commandDeps);
+    raw = await run(request, { config, photoPath, photoBuffer, commandDeps });
   } catch (error) {
     return {
       exitCode: 5,
@@ -492,12 +590,38 @@ export async function runEnrollment(request, { run = runFaceEnrollment, commandD
 }
 
 /**
+ * R07：加载 @cloudbase/node-sdk。默认解析边界严格限定为 worker 自有 node_modules
+ * （tools/checkin-face-worker/node_modules），可经 sdkModulePath 显式指定其他本机边界；
+ * 不向上探测偶然的根 node_modules、不使用 NODE_PATH。
+ * 解析失败抛出带安装指引的 WorkerConfigError（失败关闭，未发起任何任务调用）。
+ */
+async function loadCloudbaseSdkModule(explicitModulePath = "") {
+  const base = typeof explicitModulePath === "string" && explicitModulePath.trim()
+    ? resolve(explicitModulePath.trim())
+    : SDK_MODULE_DIR;
+  const requireFrom = createRequire(join(base, "noop.js"));
+  const candidate = join(base, "node_modules", "@cloudbase", "node-sdk");
+  let resolvedPath;
+  try {
+    resolvedPath = requireFrom.resolve(candidate);
+  } catch {
+    throw new WorkerConfigError(
+      "CLOUD_SDK_RESOLVE_FAILED",
+      `@cloudbase/node-sdk 未在 worker 自有依赖目录 ${join(base, "node_modules")} 解析成功；请在 tools/checkin-face-worker 目录执行 npm install（安装说明见该目录 README），不要依赖项目根或 admin-web 的偶然 node_modules`,
+    );
+  }
+  const loaded = await import(pathToFileURL(resolvedPath).href);
+  return (loaded && (loaded.default || loaded)) || null;
+}
+
+/**
  * 创建只做出站调用的云客户端。callFunction 的 payload 含 worker token，任何路径都不得记录它。
  */
 export async function createCloudClient({
   config,
   env = process.env,
   cloudbaseFactory = null,
+  sdkModulePath = null,
   logger = () => {},
 } = {}) {
   if (!config?.cloudEnv) throw new WorkerConfigError("CLOUD_ENV_MISSING", "缺少云环境配置");
@@ -508,10 +632,11 @@ export async function createCloudClient({
   try {
     if (typeof cloudbaseFactory === "function") app = await cloudbaseFactory(initArgs);
     else {
-      const module = await import("@cloudbase/node-sdk");
+      const module = await loadCloudbaseSdkModule(sdkModulePath || config?.sdkModulePath);
       app = (module.default || module).init(initArgs);
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof WorkerConfigError) throw error;
     throw new WorkerConfigError("CLOUD_INIT_FAILED", "云客户端初始化失败，未发起任何任务调用");
   }
   if (!app || typeof app.callFunction !== "function" || typeof app.downloadFile !== "function") {
@@ -528,8 +653,8 @@ export async function createCloudClient({
 
   return {
     async callFunction(action, payload) {
-      if (!["claimTask", "reportTask"].includes(action)) {
-        throw new WorkerConfigError("CLOUD_ACTION_INVALID", "worker 只允许 claimTask/reportTask");
+      if (!ALLOWED_ACTIONS.includes(action)) {
+        throw new WorkerConfigError("CLOUD_ACTION_INVALID", "worker 只允许 claimTask/reportTask/beginTaskExecution");
       }
       let response;
       try {
@@ -541,7 +666,15 @@ export async function createCloudClient({
         throw callError(action, null);
       }
       const result = response?.result ?? response;
-      if (!isObject(result) || result.code !== 0) throw callError(action, result);
+      if (!isObject(result) || result.code !== 0) {
+        // 附加云端闭式码，供执行前复核（R06）分类拒绝原因；网络失败不携带该码（回执未知）。
+        const failureError = callError(action, result);
+        if (isObject(result) && (typeof result.code === "number" || typeof result.code === "string")) {
+          failureError.cloudCode = result.code;
+        }
+        if (isObject(result) && typeof result.msg === "string") failureError.cloudMsg = result.msg.slice(0, 200);
+        throw failureError;
+      }
       return isObject(result.data) ? result.data : {};
     },
     async downloadFile(fileId) {

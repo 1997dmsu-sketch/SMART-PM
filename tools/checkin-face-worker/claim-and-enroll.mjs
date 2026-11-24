@@ -1,23 +1,32 @@
 /**
- * 本地受控 worker 主流程（B04）。
+ * 本地受控 worker 主流程（B04，R05–R09 退修版）。
  *
- *   claimTask（出站 HTTPS） → 受控下载照片 → 本机受限临时 JPEG（用后清零删除）
- *   → runFaceEnrollment（显式 device + fixed） → reportTask（出站 HTTPS）。
+ *   claimTask（出站 HTTPS）
+ *   → R05 deviceKey 强绑定校验（任务与本地均非空且精确一致，缺任一/不同零执行）
+ *   → R06 领取字段与 claim 时效预检（早于任何下载）
+ *   → 受控下载照片（进程内存 Buffer，不落盘）
+ *   → R06 下载/准备后时效再检（覆盖“下载中到期”）
+ *   → beginTaskExecution 权威复核（严格绑定 task/claim/revision/worker 与返回快照）
+ *   → 执行前最后一次时效检查
+ *   → 内存照片直接驱动登记适配层（显式 device + fixed；R08）
+ *   → R09 清理结果纳入真实终态（失败不误报成功、不重发设备）
+ *   → reportTask（出站 HTTPS，使用推进后 revision）。
  *
  * 硬边界：
  *   - 不监听任何端口、不反代 admin loopback、不在小程序跑 Node HTTPS adapter；
  *   - 不自动重试失败任务、不换 employeeNo、不删除设备残留；
- *   - 全程脱敏日志；设备秘密只在 *.local.json / 环境变量与进程内存中。
+ *   - 复核失败/过期/撤权/不一致/云不可用/回执未知均零设备执行，不自动重领/续期/重试开始；
+ *   - 照片全程内存传递，不在本机落盘；全程脱敏日志；设备秘密只在 *.local.json / 环境变量与进程内存中。
  */
 
-import { mkdir, open as openFile, readFile, unlink } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
-import { join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   WorkerConfigError,
   WorkerInputError,
-  buildDeviceRequest,
+  applyCleanupResult,
+  assertDeviceKeyMatch,
+  buildInMemoryDeviceRequest,
   buildReportPayload,
   createCloudClient,
   loadWorkerConfig,
@@ -25,10 +34,11 @@ import {
   safeConfigView,
   safeLog,
   sanitizeEnrollmentOutput,
+  validateClaimedTask,
 } from "./worker-runtime.mjs";
+import { AuthorizationError, authorizeTaskExecution, checkClaimTime } from "./execution-authorization.mjs";
+import { runInMemoryEnrollment } from "./enrollment-adapter.mjs";
 
-const MODULE_DIR = fileURLToPath(new URL(".", import.meta.url));
-const DEFAULT_DATA_DIR = join(MODULE_DIR, ".data");
 const DEFAULT_INTERVAL_MS = 15000;
 const MIN_INTERVAL_MS = 1000;
 const MAX_INTERVAL_MS = 600000;
@@ -41,6 +51,11 @@ const USAGE = Object.freeze({
     "--config <path>        本地非机密配置路径（默认同目录 worker-config.example.json 对应的 *.local.json）",
     "--help                 打印本说明",
   ],
+  cloudActions: [
+    "claimTask              领取排队任务（云端事务核验名单/开关/房间/租期）",
+    "beginTaskExecution     执行前权威复核（仅当 CLAIMED 且匹配当前 claim/revision 才推进 DEVICE_PROCESSING，revision+1）",
+    "reportTask             上报登记结果（使用推进后 revision；失败不重发）",
+  ],
   environment: [
     "CHECKIN_FACE_WORKER_TOKEN / 配置 workerTokenEnv：worker 凭据（非设备秘密，可轮换）",
     "TENCENTCLOUD_SECRETID / TENCENTCLOUD_SECRETKEY：出站调用云函数的云密钥",
@@ -52,7 +67,7 @@ const USAGE = Object.freeze({
     2: "登记命令预检失败（invalid-input），已上报，不重试",
     3: "上报失败或任务身份字段无效；不重发、不重试",
     4: "设备业务阶段失败（failed），已上报，需人工核查设备现状",
-    5: "连接/未知状态/清理错误（stopped），已上报，需人工核查",
+    5: "复核未通过/过期/撤权/云不可用/连接/未知状态/清理错误（stopped），已上报，需人工核查",
   },
 });
 
@@ -63,7 +78,6 @@ function parseArgs(argv) {
     intervalMs: DEFAULT_INTERVAL_MS,
     configPath: undefined,
     help: false,
-    dataDir: DEFAULT_DATA_DIR,
   };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
@@ -82,10 +96,6 @@ function parseArgs(argv) {
       const value = argv[++index];
       if (typeof value !== "string" || !value.trim()) throw new WorkerConfigError("WORKER_ARG_INVALID", "--config 缺少路径");
       options.configPath = resolve(value.trim());
-    } else if (arg === "--data-dir") {
-      const value = argv[++index];
-      if (typeof value !== "string" || !value.trim()) throw new WorkerConfigError("WORKER_ARG_INVALID", "--data-dir 缺少路径");
-      options.dataDir = resolve(value.trim());
     } else throw new WorkerConfigError("WORKER_ARG_INVALID", `未知参数：${arg.slice(0, 64)}`);
   }
   return options;
@@ -133,49 +143,25 @@ function stoppedFailure(code, message, config, photoPath = "") {
   };
 }
 
-/** 创建 0o600 的本机临时 JPEG；目录为 Git 忽略的 worker 私有目录。 */
-async function writeTempJpeg(bytes, dataDir) {
-  await mkdir(dataDir, { recursive: true, mode: 0o700 });
-  const path = join(dataDir, `face-${randomBytes(16).toString("hex")}.jpg`);
-  let handle;
-  let success = false;
-  try {
-    handle = await openFile(path, "wx", 0o600);
-    await handle.writeFile(bytes);
-    await handle.sync();
-    success = true;
-    return path;
-  } finally {
-    await handle?.close();
-    if (!success) await unlink(path).catch(() => {});
-  }
+/** R06：执行前复核失败 → stopped（exit 5），零设备执行，不自动重领/续期/重试开始。 */
+function authorizationFailure(error, config) {
+  const code = typeof error?.code === "string" ? error.code : "BEGIN_AUTH_FAILED";
+  const message = typeof error?.message === "string" ? error.message : "执行前授权复核未通过，未执行设备登记。";
+  return stoppedFailure(code, message, config);
 }
 
-/** 先以零覆盖本地临时照片再删除；不触碰任何设备残留对象。 */
-async function destroyTempJpeg(path) {
-  if (typeof path !== "string" || !path) return true;
-  let bytes;
+/** 领取/预检错误映射：exit 5 类（时钟/时效字段异常）走 stopped，其余走 invalid-input（exit 2）。 */
+function failureFromWorkerError(error, config) {
+  if (error?.exitCode === 5) return stoppedFailure(error.code, error.message, config);
+  return inputFailure(error, config);
+}
+
+/** R09：释放下载照片的进程内副本（内存路径没有落盘文件可删；不承诺字符串副本擦除）。 */
+async function releasePhotoBuffer(buffer) {
+  if (buffer === null || buffer === undefined) return true;
+  if (!Buffer.isBuffer(buffer)) return false;
   try {
-    bytes = await readFile(path);
-  } catch {
-    await unlink(path).catch(() => {});
-    return false;
-  }
-  try {
-    bytes.fill(0);
-    const handle = await openFile(path, "w", 0o600);
-    try {
-      await handle.writeFile(bytes);
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    bytes.fill(0);
-  } catch {
-    // 覆盖失败仍必须尝试删除；结果只记录类别，不记录路径。
-  }
-  try {
-    await unlink(path);
+    buffer.fill(0);
     return true;
   } catch {
     return false;
@@ -195,7 +181,7 @@ function logFields(task) {
 }
 
 /** 处理一个任务。返回进程级退出码；登记结果通过 reportTask 上报，绝不本地重试。 */
-async function processOnce({ config, cloud, options, logger, runEnrollmentImpl }) {
+async function processOnce({ config, cloud, options, logger, runEnrollmentImpl, nowMs = () => Date.now(), releasePhoto = releasePhotoBuffer }) {
   const workerId = config.workerId;
   if (!workerId) throw new WorkerConfigError("WORKER_ID_MISSING", "本地配置缺少 workerId");
 
@@ -208,47 +194,75 @@ async function processOnce({ config, cloud, options, logger, runEnrollmentImpl }
     logger("info", "no queued task");
     return { status: "idle", exitCode: 0 };
   }
-  if (!task || typeof task !== "object" || Array.isArray(task)) {
+  if (typeof task !== "object" || Array.isArray(task)) {
     throw new WorkerConfigError("TASK_INVALID", "claimTask 返回的任务格式无效");
   }
   logger("info", "task claimed", logFields(task));
 
   let photoBuffer = null;
-  let photoPath = "";
+  let reportTaskRef = task;
   let result = null;
   let report = null;
-  let cleanupOk = true;
+  let cleanupOk = false;
   try {
+    // —— 领取后立即失败关闭（早于任何下载）：身份字段 / R05 设备绑定 / R06 领取时效 ——
     try {
-      photoBuffer = await cloud.downloadFile(task.fileId);
-      photoPath = await writeTempJpeg(photoBuffer, options.dataDir);
-      photoBuffer.fill(0);
-      photoBuffer = null;
+      validateClaimedTask(task);
+      assertDeviceKeyMatch(task, config);
+      checkClaimTime(task, nowMs());
     } catch (error) {
-      if (error instanceof WorkerInputError) result = inputFailure(error, config);
-      else result = stoppedFailure("PHOTO_PREPARE_FAILED", "照片下载或本地暂存失败，未执行设备登记。", config);
-      report = buildReportPayload(task, result, config);
+      result = error instanceof AuthorizationError
+        ? authorizationFailure(error, config)
+        : failureFromWorkerError(error, config);
+      report = buildReportPayload(reportTaskRef, result, config);
       return { status: "processed", exitCode: result.exitCode, reportOk: false, pendingReport: report };
     }
 
+    // —— 受控下载照片（内存）——
     try {
-      const request = buildDeviceRequest(task, config, photoPath);
+      photoBuffer = await cloud.downloadFile(task.fileId);
+    } catch (error) {
+      result = error instanceof WorkerInputError
+        ? inputFailure(error, config)
+        : stoppedFailure("PHOTO_PREPARE_FAILED", "照片下载或本地准备失败，未执行设备登记。", config);
+      report = buildReportPayload(reportTaskRef, result, config);
+      return { status: "processed", exitCode: result.exitCode, reportOk: false, pendingReport: report };
+    }
+
+    // —— R06：下载/准备完成后、进入设备执行前：时效再检 → 权威复核 → 执行前最后检查 ——
+    try {
+      checkClaimTime(task, nowMs());
+      const authorized = await authorizeTaskExecution({ cloud, config, task, workerId });
+      logger("info", "execution authorized", logFields(authorized.snapshot));
+      checkClaimTime(authorized.snapshot, nowMs());
+      reportTaskRef = authorized.snapshot; // 后续 report 使用推进后 revision；不把新租期/新目标覆盖进旧任务
+      const request = buildInMemoryDeviceRequest(authorized.snapshot, config);
       result = await runEnrollmentImpl(request, {
         config,
-        photoPath,
+        photoPath: "",
+        photoBuffer,
         commandDeps: { platform: options.platform },
       });
     } catch (error) {
-      result = error instanceof WorkerInputError
-        ? inputFailure(error, config, photoPath)
-        : stoppedFailure("WORKER_RUNNER_FAILED", "本地执行失败，请人工检查设备现状。", config, photoPath);
+      result = error instanceof AuthorizationError
+        ? authorizationFailure(error, config)
+        : error instanceof WorkerInputError
+          ? inputFailure(error, config)
+          : stoppedFailure("WORKER_RUNNER_FAILED", "本地执行失败，请人工检查设备现状。", config);
     }
-    report = buildReportPayload(task, result, config);
+
+    // —— R09：清理结果纳入真实终态；失败不重发设备、不误报成功 ——
+    try {
+      cleanupOk = await releasePhoto(photoBuffer);
+    } catch {
+      cleanupOk = false;
+    }
+    photoBuffer = null;
+    result = applyCleanupResult(result, cleanupOk);
+    report = buildReportPayload(reportTaskRef, result, config);
     return { status: "processed", exitCode: result.exitCode, reportOk: false, pendingReport: report };
   } finally {
     if (Buffer.isBuffer(photoBuffer)) photoBuffer.fill(0);
-    cleanupOk = await destroyTempJpeg(photoPath);
-    if (!cleanupOk) logger("warn", "temporary photo cleanup failed");
   }
 }
 
@@ -257,15 +271,27 @@ async function wait(ms, shouldStop) {
   await new Promise((done) => setTimeout(done, ms));
 }
 
+/** 默认执行入口：内存照片适配层（R08），保留 runEnrollment 的输出白名单与未知结果收敛。 */
+function defaultRunEnrollmentImpl(request, deps = {}) {
+  return runEnrollment(request, {
+    run: runInMemoryEnrollment,
+    config: deps.config,
+    photoPath: typeof deps.photoPath === "string" ? deps.photoPath : "",
+    photoBuffer: deps.photoBuffer || null,
+    commandDeps: deps.commandDeps,
+  });
+}
+
 export async function main({
   argv = process.argv.slice(2),
   env = process.env,
   loadConfig = loadWorkerConfig,
   createClient = createCloudClient,
-  dataDir = DEFAULT_DATA_DIR,
   platform = process.platform,
   stdout = process.stdout,
-  runEnrollmentImpl = runEnrollment,
+  runEnrollmentImpl = defaultRunEnrollmentImpl,
+  nowMs = () => Date.now(),
+  releasePhoto = releasePhotoBuffer,
 } = {}) {
   let options;
   try {
@@ -278,7 +304,6 @@ export async function main({
     stdout.write(`${JSON.stringify(USAGE, null, 2)}\n`);
     return 0;
   }
-  options.dataDir = dataDir;
   options.platform = platform;
 
   let config;
@@ -307,7 +332,7 @@ export async function main({
     do {
       let outcome;
       try {
-        outcome = await processOnce({ config, cloud, options, logger, runEnrollmentImpl });
+        outcome = await processOnce({ config, cloud, options, logger, runEnrollmentImpl, nowMs, releasePhoto });
       } catch (error) {
         logger("error", error instanceof WorkerConfigError ? error.message : "worker stage failed", {
           code: error?.code || "WORKER_STAGE_FAILED",

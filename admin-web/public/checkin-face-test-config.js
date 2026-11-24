@@ -297,4 +297,15 @@ async function boot() {
     state.csrf = me?.csrf || "";
     state.account = me?.account || null;
     if (state.account?.role !== "admin" || !state.csrf) {
-      showLogin("仅�
+      showLogin("仅系统管理员可访问本机测试配置；请先在管理工作台登录。");
+      return;
+    }
+  } catch {
+    showLogin("请先在主工作台以系统管理员身份登录，再打开本页。");
+    return;
+  }
+  bind();
+  await reload();
+}
+
+boot();

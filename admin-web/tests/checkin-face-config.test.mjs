@@ -74,6 +74,8 @@ const LEASE_INPUT = { startDate: '2026-12-01', endDate: '2026-12-05' };
 async function configuredService() {
   const ctx = service();
   await ctx.config.upsertRoomBinding(ROOM_INPUT);
+  // upsertLease 的生产前置要求版本已配置；提前配版本才能形成一致租期快照。
+  await ctx.config.setApplicationVersion('test-v1');
   await ctx.config.upsertLease(LEASE_INPUT);
   return ctx;
 }
@@ -89,21 +91,66 @@ test('缺省关闭：空库 getConfig 不包含 token/哈希，revision=0', asyn
   assert.ok(!JSON.stringify(snapshot).includes(TOKEN_HASH));
 });
 
-test('未唯一绑定 102 / 未手填租期时开开关被拒，前置条件满足后才可开启且 revision 递增', async () => {
-  const { db, config } = service();
-  const before = db.writes;
-  await assert.rejects(() => config.setSwitch(true), (error) => error.code === 'ROOM_UNCONFIGURED');
-  await config.upsertRoomBinding(ROOM_INPUT);
-  await assert.rejects(() => config.setSwitch(true), (error) => error.code === 'LEASE_UNCONFIGURED');
-  assert.ok(db.writes > before, '绑定本身允许写库');
+test('setSwitch(true) 在版本/凭据/102 绑定/租期任一缺失时分别被拒', async () => {
+  // 四项前置逐一隔离，只有对应项缺失；每次都必须失败关闭且不写 config.enabled=true。
+  const scenarios = [
+    ['VERSION_UNCONFIGURED', async (config) => {}],
+    ['WORKER_TOKEN_UNCONFIGURED', async (config) => { await config.setApplicationVersion('test-v1'); }],
+    ['ROOM_UNCONFIGURED', async (config) => {
+      await config.setApplicationVersion('test-v1');
+      await config.setWorkerToken(TOKEN);
+    }],
+    ['LEASE_UNCONFIGURED', async (config) => {
+      await config.setApplicationVersion('test-v1');
+      await config.setWorkerToken(TOKEN);
+      await config.upsertRoomBinding(ROOM_INPUT);
+    }],
+  ];
+  for (const [code, prepare] of scenarios) {
+    const { db, config } = service();
+    await prepare(config);
+    const before = db.writes;
+    await assert.rejects(() => config.setSwitch(true), (error) => error.code === code, `${code} 必须由 setSwitch 守门`);
+    assert.equal(db.writes, before, `${code} 时不得写库`);
+    assert.equal((await config.getConfig()).config.enabled, false);
+  }
+
   const { config: ready } = await configuredService();
+  await ready.setWorkerToken(TOKEN);
   const snapshotBefore = await ready.getConfig();
   const switched = await ready.setSwitch(true, '合成测试开启');
   assert.equal(switched.enabled, true);
   assert.equal(switched.revision, snapshotBefore.revision + 1);
-  const snapshotAfter = await ready.getConfig();
-  assert.equal(snapshotAfter.config.enabled, true);
-  assert.equal(snapshotAfter.revision, switched.revision);
+  assert.equal((await ready.getConfig()).config.enabled, true);
+});
+
+test('setDispatchEnabled 默认 false，只接受严格 boolean', async () => {
+  const { db, config } = service();
+  assert.equal((await config.getConfig()).config.dispatchEnabled, false);
+  const before = db.writes;
+  for (const value of ['true', 1, 0, null, undefined, {}, []]) {
+    await assert.rejects(() => config.setDispatchEnabled(value), (error) => error.code === 'INVALID_INPUT');
+  }
+  assert.equal(db.writes, before, '非法派发开关输入必须零写入');
+  const opened = await config.setDispatchEnabled(true);
+  assert.equal(opened.dispatchEnabled, true);
+  assert.equal((await config.getConfig()).config.dispatchEnabled, true);
+  assert.equal((await config.setDispatchEnabled(false)).dispatchEnabled, false);
+});
+
+test('P0 配置面守门：公开方法即可产出非空版本、租期快照同版本、worker token 与派发开关', async () => {
+  const { config } = await configuredService();
+  await config.setAllowlist(['test-user-01']);
+  await config.setWorkerToken(TOKEN);
+  await config.setDispatchEnabled(true);
+  await config.setSwitch(true);
+  const snapshot = await config.getConfig();
+  assert.equal(snapshot.config.applicationVersion, 'test-v1');
+  assert.ok(snapshot.config.applicationVersion.length > 0);
+  assert.equal(snapshot.lease.applicationVersion, 'test-v1', '租期快照必须跟随公开配置的版本');
+  assert.equal(snapshot.config.workerTokenConfigured, true);
+  assert.equal(snapshot.config.dispatchEnabled, true);
+  assert.equal(snapshot.config.enabled, true);
 });
 
 test('upsertRoomBinding：102 唯一确定性 id、名称可选持久化、同号多条拒绝', async () => {
@@ -139,7 +186,7 @@ test('upsertLease：手填起止映射 T00:00:00/T23:59:59；非法日期/越界
   );
   assert.equal(snapshot.lease.status, 'active');
   assert.equal(snapshot.lease.roomBindingId, `${ENV}|102`);
-  assert.equal(snapshot.revision, 2, 'room+lease 两次配置各递增一次');
+  assert.equal(snapshot.revision, 3, 'room+version+lease 三次配置各递增一次');
   const audits = db.rows('test_checkin_face_audit').filter((row) => row.action === 'upsertLease');
   assert.equal(audits.length, 1);
   assert.equal(audits[0].after.validTo, '2026-12-05T23:59:59');
@@ -158,13 +205,56 @@ test('upsertLease：手填起止映射 T00:00:00/T23:59:59；非法日期/越界
   await assert.rejects(() => noRoom.config.upsertLease(LEASE_INPUT), (error) => error.code === 'ROOM_UNCONFIGURED');
 });
 
+test('upsertLease 在版本未配置时零写入失败关闭（不得落地空版本快照）', async () => {
+  const { db, config } = service();
+  await config.upsertRoomBinding(ROOM_INPUT);
+  const before = db.writes;
+  await assert.rejects(() => config.upsertLease(LEASE_INPUT), (error) => error.code === 'VERSION_UNCONFIGURED');
+  assert.equal(db.writes, before, '半配置租期必须零写入');
+  assert.equal((await config.getConfig()).lease, null);
+});
+
+test('setApplicationVersion 轮换时同步租期快照版本与 revision，并只在实际变更时同步', async () => {
+  const { db, config } = await configuredService();
+  const before = await config.getConfig();
+  const rotated = await config.setApplicationVersion('test-v2');
+  assert.equal(rotated.applicationVersion, 'test-v2');
+  assert.equal(rotated.leaseVersionSynced, true);
+  assert.equal(rotated.revision, before.revision + 1);
+  const after = await config.getConfig();
+  assert.equal(after.config.applicationVersion, 'test-v2');
+  assert.equal(after.lease.applicationVersion, 'test-v2');
+  assert.equal(after.lease.revision, before.lease.revision + 1, '同步租期版本必须递增 lease.revision');
+  assert.deepEqual(after.lease, { ...before.lease, applicationVersion: 'test-v2', revision: before.lease.revision + 1 });
+  const audit = db.rows('test_checkin_face_audit').filter((row) => row.action === 'APPLICATION_VERSION_SET').at(-1);
+  assert.equal(audit.after.applicationVersion, 'test-v2');
+  assert.equal(audit.after.leaseVersionSynced, true);
+  const again = await config.setApplicationVersion('test-v2');
+  assert.equal(again.leaseVersionSynced, false, '同版本重复设置不应再次改租期');
+  assert.equal((await config.getConfig()).lease.revision, after.lease.revision);
+});
+
+test('setSwitch(true) 拒绝被 DB 绕过制造的租期版本不一致半配置态', async () => {
+  const { db, config } = await configuredService();
+  await config.setWorkerToken(TOKEN);
+  // 模拟绕过公开方法直接改库：config=test-v1 但 lease 快照残留 stale-version。
+  const leaseId = `${ENV}|lease|102`;
+  const current = (await db.collection('test_lease_snapshot').doc(leaseId).get()).data;
+  const stale = { ...current, applicationVersion: 'stale-version' };
+  await db.collection('test_lease_snapshot').doc(leaseId).set({ data: stale });
+  const before = db.writes;
+  await assert.rejects(() => config.setSwitch(true), (error) => error.code === 'LEASE_VERSION_MISMATCH');
+  assert.equal(db.writes, before, '半配置态不得写库');
+  assert.equal((await config.getConfig()).config.enabled, false);
+});
+
 test('setAllowlist：名单持久化、重复/非法账号拒绝、移除账号转为 inactive', async () => {
   const { db, config } = await configuredService();
   await config.setAllowlist([{ openid: 'test-user-01', displayLabel: '合成成员' }, 'test-user-02']);
   const first = await config.getConfig();
   assert.equal(first.allowlist.length, 2);
   assert.ok(first.allowlist.every((row) => !('workerTokenHash' in row)));
-  assert.equal(first.revision, 3);
+  assert.equal(first.revision, 4);
 
   const beforeInvalid = db.writes;
   await assert.rejects(() => config.setAllowlist(['test-user-01', 'test-user-01']), (error) => error.code === 'DUPLICATE_OPENID');
@@ -175,7 +265,7 @@ test('setAllowlist：名单持久化、重复/非法账号拒绝、移除账号�
   const after = await config.getConfig();
   assert.equal(after.allowlist.find((row) => row.openid === 'test-user-01').status, 'inactive');
   assert.equal(after.allowlist.find((row) => row.openid === 'test-user-02').status, 'active');
-  assert.equal(after.revision, 4);
+  assert.equal(after.revision, 5);
 });
 
 test('setWorkerToken：至少 32 字符、只存 SHA-256、审计仅记前 8 位、非法输入零写入', async () => {

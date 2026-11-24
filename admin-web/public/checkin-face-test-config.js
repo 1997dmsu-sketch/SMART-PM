@@ -13,6 +13,8 @@ const ROUTES = Object.freeze({
   lease: "/api/checkin-face-test/lease",
   accounts: "/api/checkin-face-test/accounts",
   workerToken: "/api/checkin-face-test/worker-token",
+  applicationVersion: "/api/checkin-face-test/application-version",
+  dispatch: "/api/checkin-face-test/dispatch",
 });
 
 // Defensive: even if a server response is widened later, never render a secret-looking key.
@@ -115,6 +117,16 @@ function fillCommon(snapshot) {
   const tokenNode = $("#config-worker-token-state");
   tokenNode.textContent = tokenConfigured ? "已设置" : "未设置";
   tokenNode.className = `badge ${tokenConfigured ? "green" : "amber"}`;
+
+  // 申请版本号与派发开关是区别于「自动通过开关」的两个独立服务端判据。
+  const version = typeof config.applicationVersion === "string" ? config.applicationVersion : "";
+  $("#config-application-version").textContent = version || "未设置（申请必然失败）";
+  $("#application-version-value").value = version;
+  const dispatchEnabled = config.dispatchEnabled === true;
+  const dispatchNode = $("#config-dispatch-state");
+  dispatchNode.textContent = dispatchEnabled ? "已开启（worker 可领取）" : "已关闭（默认）";
+  dispatchNode.className = `badge ${dispatchEnabled ? "amber" : "green"}`;
+  $("#dispatch-enabled").value = dispatchEnabled ? "true" : "false";
 
   const environment = config.environment ?? snapshot?.environment;
   $("#config-environment").textContent = typeof environment === "string" && environment ? environment : "—";
@@ -286,6 +298,17 @@ function bind() {
       .filter(Boolean);
     if (openids.some((v) => v.length > 128)) throw new Error("单个 openid 过长");
     return { openids, reason: reasonOf(data) };
+  });
+
+  bindForm("#application-version-form", ROUTES.applicationVersion, (data) => {
+    const version = requiredText(data, "version", 128);
+    return { version, reason: reasonOf(data) };
+  });
+
+  bindForm("#dispatch-form", ROUTES.dispatch, (data) => {
+    const raw = data.get("enabled");
+    if (!["true", "false"].includes(raw)) throw new Error("派发开关状态无效");
+    return { enabled: raw === "true", reason: reasonOf(data) };
   });
 
   bindWorkerTokenForm();

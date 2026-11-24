@@ -22,6 +22,7 @@ const dates = require(path.join(CLOUD_DIR, 'lib/dates.js'));
 const validate = require(path.join(CLOUD_DIR, 'lib/validate.js'));
 const context = require(path.join(CLOUD_DIR, 'lib/context.js'));
 const { STATUS, DISPLAY_STATE } = require(path.join(CLOUD_DIR, 'lib/workflow.js'));
+const { AdminCheckinFaceTestConfig } = require(path.join(ROOT, 'admin-web/lib/checkin-face-test-config.mjs'));
 
 const OPENID = 'test-user-01';
 const OTHER_OPENID = 'other-user-99';
@@ -100,29 +101,36 @@ class MemoryDB {
   runTransaction(fn) { return fn(this); }
 }
 
-function fixture({ openid = OPENID, enabled = true, dispatchEnabled = true, now = FIXED } = {}) {
+const ROOM_INPUT = {
+  displayNo: '102', projectId: 'project-stable-1', buildingId: 'building-stable-1',
+  roomId: 'room-stable-1', houseId: 'house-stable-1', doorNo: 7,
+  deviceKey: 'device-key-stable', accessPlanFingerprint: FINGERPRINT,
+  projectName: '合成项目', buildingName: '合成楼栋',
+};
+const LEASE_INPUT = { startDate: '2026-12-01', endDate: '2026-12-05' };
+
+/**
+ * 只通过 AdminCheckinFaceTestConfig 的公开方法配置测试程序；
+ * applicationVersion / dispatchEnabled 不得由测试直接写 mock DB。
+ * 若公开方法缺失或配置顺序失效，所有依赖本 fixture 的用例都会 FAIL。
+ */
+async function fixture({ openid = OPENID, enabled = true, dispatchEnabled = true, now = FIXED } = {}) {
   const db = new MemoryDB();
-  const leaseWindow = dates.buildLeaseWindow('2026-12-01', '2026-12-05');
-  const config = {
-    _id: ids.configId(ENV), environment: ENV, enabled, dispatchEnabled,
-    applicationVersion: VERSION, workerTokenHash: TOKEN_HASH, revision: 3,
-  };
-  const room = {
-    _id: ids.roomBindingId(ENV), environment: ENV, displayNo: '102',
-    projectId: 'project-stable-1', buildingId: 'building-stable-1', roomId: 'room-stable-1',
-    houseId: 'house-stable-1', doorNo: 7, deviceKey: 'device-key-stable',
-    accessPlanFingerprint: FINGERPRINT, projectName: '合成项目', buildingName: '合成楼栋', revision: 2,
-  };
-  const lease = {
-    _id: ids.leaseId(ENV), ...leaseWindow, environment: ENV, status: 'active',
-    roomBindingId: room._id, doorNo: 7, applicationVersion: VERSION, revision: 4,
-  };
-  db.collection(COLLECTIONS.CONFIG).doc(config._id).set({ data: config });
-  db.collection(COLLECTIONS.ROOM).doc(room._id).set({ data: room });
-  db.collection(COLLECTIONS.LEASE).doc(lease._id).set({ data: lease });
-  db.collection(COLLECTIONS.ALLOWLIST).doc(ids.allowlistId(ENV, OPENID)).set({
-    data: { _id: ids.allowlistId(ENV, OPENID), environment: ENV, openid: OPENID, status: 'active', displayLabel: '合成测试成员', revision: 1 },
+  const admin = new AdminCheckinFaceTestConfig(null, {
+    database: db, environment: ENV, operator: 'synthetic-admin', now: () => now,
   });
+  await admin.upsertRoomBinding(ROOM_INPUT);
+  // 生产 upsertLease 要求版本已配置；提前配置版本可保证租期快照版本一致。
+  await admin.setApplicationVersion(VERSION);
+  await admin.upsertLease(LEASE_INPUT);
+  await admin.setAllowlist([OPENID]);
+  await admin.setWorkerToken(TOKEN);
+  await admin.setDispatchEnabled(dispatchEnabled);
+  await admin.setSwitch(enabled);
+
+  const config = db.row(COLLECTIONS.CONFIG, ids.configId(ENV));
+  const room = db.row(COLLECTIONS.ROOM, ids.roomBindingId(ENV));
+  const lease = db.row(COLLECTIONS.LEASE, ids.leaseId(ENV));
   db.writes = 0;
   let currentOpenid = openid;
   let currentNow = now;
@@ -135,11 +143,11 @@ function fixture({ openid = OPENID, enabled = true, dispatchEnabled = true, now 
   const main = (event) => createMain({ db, cloud, environment: ENV, now: () => currentNow })(event);
   const apply = (extra = {}) => main({ action: 'applyCheckin', applicationVersion: VERSION, ...extra });
   const taskFor = (applicationId) => db.row(COLLECTIONS.TASK, ids.taskId(ENV, applicationId));
-  return { db, cloud, main, apply, setOpenid, setNow, config, room, lease, taskFor, token: TOKEN };
+  return { db, admin, cloud, main, apply, setOpenid, setNow, config, room, lease, taskFor, token: TOKEN };
 }
 
 async function approvedFixture(options) {
-  const ctx = fixture(options);
+  const ctx = await fixture(options);
   const applied = await ctx.apply();
   assert.equal(applied.code, 0, JSON.stringify(applied));
   assert.equal(applied.data.result, 'auto_approved');
@@ -194,6 +202,72 @@ function successOutput(task, overrides = {}) {
   };
 }
 
+/**
+ * P0 守门：配置必须完全由 AdminCheckinFaceTestConfig 的公开方法完成。
+ * 若任一公开方法缺失、顺序不可用、版本/派发开关无法写入，
+ * 本用例会在 getConfig/apply/claim 任一步失败，而不是恒过。
+ */
+test('P0 守门：仅用后台全部公开配置能力即可完成 auto_approved + claim 成功', async () => {
+  const ctx = await fixture();
+  const snapshot = await ctx.admin.getConfig();
+  assert.equal(snapshot.config.applicationVersion, VERSION, 'getConfig 必须返回非空申请版本');
+  assert.equal(snapshot.config.enabled, true);
+  assert.equal(snapshot.config.dispatchEnabled, true);
+  assert.equal(snapshot.config.workerTokenConfigured, true);
+  assert.equal(snapshot.room.displayNo, '102');
+  assert.equal(snapshot.lease.validTo, '2026-12-05T23:59:59');
+  assert.equal(snapshot.lease.applicationVersion, VERSION, '租期快照必须同步公开配置的版本');
+
+  const applied = await ctx.apply();
+  assert.equal(applied.code, 0, `applyCheckin 失败：${JSON.stringify(applied)}`);
+  assert.equal(applied.data.result, 'auto_approved');
+  const created = await ctx.main({
+    action: 'createFaceTask', applicationId: applied.data.applicationId,
+    fileId: fileId(applied.data.applicationId), consent: true,
+  });
+  assert.equal(created.code, 0, `createFaceTask 失败：${JSON.stringify(created)}`);
+  const claimed = await claim(ctx);
+  assert.equal(claimed.code, 0, `claimTask 失败：${JSON.stringify(claimed)}`);
+  assert.ok(claimed.data.task, '公开配置完成后 claimTask 不得返回 DISPATCH_DISABLED/null');
+  assert.equal(claimed.data.task.doorNo, 7);
+  assert.equal(claimed.data.task.employeeNo, applied.data.employeeNo);
+});
+
+test('公开方法轮换版本后租期快照同步，云端全流程仍通过且终态为待现场刷脸', async () => {
+  const ctx = await fixture();
+  const rotated = await ctx.admin.setApplicationVersion('test-v2');
+  assert.equal(rotated.applicationVersion, 'test-v2');
+  assert.equal(rotated.leaseVersionSynced, true, '版本轮换必须同步已有租期快照');
+  const adminView = await ctx.admin.getConfig();
+  assert.equal(adminView.lease.applicationVersion, 'test-v2');
+
+  const cfg = await ctx.main({ action: 'getConfig' });
+  assert.equal(cfg.code, 0);
+  assert.equal(cfg.data.applicationVersion, 'test-v2');
+  const applied = await ctx.main({ action: 'applyCheckin', applicationVersion: 'test-v2' });
+  assert.equal(applied.code, 0, `轮换后 apply 失败：${JSON.stringify(applied)}`);
+  assert.equal(applied.data.result, 'auto_approved');
+  const created = await ctx.main({
+    action: 'createFaceTask', applicationId: applied.data.applicationId,
+    fileId: fileId(applied.data.applicationId), consent: true,
+  });
+  assert.equal(created.code, 0, `轮换后 create 失败：${JSON.stringify(created)}`);
+  const claimed = await claim(ctx);
+  assert.equal(claimed.code, 0, `轮换后 claim 失败：${JSON.stringify(claimed)}`);
+  assert.ok(claimed.data.task);
+  const reported = await ctx.main({
+    action: 'reportTask', workerToken: TOKEN, taskId: claimed.data.task.taskId,
+    claimId: claimed.data.task.claimId, revision: claimed.data.task.revision,
+    exitCode: 0, output: successOutput(claimed.data.task),
+  });
+  assert.equal(reported.code, 0, `轮换后 report 失败：${JSON.stringify(reported)}`);
+  assert.equal(reported.data.status, STATUS.PENDING_SITE_VERIFICATION);
+  const view = await ctx.main({ action: 'getMyTask', applicationId: applied.data.applicationId });
+  assert.equal(view.code, 0);
+  assert.equal(view.data.siteVerification, 'PENDING');
+  assert.equal(view.data.status, STATUS.PENDING_SITE_VERIFICATION);
+});
+
 test('名单+102+有效租期+版本一致才 auto_approved，落稳定 id 与 employeeNo', async () => {
   const ctx = await approvedFixture();
   const expectedId = ids.applicationId(ENV, OPENID, VERSION, ctx.lease.revision, ctx.room.revision);
@@ -213,41 +287,49 @@ test('名单+102+有效租期+版本一致才 auto_approved，落稳定 id 与 e
   assert.ok(ctx.db.writes >= 2, '应写申请与审计');
 });
 
-test('普通账号返回 pending_review 且测试集合零写入', async () => {
-  const ctx = fixture();
+/**
+ * 语义固化：任务卡 §6「普通账号保持原审核流程」与方案 §3.1 的内部错误码
+ * ACCOUNT_NOT_ALLOWED 并不矛盾：后者是服务端判据，不应暴露给普通账号作为
+ * 可操作错误码；对普通账号的正确行为是返回 pending_review、不写测试集合。
+ */
+test('普通账号语义：ACCOUNT_NOT_ALLOWED 不外露，返回 pending_review 且测试集合零写入', async () => {
+  const ctx = await fixture();
+  const auditBefore = ctx.db.rows(COLLECTIONS.AUDIT).length;
   ctx.setOpenid(OTHER_OPENID);
   const result = await ctx.apply();
-  assert.equal(result.code, 0);
+  assert.equal(result.code, 0, '普通账号不是错误请求，不能暴露 ACCOUNT_NOT_ALLOWED');
+  assert.ok(!JSON.stringify(result).includes('ACCOUNT_NOT_ALLOWED'));
   assert.equal(result.data.result, 'pending_review');
   assert.equal(result.data.applicationId, '');
   assert.equal(result.data.idempotent, false);
-  for (const name of [COLLECTIONS.APPLICATION, COLLECTIONS.TASK, COLLECTIONS.AUDIT]) {
+  for (const name of [COLLECTIONS.APPLICATION, COLLECTIONS.TASK]) {
     assert.equal(ctx.db.rows(name).length, 0, `${name} 不得被普通账号写入`);
   }
+  assert.equal(ctx.db.rows(COLLECTIONS.AUDIT).length, auditBefore, '不得写测试自动通过审计');
   assert.equal(ctx.db.writes, 0);
 });
 
 test('伪造 approved/testMode/room/日期/身份字段在云函数入口被拒且不写库', async () => {
   const forged = ['approved', 'testMode', 'mode', 'validityMode', 'roomNo', 'roomId', 'houseId', 'doorNo', 'employeeNo', 'validFrom', 'validTo', 'status', 'openid'];
   for (const field of forged) {
-    const ctx = fixture();
+    const ctx = await fixture();
     const before = ctx.db.writes;
     const result = await ctx.apply({ [field]: true });
     assert.equal(result.code, 'CLIENT_FIELD_FORBIDDEN', `${field} 必须被拒绝`);
     assert.equal(ctx.db.writes, before, `${field} 不得触发任何写库`);
     assert.equal(ctx.db.rows(COLLECTIONS.APPLICATION).length, 0);
   }
-  const unknown = fixture();
+  const unknown = await fixture();
   assert.equal((await unknown.main({ action: 'requeueTask' })).code, 'UNKNOWN_ACTION', '不得存在 requeue action');
   assert.equal((await unknown.main({ action: 'unlock' })).code, 'UNKNOWN_ACTION');
 });
 
 test('关闭开关、版本不符、租期未配置/过期、102 歧义分别返回指定错误码', async () => {
   const cases = [
-    ['TEST_DISABLED', (ctx) => { ctx.db.collection(COLLECTIONS.CONFIG).doc(ids.configId(ENV)).set({ data: { ...ctx.config, enabled: false } }); }],
-    ['VERSION_MISMATCH', (ctx) => { ctx.db.collection(COLLECTIONS.CONFIG).doc(ids.configId(ENV)).set({ data: { ...ctx.config, applicationVersion: 'other-version' } }); }],
+    ['TEST_DISABLED', async (ctx) => { await ctx.admin.setSwitch(false); }],
+    ['VERSION_MISMATCH', async (ctx) => { await ctx.admin.setApplicationVersion('other-version'); }],
     ['LEASE_UNCONFIGURED', (ctx) => { ctx.db.bucket(COLLECTIONS.LEASE).delete(ids.leaseId(ENV)); }],
-    ['LEASE_EXPIRED', (ctx) => { ctx.db.collection(COLLECTIONS.LEASE).doc(ids.leaseId(ENV)).set({ data: { ...ctx.lease, status: 'cancelled' } }); }],
+    ['LEASE_EXPIRED', async (ctx) => { await ctx.admin.upsertLease({ ...LEASE_INPUT, status: 'cancelled' }); }],
     ['ROOM_UNCONFIGURED', (ctx) => { ctx.db.bucket(COLLECTIONS.ROOM).delete(ids.roomBindingId(ENV)); }],
     ['ROOM_NOT_UNIQUE', (ctx) => {
       ctx.db.collection(COLLECTIONS.ROOM).doc(`${ENV}|102|duplicate`).set({
@@ -256,8 +338,8 @@ test('关闭开关、版本不符、租期未配置/过期、102 歧义分别返
     }],
   ];
   for (const [code, mutate] of cases) {
-    const ctx = fixture();
-    mutate(ctx);
+    const ctx = await fixture();
+    await mutate(ctx);
     const result = await ctx.apply();
     assert.equal(result.code, code, `期望 ${code}，实际 ${JSON.stringify(result)}`);
     assert.equal(ctx.db.rows(COLLECTIONS.APPLICATION).length, 0, `${code} 时不得写申请`);
@@ -284,14 +366,14 @@ test('日期边界：2026-12-01..2026-12-05 映射上海墙上时间，含首尾
 });
 
 test('102 只按确定性 _id 单点读取；同号多条报 ROOM_NOT_UNIQUE，不取第一条', async () => {
-  const ctx = fixture();
+  const ctx = await fixture();
   await ctx.apply();
   const spatialReads = ctx.db.whereGets.filter((entry) => entry.collection === COLLECTIONS.ROOM && entry.kind === 'get' && entry.where.displayNo);
   assert.deepEqual(spatialReads, [], '禁止按 displayNo 查询房间再取第一条');
   const docReads = ctx.db.bucket(COLLECTIONS.ROOM).size;
   assert.equal(docReads, 1, '唯一绑定通过确定性 _id 命中');
 
-  const duplicated = fixture();
+  const duplicated = await fixture();
   duplicated.db.collection(COLLECTIONS.ROOM).doc(`${ENV}|102|duplicate`).set({
     data: { ...duplicated.room, _id: `${ENV}|102|duplicate`, roomId: 'WRONG-ROOM', revision: 1 },
   });
@@ -324,7 +406,7 @@ test('fileID 归属前缀校验：跨用户、跨申请、非法文件名均不�
 });
 
 test('未通过申请、他人申请、失效租期均不得创建人脸任务；consent 必须严格为 true', async () => {
-  const ctx = fixture();
+  const ctx = await fixture();
   const missingApplicationId = ids.applicationId(ENV, OPENID, VERSION, 4, 2);
   const denied = await ctx.main({ action: 'createFaceTask', applicationId: missingApplicationId, fileId: fileId(missingApplicationId), consent: true });
   assert.equal(denied.code, 'APPLICATION_NOT_APPROVED');
@@ -361,7 +443,7 @@ test('apply/create 幂等：重复提交返回同一 id、同一 employeeNo；�
 });
 
 test('getConfig 只读且不下发名单/token/设备秘密；未配置时为待配置', async () => {
-  const ctx = fixture();
+  const ctx = await fixture();
   const before = ctx.db.writes;
   const result = await ctx.main({ action: 'getConfig' });
   assert.equal(result.code, 0);
@@ -375,7 +457,7 @@ test('getConfig 只读且不下发名单/token/设备秘密；未配置时为待
     assert.ok(!serialized.includes(secret), `getConfig 不得下发 ${secret}`);
   }
   assert.equal(ctx.db.writes, before, '轮询不得写库');
-  const unconfigured = fixture();
+  const unconfigured = await fixture();
   unconfigured.db.bucket(COLLECTIONS.LEASE).delete(ids.leaseId(ENV));
   const pending = await unconfigured.main({ action: 'getConfig' });
   assert.equal(pending.data.configured, false);
@@ -398,13 +480,13 @@ test('并发 claim 只有一个成功（revision CAS），其余不领取', asyn
 
 test('排队后租期/审批/配置 revision 变化 → INVALIDATED，不派发', async () => {
   const variants = [
-    ['lease', (ctx) => ctx.db.collection(COLLECTIONS.LEASE).doc(ids.leaseId(ENV)).set({ data: { ...ctx.lease, revision: 99 } })],
+    ['lease', async (ctx) => { await ctx.admin.upsertLease(LEASE_INPUT); }],
     ['application', (ctx) => ctx.db.collection(COLLECTIONS.APPLICATION).doc(ctx.applicationId).set({ data: { ...ctx.db.row(COLLECTIONS.APPLICATION, ctx.applicationId), result: 'pending_review' } })],
-    ['config', (ctx) => ctx.db.collection(COLLECTIONS.CONFIG).doc(ids.configId(ENV)).set({ data: { ...ctx.config, revision: 99 } })],
+    ['config', async (ctx) => { await ctx.admin.setDispatchEnabled(true); }],
   ];
   for (const [name, mutate] of variants) {
     const ctx = await queuedFixture();
-    mutate(ctx);
+    await mutate(ctx);
     const claimed = await claim(ctx);
     assert.equal(claimed.code, 0);
     assert.equal(claimed.data.task, null, `${name} 变化后不得派发`);
@@ -529,7 +611,7 @@ test('重复 report 幂等；worker token 常量时间比对失败返回 WORKER_
 });
 
 test('身份边界：小程序 action 需 OPENID，worker action 不能由小程序身份调用', async () => {
-  const ctx = fixture();
+  const ctx = await fixture();
   ctx.setOpenid('');
   const noIdentity = await ctx.main({ action: 'getConfig' });
   assert.equal(noIdentity.code, 'OPENID_REQUIRED');

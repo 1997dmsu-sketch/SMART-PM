@@ -197,21 +197,115 @@ export class AdminCheckinFaceTestConfig {
     return { workerTokenConfigured: true, revision: next.revision };
   }
 
-  /** Enable only when 102 is uniquely bound and a fixed lease is configured. */
+  /**
+   * Persist the application version that the mini-program must present.
+   * An empty version would make every applyCheckin fail with VERSION_MISMATCH,
+   * so it is validated before any write.
+   *
+   * @param {string} version 1–128 printable characters, no control characters.
+   * @param {{operator?:string, reason?:string}} options caller identity/reason.
+   * @returns {Promise<{applicationVersion:string, revision:number}>}
+   */
+  async setApplicationVersion(version, options = {}) {
+    if (typeof version !== "string") fail("INVALID_APPLICATION_VERSION", "申请版本必须是字符串");
+    const normalized = version.trim();
+    if (!normalized || normalized.length > 128 || /[\x00-\x1f\x7f]/.test(normalized)) {
+      fail("INVALID_APPLICATION_VERSION", "申请版本必须是 1–128 个可打印字符");
+    }
+    const operator = typeof options?.operator === "string" && options.operator.trim()
+      ? options.operator.trim() : this.operator;
+    const reason = typeof options?.reason === "string" ? options.reason.slice(0, 500) : "";
+    const current = await this.#config();
+    // Keep an already configured lease pinned to the current program version.
+    // Otherwise a later version change would leave lease.applicationVersion
+    // stale and permanently fail applyCheckin with LEASE_EXPIRED.
+    const leaseId = ids.leaseId(this.environment);
+    const lease = await this.#get(COLLECTIONS.LEASE, leaseId);
+    let leaseVersionSynced = false;
+    if (lease && lease.applicationVersion !== normalized) {
+      await this.#set(COLLECTIONS.LEASE, leaseId, {
+        ...lease,
+        applicationVersion: normalized,
+        revision: (Number(lease.revision) || 0) + 1,
+      });
+      leaseVersionSynced = true;
+    }
+    const next = {
+      ...current,
+      applicationVersion: normalized,
+      revision: (Number(current.revision) || 0) + 1,
+    };
+    await this.#set(COLLECTIONS.CONFIG, next._id, next);
+    await this.#audit(
+      "APPLICATION_VERSION_SET", next._id, null,
+      { applicationVersion: normalized, revision: next.revision, leaseVersionSynced },
+      reason, next.revision, operator,
+    );
+    return { applicationVersion: normalized, revision: next.revision, leaseVersionSynced };
+  }
+
+  /**
+   * Enable worker dispatch. Defaults to false; only an explicit `true` opens
+   * claimTask. Claim still requires enabled === true and a fresh revalidation.
+   *
+   * @param {boolean} enabled strict boolean.
+   * @param {{operator?:string, reason?:string}} options caller identity/reason.
+   * @returns {Promise<{dispatchEnabled:boolean, revision:number}>}
+   */
+  async setDispatchEnabled(enabled, options = {}) {
+    if (typeof enabled !== "boolean") fail("INVALID_INPUT", "派发开关必须是布尔值");
+    const operator = typeof options?.operator === "string" && options.operator.trim()
+      ? options.operator.trim() : this.operator;
+    const reason = typeof options?.reason === "string" ? options.reason.slice(0, 500) : "";
+    const current = await this.#config();
+    const next = {
+      ...current,
+      dispatchEnabled: enabled,
+      revision: (Number(current.revision) || 0) + 1,
+    };
+    await this.#set(COLLECTIONS.CONFIG, next._id, next);
+    await this.#audit(
+      "DISPATCH_SET", next._id, null,
+      { dispatchEnabled: enabled, revision: next.revision },
+      reason, next.revision, operator,
+    );
+    return { dispatchEnabled: next.dispatchEnabled, revision: next.revision };
+  }
+
+  /**
+   * Enable automatic approval only for a fully configured test program:
+   * version, worker credential, unique 102 binding and an active fixed lease.
+   * Any missing prerequisite fails closed before writing.
+   */
   async setSwitch(enabled, reason = "", options = {}) {
     if (typeof enabled !== "boolean") fail("INVALID_INPUT", "开关必须是布尔值");
     const current = await this.#config();
     if (enabled) {
+      if (typeof current.applicationVersion !== "string" || !current.applicationVersion.trim()) {
+        fail("VERSION_UNCONFIGURED", "请先配置申请版本");
+      }
+      if (typeof current.workerTokenHash !== "string"
+        || !/^[a-f0-9]{64}$/i.test(current.workerTokenHash)) {
+        fail("WORKER_TOKEN_UNCONFIGURED", "请先设置 worker 凭据");
+      }
       const room = await this.#get(COLLECTIONS.ROOM, ids.roomBindingId(this.environment));
       const lease = await this.#get(COLLECTIONS.LEASE, ids.leaseId(this.environment));
       if (!room || room.displayNo !== "102") fail("ROOM_UNCONFIGURED", "请先唯一绑定 102");
       if (!lease || lease.status !== "active" || !dates.isValidWindowSnapshot(lease)) {
         fail("LEASE_UNCONFIGURED", "请由负责人手填有效租期后再开启");
       }
+      if (lease.applicationVersion !== current.applicationVersion) {
+        fail("LEASE_VERSION_MISMATCH", "申请版本已变更，请重新保存租期");
+      }
     }
+    const operator = typeof options?.operator === "string" && options.operator.trim()
+      ? options.operator.trim() : this.operator;
     const next = { ...current, enabled, revision: (Number(current.revision) || 0) + 1 };
     await this.#set(COLLECTIONS.CONFIG, next._id, next);
-    await this.#audit("setSwitch", next._id, current, { enabled, revision: next.revision }, options.reason || reason, next.revision);
+    await this.#audit(
+      "setSwitch", next._id, current, { enabled, revision: next.revision },
+      options.reason || reason, next.revision, operator,
+    );
     return { enabled: next.enabled, revision: next.revision };
   }
 
@@ -263,6 +357,11 @@ export class AdminCheckinFaceTestConfig {
     const room = await this.#get(COLLECTIONS.ROOM, ids.roomBindingId(this.environment));
     if (!room) fail("ROOM_UNCONFIGURED", "请先绑定 102");
     const config = await this.#config();
+    // A lease saved before any version was configured would pin an empty
+    // version into its snapshot, making every applyCheckin fail later.
+    if (typeof config.applicationVersion !== "string" || !config.applicationVersion.trim()) {
+      fail("VERSION_UNCONFIGURED", "请先配置申请版本再保存租期");
+    }
     const id = ids.leaseId(this.environment);
     const before = await this.#get(COLLECTIONS.LEASE, id);
     const next = await this.#set(COLLECTIONS.LEASE, id, {
@@ -270,7 +369,7 @@ export class AdminCheckinFaceTestConfig {
       status,
       roomBindingId: room._id,
       doorNo: room.doorNo,
-      applicationVersion: config.applicationVersion || "",
+      applicationVersion: config.applicationVersion,
       configuredBy: this.operator,
       revision: (Number(before?.revision) || 0) + 1,
     });

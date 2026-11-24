@@ -29,7 +29,8 @@
         <div class="banner notice">
           <strong>默认关闭：</strong>测试自动通过开关缺省为关闭；关闭后新申请立即不再自动通过。<br />
           <strong>不填租期不自动通过：</strong>租期起止必须由负责人手动填写；未填、取消或过期时页面显示「待配置」，不会回退长期或自动取今天。<br />
-          <strong>秘密边界：</strong>设备地址、账号、密码、公开证书路径、私钥与 pin 只存在于本地受控 worker 的 Git 忽略文件中，不在本页、云端、小程序或日志出现。
+          <strong>秘密边界：</strong>设备地址、账号、密码、公开证书路径、私钥与 pin 只存在于本地受控 worker 的 Git 忽略文件中，不在本页、云端、小程序或日志出现。<br />
+          <strong>建议配置顺序：</strong>填申请版本号 → 设 worker token → 绑定 102 → 手填租期 → 设测试账号 → 开派发开关 → 最后开自动通过开关。自动通过开关有前置校验：版本号、worker token、102 绑定与有效租期缺一不可，否则拒绝开启且不写库；派发开关与它是两个独立开关，只控制 worker 是否领取任务。
         </div>
 
         <div id="config-login" class="panel" hidden>
@@ -45,6 +46,8 @@
               <div class="field"><label>配置 revision</label><div id="config-revision" class="stat-value">—</div></div>
               <div class="field"><label>开关状态</label><div id="config-switch-state" class="badge">—</div></div>
               <div class="field"><label>worker token 状态</label><div id="config-worker-token-state" class="badge">—</div></div>
+              <div class="field"><label>申请版本号</label><div id="config-application-version" class="stat-value">—</div></div>
+              <div class="field"><label>派发开关状态</label><div id="config-dispatch-state" class="badge">—</div></div>
               <div class="field"><label>测试环境</label><div id="config-environment" class="muted">—</div></div>
             </div>
             <div class="field">
@@ -65,6 +68,32 @@
               </div>
               <div class="field"><label for="switch-reason">变更原因</label><input id="switch-reason" name="reason" maxlength="200" placeholder="必填，例如：体验版现场联调开启" required /></div>
               <div class="actions"><button class="btn primary" type="submit">保存开关</button></div>
+            </form>
+          </section>
+
+          <section class="panel" aria-labelledby="config-version-form-title">
+            <div class="panel-head"><h2 id="config-version-form-title">申请版本号（服务端判据）</h2></div>
+            <p class="notice">负责人上线时填写，必须与小程序提交的 applicationVersion 完全一致；留空时申请必然失败。这是申请版本匹配字段，不是自动通过开关，也不是派发开关。</p>
+            <form id="application-version-form" class="form-fields">
+              <div class="field"><label for="application-version-value">applicationVersion</label><input id="application-version-value" name="version" maxlength="128" placeholder="例如 0.1.0-beta.19-checkin-face.1" required /></div>
+              <div class="field"><label for="application-version-reason">变更原因</label><input id="application-version-reason" name="reason" maxlength="200" placeholder="必填" required /></div>
+              <div class="actions"><button class="btn primary" type="submit">保存版本号</button></div>
+            </form>
+          </section>
+
+          <section class="panel" aria-labelledby="config-dispatch-form-title">
+            <div class="panel-head"><h2 id="config-dispatch-form-title">派发开关（worker 领取任务）</h2></div>
+            <p class="notice">默认关闭。仅开启后本地 worker 才会通过 claimTask 领取排队任务；关闭时排队任务不被派发，也不会自动重试。此开关与上面的「测试自动通过开关」相互独立，开的时机也不同：先让自动通过链路可用，需要设备下发时再开派发。</p>
+            <form id="dispatch-form" class="form-fields">
+              <div class="field">
+                <label for="dispatch-enabled">状态</label>
+                <select id="dispatch-enabled" name="enabled" required>
+                  <option value="false">关闭（默认）</option>
+                  <option value="true">开启（允许 worker 领取）</option>
+                </select>
+              </div>
+              <div class="field"><label for="dispatch-reason">变更原因</label><input id="dispatch-reason" name="reason" maxlength="200" placeholder="必填" required /></div>
+              <div class="actions"><button class="btn primary" type="submit">保存派发开关</button></div>
             </form>
           </section>
 

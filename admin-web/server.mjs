@@ -428,6 +428,41 @@ export async function createApp({
                 workerTokenConfigured: true,
                 revision: Number.isSafeInteger(tokenResult?.revision) ? tokenResult.revision : null,
               };
+            } else if (path === `${CHECKIN_FACE_TEST_API}application-version`) {
+              // 服务端申请判据：必须与小程序 applicationVersion 完全一致。
+              if (typeof configService.setApplicationVersion !== "function") {
+                fail("配置服务尚不支持申请版本号设置", 503);
+              }
+              const version = typeof data.version === "string" ? data.version.trim() : "";
+              if (!version || version.length > 128 || /[\x00-\x1f\x7f]/.test(version)) {
+                fail("申请版本号必须是 1–128 个可打印字符", 400);
+              }
+              const versionResult = await configService.setApplicationVersion(version, {
+                operator: account.username,
+                reason,
+              });
+              result = {
+                applicationVersion: version,
+                revision: Number.isSafeInteger(versionResult?.revision)
+                  ? versionResult.revision
+                  : (Number.isSafeInteger(versionResult?.configRevision) ? versionResult.configRevision : null),
+              };
+            } else if (path === `${CHECKIN_FACE_TEST_API}dispatch`) {
+              // 派发开关与自动通过开关相互独立：只有开启后 worker 才会领到任务。
+              if (typeof configService.setDispatchEnabled !== "function") {
+                fail("配置服务尚不支持派发开关设置", 503);
+              }
+              if (typeof data.enabled !== "boolean") fail("派发开关必须是布尔值", 400);
+              const dispatchResult = await configService.setDispatchEnabled(data.enabled, {
+                operator: account.username,
+                reason,
+              });
+              result = {
+                dispatchEnabled: data.enabled,
+                revision: Number.isSafeInteger(dispatchResult?.revision)
+                  ? dispatchResult.revision
+                  : (Number.isSafeInteger(dispatchResult?.configRevision) ? dispatchResult.configRevision : null),
+              };
             } else fail("接口不存在", 404);
           } catch (error) {
             if (error?.status) throw error;

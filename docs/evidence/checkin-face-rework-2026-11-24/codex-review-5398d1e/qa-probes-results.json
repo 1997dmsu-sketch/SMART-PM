@@ -1,0 +1,30 @@
+{
+  "scope": "review-only, synthetic filesystem copies, no business module execution",
+  "r10": {
+    "baselineExit": 0,
+    "fieldsRemovedFromExecutableRequest": true,
+    "blockCommentIncorrectlyAcceptedExit": 0,
+    "copy": "/workspace/artifacts/checkin-face-review-5398d1e-20261124/r10-block-comment-AZpGbs"
+  },
+  "c1": {
+    "baselineExit": 0,
+    "dedicatedVerifierExitAfterSingleSourceDrift": 1,
+    "sharedTreeQaTestExitAfterSameDrift": 0,
+    "selectedTestPasses": 1,
+    "manifestUnchanged": true,
+    "copy": "/workspace/artifacts/checkin-face-review-5398d1e-20261124/c1-stale-manifest-EFH2ws"
+  },
+  "candidateProtectedHashesUnchanged": {
+    "tools/checkin-face-worker/worker-runtime.mjs": "79b3caf64fdc04fcd2e95eb495404fa29eb2ee012873c87829d640521250440e",
+    "cloudfunctions/checkinFaceTest/lib/workflow.js": "fa366a75a57c614ee557e57e1edca60631bc90c7a019862448314012a9dae892",
+    "docs/checkin-face-experience-source-hashes.json": "f5181d829d8a22cc090dda825b3008ed7a06e9a154e71ebb43df5dea7bc61517",
+    "tests/checkin-face-qa-gates.test.cjs": "c5693cf7097aaafc1b58a0e6a0643039ac1378ee17aa475b74e2f768118d9215"
+  },
+  "commandsAndOutputs": [
+    "r10-baseline-attempt2.json",
+    "r10-block-comment-negative-attempt2.json",
+    "c1-source-baseline-attempt2.json",
+    "c1-stale-dedicated-verifier-attempt2.json",
+    "c1-stale-selected-qa-test-attempt2.json"
+  ]
+}

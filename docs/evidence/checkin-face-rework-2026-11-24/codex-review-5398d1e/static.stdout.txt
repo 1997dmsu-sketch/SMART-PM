@@ -1,0 +1,1 @@
+[PASS] checkin-face static check: 102 source files scanned, 0 violations

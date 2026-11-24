@@ -1,0 +1,4 @@
+{"at":"2026-11-24T15:20:45.828Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"synthetic-review"}
+{"at":"2026-11-24T15:20:45.830Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:20:45.831Z","level":"info","message":"execution authorized","taskId":"ch***-1","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:20:45.832Z","level":"error","message":"report delivery failed","exitCode":5,"code":"REVISION_CONFLICT"}

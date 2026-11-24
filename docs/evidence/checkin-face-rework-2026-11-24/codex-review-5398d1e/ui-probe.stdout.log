@@ -1,0 +1,72 @@
+{
+  "kind": "synthetic-ui-state-regression-only",
+  "candidate": "5398d1e06769dc1be7e0c81e060084d412ae0665",
+  "sourceSha256": "8608de7bf466867e8abf06700210034179d0885412dc7e5430e01f6e90e8d694",
+  "pid": 17645,
+  "reproduced": true,
+  "authorizationBypass": false,
+  "realWx": false,
+  "realTimers": 0,
+  "stages": [
+    {
+      "name": "before-revocation-check",
+      "reviewRequired": false,
+      "showUpload": true,
+      "canUpload": true,
+      "cloudPathReady": true,
+      "counters": {
+        "getConfig": 0,
+        "getMyTask": 0,
+        "chooseMedia": 0,
+        "upload": 0,
+        "create": 0,
+        "timers": 0
+      }
+    },
+    {
+      "name": "revocation-rejected-upload",
+      "reviewRequired": true,
+      "showUpload": false,
+      "canUpload": false,
+      "cloudPathReady": false,
+      "counters": {
+        "getConfig": 1,
+        "getMyTask": 0,
+        "chooseMedia": 0,
+        "upload": 0,
+        "create": 0,
+        "timers": 0
+      }
+    },
+    {
+      "name": "old-owned-not-found-poll-reopened-upload",
+      "reviewRequired": false,
+      "showUpload": true,
+      "canUpload": true,
+      "cloudPathReady": true,
+      "counters": {
+        "getConfig": 1,
+        "getMyTask": 1,
+        "chooseMedia": 0,
+        "upload": 0,
+        "create": 0,
+        "timers": 0
+      }
+    },
+    {
+      "name": "second-click-rejected-again-no-upload",
+      "reviewRequired": true,
+      "showUpload": false,
+      "canUpload": false,
+      "cloudPathReady": false,
+      "counters": {
+        "getConfig": 2,
+        "getMyTask": 1,
+        "chooseMedia": 0,
+        "upload": 0,
+        "create": 0,
+        "timers": 0
+      }
+    }
+  ]
+}

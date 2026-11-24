@@ -1,0 +1,14 @@
+{
+  "command": [
+    "/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "--test",
+    "--test-name-pattern=^C1：共享树清单校验",
+    "tests/checkin-face-qa-gates.test.cjs"
+  ],
+  "cwd": "/workspace/artifacts/checkin-face-review-5398d1e-20261124/c1-stale-manifest-dMTlql",
+  "status": 0,
+  "signal": null,
+  "errorCode": null,
+  "stdout": "✔ C1：共享树清单校验——清单与磁盘一致时通过；落后时失败关闭（待 lead 集成冻结后统一复算） (88.580545ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 164.602474\n",
+  "stderr": ""
+}

@@ -1,0 +1,152 @@
+{"at":"2026-11-24T15:16:51.107Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:16:51.108Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:51.109Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:16:51.109Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:16:51.109Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:51.110Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:16:51.243Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:16:51.243Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:51.243Z","level":"info","message":"execution authorized","taskId":"ch***pp","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:51.244Z","level":"info","message":"task reported","exitCode":0}
+{"at":"2026-11-24T15:16:51.244Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:16:51.245Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:51.245Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:16:51.245Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:16:51.245Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:51.246Z","level":"info","message":"execution authorized","taskId":"ch***pp","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:51.246Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:16:51.246Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:16:51.246Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:51.246Z","level":"info","message":"execution authorized","taskId":"ch***pp","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:51.247Z","level":"info","message":"task reported","exitCode":4}
+✔ S1 SDK 形状 fileID 同一值贯穿：上传透传→云端接受并持久化→worker 下载同一值 (29.517224ms)
+ℹ [待集成] R01/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+✔ S2a checkin 页 WXML：checkbox-group bindchange=onPrimaryChange 结构配套 (0.497157ms)
+✔ S2b face-enroll 页 WXML：checkbox-group bindchange=onConsentChange 结构配套 (0.285389ms)
+✔ S3a 事务内权威读取（配置/名单/房间/租期/申请）与审计不得回落外层 base (3.21322ms)
+ℹ [待集成] R03/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+✔ S3b 事务提交冲突：业务写与审计整组回滚，base 全库不变 (6.168481ms)
+ℹ [待集成] R03/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+✔ S4 创建/领取交错：单一有效 claim、revision 不回退、employeeNo 稳定 (10.076545ms)
+ℹ [待集成] R04/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+✔ S5 本地 deviceKey 缺失 → DEVICE_KEY_MISSING，执行器调用 0 次 (5.534448ms)
+✔ S5 本地 deviceKey 与任务不一致 → DEVICE_KEY_CONFLICT，执行器调用 0 次 (0.843518ms)
+✔ S6a 执行前复核成功：revision+1 推进 DEVICE_PROCESSING、claim 不延长、执行一次、report 用新 revision (6.529513ms)
+ℹ [待集成] R06/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+✔ S6b 下载后过期：本地预检 BEGIN_AUTH_EXPIRED + 云端拒绝，零设备执行 (5.085184ms)
+ℹ [待集成] R06/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+✔ S6c 领取后租期/配置撤权：begin 被云端拒绝 → BEGIN_AUTH_REJECTED，零设备执行 (5.006625ms)
+ℹ [待集成] R06/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+✔ S6d 错误 worker / 旧 revision / 重复开始：均不得返回可执行授权 (5.164111ms)
+ℹ [待集成] R06/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+✔ S7 worker 依赖归属与锁文件明确；默认入口无需注入替身即可解析（本机未安装时的失败关闭路径） (109.95516ms)
+✔ S8a 成功路径：照片以 Buffer 全程内存传递（不落盘），执行一次，report 用推进后 revision (1.70324ms)
+✔ S8b 照片下载失败 → invalid-input（exit 2），执行器 0 次 (0.920774ms)
+✔ S8c 清理失败：不得误报干净成功（exit 5 / CLEANUP_FAILED），不重发设备 (0.87837ms)
+✔ S8d 设备执行失败：exit 4 / failed 上报，不重试 (0.799992ms)
+✔ S8e R08 静态：worker 不得把照片以 POSIX 模式落盘（内存输入优先） (0.224448ms)
+✔ S9 普通账号 pending_review：页面不得显示已受理/开放人脸入口，须提示既有审核渠道 (0.812832ms)
+✔ guard：本进程在业务模块加载前已安装命名守卫，自检证明拦截且不转发 (1.180494ms)
+✔ guard：子进程经 --require 继承守卫（继承后同样拦截且不转发） (77.354472ms)
+✔ guard：无 --require 的原始子进程不继承守卫（降级模式可观测区分） (62.075969ms)
+✔ R10：当前共享树静态检查通过（0 violations） (82.029678ms)
+✔ R10：未变更副本静态检查通过（负控基线） (65.454157ms)
+✔ R10：移除 mode=device → 只报 mode 专属消息，精确失败 (75.148316ms)
+✔ R10：移除 validityMode=fixed → 只报 validity 专属消息，精确失败 (66.353317ms)
+✔ R10：两项都移除 → 两条专属消息同时出现 (73.608622ms)
+✔ R10：把两项改成注释 → 仍双双失败（注释命中不算证据） (68.581686ms)
+✔ C1：共享树清单校验——清单与磁盘一致时通过；落后时失败关闭（待 lead 集成冻结后统一复算） (93.214985ms)
+✔ C1：未变更副本校验通过（负控基线） (259.169896ms)
+✔ C1：篡改任一清单哈希 → 精确失败并指出路径与实际哈希 (232.178058ms)
+✔ C1：清单路径重复 → 精确失败 (193.745715ms)
+✔ C1：非法路径（../ 穿越）→ 精确失败 (197.999268ms)
+✔ C1：遗漏云函数目录内文件 → 闭合缺口失败 (157.10159ms)
+✔ C1：伪造 baselineSha256 → 拒绝（不伪造 originalSha256） (156.441072ms)
+✔ C1：登记范围外路径（旧云函数目录）→ 拒绝 (150.988016ms)
+✔ C1：本地导入闭包未闭合（新文件导入未登记的体验版新文件）→ 失败 (163.56299ms)
+{"at":"2026-11-24T15:16:53.613Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.614Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.616Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:16:53.617Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.617Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.618Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:16:53.618Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.618Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.618Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:16:53.619Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.619Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.620Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:16:53.621Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.621Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.621Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:16:53.622Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.622Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+✔ R05：任务缺/空/不同 deviceKey → 0 次执行器、0 次 begin、上报 exit 2（invalid-input） (7.663759ms)
+✔ R05：本地配置缺 deviceKey（main 注入路径）→ 0 次执行器、上报 exit 2 (0.856418ms)
+✔ R05：本地配置缺 deviceKey 在 loadWorkerConfig 即失败（WorkerConfigError） (0.669577ms)
+✔ R06：领取时已过期 → 0 次执行器、0 次 begin、上报 exit 5 BEGIN_AUTH_EXPIRED (0.856197ms)
+{"at":"2026-11-24T15:16:53.633Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:16:53.634Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.634Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.635Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:16:53.635Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.635Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.635Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:16:53.636Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.636Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.636Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:16:53.636Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.637Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.637Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:16:53.639Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.640Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.640Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:16:53.641Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.641Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.641Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:16:53.641Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.641Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.645Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:16:53.645Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.645Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.645Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:16:53.646Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.646Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.646Z","level":"info","message":"execution authorized","taskId":"ch***-1","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.647Z","level":"info","message":"task reported","exitCode":0}
+{"at":"2026-11-24T15:16:53.647Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:16:53.647Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.648Z","level":"info","message":"execution authorized","taskId":"ch***-1","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:16:53.648Z","level":"error","message":"report delivery failed","exitCode":0,"code":"REPORT_FAILED"}
+✔ R06：下载中到期（可控时钟推进）→ 0 次执行器、0 次 begin、上报 exit 5 (11.67958ms)
+✔ R06：准备后撤权/改租期/改绑定（快照字段不一致）→ 0 次执行器、上报 exit 5 BEGIN_SNAPSHOT_MISMATCH (2.812907ms)
+✔ R06：复核云端拒绝（非零码）→ BEGIN_AUTH_REJECTED:<云码>，0 次执行器，begin 不重试 (1.143388ms)
+✔ R06：清单 §2.4 服务端码逐条原样映射为 BEGIN_AUTH_REJECTED:<码>（不编造服务端码） (1.815969ms)
+✔ R06：复核不可用（网络失败/回执未知）→ BEGIN_AUTH_UNAVAILABLE，0 次执行器 (0.9782ms)
+✔ R06：复核返回缺字段/仅回显 → BEGIN_AUTH_UNAVAILABLE，0 次执行器 (4.970881ms)
+✔ R06：同一未失效快照正例 → 执行器恰好 1 次、report revision+1、begin 请求只含规定字段 (1.561547ms)
+✔ R06：报告递送失败 → 恰好一次 report、执行器仍为 1 次、进程退出 3（不重发、不重试） (1.168837ms)
+✔ R08：内存照片正例——模式/租期/门号/计划指纹保留，设备侧恰好各一次 (8.73574ms)
+✔ R08：证书受限读取走真实文件路径（合成证书字节，不读真实材料） (11.420975ms)
+✔ R08：型号不符（含 developmentTls=true）仍拒绝，业务写入 0 次 (1.58399ms)
+✔ R08：唯一人脸库选择与门号能力独立校验（不改服务模块） (1.152462ms)
+✔ R08：执行前指纹核验保留——设备计划在 describe 后变更 → failed(4)，不重试 (1.297335ms)
+✔ R08：服务返回行不一致/未知 → INVALID_SERVICE_RESPONSE（5/stopped），不重试 (0.935136ms)
+✔ R09：连接清理失败 → CLEANUP_FAILED(5) 并保留已确认设备事实，不重发设备 (1.342048ms)
+✔ R09：worker 级内存释放失败 → 整体 5/CLEANUP_FAILED、执行器恰好 1 次、report 一次 (2.502361ms)
+✔ R08/R09：内存路径不产生任何照片文件/临时目录（worker 目录与测试目录均无残留） (5.490823ms)
+✔ R08：runEnrollment 包装不绕过材料校验——证书读取失败关闭为 invalid-input(2) (1.169638ms)
+✔ R07：默认边界不解析 admin-web 下层/偶然 node_modules（旧断点复现并拒绝） (10.45981ms)
+✔ R07：显式边界不捡祖先级偶然 node_modules（NC-R07 的对偶断言） (6.56659ms)
+✔ R07：worker 自有 node_modules 是唯一默认边界——无注入替身即可解析并装配（无凭据 init） (5.034607ms)
+✔ R07：解析失败给出 worker 自有安装指引（含 npm install 提示），失败关闭 (1.003599ms)
+✔ R07：sdkModulePath 经 loadWorkerConfig 解析为绝对路径，缺省为空（默认 worker 自有边界） (0.761054ms)
+✔ R07：worker 自有 package.json 锁定 @cloudbase/node-sdk 3.18.7（与 admin-web 一致） (1.661628ms)
+ℹ tests 65
+ℹ suites 0
+ℹ pass 65
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2985.375254

@@ -1,0 +1,1 @@
+["git", "-c", "core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol", "diff", "--check", "0d6c674", "5398d1e"]

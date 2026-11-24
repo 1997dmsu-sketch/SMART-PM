@@ -1,0 +1,13 @@
+[
+  "node",
+  "--require",
+  "/workspace/artifacts/checkin-face-review-5398d1e-20261124/review-network-guard.cjs",
+  "--require",
+  "./tests/support/d-network-guard.cjs",
+  "--test",
+  "tests/checkin-face-api.test.cjs",
+  "tests/checkin-face-pages.test.cjs",
+  "tests/checkin-face-cloud-workflow.test.cjs",
+  "admin-web/tests/checkin-face-config.test.mjs",
+  "admin-web/tests/checkin-face-worker.test.mjs"
+]

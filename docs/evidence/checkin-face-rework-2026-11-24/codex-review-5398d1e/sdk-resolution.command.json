@@ -1,0 +1,1 @@
+["/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node", "--require", "/workspace/artifacts/checkin-face-review-5398d1e-20261124/review-network-guard.cjs", "/workspace/artifacts/checkin-face-review-5398d1e-20261124/sdk-resolution-probe.mjs"]

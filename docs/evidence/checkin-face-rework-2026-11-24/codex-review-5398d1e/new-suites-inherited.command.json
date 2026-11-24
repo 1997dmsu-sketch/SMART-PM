@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "node",
+    "--require",
+    "/workspace/artifacts/checkin-face-review-5398d1e-20261124/review-network-guard.cjs",
+    "--require",
+    "./tests/support/d-network-guard.cjs",
+    "--test",
+    "tests/checkin-face-qa-gates.test.cjs",
+    "tests/checkin-face-cross-module.test.cjs",
+    "tools/checkin-face-worker/tests/rework-r05-r06.test.mjs",
+    "tools/checkin-face-worker/tests/rework-r08-r09.test.mjs",
+    "tools/checkin-face-worker/tests/sdk-resolution.test.mjs"
+  ],
+  "NODE_OPTIONS": "--require /workspace/artifacts/checkin-face-review-5398d1e-20261124/review-network-guard.cjs"
+}

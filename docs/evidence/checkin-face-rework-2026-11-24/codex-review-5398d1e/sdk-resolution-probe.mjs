@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+const root = '/workspace/artifacts/checkin-face-review-5398d1e-20261124/sdk-install';
+const requireFrom = createRequire(root+'/package.json');
+const entry = requireFrom.resolve(root+'/node_modules/@cloudbase/node-sdk');
+const pkg = requireFrom(root+'/node_modules/@cloudbase/node-sdk/package.json');
+const module = await import(pathToFileURL(entry).href);
+const sdk = module.default || module;
+assert.equal(pkg.version,'3.18.7');
+assert.equal(typeof sdk.init,'function');
+console.log(JSON.stringify({scope:'installed-real-sdk-resolution-and-module-load-only',version:pkg.version,entryRelative:entry.slice(root.length+1),moduleLoaded:true,initCalled:false,cloudCalls:0}));

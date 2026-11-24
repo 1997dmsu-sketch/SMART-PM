@@ -1,0 +1,55 @@
+{
+  "entries": 61,
+  "matching": 54,
+  "mismatches": [
+    {
+      "file": "files.sha256",
+      "expectedBytes": 908,
+      "actualBytes": 908,
+      "expectedSha256": "35f8c23be2014542aa742cab14548d131d45eceddb8d33dc226095bd365803ba",
+      "actualSha256": "9d97dde5dce5ac2815b0056d4bf9723f568f9c3621eb539e12efa3ab3f254cce"
+    },
+    {
+      "file": "run-cross-module-frozen-candidate.exit-code.txt",
+      "expectedBytes": 3,
+      "actualBytes": 2,
+      "expectedSha256": "f1b2f662800122bed0ff255693df89c4487fbdcf453d3524a42d4ec20c3d9c04",
+      "actualSha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "file": "run-cross-module.exit-code.txt",
+      "expectedBytes": 3,
+      "actualBytes": 2,
+      "expectedSha256": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354",
+      "actualSha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "file": "run-qa-gates-raw.exit-code.txt",
+      "expectedBytes": 3,
+      "actualBytes": 2,
+      "expectedSha256": "f1b2f662800122bed0ff255693df89c4487fbdcf453d3524a42d4ec20c3d9c04",
+      "actualSha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "file": "run-qa-gates.exit-code.txt",
+      "expectedBytes": 3,
+      "actualBytes": 2,
+      "expectedSha256": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354",
+      "actualSha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "file": "run-source-verify.exit-code.txt",
+      "expectedBytes": 3,
+      "actualBytes": 2,
+      "expectedSha256": "f1b2f662800122bed0ff255693df89c4487fbdcf453d3524a42d4ec20c3d9c04",
+      "actualSha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "file": "run-static-check.exit-code.txt",
+      "expectedBytes": 3,
+      "actualBytes": 2,
+      "expectedSha256": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354",
+      "actualSha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    }
+  ]
+}

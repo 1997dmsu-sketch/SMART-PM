@@ -1,0 +1,81 @@
+{
+  "scope": "synthetic-only-fixed-candidate-review",
+  "candidate": "5398d1e06769dc1be7e0c81e060084d412ae0665",
+  "interpretation": "Exit zero means all expected defects were reproduced; not product acceptance.",
+  "fixturePrefixSha256": "5d061576068698696730a2c586c1be20952460d28605ed6f913dd9710f0e7a45",
+  "findings": [
+    {
+      "id": "CP01_NAMESPACE_TOCTOU",
+      "result": "EXPECTED_DEFECT_REPRODUCED",
+      "beforeSnapshotSha256": "83dde2737edc5f8a972a9c5de806134ea1ecc7a97162d0d168f3dbccf6d4106e",
+      "afterSnapshotSha256": "4d579cdcb4ebf19f958378937979cb78efd1fc50bb37bdba8b97bdecd39b1395",
+      "observed": {
+        "createCode": 0,
+        "claimCode": 0,
+        "beginCode": 0,
+        "taskStatus": "DEVICE_PROCESSING",
+        "currentRevisionPinned": true,
+        "taskNamespaceMatchesCurrentConfig": false
+      }
+    },
+    {
+      "id": "CP02_EXPIRY_EQUALITY",
+      "result": "EXPECTED_DEFECT_REPRODUCED",
+      "beforeSnapshotSha256": "ee8bcd9858e16c5225b032738af65cec53949c339a80d2e368409fe17902b7ad",
+      "afterSnapshotSha256": "47d849ad9bc2cb8ba5423ebee76d0b6cceaf7492c037011ff84c60978a0c44d6",
+      "observed": {
+        "beginCode": 0,
+        "authorizedExactlyAtDeadline": true,
+        "taskStatus": "DEVICE_PROCESSING"
+      }
+    },
+    {
+      "id": "CP03_REPORT_BYPASSES_BEGIN",
+      "result": "EXPECTED_DEFECT_REPRODUCED",
+      "beforeSnapshotSha256": "07129e06e665f902f80daa2300c48bf6dcce2907f4a9f14dbfed885cd0084ee3",
+      "afterSnapshotSha256": "85ba20c71fe3ec072f72118e4b32089cde96cb39c7460a314b43a82ed32550fd",
+      "observed": {
+        "originalStatus": "CLAIMED",
+        "reportCode": 0,
+        "resultingStatus": "PENDING_SITE_VERIFICATION",
+        "beginAuditCount": 0
+      }
+    },
+    {
+      "id": "CP04_TERMINAL_REPORT_REWRITE",
+      "result": "EXPECTED_DEFECT_REPRODUCED",
+      "beforeSnapshotSha256": "df3bd55e8d9cceac8fce64a8f7c41d4aea7ab2108561c575d2ceb97b927673e9",
+      "afterSnapshotSha256": "a8aa1803fa4d7870b508b00b0a7cb8d8a2bc4f6ba35d6e006370ddbdcffcf41b",
+      "observed": {
+        "originalStatus": "FAILED_REVIEW",
+        "changedReportCode": 0,
+        "resultingStatus": "PENDING_SITE_VERIFICATION",
+        "revisionAdvanced": true
+      }
+    },
+    {
+      "id": "CP05_EMPTY_CLAIM_WORKER",
+      "result": "EXPECTED_DEFECT_REPRODUCED",
+      "beforeSnapshotSha256": "49bbdbef87f2fac9fda131ccfcb326edfcad791b00f121d31a0e01a526c085a4",
+      "afterSnapshotSha256": "eb3c7c94f3f49de5bba8cc98094aec2ba141c10f3bd83aa6a97948959611e18f",
+      "observed": {
+        "claimCode": 0,
+        "storedWorkerIdEmpty": true,
+        "differentWorkerBeginCode": 0,
+        "taskStatus": "DEVICE_PROCESSING"
+      }
+    },
+    {
+      "id": "CP06_ADMIN_DISABLE_LOST",
+      "result": "EXPECTED_DEFECT_REPRODUCED",
+      "beforeSnapshotSha256": "92b5883bac4e63799f7b2046bdabb4e5c973c5ab287e8ebdbee8cc65d6a7b4d3",
+      "afterSnapshotSha256": "feb5a961538b5907a066f417de1b662d71857bf6feb6b527db0da9deccfd672d",
+      "observed": {
+        "disabledCommitted": true,
+        "enabledAfterNonSwitchSetter": true,
+        "revisionReused": true,
+        "applicationResultAfterDisableWasLost": "auto_approved"
+      }
+    }
+  ]
+}

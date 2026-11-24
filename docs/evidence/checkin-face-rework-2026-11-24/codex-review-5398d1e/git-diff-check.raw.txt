@@ -1,0 +1,1232 @@
+admin-web/tests/checkin-face-config.test.mjs:77: trailing whitespace.
++const STORAGE_NAMESPACE = 'synthetic-env-1g2h3j4k.7465-synthetic-env-1g2h3j4k-1300000000';
+admin-web/tests/checkin-face-config.test.mjs:95: trailing whitespace.
++  assert.equal(snapshot.config.storageNamespaceConfigured, false, '空库时可信命名空间必须为未配置');
+admin-web/tests/checkin-face-config.test.mjs:96: trailing whitespace.
++  assert.equal(snapshot.config.storageNamespace, '');
+admin-web/tests/checkin-face-config.test.mjs:102: trailing whitespace.
++  // 四项前置逐一隔离，只有对应项缺失；命名空间预先配好，避免抢占错误码。
+admin-web/tests/checkin-face-config.test.mjs:104: trailing whitespace.
++    ['VERSION_UNCONFIGURED', async (config) => { await config.setStorageNamespace(STORAGE_NAMESPACE); }],
+admin-web/tests/checkin-face-config.test.mjs:105: trailing whitespace.
++    ['WORKER_TOKEN_UNCONFIGURED', async (config) => {
+admin-web/tests/checkin-face-config.test.mjs:106: trailing whitespace.
++      await config.setStorageNamespace(STORAGE_NAMESPACE);
+admin-web/tests/checkin-face-config.test.mjs:107: trailing whitespace.
++      await config.setApplicationVersion('test-v1');
+admin-web/tests/checkin-face-config.test.mjs:108: trailing whitespace.
++    }],
+admin-web/tests/checkin-face-config.test.mjs:110: trailing whitespace.
++      await config.setStorageNamespace(STORAGE_NAMESPACE);
+admin-web/tests/checkin-face-config.test.mjs:115: trailing whitespace.
++      await config.setStorageNamespace(STORAGE_NAMESPACE);
+admin-web/tests/checkin-face-config.test.mjs:131: trailing whitespace.
++  await ready.setStorageNamespace(STORAGE_NAMESPACE);
+admin-web/tests/checkin-face-config.test.mjs:158: trailing whitespace.
++  await config.setStorageNamespace(STORAGE_NAMESPACE);
+admin-web/tests/checkin-face-config.test.mjs:166: trailing whitespace.
++  assert.equal(snapshot.config.storageNamespaceConfigured, true);
+admin-web/tests/checkin-face-config.test.mjs:283: trailing whitespace.
++  await config.setStorageNamespace(STORAGE_NAMESPACE);
+admin-web/tests/checkin-face-config.test.mjs:341: trailing whitespace.
++test('setStorageNamespace：与云端校验器同源正则，持久化+审计+revision，非法零写入', async () => {
+admin-web/tests/checkin-face-config.test.mjs:342: trailing whitespace.
++  const { db, config } = service();
+admin-web/tests/checkin-face-config.test.mjs:343: trailing whitespace.
++  assert.ok(cloudValidate.STORAGE_NAMESPACE_PATTERN.test(STORAGE_NAMESPACE), '合法样本必须通过云端正则');
+admin-web/tests/checkin-face-config.test.mjs:344: trailing whitespace.
++  const saved = await config.setStorageNamespace(STORAGE_NAMESPACE, { reason: '合成配置' });
+admin-web/tests/checkin-face-config.test.mjs:345: trailing whitespace.
++  assert.equal(saved.storageNamespace, STORAGE_NAMESPACE);
+admin-web/tests/checkin-face-config.test.mjs:346: trailing whitespace.
++  assert.equal(saved.revision, 1);
+admin-web/tests/checkin-face-config.test.mjs:347: trailing whitespace.
++  const snapshot = await config.getConfig();
+admin-web/tests/checkin-face-config.test.mjs:348: trailing whitespace.
++  assert.equal(snapshot.config.storageNamespace, STORAGE_NAMESPACE, 'getConfig 必须回读命名空间值');
+admin-web/tests/checkin-face-config.test.mjs:349: trailing whitespace.
++  assert.equal(snapshot.config.storageNamespaceConfigured, true);
+admin-web/tests/checkin-face-config.test.mjs:350: trailing whitespace.
++  const audit = db.rows('test_checkin_face_audit').find((row) => row.action === 'STORAGE_NAMESPACE_SET');
+admin-web/tests/checkin-face-config.test.mjs:351: trailing whitespace.
++  assert.equal(audit.after.storageNamespace, STORAGE_NAMESPACE, '审计必须记录命名空间值');
+admin-web/tests/checkin-face-config.test.mjs:352: trailing whitespace.
++  assert.equal(audit.revision, 1);
+admin-web/tests/checkin-face-config.test.mjs:353: trailing whitespace.
++
+admin-web/tests/checkin-face-config.test.mjs:354: trailing whitespace.
++  // 双端一致：admin 拒绝集与云端正则拒绝集完全相同。
+admin-web/tests/checkin-face-config.test.mjs:355: trailing whitespace.
++  const samples = ['ok-1.ab_c-9', 'A', '-bad', '_bad', 'has space', 'a/b', 'a'.repeat(129), '中文', '', '   '];
+admin-web/tests/checkin-face-config.test.mjs:356: trailing whitespace.
++  for (const sample of samples) {
+admin-web/tests/checkin-face-config.test.mjs:357: trailing whitespace.
++    const patternOk = cloudValidate.STORAGE_NAMESPACE_PATTERN.test(sample);
+admin-web/tests/checkin-face-config.test.mjs:358: trailing whitespace.
++    const { db: freshDb, config: fresh } = service();
+admin-web/tests/checkin-face-config.test.mjs:359: trailing whitespace.
++    let rejected = false;
+admin-web/tests/checkin-face-config.test.mjs:360: trailing whitespace.
++    try { await fresh.setStorageNamespace(sample); } catch (error) { rejected = error.code === 'INVALID_STORAGE_NAMESPACE'; }
+admin-web/tests/checkin-face-config.test.mjs:361: trailing whitespace.
++    assert.equal(rejected, !patternOk, `样本 ${JSON.stringify(sample)} 双端必须一致`);
+admin-web/tests/checkin-face-config.test.mjs:362: trailing whitespace.
++    if (rejected) assert.equal(freshDb.writes, 0, '非法命名空间必须零写入');
+admin-web/tests/checkin-face-config.test.mjs:363: trailing whitespace.
++    else assert.equal(freshDb.writes, 2, '合法命名空间写配置+审计各一次');
+admin-web/tests/checkin-face-config.test.mjs:364: trailing whitespace.
++  }
+admin-web/tests/checkin-face-config.test.mjs:365: trailing whitespace.
++  const { db: nullDb, config: nullConfig } = service();
+admin-web/tests/checkin-face-config.test.mjs:366: trailing whitespace.
++  const before = nullDb.writes;
+admin-web/tests/checkin-face-config.test.mjs:367: trailing whitespace.
++  await assert.rejects(() => nullConfig.setStorageNamespace(null), (error) => error.code === 'INVALID_STORAGE_NAMESPACE');
+admin-web/tests/checkin-face-config.test.mjs:368: trailing whitespace.
++  await assert.rejects(() => nullConfig.setStorageNamespace(123), (error) => error.code === 'INVALID_STORAGE_NAMESPACE');
+admin-web/tests/checkin-face-config.test.mjs:369: trailing whitespace.
++  assert.equal(nullDb.writes, before, '非字符串输入零写入');
+admin-web/tests/checkin-face-config.test.mjs:370: trailing whitespace.
++});
+admin-web/tests/checkin-face-config.test.mjs:371: trailing whitespace.
++
+admin-web/tests/checkin-face-config.test.mjs:372: trailing whitespace.
++test('setSwitch(true) 新增前置：可信云存储命名空间未配置时 STORAGE_NAMESPACE_UNCONFIGURED 且零写入', async () => {
+admin-web/tests/checkin-face-config.test.mjs:373: trailing whitespace.
++  // 其余四项前置（版本/凭据/102/租期）已满足，仅缺命名空间。
+admin-web/tests/checkin-face-config.test.mjs:374: trailing whitespace.
++  const { db, config } = service();
+admin-web/tests/checkin-face-config.test.mjs:375: trailing whitespace.
++  await config.setApplicationVersion('test-v1');
+admin-web/tests/checkin-face-config.test.mjs:376: trailing whitespace.
++  await config.setWorkerToken(TOKEN);
+admin-web/tests/checkin-face-config.test.mjs:377: trailing whitespace.
++  await config.upsertRoomBinding(ROOM_INPUT);
+admin-web/tests/checkin-face-config.test.mjs:378: trailing whitespace.
++  await config.upsertLease(LEASE_INPUT);
+admin-web/tests/checkin-face-config.test.mjs:379: trailing whitespace.
++  const before = db.writes;
+admin-web/tests/checkin-face-config.test.mjs:380: trailing whitespace.
++  await assert.rejects(() => config.setSwitch(true), (error) => error.code === 'STORAGE_NAMESPACE_UNCONFIGURED');
+admin-web/tests/checkin-face-config.test.mjs:381: trailing whitespace.
++  assert.equal(db.writes, before, '缺命名空间时开启开关必须零写入');
+admin-web/tests/checkin-face-config.test.mjs:382: trailing whitespace.
++  assert.equal((await config.getConfig()).config.enabled, false);
+admin-web/tests/checkin-face-config.test.mjs:383: trailing whitespace.
++
+admin-web/tests/checkin-face-config.test.mjs:384: trailing whitespace.
++  // 配置命名空间后开启成功。
+admin-web/tests/checkin-face-config.test.mjs:385: trailing whitespace.
++  await config.setStorageNamespace(STORAGE_NAMESPACE, { reason: '合成配置' });
+admin-web/tests/checkin-face-config.test.mjs:386: trailing whitespace.
++  const opened = await config.setSwitch(true, '合成开启');
+admin-web/tests/checkin-face-config.test.mjs:387: trailing whitespace.
++  assert.equal(opened.enabled, true);
+admin-web/tests/checkin-face-config.test.mjs:388: trailing whitespace.
++  assert.equal((await config.getConfig()).config.storageNamespaceConfigured, true);
+admin-web/tests/checkin-face-config.test.mjs:389: trailing whitespace.
++});
+admin-web/tests/checkin-face-config.test.mjs:390: trailing whitespace.
++
+admin-web/tests/checkin-face-config.test.mjs:408: trailing whitespace.
++  // R01 新增公开配置路由：命名空间必须走同一 admin-only 路由并复用云端正则。
+admin-web/tests/checkin-face-config.test.mjs:409: trailing whitespace.
++  assert.match(server, /CHECKIN_FACE_STORAGE_NAMESPACE_PATTERN/, '路由必须复用云端命名空间正则');
+admin-web/tests/checkin-face-config.test.mjs:410: trailing whitespace.
++  assert.match(server, /\$\{CHECKIN_FACE_TEST_API\}storage/, '必须存在 /api/checkin-face-test/storage 路由');
+admin-web/tests/checkin-face-config.test.mjs:411: trailing whitespace.
++  assert.match(server, /setStorageNamespace/, '路由必须调用配置服务的 setStorageNamespace');
+admin-web/tests/checkin-face-worker.test.mjs:2: trailing whitespace.
++ * B05 / §6 — 本地受控 worker 构造与退出码合成测试（R05–R09 退修版）。
+admin-web/tests/checkin-face-worker.test.mjs:4: trailing whitespace.
++ * 断言显式 device+fixed、缺项拒绝、deviceKey 强绑定（R05）、执行前复核字段校验（R06）、
+admin-web/tests/checkin-face-worker.test.mjs:5: trailing whitespace.
++ * 未知结果收敛为 5/stopped、一次 claim 一次 begin 一次 report 不重试、输出白名单脱敏、
+admin-web/tests/checkin-face-worker.test.mjs:6: trailing whitespace.
++ * 清理纳入终态（R09）、无监听端口/远程开门、无照片落盘写 API。
+admin-web/tests/checkin-face-worker.test.mjs:18: trailing whitespace.
++  WorkerConfigError,
+admin-web/tests/checkin-face-worker.test.mjs:20: trailing whitespace.
++  applyCleanupResult,
+admin-web/tests/checkin-face-worker.test.mjs:21: trailing whitespace.
++  assertDeviceKeyMatch,
+admin-web/tests/checkin-face-worker.test.mjs:23: trailing whitespace.
++  buildInMemoryDeviceRequest,
+admin-web/tests/checkin-face-worker.test.mjs:30: trailing whitespace.
++  validateClaimedTask,
+admin-web/tests/checkin-face-worker.test.mjs:32: trailing whitespace.
++import { AuthorizationError, checkClaimTime, verifyAuthorizedSnapshot } from '../../tools/checkin-face-worker/execution-authorization.mjs';
+admin-web/tests/checkin-face-worker.test.mjs:60: trailing whitespace.
++function makeTask({ nowMs = Date.now(), ...overrides } = {}) {
+admin-web/tests/checkin-face-worker.test.mjs:61: trailing whitespace.
++  return {
+admin-web/tests/checkin-face-worker.test.mjs:62: trailing whitespace.
++    taskId: 'checkin-face-test|task|app-1',
+admin-web/tests/checkin-face-worker.test.mjs:63: trailing whitespace.
++    applicationId: 'checkin-face-test|application|app-1',
+admin-web/tests/checkin-face-worker.test.mjs:64: trailing whitespace.
++    claimId: '11111111-2222-4333-8444-555555555555',
+admin-web/tests/checkin-face-worker.test.mjs:65: trailing whitespace.
++    revision: 2,
+admin-web/tests/checkin-face-worker.test.mjs:66: trailing whitespace.
++    name: '合成测试成员',
+admin-web/tests/checkin-face-worker.test.mjs:67: trailing whitespace.
++    employeeNo: 'F0123456789ABCDEF',
+admin-web/tests/checkin-face-worker.test.mjs:68: trailing whitespace.
++    doorNo: 7,
+admin-web/tests/checkin-face-worker.test.mjs:69: trailing whitespace.
++    validFrom: '2026-12-01T00:00:00',
+admin-web/tests/checkin-face-worker.test.mjs:70: trailing whitespace.
++    validTo: '2026-12-05T23:59:59',
+admin-web/tests/checkin-face-worker.test.mjs:71: trailing whitespace.
++    timezone: 'Asia/Shanghai',
+admin-web/tests/checkin-face-worker.test.mjs:72: trailing whitespace.
++    dailyHours: '24x7',
+admin-web/tests/checkin-face-worker.test.mjs:73: trailing whitespace.
++    deviceKey: 'device-key-stable',
+admin-web/tests/checkin-face-worker.test.mjs:74: trailing whitespace.
++    fileId: 'cloud://synthetic/test-face/photo.jpg',
+admin-web/tests/checkin-face-worker.test.mjs:75: trailing whitespace.
++    cloudPath: 'test-face/checkin-face-test/openid/app-1/photo.jpg',
+admin-web/tests/checkin-face-worker.test.mjs:76: trailing whitespace.
++    accessPlanFingerprint: 'a'.repeat(64),
+admin-web/tests/checkin-face-worker.test.mjs:77: trailing whitespace.
++    claimExpiresAt: nowMs + 300_000,
+admin-web/tests/checkin-face-worker.test.mjs:78: trailing whitespace.
++    ...overrides,
+admin-web/tests/checkin-face-worker.test.mjs:79: trailing whitespace.
++  };
+admin-web/tests/checkin-face-worker.test.mjs:80: trailing whitespace.
++}
+admin-web/tests/checkin-face-worker.test.mjs:81: trailing whitespace.
++
+admin-web/tests/checkin-face-worker.test.mjs:82: trailing whitespace.
++const task = makeTask();
+admin-web/tests/checkin-face-worker.test.mjs:83: trailing whitespace.
++
+admin-web/tests/checkin-face-worker.test.mjs:84: trailing whitespace.
++/** 模拟云端 beginTaskExecution 返回的权威快照（清单 §2.3 形状：推进后 revision、关联版本与时间事实）。 */
+admin-web/tests/checkin-face-worker.test.mjs:85: trailing whitespace.
++function authorizedSnapshot(claimed) {
+admin-web/tests/checkin-face-worker.test.mjs:86: trailing whitespace.
++  return {
+admin-web/tests/checkin-face-worker.test.mjs:87: trailing whitespace.
++    ...claimed,
+admin-web/tests/checkin-face-worker.test.mjs:88: trailing whitespace.
++    status: 'DEVICE_PROCESSING',
+admin-web/tests/checkin-face-worker.test.mjs:89: trailing whitespace.
++    revision: claimed.revision + 1,
+admin-web/tests/checkin-face-worker.test.mjs:90: trailing whitespace.
++    configRevision: 3,
+admin-web/tests/checkin-face-worker.test.mjs:91: trailing whitespace.
++    roomRevision: 5,
+admin-web/tests/checkin-face-worker.test.mjs:92: trailing whitespace.
++    leaseRevision: 7,
+admin-web/tests/checkin-face-worker.test.mjs:93: trailing whitespace.
++    roomBindingId: 'checkin-face-test|room|102',
+admin-web/tests/checkin-face-worker.test.mjs:94: trailing whitespace.
++    leaseSnapshotId: 'checkin-face-test|lease|1',
+admin-web/tests/checkin-face-worker.test.mjs:95: trailing whitespace.
++    workerId: 'synthetic-worker-01',
+admin-web/tests/checkin-face-worker.test.mjs:96: trailing whitespace.
++    authorizedAt: claimed.claimExpiresAt - 5000,
+admin-web/tests/checkin-face-worker.test.mjs:97: trailing whitespace.
++  };
+admin-web/tests/checkin-face-worker.test.mjs:98: trailing whitespace.
++}
+admin-web/tests/checkin-face-worker.test.mjs:125: trailing whitespace.
++test('R05：本地配置缺少 deviceKey 在配置加载即失败关闭（exit 1 类，不进领取）', async () => {
+admin-web/tests/checkin-face-worker.test.mjs:126: trailing whitespace.
++  await assert.rejects(() => loadWorkerConfig({
+admin-web/tests/checkin-face-worker.test.mjs:127: trailing whitespace.
++    configPath: 'C:/synthetic/worker.local.json',
+admin-web/tests/checkin-face-worker.test.mjs:128: trailing whitespace.
++    env: { CHECKIN_FACE_WORKER_TOKEN: TOKEN },
+admin-web/tests/checkin-face-worker.test.mjs:129: trailing whitespace.
++    readJsonFile: async () => JSON.stringify({ ...localConfig, deviceKey: '  ' }),
+admin-web/tests/checkin-face-worker.test.mjs:130: trailing whitespace.
++  }), (error) => error instanceof WorkerConfigError && error.code === 'DEVICE_KEY_MISSING');
+admin-web/tests/checkin-face-worker.test.mjs:131: trailing whitespace.
++});
+admin-web/tests/checkin-face-worker.test.mjs:132: trailing whitespace.
++
+admin-web/tests/checkin-face-worker.test.mjs:133: trailing whitespace.
++test('R06：本地 workerId 格式预检（清单 §2.1 /^[A-Za-z0-9_-]{1,64}$/）', async () => {
+admin-web/tests/checkin-face-worker.test.mjs:134: trailing whitespace.
++  await assert.rejects(() => loadWorkerConfig({
+admin-web/tests/checkin-face-worker.test.mjs:135: trailing whitespace.
++    configPath: 'C:/synthetic/worker.local.json',
+admin-web/tests/checkin-face-worker.test.mjs:136: trailing whitespace.
++    env: { CHECKIN_FACE_WORKER_TOKEN: TOKEN },
+admin-web/tests/checkin-face-worker.test.mjs:137: trailing whitespace.
++    readJsonFile: async () => JSON.stringify({ ...localConfig, workerId: 'bad id!' }),
+admin-web/tests/checkin-face-worker.test.mjs:138: trailing whitespace.
++  }), (error) => error instanceof WorkerConfigError && error.code === 'WORKER_ID_INVALID');
+admin-web/tests/checkin-face-worker.test.mjs:139: trailing whitespace.
++});
+admin-web/tests/checkin-face-worker.test.mjs:140: trailing whitespace.
++
+admin-web/tests/checkin-face-worker.test.mjs:163: trailing whitespace.
++test('R08：buildInMemoryDeviceRequest 不含 photoPath（内存照片不落盘）', async () => {
+admin-web/tests/checkin-face-worker.test.mjs:164: trailing whitespace.
++  const cfg = await config();
+admin-web/tests/checkin-face-worker.test.mjs:165: trailing whitespace.
++  const request = buildInMemoryDeviceRequest(task, cfg);
+admin-web/tests/checkin-face-worker.test.mjs:166: trailing whitespace.
++  assert.equal(request.mode, 'device');
+admin-web/tests/checkin-face-worker.test.mjs:167: trailing whitespace.
++  assert.equal(request.validityMode, 'fixed');
+admin-web/tests/checkin-face-worker.test.mjs:168: trailing whitespace.
++  assert.equal(request.doorNo, 7);
+admin-web/tests/checkin-face-worker.test.mjs:169: trailing whitespace.
++  assert.equal(Object.isFrozen(request), true);
+admin-web/tests/checkin-face-worker.test.mjs:170: trailing whitespace.
++  assert.ok(!Object.hasOwn(request, 'photoPath'), '内存路径不得携带 photoPath');
+admin-web/tests/checkin-face-worker.test.mjs:171: trailing whitespace.
++});
+admin-web/tests/checkin-face-worker.test.mjs:172: trailing whitespace.
++
+admin-web/tests/checkin-face-worker.test.mjs:197: trailing whitespace.
++test('R05：deviceKey 缺任一/空/不同立即拒绝，精确一致才放行', async () => {
+admin-web/tests/checkin-face-worker.test.mjs:198: trailing whitespace.
++  const cfg = await config();
+admin-web/tests/checkin-face-worker.test.mjs:199: trailing whitespace.
++  const withoutKey = { ...task }; delete withoutKey.deviceKey;
+admin-web/tests/checkin-face-worker.test.mjs:200: trailing whitespace.
++  const cases = [
+admin-web/tests/checkin-face-worker.test.mjs:201: trailing whitespace.
++    [withoutKey, cfg, 'TASK_FIELD_MISSING'],
+admin-web/tests/checkin-face-worker.test.mjs:202: trailing whitespace.
++    [{ ...task, deviceKey: '' }, cfg, 'WORKER_FIELD_INVALID'],
+admin-web/tests/checkin-face-worker.test.mjs:203: trailing whitespace.
++    [{ ...task, deviceKey: 'another-door-key' }, cfg, 'DEVICE_KEY_CONFLICT'],
+admin-web/tests/checkin-face-worker.test.mjs:204: trailing whitespace.
++    [task, { ...cfg, deviceKey: '' }, 'DEVICE_KEY_MISSING'],
+admin-web/tests/checkin-face-worker.test.mjs:205: trailing whitespace.
++    [task, { ...cfg, deviceKey: 'another-door-key' }, 'DEVICE_KEY_CONFLICT'],
+admin-web/tests/checkin-face-worker.test.mjs:206: trailing whitespace.
++  ];
+admin-web/tests/checkin-face-worker.test.mjs:207: trailing whitespace.
++  for (const [input, inputConfig, code] of cases) {
+admin-web/tests/checkin-face-worker.test.mjs:208: trailing whitespace.
++    let error = null;
+admin-web/tests/checkin-face-worker.test.mjs:209: trailing whitespace.
++    try { assertDeviceKeyMatch(input, inputConfig); } catch (caught) { error = caught; }
+admin-web/tests/checkin-face-worker.test.mjs:210: trailing whitespace.
++    assert.ok(error instanceof WorkerInputError, `${code} 必须抛 WorkerInputError`);
+admin-web/tests/checkin-face-worker.test.mjs:211: trailing whitespace.
++    assert.equal(error.code, code);
+admin-web/tests/checkin-face-worker.test.mjs:212: trailing whitespace.
++    assert.equal(error.exitCode, 2);
+admin-web/tests/checkin-face-worker.test.mjs:213: trailing whitespace.
++  }
+admin-web/tests/checkin-face-worker.test.mjs:214: trailing whitespace.
++  assert.equal(assertDeviceKeyMatch(task, cfg), 'device-key-stable', '一致时返回任务 deviceKey');
+admin-web/tests/checkin-face-worker.test.mjs:215: trailing whitespace.
++});
+admin-web/tests/checkin-face-worker.test.mjs:216: trailing whitespace.
++
+admin-web/tests/checkin-face-worker.test.mjs:217: trailing whitespace.
++test('R06：validateClaimedTask 在下载前失败关闭（claim 字段/租期/计划指纹）', async () => {
+admin-web/tests/checkin-face-worker.test.mjs:218: trailing whitespace.
++  const without = (row, key) => { const copy = { ...row }; delete copy[key]; return copy; };
+admin-web/tests/checkin-face-worker.test.mjs:219: trailing whitespace.
++  const bad = [
+admin-web/tests/checkin-face-worker.test.mjs:220: trailing whitespace.
++    [without(task, 'taskId'), 'TASK_FIELD_MISSING'],
+admin-web/tests/checkin-face-worker.test.mjs:221: trailing whitespace.
++    [without(task, 'claimId'), 'TASK_FIELD_MISSING'],
+admin-web/tests/checkin-face-worker.test.mjs:222: trailing whitespace.
++    [without(task, 'revision'), 'TASK_FIELD_MISSING'],
+admin-web/tests/checkin-face-worker.test.mjs:223: trailing whitespace.
++    [without(task, 'claimExpiresAt'), 'TASK_FIELD_MISSING'],
+admin-web/tests/checkin-face-worker.test.mjs:224: trailing whitespace.
++    [{ ...task, claimExpiresAt: 0 }, 'TASK_FIELD_INVALID'],
+admin-web/tests/checkin-face-worker.test.mjs:225: trailing whitespace.
++    [{ ...task, claimExpiresAt: 'soon' }, 'TASK_FIELD_INVALID'],
+admin-web/tests/checkin-face-worker.test.mjs:226: trailing whitespace.
++    [{ ...task, fileId: 'test-face/x.jpg' }, 'FILE_ID_INVALID'],
+admin-web/tests/checkin-face-worker.test.mjs:227: trailing whitespace.
++    [{ ...task, accessPlanFingerprint: '' }, 'WORKER_FIELD_INVALID'],
+admin-web/tests/checkin-face-worker.test.mjs:228: trailing whitespace.
++    [{ ...task, accessPlanFingerprint: 'z'.repeat(64) }, 'TASK_FIELD_INVALID'],
+admin-web/tests/checkin-face-worker.test.mjs:229: trailing whitespace.
++    [{ ...task, validFrom: '2026-12-06T00:00:00' }, undefined],
+admin-web/tests/checkin-face-worker.test.mjs:230: trailing whitespace.
++  ];
+admin-web/tests/checkin-face-worker.test.mjs:231: trailing whitespace.
++  for (const [input, code] of bad) {
+admin-web/tests/checkin-face-worker.test.mjs:232: trailing whitespace.
++    let error = null;
+admin-web/tests/checkin-face-worker.test.mjs:233: trailing whitespace.
++    try { validateClaimedTask(input); } catch (caught) { error = caught; }
+admin-web/tests/checkin-face-worker.test.mjs:234: trailing whitespace.
++    if (code === undefined) continue;
+admin-web/tests/checkin-face-worker.test.mjs:235: trailing whitespace.
++    assert.ok(error instanceof WorkerInputError, `${code} 必须抛 WorkerInputError`);
+admin-web/tests/checkin-face-worker.test.mjs:236: trailing whitespace.
++    assert.equal(error.code, code);
+admin-web/tests/checkin-face-worker.test.mjs:237: trailing whitespace.
++  }
+admin-web/tests/checkin-face-worker.test.mjs:238: trailing whitespace.
++  assert.ok(validateClaimedTask(task) === task.claimExpiresAt, '合法 claim 返回 claimExpiresAt');
+admin-web/tests/checkin-face-worker.test.mjs:239: trailing whitespace.
++});
+admin-web/tests/checkin-face-worker.test.mjs:240: trailing whitespace.
++
+admin-web/tests/checkin-face-worker.test.mjs:241: trailing whitespace.
++test('R06：checkClaimTime 过期/时钟无效/偏差过大失败关闭', () => {
+admin-web/tests/checkin-face-worker.test.mjs:242: trailing whitespace.
++  const now = 1_800_000_000_000;
+admin-web/tests/checkin-face-worker.test.mjs:243: trailing whitespace.
++  const fresh = { claimExpiresAt: now + 300_000 };
+admin-web/tests/checkin-face-worker.test.mjs:244: trailing whitespace.
++  assert.equal(checkClaimTime(fresh, now), now + 300_000);
+admin-web/tests/checkin-face-worker.test.mjs:245: trailing whitespace.
++  assert.throws(() => checkClaimTime({ claimExpiresAt: now - 1 }, now), (error) => error instanceof AuthorizationError && error.code === 'BEGIN_AUTH_EXPIRED');
+admin-web/tests/checkin-face-worker.test.mjs:246: trailing whitespace.
++  assert.throws(() => checkClaimTime({}, now), (error) => error instanceof WorkerInputError && error.code === 'TASK_FIELD_MISSING');
+admin-web/tests/checkin-face-worker.test.mjs:247: trailing whitespace.
++  assert.throws(() => checkClaimTime({ claimExpiresAt: 'x' }, now), (error) => error instanceof WorkerInputError && error.code === 'TASK_FIELD_INVALID');
+admin-web/tests/checkin-face-worker.test.mjs:248: trailing whitespace.
++  assert.throws(() => checkClaimTime(fresh, NaN), (error) => error instanceof WorkerInputError && error.code === 'CLOCK_INVALID' && error.exitCode === 5);
+admin-web/tests/checkin-face-worker.test.mjs:249: trailing whitespace.
++  assert.throws(() => checkClaimTime({ claimExpiresAt: now + 2 * 3600_000 }, now), (error) => error instanceof WorkerInputError && error.code === 'CLAIM_TIME_INVALID' && error.exitCode === 5);
+admin-web/tests/checkin-face-worker.test.mjs:250: trailing whitespace.
++});
+admin-web/tests/checkin-face-worker.test.mjs:251: trailing whitespace.
++
+admin-web/tests/checkin-face-worker.test.mjs:252: trailing whitespace.
++test('R06：verifyAuthorizedSnapshot 只接受预期推进/一致字段/明确时间事实（清单 §2.3/§2.5）', () => {
+admin-web/tests/checkin-face-worker.test.mjs:253: trailing whitespace.
++  const now = 1_800_000_000_000;
+admin-web/tests/checkin-face-worker.test.mjs:254: trailing whitespace.
++  const claimed = makeTask({ nowMs: now });
+admin-web/tests/checkin-face-worker.test.mjs:255: trailing whitespace.
++  const good = { ...authorizedSnapshot(claimed), authorizedAt: claimed.claimExpiresAt - 5000 };
+admin-web/tests/checkin-face-worker.test.mjs:256: trailing whitespace.
++  assert.equal(verifyAuthorizedSnapshot({ claimed, snapshot: good, authorizedAt: good.authorizedAt, workerId: 'synthetic-worker-01' }), good);
+admin-web/tests/checkin-face-worker.test.mjs:257: trailing whitespace.
++  const tamper = (snapshot, authorizedAt = good.authorizedAt, workerId = 'synthetic-worker-01') => () => verifyAuthorizedSnapshot({ claimed, snapshot, authorizedAt, workerId });
+admin-web/tests/checkin-face-worker.test.mjs:258: trailing whitespace.
++  const mismatchError = (error) => error instanceof AuthorizationError && error.code === 'BEGIN_SNAPSHOT_MISMATCH';
+admin-web/tests/checkin-face-worker.test.mjs:259: trailing whitespace.
++  assert.throws(tamper({ ...good, status: 'CLAIMED' }), mismatchError);
+admin-web/tests/checkin-face-worker.test.mjs:260: trailing whitespace.
++  assert.throws(tamper({ ...good, revision: claimed.revision }), mismatchError);
+admin-web/tests/checkin-face-worker.test.mjs:261: trailing whitespace.
++  assert.throws(tamper({ ...good, claimExpiresAt: claimed.claimExpiresAt + 60_000 }), mismatchError);
+admin-web/tests/checkin-face-worker.test.mjs:262: trailing whitespace.
++  assert.throws(tamper({ ...good, validTo: '2026-12-31T23:59:59' }), mismatchError);
+admin-web/tests/checkin-face-worker.test.mjs:263: trailing whitespace.
++  assert.throws(tamper({ ...good, deviceKey: 'other-key' }), mismatchError);
+admin-web/tests/checkin-face-worker.test.mjs:264: trailing whitespace.
++  assert.throws(tamper({ ...good, employeeNo: 'FZZZZZZZZZZZZZZZZ' }), mismatchError);
+admin-web/tests/checkin-face-worker.test.mjs:265: trailing whitespace.
++  assert.throws(tamper({ ...good, doorNo: 3 }), mismatchError);
+admin-web/tests/checkin-face-worker.test.mjs:266: trailing whitespace.
++  assert.throws(tamper({ ...good, fileId: 'cloud://synthetic/other.jpg' }), mismatchError);
+admin-web/tests/checkin-face-worker.test.mjs:267: trailing whitespace.
++  assert.throws(tamper({ ...good, workerId: 'another-worker' }), mismatchError, '快照 workerId 必须与请求一致');
+admin-web/tests/checkin-face-worker.test.mjs:268: trailing whitespace.
++  assert.throws(tamper({ ...good, authorizedAt: good.authorizedAt + 1 }), mismatchError, 'task.authorizedAt 必须与 data.authorizedAt 一致');
+admin-web/tests/checkin-face-worker.test.mjs:269: trailing whitespace.
++  const withoutLease = { ...good }; delete withoutLease.leaseRevision;
+admin-web/tests/checkin-face-worker.test.mjs:270: trailing whitespace.
++  assert.throws(tamper(withoutLease), mismatchError);
+admin-web/tests/checkin-face-worker.test.mjs:271: trailing whitespace.
++  const withoutRoomBinding = { ...good }; delete withoutRoomBinding.roomBindingId;
+admin-web/tests/checkin-face-worker.test.mjs:272: trailing whitespace.
++  assert.throws(tamper(withoutRoomBinding), mismatchError);
+admin-web/tests/checkin-face-worker.test.mjs:273: trailing whitespace.
++  assert.throws(tamper(good, 0), mismatchError);
+admin-web/tests/checkin-face-worker.test.mjs:274: trailing whitespace.
++  assert.throws(tamper(good, claimed.claimExpiresAt + 1), mismatchError);
+admin-web/tests/checkin-face-worker.test.mjs:275: trailing whitespace.
++});
+admin-web/tests/checkin-face-worker.test.mjs:276: trailing whitespace.
++
+admin-web/tests/checkin-face-worker.test.mjs:321: trailing whitespace.
++test('R09：applyCleanupResult 清理失败改记 stopped(5) 并保留设备事实；成功原样返回', () => {
+admin-web/tests/checkin-face-worker.test.mjs:322: trailing whitespace.
++  const deviceResult = {
+admin-web/tests/checkin-face-worker.test.mjs:323: trailing whitespace.
++    exitCode: 0,
+admin-web/tests/checkin-face-worker.test.mjs:324: trailing whitespace.
++    output: {
+admin-web/tests/checkin-face-worker.test.mjs:325: trailing whitespace.
++      protocolVersion: 1, outcome: 'device-enrollment-confirmed-pending-site', mode: 'device',
+admin-web/tests/checkin-face-worker.test.mjs:326: trailing whitespace.
++      validityMode: 'fixed', dailyHours: '24x7', siteVerification: 'PENDING',
+admin-web/tests/checkin-face-worker.test.mjs:327: trailing whitespace.
++      enrollment: { employeeNo: 'F0123456789ABCDEF', doorNo: 7 },
+admin-web/tests/checkin-face-worker.test.mjs:328: trailing whitespace.
++    },
+admin-web/tests/checkin-face-worker.test.mjs:329: trailing whitespace.
++  };
+admin-web/tests/checkin-face-worker.test.mjs:330: trailing whitespace.
++  const kept = applyCleanupResult(deviceResult, true);
+admin-web/tests/checkin-face-worker.test.mjs:331: trailing whitespace.
++  assert.equal(kept, deviceResult, '清理成功不得改写结果');
+admin-web/tests/checkin-face-worker.test.mjs:332: trailing whitespace.
++  const failed = applyCleanupResult(deviceResult, false);
+admin-web/tests/checkin-face-worker.test.mjs:333: trailing whitespace.
++  assert.equal(failed.exitCode, 5);
+admin-web/tests/checkin-face-worker.test.mjs:334: trailing whitespace.
++  assert.equal(failed.output.outcome, 'stopped');
+admin-web/tests/checkin-face-worker.test.mjs:335: trailing whitespace.
++  assert.equal(failed.output.error.code, 'CLEANUP_FAILED');
+admin-web/tests/checkin-face-worker.test.mjs:336: trailing whitespace.
++  assert.equal(failed.output.error.requiresInspection, true);
+admin-web/tests/checkin-face-worker.test.mjs:337: trailing whitespace.
++  assert.equal(failed.output.enrollment.employeeNo, 'F0123456789ABCDEF', '已发生设备事实保留');
+admin-web/tests/checkin-face-worker.test.mjs:338: trailing whitespace.
++  assert.equal(failed.output.enrollment.doorNo, 7);
+admin-web/tests/checkin-face-worker.test.mjs:339: trailing whitespace.
++  assert.ok(!Object.hasOwn(failed.output, 'cleanup'), '不得谎报清理成功字段');
+admin-web/tests/checkin-face-worker.test.mjs:340: trailing whitespace.
++});
+admin-web/tests/checkin-face-worker.test.mjs:341: trailing whitespace.
++
+admin-web/tests/checkin-face-worker.test.mjs:387: trailing whitespace.
++test('worker 主流程一次 claim + 一次 begin + 一次 report；report 使用推进后 revision；退出码 4/5 按结果映射，不重试', async () => {
+admin-web/tests/checkin-face-worker.test.mjs:396: trailing whitespace.
++    const current = makeTask();
+admin-web/tests/checkin-face-worker.test.mjs:400: trailing whitespace.
++        if (action === 'claimTask') return { task: current };
+admin-web/tests/checkin-face-worker.test.mjs:401: trailing whitespace.
++        if (action === 'beginTaskExecution') {
+admin-web/tests/checkin-face-worker.test.mjs:402: trailing whitespace.
++          return { task: authorizedSnapshot(current), authorizedAt: current.claimExpiresAt - 5000 };
+admin-web/tests/checkin-face-worker.test.mjs:403: trailing whitespace.
++        }
+admin-web/tests/checkin-face-worker.test.mjs:404: trailing whitespace.
++        return { ok: true };
+admin-web/tests/checkin-face-worker.test.mjs:411: trailing whitespace.
++        platform: 'win32', stdout: { write: () => {} },
+admin-web/tests/checkin-face-worker.test.mjs:416: trailing whitespace.
++      assert.deepEqual(actions.map((entry) => entry.action), ['claimTask', 'beginTaskExecution', 'reportTask'], '一次 claim 一次 begin 一次 report，无重试');
+admin-web/tests/checkin-face-worker.test.mjs:418: trailing whitespace.
++      assert.deepEqual(Object.keys(actions[1].payload).sort(), ['claimId', 'revision', 'taskId', 'workerId', 'workerToken'].sort(), 'begin 请求只携带规定字段');
+admin-web/tests/checkin-face-worker.test.mjs:419: trailing whitespace.
++      assert.equal(actions[1].payload.revision, current.revision);
+admin-web/tests/checkin-face-worker.test.mjs:420: trailing whitespace.
++      assert.equal(actions[2].payload.exitCode, exitCode);
+admin-web/tests/checkin-face-worker.test.mjs:421: trailing whitespace.
++      assert.equal(actions[2].payload.revision, current.revision + 1, 'report 使用推进后 revision');
+admin-web/tests/checkin-face-worker.test.mjs:429: trailing whitespace.
++test('worker 空闲只 claim 不 begin/report；example JSON device 段全空；代码无监听/开门/重排队/照片落盘', async () => {
+admin-web/tests/checkin-face-worker.test.mjs:435: trailing whitespace.
++    platform: 'win32', stdout: { write: () => {} },
+admin-web/tests/checkin-face-worker.test.mjs:444: trailing whitespace.
++  assert.equal(example.sdkModulePath, '', '示例 sdkModulePath 必须留空（默认 worker 自有边界）');
+admin-web/tests/checkin-face-worker.test.mjs:445: trailing whitespace.
++  for (const file of ['worker-runtime.mjs', 'claim-and-enroll.mjs', 'execution-authorization.mjs', 'enrollment-adapter.mjs']) {
+admin-web/tests/checkin-face-worker.test.mjs:451: trailing whitespace.
++  for (const file of ['claim-and-enroll.mjs', 'enrollment-adapter.mjs', 'execution-authorization.mjs']) {
+admin-web/tests/checkin-face-worker.test.mjs:452: trailing whitespace.
++    const source = await readFile(join(ROOT, 'tools/checkin-face-worker', file), 'utf8');
+admin-web/tests/checkin-face-worker.test.mjs:453: trailing whitespace.
++    assert.ok(!/(?:writeFile|createWriteStream|mkdir)\s*\(/.test(source), `${file} 不得有照片/临时文件写盘 API`);
+admin-web/tests/checkin-face-worker.test.mjs:454: trailing whitespace.
++  }
+admin-web/tests/checkin-face-worker.test.mjs:455: trailing whitespace.
++  const runtime = await readFile(join(ROOT, 'tools/checkin-face-worker', 'worker-runtime.mjs'), 'utf8');
+admin-web/tests/checkin-face-worker.test.mjs:456: trailing whitespace.
++  assert.ok(!/(?:writeFile|createWriteStream|mkdir)\s*\(/.test(runtime), 'worker-runtime 不得有写盘 API');
+scripts/checkin-face-static-check.mjs:6: trailing whitespace.
++ * 云函数不打印请求体。R10：mode=device 与 validityMode=fixed 逐项断言、全部要求。
+scripts/checkin-face-static-check.mjs:7: trailing whitespace.
++ * 违规打印具体文件:行号并以退出码 1 结束。
+scripts/checkin-face-static-check.mjs:48: trailing whitespace.
++/**
+scripts/checkin-face-static-check.mjs:49: trailing whitespace.
++ * 剔除注释后取代码行：`//` 行、`/* ... *​/` 块（含行内）不参与匹配，
+scripts/checkin-face-static-check.mjs:50: trailing whitespace.
++ * 因此把关键构造写进注释不能冒充实际请求（R10：注释命中不算证据）。
+scripts/checkin-face-static-check.mjs:51: trailing whitespace.
++ */
+scripts/checkin-face-static-check.mjs:52: trailing whitespace.
++function codeLinesOf(file) {
+scripts/checkin-face-static-check.mjs:53: trailing whitespace.
++  return readFileSync(file, 'utf8')
+scripts/checkin-face-static-check.mjs:54: trailing whitespace.
++    .split(/\r?\n/)
+scripts/checkin-face-static-check.mjs:55: trailing whitespace.
++    .map((line) => line.replace(/\/\*[\s\S]*?\*\//g, ''))
+scripts/checkin-face-static-check.mjs:56: trailing whitespace.
++    .filter((line) => {
+scripts/checkin-face-static-check.mjs:57: trailing whitespace.
++      const trimmed = line.trim();
+scripts/checkin-face-static-check.mjs:58: trailing whitespace.
++      return trimmed !== '' && !trimmed.startsWith('//') && !trimmed.startsWith('/*') && !trimmed.startsWith('*');
+scripts/checkin-face-static-check.mjs:59: trailing whitespace.
++    });
+scripts/checkin-face-static-check.mjs:60: trailing whitespace.
++}
+scripts/checkin-face-static-check.mjs:61: trailing whitespace.
++
+scripts/checkin-face-static-check.mjs:62: trailing whitespace.
++function codeTextOf(file) {
+scripts/checkin-face-static-check.mjs:63: trailing whitespace.
++  return codeLinesOf(file).join('\n');
+scripts/checkin-face-static-check.mjs:64: trailing whitespace.
++}
+scripts/checkin-face-static-check.mjs:65: trailing whitespace.
++
+scripts/checkin-face-static-check.mjs:66: trailing whitespace.
++/**
+scripts/checkin-face-static-check.mjs:67: trailing whitespace.
++ * 逐项断言（R10）：每一对 [pattern, message] 都必须命中，缺任何一项都失败，
+scripts/checkin-face-static-check.mjs:68: trailing whitespace.
++ * 并且各自打印专属消息，负控可精确命中。
+scripts/checkin-face-static-check.mjs:69: trailing whitespace.
++ */
+scripts/checkin-face-static-check.mjs:70: trailing whitespace.
++function requireEachText(file, pairs) {
+scripts/checkin-face-static-check.mjs:71: trailing whitespace.
++  const text = codeTextOf(file);
+scripts/checkin-face-static-check.mjs:72: trailing whitespace.
++  const rel = relative(ROOT, file).replaceAll('\\', '/');
+scripts/checkin-face-static-check.mjs:73: trailing whitespace.
++  for (const [pattern, message] of pairs) {
+scripts/checkin-face-static-check.mjs:74: trailing whitespace.
++    if (!pattern.test(text)) issues.push(`${rel}:1: ${message}`);
+scripts/checkin-face-static-check.mjs:75: trailing whitespace.
++  }
+scripts/checkin-face-static-check.mjs:76: trailing whitespace.
++}
+scripts/checkin-face-static-check.mjs:77: trailing whitespace.
++
+scripts/checkin-face-static-check.mjs:78: trailing whitespace.
++/**
+scripts/checkin-face-static-check.mjs:79: trailing whitespace.
++ * R10 请求构造段落断言：mode=device 与 validityMode=fixed 必须成对出现在
+scripts/checkin-face-static-check.mjs:80: trailing whitespace.
++ * 与 consent:true 硬要求共置的请求构造处；文件里其他位置的同名字符串
+scripts/checkin-face-static-check.mjs:81: trailing whitespace.
++ * （上报脱敏/失败输出里的 validityMode 常量）不算数。不绑定函数名，
+scripts/checkin-face-static-check.mjs:82: trailing whitespace.
++ * 对 worker 内部重构（Core/wrapper 拆分、内存/落盘两个入口）保持健壮。
+scripts/checkin-face-static-check.mjs:83: trailing whitespace.
++ */
+scripts/checkin-face-static-check.mjs:84: trailing whitespace.
++function requireRequestConstruction(file, pairs) {
+scripts/checkin-face-static-check.mjs:85: trailing whitespace.
++  const rel = relative(ROOT, file).replaceAll('\\', '/');
+scripts/checkin-face-static-check.mjs:86: trailing whitespace.
++  const lines = codeLinesOf(file);
+scripts/checkin-face-static-check.mjs:87: trailing whitespace.
++  const anchors = [];
+scripts/checkin-face-static-check.mjs:88: trailing whitespace.
++  lines.forEach((line, index) => {
+scripts/checkin-face-static-check.mjs:89: trailing whitespace.
++    if (/\bconsent\s*:\s*true\b/.test(line)) anchors.push(index);
+scripts/checkin-face-static-check.mjs:90: trailing whitespace.
++  });
+scripts/checkin-face-static-check.mjs:91: trailing whitespace.
++  if (anchors.length === 0) {
+scripts/checkin-face-static-check.mjs:92: trailing whitespace.
++    issues.push(`${rel}:1: 找不到请求构造锚点（consent:true 硬要求缺失或整体被注释），无法校验 mode/validityMode`);
+scripts/checkin-face-static-check.mjs:93: trailing whitespace.
++    return;
+scripts/checkin-face-static-check.mjs:94: trailing whitespace.
++  }
+scripts/checkin-face-static-check.mjs:95: trailing whitespace.
++  const found = new Set();
+scripts/checkin-face-static-check.mjs:96: trailing whitespace.
++  for (const anchor of anchors) {
+scripts/checkin-face-static-check.mjs:97: trailing whitespace.
++    const window = lines.slice(Math.max(0, anchor - 15), anchor + 16).join('\n');
+scripts/checkin-face-static-check.mjs:98: trailing whitespace.
++    for (const [pattern, message] of pairs) {
+scripts/checkin-face-static-check.mjs:99: trailing whitespace.
++      if (pattern.test(window)) found.add(message);
+scripts/checkin-face-static-check.mjs:100: trailing whitespace.
++    }
+scripts/checkin-face-static-check.mjs:101: trailing whitespace.
++  }
+scripts/checkin-face-static-check.mjs:102: trailing whitespace.
++  for (const [pattern, message] of pairs) {
+scripts/checkin-face-static-check.mjs:103: trailing whitespace.
++    if (!found.has(message)) issues.push(`${rel}:1: ${message}`);
+scripts/checkin-face-static-check.mjs:162: trailing whitespace.
++requireEachText(
+scripts/checkin-face-static-check.mjs:164: trailing whitespace.
++  [[/allowDeviceOperations\s*:\s*false/, 'runtime.allowDeviceOperations 必须保持 false']],
+scripts/checkin-face-static-check.mjs:178: trailing whitespace.
++// R10：mode=device 与 validityMode=fixed 分别断言、全部要求；限定在
+scripts/checkin-face-static-check.mjs:179: trailing whitespace.
++// 请求构造处（consent:true 锚点窗口），注释命中不算证据，任一缺失单独报错。
+scripts/checkin-face-static-check.mjs:184: trailing whitespace.
++requireRequestConstruction(WORKER_FILES[0], [
+scripts/checkin-face-static-check.mjs:185: trailing whitespace.
++  [/mode\s*:\s*['"]device['"]/, 'worker 请求构造必须显式 mode=device（缺失即失败）'],
+scripts/checkin-face-static-check.mjs:186: trailing whitespace.
++  [/validityMode\s*:\s*['"]fixed['"]/, 'worker 请求构造必须显式 validityMode=fixed（缺失即失败）'],
+scripts/checkin-face-static-check.mjs:187: trailing whitespace.
++]);
+tests/checkin-face-pages.test.cjs:7: trailing whitespace.
++ * 不伪造识别结果、不重复提交、普通账号不显示成功或人脸入口。
+tests/checkin-face-pages.test.cjs:8: trailing whitespace.
++ * R02 部分同时做真实 WXML 组件结构静态断言：直接调用 handler 的单测
+tests/checkin-face-pages.test.cjs:9: trailing whitespace.
++ * 不能独自证明组件接线，必须校验 checkbox-group 结构与事件归属。
+tests/checkin-face-pages.test.cjs:10: trailing whitespace.
++ * 此处的页面逻辑通过不代表真机流程通过。
+tests/checkin-face-pages.test.cjs:21: trailing whitespace.
++const CHECKIN_WXML = path.join(ROOT, 'miniprogram/pages/checkin/index.wxml');
+tests/checkin-face-pages.test.cjs:23: trailing whitespace.
++const FACE_WXML = path.join(ROOT, 'miniprogram/pages/face-enroll/index.wxml');
+tests/checkin-face-pages.test.cjs:26: trailing whitespace.
++// 与 miniprogram/services/api.js 的 REVIEW_CHANNEL_CODES 保持一致（INTERFACES.md §5 对齐；
+tests/checkin-face-pages.test.cjs:27: trailing whitespace.
++// api 测试侧有反向校验）。
+tests/checkin-face-pages.test.cjs:28: trailing whitespace.
++const REVIEW_CHANNEL_CODES = ['APPLICATION_FORBIDDEN', 'APPLICATION_NOT_APPROVED', 'ACCOUNT_NOT_ALLOWED'];
+tests/checkin-face-pages.test.cjs:29: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:30: trailing whitespace.
++function augmentApi(api) {
+tests/checkin-face-pages.test.cjs:31: trailing whitespace.
++  if (typeof api.isReviewChannelCode !== 'function') {
+tests/checkin-face-pages.test.cjs:32: trailing whitespace.
++    api.isReviewChannelCode = (code) => REVIEW_CHANNEL_CODES.includes(code);
+tests/checkin-face-pages.test.cjs:33: trailing whitespace.
++  }
+tests/checkin-face-pages.test.cjs:34: trailing whitespace.
++  return api;
+tests/checkin-face-pages.test.cjs:35: trailing whitespace.
++}
+tests/checkin-face-pages.test.cjs:36: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:76: trailing whitespace.
++  api = augmentApi(api);
+tests/checkin-face-pages.test.cjs:82: trailing whitespace.
++  const page = instantiate(captured);
+tests/checkin-face-pages.test.cjs:83: trailing whitespace.
++  page.__rawConfig = captured;
+tests/checkin-face-pages.test.cjs:84: trailing whitespace.
++  return page;
+tests/checkin-face-pages.test.cjs:88: trailing whitespace.
++  api = augmentApi(api);
+tests/checkin-face-pages.test.cjs:101: trailing whitespace.
++  const page = instantiate(captured);
+tests/checkin-face-pages.test.cjs:102: trailing whitespace.
++  page.__rawConfig = captured;
+tests/checkin-face-pages.test.cjs:103: trailing whitespace.
++  return { page, intervals };
+tests/checkin-face-pages.test.cjs:112: trailing whitespace.
++function scanCheckboxGroups(wxml) {
+tests/checkin-face-pages.test.cjs:113: trailing whitespace.
++  const groups = [];
+tests/checkin-face-pages.test.cjs:114: trailing whitespace.
++  const re = /<checkbox-group\b([^>]*)>([\s\S]*?)<\/checkbox-group>/g;
+tests/checkin-face-pages.test.cjs:115: trailing whitespace.
++  let match;
+tests/checkin-face-pages.test.cjs:116: trailing whitespace.
++  while ((match = re.exec(wxml))) groups.push({ attrs: match[1] || '', body: match[2] || '' });
+tests/checkin-face-pages.test.cjs:117: trailing whitespace.
++  return groups;
+tests/checkin-face-pages.test.cjs:118: trailing whitespace.
++}
+tests/checkin-face-pages.test.cjs:119: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:162: trailing whitespace.
++  const wxml = fs.readFileSync(CHECKIN_WXML, 'utf8');
+tests/checkin-face-pages.test.cjs:202: trailing whitespace.
++  assert.equal(page.data.reviewRequired, false);
+tests/checkin-face-pages.test.cjs:234: trailing whitespace.
++    FACE_WXML,
+tests/checkin-face-pages.test.cjs:236: trailing whitespace.
++    CHECKIN_WXML,
+tests/checkin-face-pages.test.cjs:246: trailing whitespace.
++// ---- R02：真实 checkbox-group 结构与事件归属（静态 WXML + 处理器配套）----
+tests/checkin-face-pages.test.cjs:247: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:248: trailing whitespace.
++test('R02：两页为真实 checkbox-group bindchange 结构，事件归属与处理器配套', () => {
+tests/checkin-face-pages.test.cjs:249: trailing whitespace.
++  const checkinWxml = fs.readFileSync(CHECKIN_WXML, 'utf8');
+tests/checkin-face-pages.test.cjs:250: trailing whitespace.
++  const faceWxml = fs.readFileSync(FACE_WXML, 'utf8');
+tests/checkin-face-pages.test.cjs:251: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:252: trailing whitespace.
++  const checkinGroups = scanCheckboxGroups(checkinWxml);
+tests/checkin-face-pages.test.cjs:253: trailing whitespace.
++  assert.ok(checkinGroups.length >= 1, 'checkin 页必须存在 checkbox-group 组件');
+tests/checkin-face-pages.test.cjs:254: trailing whitespace.
++  assert.match(checkinGroups[0].attrs, /bindchange\s*=\s*"onPrimaryChange"/, 'checkin 组事件必须绑定 onPrimaryChange');
+tests/checkin-face-pages.test.cjs:255: trailing whitespace.
++  assert.match(checkinGroups[0].body, /<checkbox\b[^>]*value\s*=\s*"primary"/, 'checkin 组内必须有 value=primary 的 checkbox 子组件');
+tests/checkin-face-pages.test.cjs:256: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:257: trailing whitespace.
++  const faceGroups = scanCheckboxGroups(faceWxml);
+tests/checkin-face-pages.test.cjs:258: trailing whitespace.
++  assert.ok(faceGroups.length >= 1, 'face-enroll 页必须存在 checkbox-group 组件');
+tests/checkin-face-pages.test.cjs:259: trailing whitespace.
++  assert.match(faceGroups[0].attrs, /bindchange\s*=\s*"onConsentChange"/, 'face 组事件必须绑定 onConsentChange');
+tests/checkin-face-pages.test.cjs:260: trailing whitespace.
++  assert.match(faceGroups[0].body, /<checkbox\b[^>]*value\s*=\s*"consent"/, 'face 组内必须有 value=consent 的 checkbox 子组件');
+tests/checkin-face-pages.test.cjs:261: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:262: trailing whitespace.
++  // 组外不得再出现旧接线：单 checkbox 直接挂 bindchange。
+tests/checkin-face-pages.test.cjs:263: trailing whitespace.
++  for (const [name, wxml] of [['checkin/index.wxml', checkinWxml], ['face-enroll/index.wxml', faceWxml]]) {
+tests/checkin-face-pages.test.cjs:264: trailing whitespace.
++    const withoutGroups = wxml.replace(/<checkbox-group\b[\s\S]*?<\/checkbox-group>/g, '');
+tests/checkin-face-pages.test.cjs:265: trailing whitespace.
++    assert.ok(!/<checkbox\b[^>]*\bbindchange\s*=/.test(withoutGroups), `${name} 组外不得有 checkbox 直接挂 bindchange`);
+tests/checkin-face-pages.test.cjs:266: trailing whitespace.
++  }
+tests/checkin-face-pages.test.cjs:267: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:268: trailing whitespace.
++  // 事件归属：bindchange 指名的处理器必须真实存在于 Page 配置中。
+tests/checkin-face-pages.test.cjs:269: trailing whitespace.
++  const checkinPageInstance = checkinPage({ getCheckinFaceConfig: async () => FULL_CONFIG }, makeWx().wx);
+tests/checkin-face-pages.test.cjs:270: trailing whitespace.
++  assert.equal(typeof checkinPageInstance.__rawConfig.onPrimaryChange, 'function', 'onPrimaryChange 必须存在于 checkin Page 配置');
+tests/checkin-face-pages.test.cjs:271: trailing whitespace.
++  const faceInstance = facePage({ getFaceTask: async () => ({}) }, makeWx().wx).page;
+tests/checkin-face-pages.test.cjs:272: trailing whitespace.
++  assert.equal(typeof faceInstance.__rawConfig.onConsentChange, 'function', 'onConsentChange 必须存在于 face Page 配置');
+tests/checkin-face-pages.test.cjs:273: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:274: trailing whitespace.
++  // 按钮禁用表达式必须消费对应确认值：取消勾选即恢复禁用。
+tests/checkin-face-pages.test.cjs:275: trailing whitespace.
++  assert.match(checkinWxml, /disabled="\{\{[^}]*!primaryConfirmed[^}]*\}\}"/, 'checkin 提交按钮禁用必须依赖 !primaryConfirmed');
+tests/checkin-face-pages.test.cjs:276: trailing whitespace.
++  assert.match(faceWxml, /disabled="\{\{!canUpload\}\}"/, 'face 上传按钮禁用必须依赖 !canUpload');
+tests/checkin-face-pages.test.cjs:277: trailing whitespace.
++});
+tests/checkin-face-pages.test.cjs:278: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:279: trailing whitespace.
++test('R02：勾选/取消勾选与提交按钮状态联动（真实数组事件）', async () => {
+tests/checkin-face-pages.test.cjs:280: trailing whitespace.
++  const api = {
+tests/checkin-face-pages.test.cjs:281: trailing whitespace.
++    getCheckinFaceConfig: async () => FULL_CONFIG,
+tests/checkin-face-pages.test.cjs:282: trailing whitespace.
++    applyTestCheckin: async () => ({ applicationId: 'app-1', result: 'auto_approved' }),
+tests/checkin-face-pages.test.cjs:283: trailing whitespace.
++  };
+tests/checkin-face-pages.test.cjs:284: trailing whitespace.
++  const { wx, toasts } = makeWx();
+tests/checkin-face-pages.test.cjs:285: trailing whitespace.
++  const page = checkinPage(api, wx);
+tests/checkin-face-pages.test.cjs:286: trailing whitespace.
++  page.setData({ loading: false });
+tests/checkin-face-pages.test.cjs:287: trailing whitespace.
++  await page.loadConfig();
+tests/checkin-face-pages.test.cjs:288: trailing whitespace.
++  assert.equal(page.data.primaryConfirmed, false);
+tests/checkin-face-pages.test.cjs:289: trailing whitespace.
++  page.onPrimaryChange({ detail: { value: ['primary'] } });
+tests/checkin-face-pages.test.cjs:290: trailing whitespace.
++  assert.equal(page.data.primaryConfirmed, true, '勾选后确认值必须更新');
+tests/checkin-face-pages.test.cjs:291: trailing whitespace.
++  page.onPrimaryChange({ detail: { value: [] } });
+tests/checkin-face-pages.test.cjs:292: trailing whitespace.
++  assert.equal(page.data.primaryConfirmed, false, '取消勾选必须恢复未确认');
+tests/checkin-face-pages.test.cjs:293: trailing whitespace.
++  await page.submit();
+tests/checkin-face-pages.test.cjs:294: trailing whitespace.
++  assert.ok(toasts.some((t) => /请先确认主入住人信息/.test(t.title)), '取消勾选后提交必须被原门禁拦下');
+tests/checkin-face-pages.test.cjs:295: trailing whitespace.
++  // 非法事件形状不得误判为已勾选。
+tests/checkin-face-pages.test.cjs:296: trailing whitespace.
++  page.onPrimaryChange({ detail: { value: 'primary' } });
+tests/checkin-face-pages.test.cjs:297: trailing whitespace.
++  assert.equal(page.data.primaryConfirmed, false);
+tests/checkin-face-pages.test.cjs:298: trailing whitespace.
++  page.onPrimaryChange(null);
+tests/checkin-face-pages.test.cjs:299: trailing whitespace.
++  assert.equal(page.data.primaryConfirmed, false);
+tests/checkin-face-pages.test.cjs:300: trailing whitespace.
++});
+tests/checkin-face-pages.test.cjs:301: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:302: trailing whitespace.
++test('R02：用途确认勾选/取消与上传按钮状态联动', async () => {
+tests/checkin-face-pages.test.cjs:303: trailing whitespace.
++  const api = {
+tests/checkin-face-pages.test.cjs:304: trailing whitespace.
++    getFaceTask: async () => ({ status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
+tests/checkin-face-pages.test.cjs:305: trailing whitespace.
++    getCheckinFaceConfig: async () => FULL_CONFIG,
+tests/checkin-face-pages.test.cjs:306: trailing whitespace.
++  };
+tests/checkin-face-pages.test.cjs:307: trailing whitespace.
++  const { page } = facePage(api, makeWx().wx);
+tests/checkin-face-pages.test.cjs:308: trailing whitespace.
++  page._applicationId = 'app-1';
+tests/checkin-face-pages.test.cjs:309: trailing whitespace.
++  await page.refreshTask();
+tests/checkin-face-pages.test.cjs:310: trailing whitespace.
++  assert.equal(page.data.consentConfirmed, false);
+tests/checkin-face-pages.test.cjs:311: trailing whitespace.
++  assert.equal(page.data.canUpload, false);
+tests/checkin-face-pages.test.cjs:312: trailing whitespace.
++  page.onConsentChange({ detail: { value: ['consent'] } });
+tests/checkin-face-pages.test.cjs:313: trailing whitespace.
++  assert.equal(page.data.consentConfirmed, true);
+tests/checkin-face-pages.test.cjs:314: trailing whitespace.
++  assert.equal(page.data.canUpload, true, '勾选用途后上传可用');
+tests/checkin-face-pages.test.cjs:315: trailing whitespace.
++  page.onConsentChange({ detail: { value: [] } });
+tests/checkin-face-pages.test.cjs:316: trailing whitespace.
++  assert.equal(page.data.consentConfirmed, false);
+tests/checkin-face-pages.test.cjs:317: trailing whitespace.
++  assert.equal(page.data.canUpload, false, '取消勾选必须恢复禁用');
+tests/checkin-face-pages.test.cjs:318: trailing whitespace.
++});
+tests/checkin-face-pages.test.cjs:319: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:320: trailing whitespace.
++// ---- R11 / C2：applyTestCheckin 结果分类与普通账号反馈 ----
+tests/checkin-face-pages.test.cjs:321: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:322: trailing whitespace.
++test('R11：仅 auto_approved 且有效非空 applicationId 显示受理与人脸入口', async () => {
+tests/checkin-face-pages.test.cjs:323: trailing whitespace.
++  const outcomes = [
+tests/checkin-face-pages.test.cjs:324: trailing whitespace.
++    { name: '正常自动通过', response: { applicationId: 'app-1', result: 'auto_approved', employeeNo: 'F001' }, applied: true, review: false, entry: true },
+tests/checkin-face-pages.test.cjs:325: trailing whitespace.
++    { name: 'pending_review（普通账号）', response: { applicationId: '', result: 'pending_review', reason: '请走既有审核流程', idempotent: false }, applied: false, review: true, entry: false },
+tests/checkin-face-pages.test.cjs:326: trailing whitespace.
++    { name: '空返回', response: {}, applied: false, review: true, entry: false },
+tests/checkin-face-pages.test.cjs:327: trailing whitespace.
++    { name: '空 applicationId', response: { applicationId: '', result: 'auto_approved' }, applied: false, review: true, entry: false },
+tests/checkin-face-pages.test.cjs:328: trailing whitespace.
++    { name: '畸形 applicationId', response: { applicationId: '../evil', result: 'auto_approved' }, applied: false, review: true, entry: false },
+tests/checkin-face-pages.test.cjs:329: trailing whitespace.
++    { name: '未知 result', response: { applicationId: 'app-1', result: 'mystery' }, applied: false, review: true, entry: false },
+tests/checkin-face-pages.test.cjs:330: trailing whitespace.
++  ];
+tests/checkin-face-pages.test.cjs:331: trailing whitespace.
++  for (const item of outcomes) {
+tests/checkin-face-pages.test.cjs:332: trailing whitespace.
++    let applyCalls = 0;
+tests/checkin-face-pages.test.cjs:333: trailing whitespace.
++    const api = {
+tests/checkin-face-pages.test.cjs:334: trailing whitespace.
++      getCheckinFaceConfig: async () => FULL_CONFIG,
+tests/checkin-face-pages.test.cjs:335: trailing whitespace.
++      applyTestCheckin: async () => { applyCalls += 1; return item.response; },
+tests/checkin-face-pages.test.cjs:336: trailing whitespace.
++    };
+tests/checkin-face-pages.test.cjs:337: trailing whitespace.
++    const { wx, navigations } = makeWx();
+tests/checkin-face-pages.test.cjs:338: trailing whitespace.
++    const page = checkinPage(api, wx);
+tests/checkin-face-pages.test.cjs:339: trailing whitespace.
++    page.setData({ loading: false });
+tests/checkin-face-pages.test.cjs:340: trailing whitespace.
++    await page.loadConfig();
+tests/checkin-face-pages.test.cjs:341: trailing whitespace.
++    page.setData({ primaryConfirmed: true });
+tests/checkin-face-pages.test.cjs:342: trailing whitespace.
++    await page.submit();
+tests/checkin-face-pages.test.cjs:343: trailing whitespace.
++    assert.equal(applyCalls, 1, `${item.name}: 必须实际提交一次`);
+tests/checkin-face-pages.test.cjs:344: trailing whitespace.
++    assert.equal(page.data.applied, item.applied, `${item.name}: applied 状态`);
+tests/checkin-face-pages.test.cjs:345: trailing whitespace.
++    assert.equal(page.data.reviewRequired, item.review, `${item.name}: reviewRequired 状态`);
+tests/checkin-face-pages.test.cjs:346: trailing whitespace.
++    page.goFaceEnroll();
+tests/checkin-face-pages.test.cjs:347: trailing whitespace.
++    assert.equal(navigations.length, item.entry ? 1 : 0, `${item.name}: 人脸入口导航`);
+tests/checkin-face-pages.test.cjs:348: trailing whitespace.
++    if (item.entry) assert.deepEqual(navigations[0], { url: '/pages/face-enroll/index?applicationId=app-1' });
+tests/checkin-face-pages.test.cjs:349: trailing whitespace.
++    if (item.review) assert.ok(page.data.reviewReason && page.data.reviewReason.length > 0, `${item.name}: 必须给出审核渠道/明确错误文案`);
+tests/checkin-face-pages.test.cjs:350: trailing whitespace.
++  }
+tests/checkin-face-pages.test.cjs:351: trailing whitespace.
++});
+tests/checkin-face-pages.test.cjs:352: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:353: trailing whitespace.
++test('R11：受理卡片与人脸入口互斥——人脸入口只存在于 applied 卡片', () => {
+tests/checkin-face-pages.test.cjs:354: trailing whitespace.
++  const checkinWxml = fs.readFileSync(CHECKIN_WXML, 'utf8');
+tests/checkin-face-pages.test.cjs:355: trailing whitespace.
++  const appliedBlock = (checkinWxml.match(/<view wx:if="\{\{applied\}\}"[\s\S]*?<\/view>/) || [])[0];
+tests/checkin-face-pages.test.cjs:356: trailing whitespace.
++  const reviewBlock = (checkinWxml.match(/<view wx:if="\{\{reviewRequired\}\}"[\s\S]*?<\/view>/) || [])[0];
+tests/checkin-face-pages.test.cjs:357: trailing whitespace.
++  assert.ok(appliedBlock, '必须存在 applied 受理卡片');
+tests/checkin-face-pages.test.cjs:358: trailing whitespace.
++  assert.match(appliedBlock, /bindtap="goFaceEnroll"/, '人脸入口只应出现在受理卡片内');
+tests/checkin-face-pages.test.cjs:359: trailing whitespace.
++  assert.ok(reviewBlock, '必须存在 reviewRequired 审核渠道卡片');
+tests/checkin-face-pages.test.cjs:360: trailing whitespace.
++  assert.ok(!/bindtap="goFaceEnroll"/.test(reviewBlock), '审核渠道卡片不得提供人脸入口');
+tests/checkin-face-pages.test.cjs:361: trailing whitespace.
++  const faceWxml = fs.readFileSync(FACE_WXML, 'utf8');
+tests/checkin-face-pages.test.cjs:362: trailing whitespace.
++  const faceReviewBlock = (faceWxml.match(/<view wx:if="\{\{reviewRequired\}\}"[\s\S]*?<\/view>/) || [])[0];
+tests/checkin-face-pages.test.cjs:363: trailing whitespace.
++  assert.ok(faceReviewBlock, 'face 页必须存在审核渠道卡片');
+tests/checkin-face-pages.test.cjs:364: trailing whitespace.
++  assert.ok(!/chooseAndUpload/.test(faceReviewBlock), 'face 审核渠道卡片不得提供上传按钮');
+tests/checkin-face-pages.test.cjs:365: trailing whitespace.
++});
+tests/checkin-face-pages.test.cjs:366: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:367: trailing whitespace.
++test('C2：普通账号反馈不冒称人工申请已提交，并明确提示既有审核渠道', () => {
+tests/checkin-face-pages.test.cjs:368: trailing whitespace.
++  const checkinWxml = fs.readFileSync(CHECKIN_WXML, 'utf8');
+tests/checkin-face-pages.test.cjs:369: trailing whitespace.
++  const faceWxml = fs.readFileSync(FACE_WXML, 'utf8');
+tests/checkin-face-pages.test.cjs:370: trailing whitespace.
++  for (const [name, wxml] of [['checkin/index.wxml', checkinWxml], ['face-enroll/index.wxml', faceWxml]]) {
+tests/checkin-face-pages.test.cjs:371: trailing whitespace.
++    assert.ok(!/人工审核已提交|已提交人工审核|人工申请已入队|审核单已提交/.test(wxml), `${name} 不得声称人工审核单已提交/已入队`);
+tests/checkin-face-pages.test.cjs:372: trailing whitespace.
++    assert.match(wxml, /请走既有审核流程/, `${name} 必须明确提示既有审核渠道`);
+tests/checkin-face-pages.test.cjs:373: trailing whitespace.
++  }
+tests/checkin-face-pages.test.cjs:374: trailing whitespace.
++});
+tests/checkin-face-pages.test.cjs:375: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:376: trailing whitespace.
++test('R11：名单在页面加载后撤销——提交得到 pending_review 不显示成功与人脸入口', async () => {
+tests/checkin-face-pages.test.cjs:377: trailing whitespace.
++  let configCalls = 0;
+tests/checkin-face-pages.test.cjs:378: trailing whitespace.
++  const api = {
+tests/checkin-face-pages.test.cjs:379: trailing whitespace.
++    getCheckinFaceConfig: async () => { configCalls += 1; return configCalls === 1 ? FULL_CONFIG : { ...FULL_CONFIG, accountEligible: false }; },
+tests/checkin-face-pages.test.cjs:380: trailing whitespace.
++    applyTestCheckin: async () => ({ applicationId: '', result: 'pending_review', reason: '请走既有审核流程', idempotent: false }),
+tests/checkin-face-pages.test.cjs:381: trailing whitespace.
++  };
+tests/checkin-face-pages.test.cjs:382: trailing whitespace.
++  const { wx, navigations } = makeWx();
+tests/checkin-face-pages.test.cjs:383: trailing whitespace.
++  const page = checkinPage(api, wx);
+tests/checkin-face-pages.test.cjs:384: trailing whitespace.
++  page.setData({ loading: false });
+tests/checkin-face-pages.test.cjs:385: trailing whitespace.
++  await page.loadConfig();
+tests/checkin-face-pages.test.cjs:386: trailing whitespace.
++  assert.equal(page.data.eligible, true, '页面加载时仍在名单内，属合法竞态起点');
+tests/checkin-face-pages.test.cjs:387: trailing whitespace.
++  page.setData({ primaryConfirmed: true });
+tests/checkin-face-pages.test.cjs:388: trailing whitespace.
++  await page.submit();
+tests/checkin-face-pages.test.cjs:389: trailing whitespace.
++  assert.equal(page.data.applied, false, '撤销后不得显示已受理');
+tests/checkin-face-pages.test.cjs:390: trailing whitespace.
++  assert.equal(page.data.reviewRequired, true, '撤销后必须显示既有审核渠道');
+tests/checkin-face-pages.test.cjs:391: trailing whitespace.
++  assert.match(page.data.reviewReason, /既有审核流程/);
+tests/checkin-face-pages.test.cjs:392: trailing whitespace.
++  page.goFaceEnroll();
+tests/checkin-face-pages.test.cjs:393: trailing whitespace.
++  assert.equal(navigations.length, 0, '未通过者不得出现人脸入口导航');
+tests/checkin-face-pages.test.cjs:394: trailing whitespace.
++});
+tests/checkin-face-pages.test.cjs:395: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:396: trailing whitespace.
++// ---- face-enroll：名单撤销竞态与审核渠道 ----
+tests/checkin-face-pages.test.cjs:397: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:398: trailing whitespace.
++test('face-enroll：名单撤销后上传前复核拒绝——零照片上传、零 createFaceTask、零入口', async () => {
+tests/checkin-face-pages.test.cjs:399: trailing whitespace.
++  let polls = 0;
+tests/checkin-face-pages.test.cjs:400: trailing whitespace.
++  const uploads = [];
+tests/checkin-face-pages.test.cjs:401: trailing whitespace.
++  const creates = [];
+tests/checkin-face-pages.test.cjs:402: trailing whitespace.
++  const api = {
+tests/checkin-face-pages.test.cjs:403: trailing whitespace.
++    getFaceTask: async () => { polls += 1; return polls === 1 ? { status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} } : { status: 'NOT_FOUND', cloudPath: '', room: {}, lease: {} }; },
+tests/checkin-face-pages.test.cjs:404: trailing whitespace.
++    getCheckinFaceConfig: async () => ({ enabled: true, configured: true, accountEligible: false }),
+tests/checkin-face-pages.test.cjs:405: trailing whitespace.
++    uploadTestFace: async (input) => { uploads.push(input); return 'cloud://synthetic/f.jpg'; },
+tests/checkin-face-pages.test.cjs:406: trailing whitespace.
++    createFaceTask: async (input) => { creates.push(input); return {}; },
+tests/checkin-face-pages.test.cjs:407: trailing whitespace.
++  };
+tests/checkin-face-pages.test.cjs:408: trailing whitespace.
++  const { page } = facePage(api, makeWx().wx);
+tests/checkin-face-pages.test.cjs:409: trailing whitespace.
++  page._applicationId = 'app-1';
+tests/checkin-face-pages.test.cjs:410: trailing whitespace.
++  await page.refreshTask();
+tests/checkin-face-pages.test.cjs:411: trailing whitespace.
++  assert.equal(page.data.cloudPathReady, true, '页面加载时仍在名单内、已有服务端上传路径');
+tests/checkin-face-pages.test.cjs:412: trailing whitespace.
++  page.onConsentChange({ detail: { value: ['consent'] } });
+tests/checkin-face-pages.test.cjs:413: trailing whitespace.
++  await page.chooseAndUpload();
+tests/checkin-face-pages.test.cjs:414: trailing whitespace.
++  assert.equal(page.data.reviewRequired, true, '上传前复核发现名单撤销，必须进入审核渠道态');
+tests/checkin-face-pages.test.cjs:415: trailing whitespace.
++  assert.equal(page.data.showUpload, false, '审核态不得再显示上传卡片');
+tests/checkin-face-pages.test.cjs:416: trailing whitespace.
++  assert.equal(uploads.length, 0, '未通过者零照片上传');
+tests/checkin-face-pages.test.cjs:417: trailing whitespace.
++  assert.equal(creates.length, 0, '未通过者零 createFaceTask');
+tests/checkin-face-pages.test.cjs:418: trailing whitespace.
++  await page.chooseAndUpload();
+tests/checkin-face-pages.test.cjs:419: trailing whitespace.
++  assert.equal(uploads.length, 0, '审核态重复点击仍零上传');
+tests/checkin-face-pages.test.cjs:420: trailing whitespace.
++  assert.equal(creates.length, 0);
+tests/checkin-face-pages.test.cjs:421: trailing whitespace.
++});
+tests/checkin-face-pages.test.cjs:422: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:423: trailing whitespace.
++test('face-enroll：上传前复核发现存储命名空间未配置（§1.2）——零照片上传、零 createFaceTask', async () => {
+tests/checkin-face-pages.test.cjs:424: trailing whitespace.
++  const uploads = [];
+tests/checkin-face-pages.test.cjs:425: trailing whitespace.
++  const creates = [];
+tests/checkin-face-pages.test.cjs:426: trailing whitespace.
++  const api = {
+tests/checkin-face-pages.test.cjs:427: trailing whitespace.
++    getFaceTask: async () => ({ status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
+tests/checkin-face-pages.test.cjs:428: trailing whitespace.
++    getCheckinFaceConfig: async () => ({ enabled: true, configured: true, accountEligible: true, storageNamespaceConfigured: false }),
+tests/checkin-face-pages.test.cjs:429: trailing whitespace.
++    uploadTestFace: async (input) => { uploads.push(input); return 'cloud://synthetic/f.jpg'; },
+tests/checkin-face-pages.test.cjs:430: trailing whitespace.
++    createFaceTask: async (input) => { creates.push(input); return {}; },
+tests/checkin-face-pages.test.cjs:431: trailing whitespace.
++  };
+tests/checkin-face-pages.test.cjs:432: trailing whitespace.
++  const { page } = facePage(api, makeWx().wx);
+tests/checkin-face-pages.test.cjs:433: trailing whitespace.
++  page._applicationId = 'app-1';
+tests/checkin-face-pages.test.cjs:434: trailing whitespace.
++  await page.refreshTask();
+tests/checkin-face-pages.test.cjs:435: trailing whitespace.
++  page.onConsentChange({ detail: { value: ['consent'] } });
+tests/checkin-face-pages.test.cjs:436: trailing whitespace.
++  await page.chooseAndUpload();
+tests/checkin-face-pages.test.cjs:437: trailing whitespace.
++  assert.equal(page.data.reviewRequired, true, '命名空间未配置必须在上传前失败关闭');
+tests/checkin-face-pages.test.cjs:438: trailing whitespace.
++  assert.equal(page.data.showUpload, false);
+tests/checkin-face-pages.test.cjs:439: trailing whitespace.
++  assert.equal(uploads.length, 0, '命名空间未配置时零照片上传');
+tests/checkin-face-pages.test.cjs:440: trailing whitespace.
++  assert.equal(creates.length, 0, '命名空间未配置时零 createFaceTask');
+tests/checkin-face-pages.test.cjs:441: trailing whitespace.
++});
+tests/checkin-face-pages.test.cjs:442: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:443: trailing whitespace.
++test('face-enroll：申请被拒（APPLICATION_FORBIDDEN）时显示审核渠道、无上传卡片', async () => {
+tests/checkin-face-pages.test.cjs:444: trailing whitespace.
++  const err = new Error('未找到本人申请');
+tests/checkin-face-pages.test.cjs:445: trailing whitespace.
++  err.code = 'APPLICATION_FORBIDDEN';
+tests/checkin-face-pages.test.cjs:446: trailing whitespace.
++  const uploads = [];
+tests/checkin-face-pages.test.cjs:447: trailing whitespace.
++  const api = {
+tests/checkin-face-pages.test.cjs:448: trailing whitespace.
++    getFaceTask: async () => { throw err; },
+tests/checkin-face-pages.test.cjs:449: trailing whitespace.
++    getCheckinFaceConfig: async () => FULL_CONFIG,
+tests/checkin-face-pages.test.cjs:450: trailing whitespace.
++    uploadTestFace: async (input) => { uploads.push(input); return 'cloud://synthetic/f.jpg'; },
+tests/checkin-face-pages.test.cjs:451: trailing whitespace.
++    createFaceTask: async () => ({}),
+tests/checkin-face-pages.test.cjs:452: trailing whitespace.
++  };
+tests/checkin-face-pages.test.cjs:453: trailing whitespace.
++  const { page } = facePage(api, makeWx().wx);
+tests/checkin-face-pages.test.cjs:454: trailing whitespace.
++  page._applicationId = 'app-1';
+tests/checkin-face-pages.test.cjs:455: trailing whitespace.
++  await page.refreshTask();
+tests/checkin-face-pages.test.cjs:456: trailing whitespace.
++  assert.equal(page.data.reviewRequired, true, 'APPLICATION_FORBIDDEN 必须进入审核渠道态（不能按文案猜成无任务）');
+tests/checkin-face-pages.test.cjs:457: trailing whitespace.
++  assert.equal(page.data.showUpload, false);
+tests/checkin-face-pages.test.cjs:458: trailing whitespace.
++  assert.equal(page.data.loading, false);
+tests/checkin-face-pages.test.cjs:459: trailing whitespace.
++  page.onConsentChange({ detail: { value: ['consent'] } });
+tests/checkin-face-pages.test.cjs:460: trailing whitespace.
++  assert.equal(page.data.canUpload, false, '审核态即使勾选用途也不得上传');
+tests/checkin-face-pages.test.cjs:461: trailing whitespace.
++  await page.chooseAndUpload();
+tests/checkin-face-pages.test.cjs:462: trailing whitespace.
++  assert.equal(uploads.length, 0);
+tests/checkin-face-pages.test.cjs:463: trailing whitespace.
++});
+tests/checkin-face-pages.test.cjs:464: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:465: trailing whitespace.
++test('face-enroll：createFaceTask 被服务端以审核码拒绝时不显示成功、不保留可用入口', async () => {
+tests/checkin-face-pages.test.cjs:466: trailing whitespace.
++  const err = new Error('当前账号不在测试名单内');
+tests/checkin-face-pages.test.cjs:467: trailing whitespace.
++  err.code = 'ACCOUNT_NOT_ALLOWED';
+tests/checkin-face-pages.test.cjs:468: trailing whitespace.
++  const uploads = [];
+tests/checkin-face-pages.test.cjs:469: trailing whitespace.
++  let createCalls = 0;
+tests/checkin-face-pages.test.cjs:470: trailing whitespace.
++  const api = {
+tests/checkin-face-pages.test.cjs:471: trailing whitespace.
++    getFaceTask: async () => ({ status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
+tests/checkin-face-pages.test.cjs:472: trailing whitespace.
++    getCheckinFaceConfig: async () => ({ enabled: true, configured: true, accountEligible: true }),
+tests/checkin-face-pages.test.cjs:473: trailing whitespace.
++    uploadTestFace: async (input) => { uploads.push(input); return 'cloud://synthetic/f.jpg'; },
+tests/checkin-face-pages.test.cjs:474: trailing whitespace.
++    createFaceTask: async () => { createCalls += 1; throw err; },
+tests/checkin-face-pages.test.cjs:475: trailing whitespace.
++  };
+tests/checkin-face-pages.test.cjs:476: trailing whitespace.
++  const { page } = facePage(api, makeWx().wx);
+tests/checkin-face-pages.test.cjs:477: trailing whitespace.
++  page._applicationId = 'app-1';
+tests/checkin-face-pages.test.cjs:478: trailing whitespace.
++  await page.refreshTask();
+tests/checkin-face-pages.test.cjs:479: trailing whitespace.
++  page.onConsentChange({ detail: { value: ['consent'] } });
+tests/checkin-face-pages.test.cjs:480: trailing whitespace.
++  await page.chooseAndUpload();
+tests/checkin-face-pages.test.cjs:481: trailing whitespace.
++  assert.equal(page.data.reviewRequired, true, '任务创建被服务端拒绝即进入审核渠道态');
+tests/checkin-face-pages.test.cjs:482: trailing whitespace.
++  assert.equal(page.data.showUpload, false, '不得保留可用上传入口');
+tests/checkin-face-pages.test.cjs:483: trailing whitespace.
++  assert.equal(page.data.taskView.label, '尚未上传照片', '不得显示任何成功/处理中状态');
+tests/checkin-face-pages.test.cjs:484: trailing whitespace.
++  assert.equal(createCalls, 1, 'createFaceTask 被调用一次即被服务端拒绝');
+tests/checkin-face-pages.test.cjs:485: trailing whitespace.
++  assert.equal(uploads.length, 1, '复核与建任务之间的最后一跳竞态由服务端关闭：照片已到服务端路径但任务未建立');
+tests/checkin-face-pages.test.cjs:486: trailing whitespace.
++});
+tests/checkin-face-pages.test.cjs:487: trailing whitespace.
++
+tests/checkin-face-pages.test.cjs:500: trailing whitespace.
++    getCheckinFaceConfig: async () => FULL_CONFIG,
+tests/checkin-face-pages.test.cjs:515: trailing whitespace.
++  assert.equal(page.data.reviewRequired, false);
+tests/checkin-face-pages.test.cjs:524: trailing whitespace.
++    getCheckinFaceConfig: async () => FULL_CONFIG,

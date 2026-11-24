@@ -1,0 +1,12 @@
+{
+  "command": [
+    "/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "scripts/checkin-face-static-check.mjs"
+  ],
+  "cwd": "/workspace/artifacts/checkin-face-review-5398d1e-20261124/r10-block-comment-AZpGbs",
+  "status": 0,
+  "signal": null,
+  "errorCode": null,
+  "stdout": "[PASS] checkin-face static check: 8 source files scanned, 0 violations\n",
+  "stderr": ""
+}

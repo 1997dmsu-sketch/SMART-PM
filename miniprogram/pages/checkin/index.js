@@ -11,6 +11,26 @@ const EMPTY_CONFIG = {
   lease: {}
 };
 
+// R11 / C2：applyCheckin 返回分类。
+// 仅 result === 'auto_approved' 且 applicationId 有效非空才视为「已受理」并可进入人脸登记；
+// pending_review / 空 ID / 畸形返回 / 未知状态一律展示既有审核渠道或明确错误，绝不视为成功，
+// 也不声称人工审核申请已提交。
+const APPLICATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9|._:-]{0,255}$/;
+
+function classifyApplyResult(data) {
+  const safe = data && typeof data === 'object' ? data : {};
+  if (safe.result === 'auto_approved') {
+    const id = safe.applicationId;
+    const validId = typeof id === 'string' && id.length > 0 && APPLICATION_ID_PATTERN.test(id);
+    if (validId) return { applied: true, reviewRequired: false, reason: '' };
+    return { applied: false, reviewRequired: true, reason: '服务返回的入住申请标识无效，未受理自动通过；请走既有审核流程。' };
+  }
+  if (safe.result === 'pending_review' || safe.reviewRequired === true) {
+    return { applied: false, reviewRequired: true, reason: safe.reason || '未自动通过，请走既有审核流程。' };
+  }
+  return { applied: false, reviewRequired: true, reason: '服务返回异常，未完成测试入住自动通过；请走既有审核流程或稍后重试。' };
+}
+
 Page({
   data: {
     statusBarHeight: 20,
@@ -26,7 +46,11 @@ Page({
     ineligibleReason: '正在读取服务端配置',
     primaryConfirmed: false,
     submitting: false,
+    // applied 只表示「服务端确认 auto_approved 且申请标识有效」，与现场验证无关。
     applied: false,
+    // reviewRequired 表示未自动通过，须走既有审核渠道；与 applied 互斥，不显示人脸入口。
+    reviewRequired: false,
+    reviewReason: '',
     result: null
   },
 
@@ -68,7 +92,11 @@ Page({
           eligible,
           leaseConfigured,
           ineligibleReason,
-          loading: false
+          loading: false,
+          // 重新加载以服务端最新配置为准：撤销的审核结论随新配置作废，用户可重新提交；
+          // 服务端会再次独立判定，不会因此放行未通过者。
+          reviewRequired: false,
+          reviewReason: ''
         });
       }
     } catch (err) {
@@ -93,14 +121,15 @@ Page({
     return '暂不满足自动通过条件。';
   },
 
+  // checkbox-group bindchange 的真实事件：detail.value 为勾选值的数组。
   onPrimaryChange(event) {
     const checked = event && event.detail && Array.isArray(event.detail.value) && event.detail.value.length > 0;
     this.setData({ primaryConfirmed: Boolean(checked) });
   },
 
   async submit() {
-    // 本地 busy 锁：重复点击、并发提交都被拒绝。
-    if (this.data.submitting || this.data.applied) return;
+    // 本地 busy 锁：重复点击、并发提交都被拒绝；未自动通过或已受理后同样不再提交。
+    if (this.data.submitting || this.data.applied || this.data.reviewRequired) return;
     if (!this.data.eligible) {
       wx.showToast({ title: '当前未开放测试入住自动通过', icon: 'none' });
       return;
@@ -122,15 +151,44 @@ Page({
     try {
       // 唯一允许客户端提交的业务字段，值来自服务端 getConfig。
       const result = await api.applyTestCheckin({ applicationVersion });
-      if (!this._destroyed) this.setData({ result: result || {}, applied: true });
+      if (this._destroyed) return;
+      const decision = classifyApplyResult(result);
+      if (decision.applied) {
+        this.setData({
+          result: result && typeof result === 'object' ? result : {},
+          applied: true,
+          reviewRequired: false,
+          reviewReason: ''
+        });
+      } else {
+        this.setData({
+          result: result && typeof result === 'object' ? result : {},
+          applied: false,
+          reviewRequired: true,
+          reviewReason: decision.reason
+        });
+      }
     } catch (err) {
-      if (!this._destroyed) this.setData({ error: (err && err.message) || '提交失败，请重试' });
+      if (this._destroyed) return;
+      if (api.isReviewChannelCode(err && err.code)) {
+        this.setData({
+          applied: false,
+          reviewRequired: true,
+          reviewReason: (err && err.message) || '未自动通过，请走既有审核流程。'
+        });
+      } else {
+        this.setData({ error: (err && err.message) || '提交失败，请重试' });
+      }
     } finally {
       if (!this._destroyed) this.setData({ submitting: false });
     }
   },
 
   goFaceEnroll() {
+    if (this.data.applied !== true) {
+      wx.showToast({ title: '测试入住未自动通过，请走既有审核流程', icon: 'none' });
+      return;
+    }
     const applicationId = this.data.result && this.data.result.applicationId;
     if (!applicationId) {
       wx.showToast({ title: '缺少入住申请标识，请重新提交', icon: 'none' });

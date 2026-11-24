@@ -18,7 +18,13 @@ async function call(name, data = {}) {
     throw new Error(`[${name}] 服务连接失败${hint}，请检查云环境及该函数是否已部署`);
   }
   const result = response && response.result;
-  if (!result || result.code !== 0) throw new Error(result && result.msg || '服务返回异常');
+  if (!result || result.code !== 0) {
+    const error = new Error((result && result.msg) || '服务返回异常');
+    // 保留服务端错误码，页面才能按码区分「走既有审核渠道」与「其他明确错误」，
+    // 不再依赖消息文案猜状态。code 只在非零时附加，成功路径不受影响。
+    if (result && typeof result.code === 'string') error.code = result.code;
+    throw error;
+  }
   return result;
 }
 
@@ -32,6 +38,24 @@ const CHECKIN_FACE_FORBIDDEN_FIELDS = [
   'decisionReasons', 'claimId', 'revision', 'siteVerification', 'deviceOutcome',
   'deviceKey', 'origin', 'username', 'password', 'pin', 'privateKey', 'cert'
 ];
+
+// ---- 审核渠道错误码分类（C2）----
+// 以下云端错误码表示当前账号/申请不在自动通过路径：页面据此展示既有审核渠道，
+// 绝不显示成功、不受理状态或人脸入口。闭式集合，不吞并任务/配置/文件错误码。
+// 码表按 A 路唯一接口清单（INTERFACES.md §5 错误码全表）对齐：
+// - APPLICATION_FORBIDDEN：getMyTask 返回，申请不存在/不属于本人；
+// - APPLICATION_NOT_APPROVED：createFaceTask 返回，申请未 auto_approved；
+// - ACCOUNT_NOT_ALLOWED：清单 §5 注明 applyCheckin 路径不对外暴露（转为 code0
+//   pending_review），但 createFaceTask 的事务复核仍可能以该码拒绝，防御性保留。
+// 清单 §5 中不存在 APPLICATION_NOT_FOUND/APPLICATION_INVALID/APPLICATION_REVOKED/
+// ACCOUNT_REVOKED，不得收录；新增码不得自动放行。
+const REVIEW_CHANNEL_CODES = Object.freeze([
+  'APPLICATION_FORBIDDEN', 'APPLICATION_NOT_APPROVED', 'ACCOUNT_NOT_ALLOWED',
+]);
+
+function isReviewChannelCode(code) {
+  return typeof code === 'string' && REVIEW_CHANNEL_CODES.indexOf(code) !== -1;
+}
 
 function assertCheckinFaceInput(name, input, allowedFields) {
   if (input === undefined || input === null) return {};
@@ -185,4 +209,4 @@ function listMeters(type){
  if(isDemo())return Promise.resolve(type==='water'?[]:[clone(demo.meter)]);
  return unsupported('旧水电表接口尚未按住户房产过滤，完成权限对接后开放');
 }
-module.exports={isDemo,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,logout,listFamily,addFamily,getProperty,listMeters,getCheckinFaceConfig,applyTestCheckin,uploadTestFace,createFaceTask,getFaceTask};
+module.exports={isDemo,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,logout,listFamily,addFamily,getProperty,listMeters,getCheckinFaceConfig,applyTestCheckin,uploadTestFace,createFaceTask,getFaceTask,isReviewChannelCode,REVIEW_CHANNEL_CODES};

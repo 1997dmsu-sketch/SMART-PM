@@ -4,7 +4,10 @@
  * B05 / §6 — 小程序两页面逻辑合成测试。
  *
  * 通过轻量 Page/wx 注入读取真实页面 JS，断言页面只渲染服务端事实、
- * 不伪造识别结果、不重复提交。此处的页面逻辑通过不代表真机流程通过。
+ * 不伪造识别结果、不重复提交、普通账号不显示成功或人脸入口。
+ * R02 部分同时做真实 WXML 组件结构静态断言：直接调用 handler 的单测
+ * 不能独自证明组件接线，必须校验 checkbox-group 结构与事件归属。
+ * 此处的页面逻辑通过不代表真机流程通过。
  */
 
 const test = require('node:test');
@@ -15,8 +18,21 @@ const vm = require('node:vm');
 
 const ROOT = path.resolve(__dirname, '..');
 const CHECKIN_JS = path.join(ROOT, 'miniprogram/pages/checkin/index.js');
+const CHECKIN_WXML = path.join(ROOT, 'miniprogram/pages/checkin/index.wxml');
 const FACE_JS = path.join(ROOT, 'miniprogram/pages/face-enroll/index.js');
+const FACE_WXML = path.join(ROOT, 'miniprogram/pages/face-enroll/index.wxml');
 const PROFILE_JS = path.join(ROOT, 'miniprogram/pages/profile/index.js');
+
+// 与 miniprogram/services/api.js 的 REVIEW_CHANNEL_CODES 保持一致（INTERFACES.md §5 对齐；
+// api 测试侧有反向校验）。
+const REVIEW_CHANNEL_CODES = ['APPLICATION_FORBIDDEN', 'APPLICATION_NOT_APPROVED', 'ACCOUNT_NOT_ALLOWED'];
+
+function augmentApi(api) {
+  if (typeof api.isReviewChannelCode !== 'function') {
+    api.isReviewChannelCode = (code) => REVIEW_CHANNEL_CODES.includes(code);
+  }
+  return api;
+}
 
 function loadModule(filename, { requires = {}, globals = {} } = {}) {
   const source = fs.readFileSync(filename, 'utf8');
@@ -57,15 +73,19 @@ function instantiate(config) {
 }
 
 function checkinPage(api, wx) {
+  api = augmentApi(api);
   let captured;
   loadModule(CHECKIN_JS, {
     requires: { '../../services/api': api, '../../utils/layout': { getNavigationLayout: () => ({ statusBarHeight: 20, navHeight: 44, navSideWidth: 104 }) } },
     globals: { Page: (config) => { captured = config; }, wx },
   });
-  return instantiate(captured);
+  const page = instantiate(captured);
+  page.__rawConfig = captured;
+  return page;
 }
 
 function facePage(api, wx) {
+  api = augmentApi(api);
   let captured;
   const intervals = [];
   loadModule(FACE_JS, {
@@ -78,7 +98,9 @@ function facePage(api, wx) {
       clearInterval: () => {},
     },
   });
-  return { page: instantiate(captured), intervals };
+  const page = instantiate(captured);
+  page.__rawConfig = captured;
+  return { page, intervals };
 }
 
 const FULL_CONFIG = {
@@ -86,6 +108,14 @@ const FULL_CONFIG = {
   room: { displayNo: '102', roomId: 'room-stable-1', houseId: 'house-stable-1', projectName: '合成项目', buildingName: '合成楼栋' },
   lease: { status: 'active', startDate: '2026-12-01', endDate: '2026-12-05', validFrom: '2026-12-01T00:00:00', validTo: '2026-12-05T23:59:59', timezone: 'Asia/Shanghai', dailyHours: '24x7' },
 };
+
+function scanCheckboxGroups(wxml) {
+  const groups = [];
+  const re = /<checkbox-group\b([^>]*)>([\s\S]*?)<\/checkbox-group>/g;
+  let match;
+  while ((match = re.exec(wxml))) groups.push({ attrs: match[1] || '', body: match[2] || '' });
+  return groups;
+}
 
 // onLoad 的顺序缺陷由单独用例守；其余用例显式把 loading 复位后驱动 loadConfig。
 async function loadCheckin(page, config = FULL_CONFIG) {
@@ -129,7 +159,7 @@ test('enabled/configured/accountEligible 任一不为 true 都禁止申请', asy
 
 test('租期未配置显示待配置，不提交、不生成默认日期/一年/长期/今天', async () => {
   const source = fs.readFileSync(CHECKIN_JS, 'utf8');
-  const wxml = fs.readFileSync(path.join(ROOT, 'miniprogram/pages/checkin/index.wxml'), 'utf8');
+  const wxml = fs.readFileSync(CHECKIN_WXML, 'utf8');
   assert.ok(!/new\s+Date|Date\.now|setFullYear|365|unlimited|autoToday/i.test(source), '页面 JS 不得自造日期或长期规则');
   assert.ok(!/<input|<picker|bindinput/.test(wxml), '页面不得提供可编辑日期/房号控件');
   assert.ok(/待配置/.test(wxml));
@@ -169,6 +199,7 @@ test('房号与租期只读来自服务端，提交载荷只有 applicationVersi
   assert.deepEqual(payloads[0], { applicationVersion: 'test-v1' });
   assert.deepEqual(Object.keys(payloads[0]), ['applicationVersion']);
   assert.equal(page.data.applied, true);
+  assert.equal(page.data.reviewRequired, false);
 });
 
 test('六态文案逐项映射；ready 与 pending-site 都显示待现场刷脸验证', async () => {
@@ -200,9 +231,9 @@ test('六态文案逐项映射；ready 与 pending-site 都显示待现场刷脸
 test('页面文件不得出现现场识别通过/已通过/已开门字样', () => {
   const files = [
     FACE_JS,
-    path.join(ROOT, 'miniprogram/pages/face-enroll/index.wxml'),
+    FACE_WXML,
     CHECKIN_JS,
-    path.join(ROOT, 'miniprogram/pages/checkin/index.wxml'),
+    CHECKIN_WXML,
   ];
   for (const file of files) {
     const text = fs.readFileSync(file, 'utf8');
@@ -210,6 +241,248 @@ test('页面文件不得出现现场识别通过/已通过/已开门字样', () 
       assert.ok(!text.includes(phrase), `${path.relative(ROOT, file)} 不得出现「${phrase}」`);
     }
   }
+});
+
+// ---- R02：真实 checkbox-group 结构与事件归属（静态 WXML + 处理器配套）----
+
+test('R02：两页为真实 checkbox-group bindchange 结构，事件归属与处理器配套', () => {
+  const checkinWxml = fs.readFileSync(CHECKIN_WXML, 'utf8');
+  const faceWxml = fs.readFileSync(FACE_WXML, 'utf8');
+
+  const checkinGroups = scanCheckboxGroups(checkinWxml);
+  assert.ok(checkinGroups.length >= 1, 'checkin 页必须存在 checkbox-group 组件');
+  assert.match(checkinGroups[0].attrs, /bindchange\s*=\s*"onPrimaryChange"/, 'checkin 组事件必须绑定 onPrimaryChange');
+  assert.match(checkinGroups[0].body, /<checkbox\b[^>]*value\s*=\s*"primary"/, 'checkin 组内必须有 value=primary 的 checkbox 子组件');
+
+  const faceGroups = scanCheckboxGroups(faceWxml);
+  assert.ok(faceGroups.length >= 1, 'face-enroll 页必须存在 checkbox-group 组件');
+  assert.match(faceGroups[0].attrs, /bindchange\s*=\s*"onConsentChange"/, 'face 组事件必须绑定 onConsentChange');
+  assert.match(faceGroups[0].body, /<checkbox\b[^>]*value\s*=\s*"consent"/, 'face 组内必须有 value=consent 的 checkbox 子组件');
+
+  // 组外不得再出现旧接线：单 checkbox 直接挂 bindchange。
+  for (const [name, wxml] of [['checkin/index.wxml', checkinWxml], ['face-enroll/index.wxml', faceWxml]]) {
+    const withoutGroups = wxml.replace(/<checkbox-group\b[\s\S]*?<\/checkbox-group>/g, '');
+    assert.ok(!/<checkbox\b[^>]*\bbindchange\s*=/.test(withoutGroups), `${name} 组外不得有 checkbox 直接挂 bindchange`);
+  }
+
+  // 事件归属：bindchange 指名的处理器必须真实存在于 Page 配置中。
+  const checkinPageInstance = checkinPage({ getCheckinFaceConfig: async () => FULL_CONFIG }, makeWx().wx);
+  assert.equal(typeof checkinPageInstance.__rawConfig.onPrimaryChange, 'function', 'onPrimaryChange 必须存在于 checkin Page 配置');
+  const faceInstance = facePage({ getFaceTask: async () => ({}) }, makeWx().wx).page;
+  assert.equal(typeof faceInstance.__rawConfig.onConsentChange, 'function', 'onConsentChange 必须存在于 face Page 配置');
+
+  // 按钮禁用表达式必须消费对应确认值：取消勾选即恢复禁用。
+  assert.match(checkinWxml, /disabled="\{\{[^}]*!primaryConfirmed[^}]*\}\}"/, 'checkin 提交按钮禁用必须依赖 !primaryConfirmed');
+  assert.match(faceWxml, /disabled="\{\{!canUpload\}\}"/, 'face 上传按钮禁用必须依赖 !canUpload');
+});
+
+test('R02：勾选/取消勾选与提交按钮状态联动（真实数组事件）', async () => {
+  const api = {
+    getCheckinFaceConfig: async () => FULL_CONFIG,
+    applyTestCheckin: async () => ({ applicationId: 'app-1', result: 'auto_approved' }),
+  };
+  const { wx, toasts } = makeWx();
+  const page = checkinPage(api, wx);
+  page.setData({ loading: false });
+  await page.loadConfig();
+  assert.equal(page.data.primaryConfirmed, false);
+  page.onPrimaryChange({ detail: { value: ['primary'] } });
+  assert.equal(page.data.primaryConfirmed, true, '勾选后确认值必须更新');
+  page.onPrimaryChange({ detail: { value: [] } });
+  assert.equal(page.data.primaryConfirmed, false, '取消勾选必须恢复未确认');
+  await page.submit();
+  assert.ok(toasts.some((t) => /请先确认主入住人信息/.test(t.title)), '取消勾选后提交必须被原门禁拦下');
+  // 非法事件形状不得误判为已勾选。
+  page.onPrimaryChange({ detail: { value: 'primary' } });
+  assert.equal(page.data.primaryConfirmed, false);
+  page.onPrimaryChange(null);
+  assert.equal(page.data.primaryConfirmed, false);
+});
+
+test('R02：用途确认勾选/取消与上传按钮状态联动', async () => {
+  const api = {
+    getFaceTask: async () => ({ status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
+    getCheckinFaceConfig: async () => FULL_CONFIG,
+  };
+  const { page } = facePage(api, makeWx().wx);
+  page._applicationId = 'app-1';
+  await page.refreshTask();
+  assert.equal(page.data.consentConfirmed, false);
+  assert.equal(page.data.canUpload, false);
+  page.onConsentChange({ detail: { value: ['consent'] } });
+  assert.equal(page.data.consentConfirmed, true);
+  assert.equal(page.data.canUpload, true, '勾选用途后上传可用');
+  page.onConsentChange({ detail: { value: [] } });
+  assert.equal(page.data.consentConfirmed, false);
+  assert.equal(page.data.canUpload, false, '取消勾选必须恢复禁用');
+});
+
+// ---- R11 / C2：applyTestCheckin 结果分类与普通账号反馈 ----
+
+test('R11：仅 auto_approved 且有效非空 applicationId 显示受理与人脸入口', async () => {
+  const outcomes = [
+    { name: '正常自动通过', response: { applicationId: 'app-1', result: 'auto_approved', employeeNo: 'F001' }, applied: true, review: false, entry: true },
+    { name: 'pending_review（普通账号）', response: { applicationId: '', result: 'pending_review', reason: '请走既有审核流程', idempotent: false }, applied: false, review: true, entry: false },
+    { name: '空返回', response: {}, applied: false, review: true, entry: false },
+    { name: '空 applicationId', response: { applicationId: '', result: 'auto_approved' }, applied: false, review: true, entry: false },
+    { name: '畸形 applicationId', response: { applicationId: '../evil', result: 'auto_approved' }, applied: false, review: true, entry: false },
+    { name: '未知 result', response: { applicationId: 'app-1', result: 'mystery' }, applied: false, review: true, entry: false },
+  ];
+  for (const item of outcomes) {
+    let applyCalls = 0;
+    const api = {
+      getCheckinFaceConfig: async () => FULL_CONFIG,
+      applyTestCheckin: async () => { applyCalls += 1; return item.response; },
+    };
+    const { wx, navigations } = makeWx();
+    const page = checkinPage(api, wx);
+    page.setData({ loading: false });
+    await page.loadConfig();
+    page.setData({ primaryConfirmed: true });
+    await page.submit();
+    assert.equal(applyCalls, 1, `${item.name}: 必须实际提交一次`);
+    assert.equal(page.data.applied, item.applied, `${item.name}: applied 状态`);
+    assert.equal(page.data.reviewRequired, item.review, `${item.name}: reviewRequired 状态`);
+    page.goFaceEnroll();
+    assert.equal(navigations.length, item.entry ? 1 : 0, `${item.name}: 人脸入口导航`);
+    if (item.entry) assert.deepEqual(navigations[0], { url: '/pages/face-enroll/index?applicationId=app-1' });
+    if (item.review) assert.ok(page.data.reviewReason && page.data.reviewReason.length > 0, `${item.name}: 必须给出审核渠道/明确错误文案`);
+  }
+});
+
+test('R11：受理卡片与人脸入口互斥——人脸入口只存在于 applied 卡片', () => {
+  const checkinWxml = fs.readFileSync(CHECKIN_WXML, 'utf8');
+  const appliedBlock = (checkinWxml.match(/<view wx:if="\{\{applied\}\}"[\s\S]*?<\/view>/) || [])[0];
+  const reviewBlock = (checkinWxml.match(/<view wx:if="\{\{reviewRequired\}\}"[\s\S]*?<\/view>/) || [])[0];
+  assert.ok(appliedBlock, '必须存在 applied 受理卡片');
+  assert.match(appliedBlock, /bindtap="goFaceEnroll"/, '人脸入口只应出现在受理卡片内');
+  assert.ok(reviewBlock, '必须存在 reviewRequired 审核渠道卡片');
+  assert.ok(!/bindtap="goFaceEnroll"/.test(reviewBlock), '审核渠道卡片不得提供人脸入口');
+  const faceWxml = fs.readFileSync(FACE_WXML, 'utf8');
+  const faceReviewBlock = (faceWxml.match(/<view wx:if="\{\{reviewRequired\}\}"[\s\S]*?<\/view>/) || [])[0];
+  assert.ok(faceReviewBlock, 'face 页必须存在审核渠道卡片');
+  assert.ok(!/chooseAndUpload/.test(faceReviewBlock), 'face 审核渠道卡片不得提供上传按钮');
+});
+
+test('C2：普通账号反馈不冒称人工申请已提交，并明确提示既有审核渠道', () => {
+  const checkinWxml = fs.readFileSync(CHECKIN_WXML, 'utf8');
+  const faceWxml = fs.readFileSync(FACE_WXML, 'utf8');
+  for (const [name, wxml] of [['checkin/index.wxml', checkinWxml], ['face-enroll/index.wxml', faceWxml]]) {
+    assert.ok(!/人工审核已提交|已提交人工审核|人工申请已入队|审核单已提交/.test(wxml), `${name} 不得声称人工审核单已提交/已入队`);
+    assert.match(wxml, /请走既有审核流程/, `${name} 必须明确提示既有审核渠道`);
+  }
+});
+
+test('R11：名单在页面加载后撤销——提交得到 pending_review 不显示成功与人脸入口', async () => {
+  let configCalls = 0;
+  const api = {
+    getCheckinFaceConfig: async () => { configCalls += 1; return configCalls === 1 ? FULL_CONFIG : { ...FULL_CONFIG, accountEligible: false }; },
+    applyTestCheckin: async () => ({ applicationId: '', result: 'pending_review', reason: '请走既有审核流程', idempotent: false }),
+  };
+  const { wx, navigations } = makeWx();
+  const page = checkinPage(api, wx);
+  page.setData({ loading: false });
+  await page.loadConfig();
+  assert.equal(page.data.eligible, true, '页面加载时仍在名单内，属合法竞态起点');
+  page.setData({ primaryConfirmed: true });
+  await page.submit();
+  assert.equal(page.data.applied, false, '撤销后不得显示已受理');
+  assert.equal(page.data.reviewRequired, true, '撤销后必须显示既有审核渠道');
+  assert.match(page.data.reviewReason, /既有审核流程/);
+  page.goFaceEnroll();
+  assert.equal(navigations.length, 0, '未通过者不得出现人脸入口导航');
+});
+
+// ---- face-enroll：名单撤销竞态与审核渠道 ----
+
+test('face-enroll：名单撤销后上传前复核拒绝——零照片上传、零 createFaceTask、零入口', async () => {
+  let polls = 0;
+  const uploads = [];
+  const creates = [];
+  const api = {
+    getFaceTask: async () => { polls += 1; return polls === 1 ? { status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} } : { status: 'NOT_FOUND', cloudPath: '', room: {}, lease: {} }; },
+    getCheckinFaceConfig: async () => ({ enabled: true, configured: true, accountEligible: false }),
+    uploadTestFace: async (input) => { uploads.push(input); return 'cloud://synthetic/f.jpg'; },
+    createFaceTask: async (input) => { creates.push(input); return {}; },
+  };
+  const { page } = facePage(api, makeWx().wx);
+  page._applicationId = 'app-1';
+  await page.refreshTask();
+  assert.equal(page.data.cloudPathReady, true, '页面加载时仍在名单内、已有服务端上传路径');
+  page.onConsentChange({ detail: { value: ['consent'] } });
+  await page.chooseAndUpload();
+  assert.equal(page.data.reviewRequired, true, '上传前复核发现名单撤销，必须进入审核渠道态');
+  assert.equal(page.data.showUpload, false, '审核态不得再显示上传卡片');
+  assert.equal(uploads.length, 0, '未通过者零照片上传');
+  assert.equal(creates.length, 0, '未通过者零 createFaceTask');
+  await page.chooseAndUpload();
+  assert.equal(uploads.length, 0, '审核态重复点击仍零上传');
+  assert.equal(creates.length, 0);
+});
+
+test('face-enroll：上传前复核发现存储命名空间未配置（§1.2）——零照片上传、零 createFaceTask', async () => {
+  const uploads = [];
+  const creates = [];
+  const api = {
+    getFaceTask: async () => ({ status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
+    getCheckinFaceConfig: async () => ({ enabled: true, configured: true, accountEligible: true, storageNamespaceConfigured: false }),
+    uploadTestFace: async (input) => { uploads.push(input); return 'cloud://synthetic/f.jpg'; },
+    createFaceTask: async (input) => { creates.push(input); return {}; },
+  };
+  const { page } = facePage(api, makeWx().wx);
+  page._applicationId = 'app-1';
+  await page.refreshTask();
+  page.onConsentChange({ detail: { value: ['consent'] } });
+  await page.chooseAndUpload();
+  assert.equal(page.data.reviewRequired, true, '命名空间未配置必须在上传前失败关闭');
+  assert.equal(page.data.showUpload, false);
+  assert.equal(uploads.length, 0, '命名空间未配置时零照片上传');
+  assert.equal(creates.length, 0, '命名空间未配置时零 createFaceTask');
+});
+
+test('face-enroll：申请被拒（APPLICATION_FORBIDDEN）时显示审核渠道、无上传卡片', async () => {
+  const err = new Error('未找到本人申请');
+  err.code = 'APPLICATION_FORBIDDEN';
+  const uploads = [];
+  const api = {
+    getFaceTask: async () => { throw err; },
+    getCheckinFaceConfig: async () => FULL_CONFIG,
+    uploadTestFace: async (input) => { uploads.push(input); return 'cloud://synthetic/f.jpg'; },
+    createFaceTask: async () => ({}),
+  };
+  const { page } = facePage(api, makeWx().wx);
+  page._applicationId = 'app-1';
+  await page.refreshTask();
+  assert.equal(page.data.reviewRequired, true, 'APPLICATION_FORBIDDEN 必须进入审核渠道态（不能按文案猜成无任务）');
+  assert.equal(page.data.showUpload, false);
+  assert.equal(page.data.loading, false);
+  page.onConsentChange({ detail: { value: ['consent'] } });
+  assert.equal(page.data.canUpload, false, '审核态即使勾选用途也不得上传');
+  await page.chooseAndUpload();
+  assert.equal(uploads.length, 0);
+});
+
+test('face-enroll：createFaceTask 被服务端以审核码拒绝时不显示成功、不保留可用入口', async () => {
+  const err = new Error('当前账号不在测试名单内');
+  err.code = 'ACCOUNT_NOT_ALLOWED';
+  const uploads = [];
+  let createCalls = 0;
+  const api = {
+    getFaceTask: async () => ({ status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
+    getCheckinFaceConfig: async () => ({ enabled: true, configured: true, accountEligible: true }),
+    uploadTestFace: async (input) => { uploads.push(input); return 'cloud://synthetic/f.jpg'; },
+    createFaceTask: async () => { createCalls += 1; throw err; },
+  };
+  const { page } = facePage(api, makeWx().wx);
+  page._applicationId = 'app-1';
+  await page.refreshTask();
+  page.onConsentChange({ detail: { value: ['consent'] } });
+  await page.chooseAndUpload();
+  assert.equal(page.data.reviewRequired, true, '任务创建被服务端拒绝即进入审核渠道态');
+  assert.equal(page.data.showUpload, false, '不得保留可用上传入口');
+  assert.equal(page.data.taskView.label, '尚未上传照片', '不得显示任何成功/处理中状态');
+  assert.equal(createCalls, 1, 'createFaceTask 被调用一次即被服务端拒绝');
+  assert.equal(uploads.length, 1, '复核与建任务之间的最后一跳竞态由服务端关闭：照片已到服务端路径但任务未建立');
 });
 
 test('照片上传成功仅显示照片收件；上传 cloudPath 原样取服务端字段，不拼接', async () => {
@@ -224,6 +497,7 @@ test('照片上传成功仅显示照片收件；上传 cloudPath 原样取服务
         ? { status: 'NOT_FOUND', cloudPath: serverPath, room: FULL_CONFIG.room, lease: FULL_CONFIG.lease }
         : { status: 'PHOTO_RECEIVED', cloudPath: serverPath, room: FULL_CONFIG.room, lease: FULL_CONFIG.lease };
     },
+    getCheckinFaceConfig: async () => FULL_CONFIG,
     uploadTestFace: async (input) => { uploads.push(input); return 'cloud://synthetic/file.jpg'; },
     createFaceTask: async (input) => { created.push(input); return { status: 'PHOTO_RECEIVED' }; },
   };
@@ -238,6 +512,7 @@ test('照片上传成功仅显示照片收件；上传 cloudPath 原样取服务
   assert.deepEqual(created, [{ applicationId: 'app-1', fileId: 'cloud://synthetic/file.jpg', consent: true }]);
   assert.equal(page.data.taskView.label, '照片收件');
   assert.equal(page.data.showUpload, false);
+  assert.equal(page.data.reviewRequired, false);
   assert.ok(!/识别通过|识别成功/.test(page.data.taskView.hint + page.data.taskView.label));
 });
 
@@ -246,6 +521,7 @@ test('上传按钮 busy 锁：并发点击只建一次任务，未勾选用途�
   let creates = 0;
   const api = {
     getFaceTask: async () => ({ status: 'NOT_FOUND', cloudPath: 'test-face/e/o/a/p.jpg', room: {}, lease: {} }),
+    getCheckinFaceConfig: async () => FULL_CONFIG,
     uploadTestFace: async () => { uploads += 1; await new Promise((r) => setTimeout(r, 5)); return 'cloud://synthetic/f.jpg'; },
     createFaceTask: async () => { creates += 1; return {}; },
   };

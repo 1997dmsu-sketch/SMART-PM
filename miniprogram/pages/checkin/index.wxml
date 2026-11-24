@@ -38,11 +38,13 @@
       <text class="ability-hint">{{ineligibleReason}}</text>
     </view>
 
-    <view wx:if="{{!applied}}" class="submit-card">
-      <label class="confirm-row">
-        <checkbox value="primary" checked="{{primaryConfirmed}}" bindchange="onPrimaryChange" color="#ff2450" />
-        <text class="confirm-text">本人为主入住人，确认以上房号与租期信息均来自服务端且无误。</text>
-      </label>
+    <view wx:if="{{!applied && !reviewRequired}}" class="submit-card">
+      <checkbox-group bindchange="onPrimaryChange">
+        <label class="confirm-row">
+          <checkbox value="primary" checked="{{primaryConfirmed}}" color="#ff2450" />
+          <text class="confirm-text">本人为主入住人，确认以上房号与租期信息均来自服务端且无误。</text>
+        </label>
+      </checkbox-group>
       <button class="primary-button submit-button" bindtap="submit" loading="{{submitting}}" disabled="{{submitting || !eligible || !leaseConfigured || !primaryConfirmed}}">提交测试入住申请</button>
       <text class="safety-note">提交内容仅为服务端下发的配置版本；房号、租期与审批字段不会由本页提交。</text>
     </view>
@@ -51,6 +53,12 @@
       <text class="status-pill allowed">入住申请已受理</text>
       <text class="result-hint">房号与租期以服务端关联为准；下一步请上传本人照片完成人脸登记。</text>
       <button class="primary-button submit-button" bindtap="goFaceEnroll">上传人脸</button>
+    </view>
+
+    <view wx:if="{{reviewRequired}}" class="result-card review-card">
+      <text class="status-pill muted">未自动通过</text>
+      <text class="result-hint">{{reviewReason}}</text>
+      <text class="review-hint">测试入住不自动审批普通账号；本页不会替您提交人工审核申请，请走既有审核流程。</text>
     </view>
   </block>
 </view>

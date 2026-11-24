@@ -69,6 +69,9 @@ function extractFilePath(response) {
   return '';
 }
 
+// 任务不存在/尚未创建的云端码；其余错误按审核渠道码分类走既有审核渠道或明确错误。
+const TASK_NOT_FOUND_CODES = ['TASK_NOT_FOUND', 'NO_TASK'];
+
 Page({
   data: {
     statusBarHeight: 20,
@@ -85,7 +88,11 @@ Page({
     uploading: false,
     cloudPathReady: false,
     showUpload: true,
-    canUpload: false
+    canUpload: false,
+    // reviewRequired：申请/账号不在自动通过路径（含页面加载后被撤销），
+    // 展示既有审核渠道且关闭上传卡片；绝不显示成功或人脸入口。
+    reviewRequired: false,
+    reviewReason: ''
   },
 
   onLoad(options) {
@@ -121,6 +128,17 @@ Page({
     this.refreshTask().finally(() => wx.stopPullDownRefresh());
   },
 
+  toReviewRequired(message) {
+    this.setData({
+      reviewRequired: true,
+      reviewReason: String(message || '当前申请未通过测试自动审批，请走既有审核流程。'),
+      showUpload: false,
+      cloudPathReady: false,
+      error: '',
+      loading: false
+    }, () => this.refreshCanUpload());
+  },
+
   async refreshTask() {
     if (this._destroyed || this._fetching) return;
     this._fetching = true;
@@ -130,11 +148,16 @@ Page({
       const task = result.task && typeof result.task === 'object' ? result.task : result;
       if (!this._destroyed) this.applyTask(task);
     } catch (err) {
+      if (this._destroyed) return;
       const message = String((err && err.message) || '');
-      // 首次进入尚无任务属于正常状态，仍展示服务端下发的 cloudPath 供上传。
-      if (/TASK_NOT_FOUND|NO_TASK|尚未创建|未找到|暂无任务/.test(message)) {
-        if (!this._destroyed) this.applyTask(null);
-      } else if (!this._destroyed) {
+      const code = String((err && err.code) || '');
+      // 按错误码精确分类，不再用文案猜状态（APPLICATION_FORBIDDEN 的文案同样含「未找到」）。
+      if (api.isReviewChannelCode(err && err.code)) {
+        this.toReviewRequired(message);
+      } else if (TASK_NOT_FOUND_CODES.indexOf(code) !== -1 || /TASK_NOT_FOUND|NO_TASK|尚未创建|暂无任务/.test(message)) {
+        // 首次进入尚无任务属于正常状态，仍展示服务端下发的 cloudPath 供上传。
+        this.applyTask(null);
+      } else {
         this.setData({ error: message || '状态查询失败，请重试', loading: false });
       }
     } finally {
@@ -159,15 +182,20 @@ Page({
       leaseText,
       cloudPathReady: Boolean(safe.cloudPath),
       showUpload,
-      loading: false
+      loading: false,
+      // 服务端返回有效任务即代表申请仍可查询；审核态随最新结果复位，不会永久锁死。
+      reviewRequired: false,
+      reviewReason: ''
     }, () => this.refreshCanUpload());
   },
 
   refreshCanUpload() {
-    const canUpload = this.data.showUpload && this.data.consentConfirmed && this.data.cloudPathReady && !this.data.uploading;
+    const canUpload = this.data.showUpload && this.data.consentConfirmed && this.data.cloudPathReady
+      && !this.data.uploading && !this.data.reviewRequired;
     if (this.data.canUpload !== canUpload) this.setData({ canUpload });
   },
 
+  // checkbox-group bindchange 的真实事件：detail.value 为勾选值的数组。
   onConsentChange(event) {
     const checked = event && event.detail && Array.isArray(event.detail.value) && event.detail.value.length > 0;
     this.setData({ consentConfirmed: Boolean(checked) }, () => this.refreshCanUpload());
@@ -175,6 +203,10 @@ Page({
 
   async chooseAndUpload() {
     if (this.data.uploading) return;
+    if (this.data.reviewRequired) {
+      wx.showToast({ title: '当前申请未通过测试自动审批，请走既有审核流程', icon: 'none' });
+      return;
+    }
     if (!this.data.consentConfirmed) {
       wx.showToast({ title: '请先确认照片用途', icon: 'none' });
       return;
@@ -191,6 +223,21 @@ Page({
     }
     this.setData({ uploading: true, error: '' }, () => this.refreshCanUpload());
     try {
+      // 上传前资格复核：名单可能在页面加载后被撤销。以服务端最新 getConfig 为准，
+      // 未通过者在此处被拦下——零照片上传、零 createFaceTask、零可用人脸入口。
+      // 按 A 路接口清单（INTERFACES.md §1.2）：storageNamespaceConfigured 为服务端
+      // 新下发字段；setSwitch(true) 前置要求命名空间已配置，此处显式失败关闭
+      // （仅 false 阻断，旧服务端缺字段不误伤）。
+      const gate = await api.getCheckinFaceConfig();
+      const eligible = !!gate && gate.enabled === true && gate.configured === true
+        && gate.accountEligible === true && gate.storageNamespaceConfigured !== false;
+      if (!eligible) {
+        const reason = !!gate && gate.accountEligible === false
+          ? '当前账号不在测试名单，请走既有审核流程。'
+          : '测试自动通过当前不可用，请走既有审核流程。';
+        if (!this._destroyed) this.toReviewRequired(reason);
+        return;
+      }
       const picked = await choosePhoto();
       const filePath = extractFilePath(picked);
       if (!filePath) throw new Error('未选择有效照片');
@@ -200,12 +247,23 @@ Page({
         filePath
       });
       if (!fileId) throw new Error('上传未返回文件标识');
-      // 仅在本人勾选 + 主动选图成功后建任务一次；上传成功不代表现场验证完成。
-      await api.createFaceTask({
-        applicationId: this._applicationId,
-        fileId,
-        consent: true
-      });
+      try {
+        // 仅在本人勾选 + 主动选图成功后建任务一次；上传成功不代表现场验证完成。
+        await api.createFaceTask({
+          applicationId: this._applicationId,
+          fileId,
+          consent: true
+        });
+      } catch (taskErr) {
+        // 服务端在创建任务时复核名单/开关/租期：拒绝即转入审核渠道态，不显示成功。
+        if (api.isReviewChannelCode(taskErr && taskErr.code)) {
+          if (!this._destroyed) {
+            this.toReviewRequired(String((taskErr && taskErr.message) || '当前申请未通过测试自动审批，请走既有审核流程。'));
+          }
+          return;
+        }
+        throw taskErr;
+      }
       await this.refreshTask();
     } catch (err) {
       const message = String((err && err.message) || '');

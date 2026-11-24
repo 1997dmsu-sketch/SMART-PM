@@ -29,13 +29,13 @@ function loadCjs(filename, { requires = {}, globals = {} } = {}) {
   return module.exports;
 }
 
-function fixture({ result = { code: 0, data: { ok: 1 }, msg: '' } } = {}) {
+function fixture({ result = { code: 0, data: { ok: 1 }, msg: '' }, uploadFileID = 'cloud://synthetic/photo.jpg' } = {}) {
   const calls = [];
   const uploads = [];
   const wx = {
     cloud: {
       callFunction: async (payload) => { calls.push(payload); return { result }; },
-      uploadFile: async (payload) => { uploads.push(payload); return { fileID: 'cloud://synthetic/photo.jpg' }; },
+      uploadFile: async (payload) => { uploads.push(payload); return { fileID: uploadFileID }; },
     },
     showToast: () => {},
     navigateTo: () => {},
@@ -136,4 +136,81 @@ test('getFaceTask 同时支持字符串与对象入参，但仍拒绝服务端�
   assert.deepEqual(calls[0].data, { action: 'getMyTask', applicationId: 'app-1' });
   await assert.rejects(() => api.getFaceTask({ applicationId: 'app-1', status: 'DEVICE_CONFIRMED' }), /禁止提交/);
   assert.equal(calls.length, 1);
+});
+
+test('非零错误码透传给页面：err.code 必须保留服务端 code（C2 分类依据）', async () => {
+  const { api, calls } = fixture({ result: { code: 'TEST_DISABLED', data: null, msg: '测试入住当前未启用' } });
+  await assert.rejects(
+    () => api.applyTestCheckin({ applicationVersion: 'test-v1' }),
+    (err) => err instanceof Error && err.code === 'TEST_DISABLED' && /测试入住当前未启用/.test(err.message),
+    'applyTestCheckin 抛错必须携带 code=TEST_DISABLED',
+  );
+  assert.equal(calls.length, 1, '错误码不改变下发载荷');
+  const forbidden = fixture({ result: { code: 'APPLICATION_FORBIDDEN', data: null, msg: '未找到本人申请' } });
+  await assert.rejects(
+    () => forbidden.api.getFaceTask({ applicationId: 'app-1' }),
+    (err) => err.code === 'APPLICATION_FORBIDDEN',
+  );
+  // 连接类失败无服务端 code，不得伪造 code。
+  const dead = fixture({ result: { code: 0, data: {}, msg: '' } });
+  dead.wx.cloud.callFunction = async () => { throw new Error('network down'); };
+  await assert.rejects(
+    () => dead.api.getFaceTask({ applicationId: 'app-1' }),
+    (err) => err.code === undefined && /服务连接失败/.test(err.message),
+  );
+});
+
+test('审核渠道错误码分类是闭式集合：只认申请/账号拒绝码，不吞并任务与配置码', async () => {
+  const { api } = fixture();
+  assert.equal(typeof api.isReviewChannelCode, 'function', 'api 必须导出 isReviewChannelCode');
+  assert.ok(Array.isArray(api.REVIEW_CHANNEL_CODES), 'api 必须导出 REVIEW_CHANNEL_CODES');
+  assert.equal(api.REVIEW_CHANNEL_CODES.length, 3, '审核渠道码为闭式集合，大小固定为 3（INTERFACES.md §5 对齐）');
+  for (const code of ['APPLICATION_FORBIDDEN', 'APPLICATION_NOT_APPROVED', 'ACCOUNT_NOT_ALLOWED']) {
+    assert.equal(api.isReviewChannelCode(code), true, `${code} 属于审核渠道码`);
+  }
+  // 清单 §5 存在但不属于审核渠道语义、以及 §5 不存在的码，一律不得归类为审核渠道码。
+  for (const code of [
+    'APPLICATION_NOT_FOUND', 'APPLICATION_INVALID', 'APPLICATION_REVOKED', 'ACCOUNT_REVOKED',
+    'APPLICATION_CONFLICT', 'TASK_FORBIDDEN', 'TASK_NOT_FOUND', 'NO_TASK', 'TASK_ALREADY_CLAIMED',
+    'TEST_DISABLED', 'VERSION_MISMATCH', 'ROOM_UNCONFIGURED', 'ROOM_NOT_UNIQUE', 'LEASE_UNCONFIGURED',
+    'LEASE_EXPIRED', 'INVALIDATED', 'INVALID_FILE_ID', 'FILE_NAMESPACE_MISMATCH',
+    'FILE_OWNERSHIP_MISMATCH', 'STORAGE_NAMESPACE_UNCONFIGURED', 'PHOTO_INVALID', 'INVALID_VERSION',
+    'INVALID_APPLICATION_ID', 'CLAIM_EXPIRED', 'EXECUTION_INVALIDATED', 'REVISION_CONFLICT',
+    'INTERNAL_ERROR', '', 123, null, undefined,
+  ]) {
+    assert.equal(api.isReviewChannelCode(code), false, `${String(code)} 不得归类为审核渠道码`);
+  }
+});
+
+test('演示模式不提供入住/人脸成功 fallback，一律拒绝且不调用云端与上传', async () => {
+  const { api, calls, uploads, runtime } = fixture();
+  runtime.mode = 'demo';
+  await assert.rejects(() => api.getCheckinFaceConfig(), /演示模式不会调用云端服务/);
+  await assert.rejects(() => api.applyTestCheckin({ applicationVersion: 'test-v1' }), /演示模式不会调用云端服务/);
+  await assert.rejects(() => api.createFaceTask({ applicationId: 'app-1', fileId: 'f', consent: true }), /演示模式不会调用云端服务/);
+  await assert.rejects(() => api.getFaceTask({ applicationId: 'app-1' }), /演示模式不会调用云端服务/);
+  await assert.rejects(
+    () => api.uploadTestFace({ applicationId: 'app-1', cloudPath: 'test-face/e/o/a/p.jpg', filePath: '/tmp/p.jpg' }),
+    /演示模式不会上传真实人脸照片/,
+  );
+  assert.equal(calls.length, 0, '演示模式不得调用云端');
+  assert.equal(uploads.length, 0, '演示模式不得上传照片');
+});
+
+test('上传输出与建任务输入使用同一个 SDK 形状 fileID，原样透传不重造（R01 客户端侧）', async () => {
+  const sdkFileId = 'cloud://checkin-env-synthetic.636c-checkin-env-synthetic-1250000000/test-face/synthetic-env/openid/app-1/photo.jpg';
+  const { api, calls, uploads } = fixture({ uploadFileID: sdkFileId });
+  const fileId = await api.uploadTestFace({
+    applicationId: 'app-1',
+    cloudPath: 'test-face/synthetic-env/openid/app-1/photo.jpg',
+    filePath: '/tmp/photo.jpg',
+  });
+  assert.equal(fileId, sdkFileId, '返回的必须是 wx.cloud.uploadFile 的原始 fileID');
+  assert.equal(typeof fileId, 'string');
+  assert.ok(fileId.startsWith('cloud://'), 'fileID 保持微信 SDK 原始形状');
+  await api.createFaceTask({ applicationId: 'app-1', fileId, consent: true });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].data.fileId, sdkFileId, '下一步输入必须与上传输出为同一字符串');
+  assert.ok(!calls[0].data.fileId.startsWith('test-face/'), '不得把 cloud:// fileID 去头成裸路径再提交');
+  assert.equal(uploads.length, 1);
 });

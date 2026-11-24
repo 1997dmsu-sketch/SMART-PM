@@ -23,12 +23,20 @@
       <text wx:if="{{taskView.showSite}}" class="site-notice">待现场刷脸验证</text>
     </view>
 
-    <view wx:if="{{showUpload}}" class="upload-card">
+    <view wx:if="{{reviewRequired}}" class="upload-card review-card">
+      <text class="section-heading">人脸登记入口未开放</text>
+      <text class="upload-note">{{reviewReason}}</text>
+      <text class="safety-note">测试入住不自动审批普通账号；本页不会替您提交人工审核申请，请走既有审核流程。</text>
+    </view>
+
+    <view wx:elif="{{showUpload}}" class="upload-card">
       <text class="section-heading">上传本人照片</text>
-      <label class="consent-row">
-        <checkbox value="consent" checked="{{consentConfirmed}}" bindchange="onConsentChange" color="#ff2450" />
-        <text class="consent-text">本人确认：本次上传的是本人照片，仅用于本次测试入住的人脸登记。</text>
-      </label>
+      <checkbox-group bindchange="onConsentChange">
+        <label class="consent-row">
+          <checkbox value="consent" checked="{{consentConfirmed}}" color="#ff2450" />
+          <text class="consent-text">本人确认：本次上传的是本人照片，仅用于本次测试入住的人脸登记。</text>
+        </label>
+      </checkbox-group>
       <button class="primary-button upload-button" bindtap="chooseAndUpload" loading="{{uploading}}" disabled="{{!canUpload}}">选择照片并上传</button>
       <view wx:if="{{!cloudPathReady}}" class="pending-config">上传路径待服务端下发，请稍后重新查询；本页不会自行拼接路径。</view>
       <text class="upload-note">照片上传至服务端下发的私有路径；上传成功仅代表平台收件，不代表设备已识别。</text>

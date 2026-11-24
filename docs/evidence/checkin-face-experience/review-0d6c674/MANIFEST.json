@@ -1,0 +1,109 @@
+{
+  "schema": "checkin-face-independent-review-evidence/v1",
+  "reviewDate": "2026-11-24",
+  "timezone": "Asia/Shanghai",
+  "candidateCommit": "0d6c674a04b224025c8640628122f27c34e8df0f",
+  "runtime": {
+    "platform": "linux",
+    "node": "v24.22.1"
+  },
+  "scope": "synthetic tests and probes only; no live SDK/device call",
+  "scriptPathNote": "Original scripts include the original cloud review worktree paths. Reproduction on another machine must use separately named copies and new hashes. Never run the archived guard in place because it appends to network-events.jsonl.",
+  "files": [
+    {
+      "path": "focused.exit-code.txt",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "focused.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "focused.stdout.txt",
+      "bytes": 6158,
+      "sha256": "12b166417e4f06e82ec731e370423cb392da044960284eed65121cca6d23acb6"
+    },
+    {
+      "path": "network-events.jsonl",
+      "bytes": 570,
+      "sha256": "0cb0eb3dc51f7c2a68ffb04bd2a1e7a854bc8222e5772fc665ebaa2377a4957e"
+    },
+    {
+      "path": "network-guard.cjs",
+      "bytes": 2020,
+      "sha256": "ab4490b1214faca24bb879360e06805ea8a5567a85fa092b4131d3d58c26a2d9"
+    },
+    {
+      "path": "probes.cjs",
+      "bytes": 7749,
+      "sha256": "05c28b666c3cdfe5153a6e86a48afe2d85483a6f098830d6f464b37cea4235ff"
+    },
+    {
+      "path": "probes.exit-code.txt",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "probes.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "probes.stdout.txt",
+      "bytes": 961,
+      "sha256": "5392e47c26efb077a9e91c921a6fcb90c5d6c28153452f897e2c9fc687d008c4"
+    },
+    {
+      "path": "stale-claim-probe.mjs",
+      "bytes": 2312,
+      "sha256": "8f69479d39e866aabd25378d841b3c0ab862726f2cd1982734ac4a2df67a9e9f"
+    },
+    {
+      "path": "stale-claim.exit-code.txt",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "stale-claim.stderr.txt",
+      "bytes": 461,
+      "sha256": "f0851594629565bbd4cad4dd3d3e48a22a1547900f787241b7b81f3975ed217d"
+    },
+    {
+      "path": "stale-claim.stdout.json",
+      "bytes": 231,
+      "sha256": "fed328fc1f77a9a282912fae39c6dd8ab7e452d614b9bed5d97dc84cb9634359"
+    },
+    {
+      "path": "static.exit-code.txt",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "static.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "static.stdout.txt",
+      "bytes": 73,
+      "sha256": "bfa3c9834861a1a7a83ee6aa59ca5e8c5a03c0a7ff9b83ff4075760385110028"
+    },
+    {
+      "path": "structure.exit-code.txt",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "structure.stderr.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "structure.stdout.txt",
+      "bytes": 185,
+      "sha256": "83753cc0b7f68198b92e002c9b514c5ec68d644b82f83445a2d3827190427d7d"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "scope": "synthetic-only-no-device-call",
+  "id": "EXPIRED_CLAIM_EXECUTOR_REACHED",
+  "expiredBeforeExecution": true,
+  "enrollmentCalls": 1,
+  "cloudActions": [
+    "claimTask",
+    "reportTask"
+  ],
+  "observedExitCode": 4
+}

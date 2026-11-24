@@ -1,0 +1,42 @@
+{
+  "scope": "synthetic-review-probes-only",
+  "observations": [
+    {
+      "id": "FILE_ID_CONTRACT",
+      "realFormatCloudCode": "FILE_OWNERSHIP_MISMATCH",
+      "plainCloudAccepted": true,
+      "plainWorkerCode": "FILE_ID_INVALID"
+    },
+    {
+      "id": "TRANSACTION_ROUTING",
+      "observed": [
+        "base:get",
+        "base:list",
+        "base:count",
+        "tx:get",
+        "base:audit",
+        "tx:set"
+      ],
+      "expectedScopeForAll": "tx"
+    },
+    {
+      "id": "CREATE_CLAIM_RACE",
+      "beforeDelayedCreate": {
+        "status": "CLAIMED",
+        "revision": 2
+      },
+      "afterDelayedCreate": {
+        "status": "QUEUED_FOR_DISPATCH",
+        "revision": 1
+      },
+      "successfulClaims": 2,
+      "differentClaimIds": true
+    },
+    {
+      "id": "MISSING_LOCAL_DEVICE_BINDING",
+      "localDeviceKeyEmpty": true,
+      "taskHasDifferentDevice": true,
+      "requestToOtherSyntheticOriginAccepted": true
+    }
+  ]
+}

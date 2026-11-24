@@ -1,0 +1,2 @@
+Checked 11 pages, custom tab bar, handlers, literal asset references, JSON, JS syntax; package 900 KiB.
+This is a static check, not a WeChat Developer Tools compilation or visual test.

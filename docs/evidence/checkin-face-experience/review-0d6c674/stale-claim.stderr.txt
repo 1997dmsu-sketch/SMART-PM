@@ -1,0 +1,3 @@
+{"at":"2026-11-24T09:32:50.656Z","level":"info","message":"worker config loaded","workerId":"[redacted]-worker","environment":"checkin-face-test"}
+{"at":"2026-11-24T09:32:50.658Z","level":"info","message":"task claimed","taskId":"sy***sk","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T09:32:50.664Z","level":"info","message":"task reported","exitCode":4}

@@ -149,6 +149,61 @@ test("the stdin limit counts UTF-8 bytes and never saves the rejected input", { 
 });
 
 for (const [label, executable] of [["Windows PowerShell 5.1", powershell], ["PowerShell 7", "pwsh.exe"]]) {
+  test(`${label} rejects an incomplete UTF-8 sequence at EOF before starting any child`, { skip: !windows }, async () => {
+    const childSource = `import {writeFileSync} from 'node:fs'; writeFileSync('CHILD_MUST_NOT_START','SYNTHETIC_EOF_CHILD_STARTED'); process.stdout.write('{"protocolVersion":1,"outcome":"failed"}'); process.exitCode=4;`;
+    const negative = await fakeEntry(childSource);
+    const positive = await fakeEntry(childSource);
+    assert.notEqual(negative.root, positive.root);
+    const marker = "CHILD_MUST_NOT_START";
+    const negativeBefore = (await readdir(negative.root)).includes(marker);
+    const positiveBefore = (await readdir(positive.root)).includes(marker);
+    assert.equal(negativeBefore, false);
+    assert.equal(positiveBefore, false);
+    const prefix = Buffer.from('{"name":"SYNTHETIC_EOF_', "ascii");
+    const bytes = Buffer.concat([prefix, Buffer.from([0xe4, 0xb8])]);
+    assert.ok(prefix.every(byte => byte < 0x80));
+    assert.equal(bytes.length, prefix.length + 2);
+    assert.deepEqual([...bytes.subarray(-2)], [0xe4, 0xb8]);
+    const output = join(negative.root, "eof-evidence");
+    const control = await invoke(Buffer.from('{"name":"SYNTHETIC_EOF_CONTROL"}', "utf8"), join(positive.root, "control-evidence"), positive.script, { executable });
+    const result = await invoke(bytes, output, negative.script, { executable });
+    const negativeAfter = (await readdir(negative.root)).includes(marker);
+    const positiveAfter = (await readdir(positive.root)).includes(marker);
+    const childStdout = await readFile(join(output, "stdout.txt"));
+    const childStderr = await readFile(join(output, "stderr.txt"));
+    const childExit = await readFile(join(output, "exit-code.txt"));
+    // Preserve observations before the oracle, including an intentionally
+    // failing artifact-copy control. Never delete a marker to satisfy the test.
+    await writeFile(join(negative.root, "eof-observation.json"), JSON.stringify({
+      host: label, executable, negativeFixture: negative.root, positiveFixture: positive.root,
+      input: { prefixAscii: true, prefixBytes: prefix.length, bytes: bytes.length, hex: bytes.toString("hex"), tailHex: bytes.subarray(-2).toString("hex") },
+      negative: { ...result, markerBefore: negativeBefore, markerAfter: negativeAfter, childStdoutHex: childStdout.toString("hex"), childStderrHex: childStderr.toString("hex"), childExitHex: childExit.toString("hex") },
+      positive: { ...control, markerBefore: positiveBefore, markerAfter: positiveAfter },
+    }, null, 2) + "\n", "utf8");
+    await writeFile(join(negative.root, "wrapper.stdout.txt"), result.stdout, "utf8");
+    await writeFile(join(negative.root, "wrapper.stderr.txt"), result.stderr, "utf8");
+    await writeFile(join(positive.root, "wrapper.stdout.txt"), control.stdout, "utf8");
+    await writeFile(join(positive.root, "wrapper.stderr.txt"), control.stderr, "utf8");
+    assert.equal(control.code, 4);
+    assert.equal(control.summary.wrapperExitCode, 4);
+    assert.equal(control.summary.childExitCode, 4);
+    assert.equal(control.summary.timedOut, false);
+    assert.equal(control.summary.error, null);
+    assert.equal(positiveAfter, true);
+    assert.equal(await readFile(join(positive.root, marker), "utf8"), "SYNTHETIC_EOF_CHILD_STARTED");
+    assert.equal(result.code, 2);
+    assert.equal(result.summary.wrapperExitCode, 2);
+    assert.equal(result.summary.childExitCode, null);
+    assert.equal(result.summary.timedOut, false);
+    assert.equal(result.summary.error, "input-invalid-or-too-large");
+    assert.equal(childStdout.length, 0);
+    assert.equal(childStderr.length, 0);
+    assert.deepEqual(childExit, Buffer.from("not-started-or-unknown\n"));
+    assert.equal(negativeAfter, false);
+    assert(!result.stdout.includes("SYNTHETIC_EOF"));
+    assert(!result.stdout.includes("\ufffd"));
+  });
+
   test(`${label} rejects original malformed UTF-8 bytes before starting any child`, { skip: !windows }, async (context) => {
     const fixture = await fakeEntry(`import {writeFileSync} from 'node:fs'; writeFileSync('CHILD_MUST_NOT_START','SYNTHETIC'); process.stdout.write('{"protocolVersion":1,"outcome":"simulation-completed","mode":"simulation","siteVerification":"NOT_APPLICABLE"}');`);
     const malformed = [

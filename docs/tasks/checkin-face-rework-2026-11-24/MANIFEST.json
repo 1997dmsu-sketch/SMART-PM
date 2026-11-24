@@ -1,0 +1,44 @@
+{
+  "schema": "checkin-face-harness-dispatch-pack/v1",
+  "date": "2026-11-24",
+  "timezone": "Asia/Shanghai",
+  "taskKey": "CHECKIN-FACE-REWORK-0d6c674",
+  "implementationBaseline": "0d6c674a04b224025c8640628122f27c34e8df0f",
+  "reviewCommit": "24c6140f2c0b4942825274d1b722e520f209c96e",
+  "dispatchStatus": "READY_NOT_DISPATCHED",
+  "runIds": [],
+  "sessionIds": [],
+  "missingCapability": "No dsh-baton MCP, CLI, or connected local Windows execution channel in current cloud context",
+  "files": [
+    {
+      "path": "A-CLOUD.md",
+      "bytes": 2569,
+      "sha256": "ebd2a6eca7818cdecc3233369aede9850cf57d726a4912f8a30024611c727c5d"
+    },
+    {
+      "path": "B-MINIPROGRAM.md",
+      "bytes": 1702,
+      "sha256": "cc52a37a4cc575b3568ade0602ddf10f475e3d5b6910ae70d038175f4ea2083c"
+    },
+    {
+      "path": "C-WORKER.md",
+      "bytes": 2848,
+      "sha256": "b33d2a68fff2d17d33deee9bc12fc3b22855f78d3cfcb5e394a26ec0555a430b"
+    },
+    {
+      "path": "COMMON.md",
+      "bytes": 6738,
+      "sha256": "fedd2016e758cc6f087cc380ebd9693032e32a5524cfc54dbcb4c6859a663f51"
+    },
+    {
+      "path": "D-QA-GATES.md",
+      "bytes": 2093,
+      "sha256": "7ed412095b0e357d7b33696eafd86171209a39329551b067dab98a60d8556342"
+    },
+    {
+      "path": "README.md",
+      "bytes": 4261,
+      "sha256": "e9b3841ab45adb8eb5a5092713e73904f2e66b93193f2954957e78d8d741e6ac"
+    }
+  ]
+}

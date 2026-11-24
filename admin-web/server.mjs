@@ -8,6 +8,7 @@ import { PropertyService } from "./lib/property.mjs";
 import { LocalStore, CloudStore } from "./lib/store.mjs";
 import { resolvePublicFile } from "./lib/static-path.mjs";
 import { Accounts, publicAccount } from "./lib/auth.mjs";
+import { FaceEnrollmentService } from "./lib/face-enrollment.mjs";
 import {
   authorize,
   validate,
@@ -50,6 +51,7 @@ export async function createApp({
   accounts,
   origin,
   secure = false,
+  faceServiceFactory = () => new FaceEnrollmentService(),
 } = {}) {
   if (!["demo", "live"].includes(mode))
     throw Error("ADMIN_MODE must be demo or live");
@@ -65,7 +67,12 @@ export async function createApp({
   )
     throw Error("Create an administrator with npm run create-admin first");
   const sessions = new Map(),
-    attempts = new Map();
+    attempts = new Map(),
+    faceSessions = new Map();
+  function closeFaceSession(token) {
+    faceSessions.get(token)?.close();
+    faceSessions.delete(token);
+  }
   const sessionAge = 8 * 60 * 60 * 1000;
   const server = http.createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -109,6 +116,7 @@ export async function createApp({
           ?.slice(16);
         let session = token && sessions.get(token);
         if (session && session.expires < Date.now()) {
+          closeFaceSession(token);
           sessions.delete(token);
           session = null;
         }
@@ -121,6 +129,7 @@ export async function createApp({
               a.revision === account.revision,
           );
           if (!current) {
+            closeFaceSession(token);
             sessions.delete(token);
             session = null;
             account = null;
@@ -128,11 +137,17 @@ export async function createApp({
         }
         function establish(a) {
           for (const [key, value] of sessions)
-            if (value.expires < Date.now()) sessions.delete(key);
+            if (value.expires < Date.now()) {
+              closeFaceSession(key);
+              sessions.delete(key);
+            }
           if (sessions.size >= 1000) fail("会话数已满，请稍后重试", 503);
           const key = randomBytes(32).toString("hex"),
             csrf = randomBytes(24).toString("hex");
-          if (token) sessions.delete(token);
+          if (token) {
+            closeFaceSession(token);
+            sessions.delete(token);
+          }
           sessions.set(key, {
             account: a,
             csrf,
@@ -185,6 +200,7 @@ export async function createApp({
             mode,
           });
         if (path === "/api/logout" && method === "POST") {
+          closeFaceSession(token);
           sessions.delete(token);
           res.setHeader(
             "Set-Cookie",
@@ -197,6 +213,26 @@ export async function createApp({
           actorId: account._id,
           action,
         });
+        if (path.startsWith("/api/face/")) {
+          if (account.role !== "admin") fail("仅系统管理员可联调人脸门禁", 403);
+          if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress))
+            fail("现场设备联调入口仅在本机开放", 403);
+          let face = faceSessions.get(token);
+          if (!face) {
+            face = faceServiceFactory();
+            faceSessions.set(token, face);
+          }
+          if (path === "/api/face/state" && method === "GET")
+            return send(face.state());
+          if (method !== "POST") fail("接口不存在", 404);
+          const data = await body(req, 1024 * 1024);
+          if (path === "/api/face/connect") return send(await face.connect(data));
+          if (path === "/api/face/disconnect") return send(await face.disconnect());
+          if (path === "/api/face/enroll") return send({ enrollment: await face.enroll(data) });
+          if (path === "/api/face/retry") return send({ enrollment: await face.retry(data) });
+          if (path === "/api/face/verify") return send({ enrollment: await face.verify(data) });
+          fail("接口不存在", 404);
+        }
         if (path.startsWith("/api/property/")) {
           authorize(account.role, "rooms", method !== "GET");
           const service = new PropertyService(store);
@@ -290,6 +326,7 @@ export async function createApp({
             account.username,
           );
           attempts.delete(key);
+          closeFaceSession(token);
           sessions.delete(token);
           return send({ ok: true });
         }
@@ -560,6 +597,9 @@ export async function createApp({
         );
       } else res.end();
     }
+  });
+  server.on("close", () => {
+    for (const token of faceSessions.keys()) closeFaceSession(token);
   });
   return { server, store, accounts };
 }

@@ -1,0 +1,63 @@
+{
+  "kind": "offline-captured-capability-replay",
+  "deviceInfoSource": "synthetic",
+  "networkCalls": 0,
+  "deviceWrites": 0,
+  "calls": [
+    {
+      "method": "GET",
+      "path": "/ISAPI/System/deviceInfo"
+    },
+    {
+      "method": "GET",
+      "path": "/ISAPI/AccessControl/UserInfo/capabilities?format=json"
+    },
+    {
+      "method": "GET",
+      "path": "/ISAPI/Intelligent/FDLib/capabilities?format=json"
+    },
+    {
+      "method": "GET",
+      "path": "/ISAPI/Intelligent/FDLib?format=json"
+    }
+  ],
+  "capabilities": {
+    "libraries": [
+      {
+        "FDID": "1",
+        "faceLibType": "blackFD"
+      },
+      {
+        "FDID": "2",
+        "faceLibType": "infraredFD"
+      }
+    ],
+    "doorNumbers": [
+      1
+    ],
+    "maxPhotoBytes": 204800,
+    "photoLimitSource": "guide-default",
+    "employeeNoMaxLength": 32,
+    "employeeNoPattern": "^[A-Za-z0-9]+$",
+    "nameMaxBytes": 128,
+    "timeRangeBegin": "2000-01-01T00:00:00",
+    "timeRangeEnd": "2037-12-31T23:59:59",
+    "userTypes": [
+      "normal",
+      "visitor",
+      "blackList"
+    ],
+    "timeTypes": [
+      "local"
+    ],
+    "faceFunctions": [
+      "post",
+      "delete",
+      "get",
+      "put",
+      "setUp"
+    ],
+    "faceSearchSupported": false,
+    "personFaceCountSupported": true
+  }
+}

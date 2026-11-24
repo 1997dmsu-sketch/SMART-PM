@@ -1,0 +1,57 @@
+[
+  {
+    "path": "admin-web/server.mjs",
+    "bytes": 25621,
+    "sha256": "53caefc6a9b198e35ca0a53c9defd45d72d3f5764826a5b43a4cb30c9b868b11"
+  },
+  {
+    "path": "admin-web/lib/hikvision-client.mjs",
+    "bytes": 14009,
+    "sha256": "d79ef3ba00914d4bc551ab363315f6fdb183da44088577fe14c1902786e76001"
+  },
+  {
+    "path": "admin-web/lib/face-enrollment.mjs",
+    "bytes": 21295,
+    "sha256": "2f1707d6f887a636d45e432af34420b1488376335a9b8415d4ffacf389a1f30b"
+  },
+  {
+    "path": "admin-web/public/app.js",
+    "bytes": 44619,
+    "sha256": "2f2b1cbc74b552911fb85a4e7f1fa3c626953db014dce28a34d9f88f98d0af2d"
+  },
+  {
+    "path": "admin-web/public/face-ui.js",
+    "bytes": 27667,
+    "sha256": "74f511c4596c2c156a399cc526ae970a81c4b440d14889e7d0707d4f939aaf15"
+  },
+  {
+    "path": "admin-web/public/style.css",
+    "bytes": 28558,
+    "sha256": "5f297f13592a9012e03d57a8003da4de80a1713a4022569a692da14d057a638b"
+  },
+  {
+    "path": "admin-web/tests/hikvision-client.test.mjs",
+    "bytes": 14269,
+    "sha256": "6fcf797705716379c8f99612d9da45576c3b59e8357815624fdba5665d9f5a34"
+  },
+  {
+    "path": "admin-web/tests/face-enrollment.test.mjs",
+    "bytes": 15711,
+    "sha256": "69fa4db6756da3c7791227504a1aeb995dbc0b1fab7b60ce84c3dbb023ee05ef"
+  },
+  {
+    "path": "admin-web/tests/face-server.test.mjs",
+    "bytes": 15825,
+    "sha256": "0aeb9204314c3fd96cef93bc6efbd482361b82a88696b84a7a2c84b3bdd7dd01"
+  },
+  {
+    "path": "admin-web/tests/face-ui.test.mjs",
+    "bytes": 7596,
+    "sha256": "1e0cb9880982434545484ad1d277e5aae44a5db2696e6b97acbc08eea399b011"
+  },
+  {
+    "path": "admin-web/tests/fixtures/hikvision-synthetic-certificates.mjs",
+    "bytes": 2047,
+    "sha256": "de9059f9169367e53d68b12da7f2694c45a1ddfab2fdaf20a356299375d04dd1"
+  }
+]

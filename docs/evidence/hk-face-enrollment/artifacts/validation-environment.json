@@ -1,0 +1,16 @@
+{
+  "started": "2026-11-24T09:40:03.9227931+08:00",
+  "finished": "2026-11-24T09:40:05.4180182+08:00",
+  "windows": {
+    "productName": "Windows 10 Home China",
+    "displayVersion": "23H2",
+    "build": "22631.6199"
+  },
+  "powershell": "7.6.9",
+  "edition": "Core",
+  "dotNet": "10.0.14",
+  "node": "v24.16.0",
+  "command": "npm.cmd --prefix admin-web test",
+  "exitCode": 0,
+  "sourceHashesUnchanged": true
+}

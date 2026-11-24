@@ -1,0 +1,68 @@
+[
+  {
+    "path": "admin-web/server.mjs",
+    "bytes": 24971,
+    "sha256": "7bc1cfeb3b6f0d0272969859f0c3000f630ec1e1df1d607e3a58ebc1577914d2",
+    "matchesWindowsWorkingBytes": false
+  },
+  {
+    "path": "admin-web/lib/hikvision-client.mjs",
+    "bytes": 14009,
+    "sha256": "d79ef3ba00914d4bc551ab363315f6fdb183da44088577fe14c1902786e76001",
+    "matchesWindowsWorkingBytes": true
+  },
+  {
+    "path": "admin-web/lib/face-enrollment.mjs",
+    "bytes": 21295,
+    "sha256": "2f1707d6f887a636d45e432af34420b1488376335a9b8415d4ffacf389a1f30b",
+    "matchesWindowsWorkingBytes": true
+  },
+  {
+    "path": "admin-web/public/app.js",
+    "bytes": 43710,
+    "sha256": "c2acdc9907b6bd344fa2c6f79599ec586b1d054a8535d404d5566caf26792848",
+    "matchesWindowsWorkingBytes": false
+  },
+  {
+    "path": "admin-web/public/face-ui.js",
+    "bytes": 27667,
+    "sha256": "74f511c4596c2c156a399cc526ae970a81c4b440d14889e7d0707d4f939aaf15",
+    "matchesWindowsWorkingBytes": true
+  },
+  {
+    "path": "admin-web/public/style.css",
+    "bytes": 26932,
+    "sha256": "ab7785ba54f9cbf5c5238b44c6c24c0d17bb1924bbd4fd3820f70ed4e9c611af",
+    "matchesWindowsWorkingBytes": false
+  },
+  {
+    "path": "admin-web/tests/hikvision-client.test.mjs",
+    "bytes": 14269,
+    "sha256": "6fcf797705716379c8f99612d9da45576c3b59e8357815624fdba5665d9f5a34",
+    "matchesWindowsWorkingBytes": true
+  },
+  {
+    "path": "admin-web/tests/face-enrollment.test.mjs",
+    "bytes": 15711,
+    "sha256": "69fa4db6756da3c7791227504a1aeb995dbc0b1fab7b60ce84c3dbb023ee05ef",
+    "matchesWindowsWorkingBytes": true
+  },
+  {
+    "path": "admin-web/tests/face-server.test.mjs",
+    "bytes": 15825,
+    "sha256": "0aeb9204314c3fd96cef93bc6efbd482361b82a88696b84a7a2c84b3bdd7dd01",
+    "matchesWindowsWorkingBytes": true
+  },
+  {
+    "path": "admin-web/tests/face-ui.test.mjs",
+    "bytes": 7596,
+    "sha256": "1e0cb9880982434545484ad1d277e5aae44a5db2696e6b97acbc08eea399b011",
+    "matchesWindowsWorkingBytes": true
+  },
+  {
+    "path": "admin-web/tests/fixtures/hikvision-synthetic-certificates.mjs",
+    "bytes": 2008,
+    "sha256": "e33f3a3bfe5a6bcc4d789cbf37794b2024e39832b4ef3a7f3a78e0d0473898f6",
+    "matchesWindowsWorkingBytes": false
+  }
+]

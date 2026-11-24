@@ -40,6 +40,7 @@ function defaultConfig(environment) {
     dispatchEnabled: false,
     applicationVersion: '',
     workerTokenHash: '',
+    storageNamespace: '',
     revision: 0,
     configured: false,
   };
@@ -57,14 +58,21 @@ async function loadAllowlistEntry(store, openid) {
 
 /**
  * Single-point read of the 102 binding, with a uniqueness count that never
- * selects a row.
- * @throws {WorkflowError} ROOM_NOT_UNIQUE when duplicates exist.
+ * selects a row. The count is a collection query and therefore unavailable
+ * inside a transaction: callers evaluating inside a transaction pass
+ * checkUniqueness:false and rely on the deterministic-id point read plus the
+ * admin-side write-time count gate (documented in INTERFACES.md §3.3).
+ * @param {{get:Function,count:Function,environment:string}} store
+ * @param {{checkUniqueness?:boolean}} options
+ * @throws {WorkflowError} ROOM_NOT_UNIQUE when duplicates exist (base context).
  */
-async function loadRoomBinding(store) {
+async function loadRoomBinding(store, { checkUniqueness = true } = {}) {
   const doc = await store.get(COLLECTIONS.ROOM, ids.roomBindingId(store.environment));
   if (!doc || doc.displayNo !== '102' || doc.environment !== store.environment) return null;
-  const duplicates = await store.count(COLLECTIONS.ROOM, { environment: store.environment, displayNo: '102' });
-  if (duplicates > 1) throw new WorkflowError('ROOM_NOT_UNIQUE', MESSAGES.ROOM_NOT_UNIQUE);
+  if (checkUniqueness) {
+    const duplicates = await store.count(COLLECTIONS.ROOM, { environment: store.environment, displayNo: '102' });
+    if (duplicates > 1) throw new WorkflowError('ROOM_NOT_UNIQUE', MESSAGES.ROOM_NOT_UNIQUE);
+  }
   return doc;
 }
 
@@ -107,9 +115,13 @@ function failure(code) {
 
 /**
  * All conditions required for automatic approval of a test account.
+ * When `inTransaction` is true only point reads are performed: the room
+ * uniqueness count and the concurrent-application query are skipped (the
+ * caller runs them as a non-transactional preflight). No query is silently
+ * served by the outer DB.
  * @returns {Promise<object>} ok result with trusted snapshots, or a failure code.
  */
-async function evaluateApply({ store, openid, applicationVersion, now = new Date() }) {
+async function evaluateApply({ store, openid, applicationVersion, now = new Date(), inTransaction = false }) {
   const config = await loadConfig(store);
   const allowlist = await loadAllowlistEntry(store, openid);
   const accountEligible = !!allowlist && allowlist.status === 'active';
@@ -122,7 +134,7 @@ async function evaluateApply({ store, openid, applicationVersion, now = new Date
   }
 
   let room;
-  try { room = await loadRoomBinding(store); }
+  try { room = await loadRoomBinding(store, { checkUniqueness: !inTransaction }); }
   catch (error) {
     if (error instanceof WorkflowError) return { ...failure(error.code), ...base };
     throw error;
@@ -135,10 +147,12 @@ async function evaluateApply({ store, openid, applicationVersion, now = new Date
   if (lease.status !== 'active' || lease.applicationVersion !== config.applicationVersion
     || !dates.isWithinWindow(lease, now)) return { ...failure('LEASE_EXPIRED'), ...base, room, lease };
 
-  const concurrent = await store.list(COLLECTIONS.APPLICATION, { environment: store.environment, openid });
-  const colliding = concurrent.find((row) => row.result !== 'auto_approved'
-    && row._id !== ids.applicationId(store.environment, openid, applicationVersion, lease.revision, room.revision));
-  if (colliding) return { ...failure('CONCURRENT_APPLICATION'), ...base, room, lease };
+  if (!inTransaction) {
+    const concurrent = await store.list(COLLECTIONS.APPLICATION, { environment: store.environment, openid });
+    const colliding = concurrent.find((row) => row.result !== 'auto_approved'
+      && row._id !== ids.applicationId(store.environment, openid, applicationVersion, lease.revision, room.revision));
+    if (colliding) return { ...failure('CONCURRENT_APPLICATION'), ...base, room, lease };
+  }
 
   return {
     ok: true,
@@ -155,10 +169,13 @@ async function evaluateApply({ store, openid, applicationVersion, now = new Date
 }
 
 /**
- * Re-run every gate before dispatch and before finalizing a device report.
+ * Re-run every gate before dispatch, before beginning device execution and
+ * before finalizing a device report. Point reads only; when run inside a
+ * transaction `inTransaction:true` skips the room uniqueness count (see
+ * loadRoomBinding).
  * @returns {Promise<object>} ok result with trusted snapshots, or INVALIDATED.
  */
-async function evaluateDispatch({ store, task, now = new Date() }) {
+async function evaluateDispatch({ store, task, now = new Date(), inTransaction = false }) {
   const config = await loadConfig(store);
   if (config.enabled !== true || config.dispatchEnabled !== true) return failure('INVALIDATED');
   if (!task || task.configRevision !== config.revision) return failure('INVALIDATED');
@@ -173,7 +190,7 @@ async function evaluateDispatch({ store, task, now = new Date() }) {
     || application._id !== task.applicationId) return failure('INVALIDATED');
 
   let room;
-  try { room = await loadRoomBinding(store); }
+  try { room = await loadRoomBinding(store, { checkUniqueness: !inTransaction }); }
   catch { return failure('INVALIDATED'); }
   if (!room || room._id !== task.roomBindingId || room.revision !== task.roomRevision) return failure('INVALIDATED');
 

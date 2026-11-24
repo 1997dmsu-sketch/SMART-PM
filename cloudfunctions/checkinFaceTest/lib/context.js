@@ -12,7 +12,7 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 const { ValidationError, validateToken } = require('./validate');
 
 const MINIPROGRAM_ACTIONS = Object.freeze(['getConfig', 'applyCheckin', 'createFaceTask', 'getMyTask']);
-const WORKER_ACTIONS = Object.freeze(['claimTask', 'reportTask']);
+const WORKER_ACTIONS = Object.freeze(['claimTask', 'beginTaskExecution', 'reportTask']);
 const ALL_ACTIONS = Object.freeze([...MINIPROGRAM_ACTIONS, ...WORKER_ACTIONS]);
 
 class ContextError extends Error {

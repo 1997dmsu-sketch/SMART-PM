@@ -24,6 +24,7 @@ const require = createRequire(import.meta.url);
 // Reuse the same namespace constants as the isolated cloud test function so the
 // admin pages and server gates can never disagree about collection names.
 const { COLLECTIONS: CHECKIN_FACE_COLLECTIONS, ids: CHECKIN_FACE_IDS } = require("../cloudfunctions/checkinFaceTest/lib/store.js");
+const { STORAGE_NAMESPACE_PATTERN: CHECKIN_FACE_STORAGE_NAMESPACE_PATTERN } = require("../cloudfunctions/checkinFaceTest/lib/validate.js");
 const CHECKIN_FACE_TEST_API = "/api/checkin-face-test/";
 const mime = {
   ".html": "text/html; charset=utf-8",
@@ -446,6 +447,24 @@ export async function createApp({
                 revision: Number.isSafeInteger(versionResult?.revision)
                   ? versionResult.revision
                   : (Number.isSafeInteger(versionResult?.configRevision) ? versionResult.configRevision : null),
+              };
+            } else if (path === `${CHECKIN_FACE_TEST_API}storage`) {
+              // 可信云存储命名空间：与云函数校验器共用同一正则（两端一致）。
+              // 管理员填写真实环境 fileID 中 cloud:// 与第一个 / 之间的整段。
+              if (typeof configService.setStorageNamespace !== "function") {
+                fail("配置服务尚不支持存储命名空间设置", 503);
+              }
+              const namespace = typeof data.namespace === "string" ? data.namespace.trim() : "";
+              if (!CHECKIN_FACE_STORAGE_NAMESPACE_PATTERN.test(namespace)) {
+                fail("命名空间须为 1–128 位字母/数字开头，可含 . _ -", 400);
+              }
+              const storageResult = await configService.setStorageNamespace(namespace, {
+                operator: account.username,
+                reason,
+              });
+              result = {
+                storageNamespace: namespace,
+                revision: Number.isSafeInteger(storageResult?.revision) ? storageResult.revision : null,
               };
             } else if (path === `${CHECKIN_FACE_TEST_API}dispatch`) {
               // 派发开关与自动通过开关相互独立：只有开启后 worker 才会领到任务。

@@ -11,6 +11,12 @@ const dates = require("../../cloudfunctions/checkinFaceTest/lib/dates.js");
 // cloudfunctions/checkinFaceTest/lib/validate.js (validateApplicationVersion).
 const APPLICATION_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
+// The trusted cloud storage namespace shares ONE definition with the cloud
+// validator (imported, not copied), so both ends always accept/reject the
+// same inputs. It is the segment between `cloud://` and the first `/` of a
+// real SDK fileID (e.g. `prod-env-id.7465-prod-env-id-1300000000`).
+const { STORAGE_NAMESPACE_PATTERN } = require("../../cloudfunctions/checkinFaceTest/lib/validate.js");
+
 const SECRET_KEYS = new Set([
   "workerTokenHash", "workerToken", "password", "origin", "certificatePath",
   "privateKey", "pin", "clientSecret", "accessToken",
@@ -123,6 +129,7 @@ export class AdminCheckinFaceTestConfig {
       dispatchEnabled: false,
       applicationVersion: "",
       workerTokenHash: "",
+      storageNamespace: "",
       revision: 0,
     };
   }
@@ -160,6 +167,8 @@ export class AdminCheckinFaceTestConfig {
       config: {
         ...publicDoc(config),
         workerTokenConfigured: Boolean(config.workerTokenHash),
+        storageNamespaceConfigured: Boolean(config.storageNamespace)
+          && STORAGE_NAMESPACE_PATTERN.test(config.storageNamespace),
       },
       room: publicDoc(room),
       lease: publicDoc(lease),
@@ -278,9 +287,47 @@ export class AdminCheckinFaceTestConfig {
   }
 
   /**
+   * Set the trusted cloud storage namespace for real SDK fileIDs. The value
+   * is the exact segment between `cloud://` and the first `/` of the fileID
+   * returned by wx.cloud.uploadFile in the target environment (observed
+   * during on-site setup). The grammar is the cloud validator's own pattern;
+   * the persisted value is a configuration fact, not a secret.
+   *
+   * @param {string} namespace 1–128 chars, /^[A-Za-z0-9][A-Za-z0-9._-]*$/.
+   * @param {{operator?:string, reason?:string}} options caller identity/reason.
+   * @returns {Promise<{storageNamespace:string, revision:number}>}
+   */
+  async setStorageNamespace(namespace, options = {}) {
+    if (typeof namespace !== "string") {
+      fail("INVALID_STORAGE_NAMESPACE", "可信云存储命名空间必须是字符串");
+    }
+    const normalized = namespace.trim();
+    if (!STORAGE_NAMESPACE_PATTERN.test(normalized)) {
+      fail("INVALID_STORAGE_NAMESPACE", "命名空间须为 1–128 位字母/数字开头，可含 . _ -");
+    }
+    const operator = typeof options?.operator === "string" && options.operator.trim()
+      ? options.operator.trim() : this.operator;
+    const reason = typeof options?.reason === "string" ? options.reason.slice(0, 500) : "";
+    const current = await this.#config();
+    const next = {
+      ...current,
+      storageNamespace: normalized,
+      revision: (Number(current.revision) || 0) + 1,
+    };
+    await this.#set(COLLECTIONS.CONFIG, next._id, next);
+    await this.#audit(
+      "STORAGE_NAMESPACE_SET", next._id, null,
+      { storageNamespace: normalized, revision: next.revision },
+      reason, next.revision, operator,
+    );
+    return { storageNamespace: normalized, revision: next.revision };
+  }
+
+  /**
    * Enable automatic approval only for a fully configured test program:
-   * version, worker credential, unique 102 binding and an active fixed lease.
-   * Any missing prerequisite fails closed before writing.
+   * version, worker credential, trusted storage namespace, unique 102 binding
+   * and an active fixed lease. Any missing prerequisite fails closed before
+   * writing.
    */
   async setSwitch(enabled, reason = "", options = {}) {
     if (typeof enabled !== "boolean") fail("INVALID_INPUT", "开关必须是布尔值");
@@ -292,6 +339,10 @@ export class AdminCheckinFaceTestConfig {
       if (typeof current.workerTokenHash !== "string"
         || !/^[a-f0-9]{64}$/i.test(current.workerTokenHash)) {
         fail("WORKER_TOKEN_UNCONFIGURED", "请先设置 worker 凭据");
+      }
+      if (typeof current.storageNamespace !== "string"
+        || !STORAGE_NAMESPACE_PATTERN.test(current.storageNamespace)) {
+        fail("STORAGE_NAMESPACE_UNCONFIGURED", "请先设置可信云存储命名空间");
       }
       const room = await this.#get(COLLECTIONS.ROOM, ids.roomBindingId(this.environment));
       const lease = await this.#get(COLLECTIONS.LEASE, ids.leaseId(this.environment));

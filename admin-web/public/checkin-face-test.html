@@ -30,7 +30,7 @@
           <strong>默认关闭：</strong>测试自动通过开关缺省为关闭；关闭后新申请立即不再自动通过。<br />
           <strong>不填租期不自动通过：</strong>租期起止必须由负责人手动填写；未填、取消或过期时页面显示「待配置」，不会回退长期或自动取今天。<br />
           <strong>秘密边界：</strong>设备地址、账号、密码、公开证书路径、私钥与 pin 只存在于本地受控 worker 的 Git 忽略文件中，不在本页、云端、小程序或日志出现。<br />
-          <strong>建议配置顺序：</strong>填申请版本号 → 设 worker token → 绑定 102 → 手填租期 → 设测试账号 → 开派发开关 → 最后开自动通过开关。自动通过开关有前置校验：版本号、worker token、102 绑定与有效租期缺一不可，否则拒绝开启且不写库；派发开关与它是两个独立开关，只控制 worker 是否领取任务。
+          <strong>建议配置顺序：</strong>填申请版本号 → 设 worker token → 设可信云存储命名空间 → 绑定 102 → 手填租期 → 设测试账号 → 开派发开关 → 最后开自动通过开关。自动通过开关有前置校验：版本号、worker token、可信云存储命名空间、102 绑定与有效租期缺一不可，否则拒绝开启且不写库；派发开关与它是两个独立开关，只控制 worker 是否领取任务。
         </div>
 
         <div id="config-login" class="panel" hidden>
@@ -47,6 +47,7 @@
               <div class="field"><label>开关状态</label><div id="config-switch-state" class="badge">—</div></div>
               <div class="field"><label>worker token 状态</label><div id="config-worker-token-state" class="badge">—</div></div>
               <div class="field"><label>申请版本号</label><div id="config-application-version" class="stat-value">—</div></div>
+              <div class="field"><label>可信云存储命名空间</label><div id="config-storage-namespace" class="stat-value">—</div></div>
               <div class="field"><label>派发开关状态</label><div id="config-dispatch-state" class="badge">—</div></div>
               <div class="field"><label>测试环境</label><div id="config-environment" class="muted">—</div></div>
             </div>
@@ -78,6 +79,16 @@
               <div class="field"><label for="application-version-value">applicationVersion</label><input id="application-version-value" name="version" maxlength="128" placeholder="例如 0.1.0-beta.19-checkin-face.1" required /></div>
               <div class="field"><label for="application-version-reason">变更原因</label><input id="application-version-reason" name="reason" maxlength="200" placeholder="必填" required /></div>
               <div class="actions"><button class="btn primary" type="submit">保存版本号</button></div>
+            </form>
+          </section>
+
+          <section class="panel" aria-labelledby="config-storage-form-title">
+            <div class="panel-head"><h2 id="config-storage-form-title">可信云存储命名空间（fileID 契约）</h2></div>
+            <p class="notice">服务端只接受命名空间与此处完全一致的真实 cloud://… fileID。填写真实环境 wx.cloud.uploadFile 返回 fileID 中 cloud:// 与第一个 / 之间的整段（以现场联调实际返回为准，例如 prod-env-id.7465-prod-env-id-1300000000）。未配置时上传建任务失败关闭，自动通过开关也无法开启。</p>
+            <form id="storage-form" class="form-fields">
+              <div class="field"><label for="storage-namespace-value">storageNamespace</label><input id="storage-namespace-value" name="namespace" maxlength="128" placeholder="例如 prod-env-id.7465-prod-env-id-1300000000" required /></div>
+              <div class="field"><label for="storage-reason">变更原因</label><input id="storage-reason" name="reason" maxlength="200" placeholder="必填" required /></div>
+              <div class="actions"><button class="btn primary" type="submit">保存命名空间</button></div>
             </form>
           </section>
 

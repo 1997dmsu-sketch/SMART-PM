@@ -27,6 +27,7 @@ const ACTION_FIELDS = Object.freeze({
   createFaceTask: ['action', 'applicationId', 'fileId', 'consent'],
   getMyTask: ['action', 'applicationId'],
   claimTask: ['action', 'workerToken', 'workerId'],
+  beginTaskExecution: ['action', 'workerToken', 'workerId', 'taskId', 'claimId', 'revision'],
   reportTask: ['action', 'workerToken', 'taskId', 'claimId', 'revision', 'exitCode', 'output'],
 });
 
@@ -71,7 +72,7 @@ function validateEvent(event, group) {
   const action = event.action;
   const fields = ACTION_FIELDS[action];
   if (!fields) throw new ValidationError('UNKNOWN_ACTION', '不支持的操作');
-  const workerOwned = action === 'claimTask' || action === 'reportTask';
+  const workerOwned = action === 'claimTask' || action === 'beginTaskExecution' || action === 'reportTask';
   if (group === 'worker' && !workerOwned) throw new ValidationError('ACTION_FORBIDDEN', '该操作不允许 worker 调用');
   if (group === 'miniprogram' && workerOwned) throw new ValidationError('ACTION_FORBIDDEN', '该操作不允许小程序调用');
   return assertAllowedFields(event, fields, '请求');
@@ -109,20 +110,87 @@ function validateToken(value) {
 }
 
 /**
- * Verify that a fileID belongs to the caller's own application and lives
- * under the server-generated cloud path prefix.
- * @returns {{fileId:string,cloudPath:string,fileName:string}}
+ * Real-SDK fileID contract (R01). The single trusted namespace pattern is
+ * shared with the admin configuration service so both ends validate the same
+ * grammar. The admin page and server route require this exact definition.
  */
-function validateFileOwnership(fileId, { environment, openid, applicationId }) {
-  if (typeof fileId !== 'string') throw new ValidationError('INVALID_FILE_ID', '文件标识无效');
-  const prefix = `test-face/${environment}/${openid}/${applicationId}/`;
-  if (!fileId.startsWith(prefix)) throw new ValidationError('FILE_OWNERSHIP_MISMATCH', '照片不属于本次申请');
-  const rest = fileId.slice(prefix.length);
-  if (!rest || rest.length > 128 || /[\\/]/.test(rest) || /[\x00-\x1f\x7f]/.test(rest)
-    || rest.includes('..') || !/\.(jpe?g)$/i.test(rest)) {
+const STORAGE_NAMESPACE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const FILE_ID_MAX_LENGTH = 512;
+const FILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,122}\.(jpe?g)$/i;
+
+/**
+ * Verify that a real SDK `cloud://<namespace>/<objectPath>` fileID belongs to
+ * the trusted storage namespace and to the caller's own application, and that
+ * the canonical object path is well-formed.
+ *
+ * Rejection classes:
+ *  - not a string / empty / overlong / control chars / not cloud:// → INVALID_FILE_ID
+ *    (a bare `test-face/…` path is no longer accepted);
+ *  - namespace grammar mismatch or namespace !== trusted config → FILE_NAMESPACE_MISMATCH
+ *    (cross-environment);
+ *  - object path outside the server-issued prefix for this openid/applicationId
+ *    → FILE_OWNERSHIP_MISMATCH (cross-user / cross-application);
+ *  - malformed file name (separators, `..`, `%`, bad extension) → INVALID_FILE_ID;
+ *  - server storageNamespace missing/ill-formed → STORAGE_NAMESPACE_UNCONFIGURED
+ *    (fail closed).
+ *
+ * @param {string} fileId the unmodified fileID returned by wx.cloud.uploadFile.
+ * @param {{environment:string,openid:string,applicationId:string,storageNamespace?:string}} ctx
+ * @returns {{fileId:string,cloudPath:string,namespace:string,fileName:string}}
+ */
+function validateFileOwnership(fileId, { environment, openid, applicationId, storageNamespace }) {
+  if (typeof fileId !== 'string' || !fileId || fileId.length > FILE_ID_MAX_LENGTH
+    || /[\x00-\x1f\x7f\s]/.test(fileId)) {
+    throw new ValidationError('INVALID_FILE_ID', '文件标识无效');
+  }
+  if (typeof storageNamespace !== 'string' || !storageNamespace
+    || !STORAGE_NAMESPACE_PATTERN.test(storageNamespace)) {
+    throw new ValidationError('STORAGE_NAMESPACE_UNCONFIGURED', '可信云存储命名空间未配置');
+  }
+  if (!fileId.startsWith('cloud://')) {
+    throw new ValidationError('INVALID_FILE_ID', '文件标识不是云存储 fileID');
+  }
+  const rest = fileId.slice('cloud://'.length);
+  const slash = rest.indexOf('/');
+  if (slash <= 0) throw new ValidationError('INVALID_FILE_ID', '文件标识缺少对象路径');
+  const namespace = rest.slice(0, slash);
+  const objectPath = rest.slice(slash + 1);
+  if (!STORAGE_NAMESPACE_PATTERN.test(namespace)) {
+    throw new ValidationError('INVALID_FILE_ID', '文件标识命名空间无效');
+  }
+  if (namespace !== storageNamespace) {
+    throw new ValidationError('FILE_NAMESPACE_MISMATCH', '文件不属于可信云存储命名空间');
+  }
+  if (!objectPath || objectPath.length > 384 || /[\x00-\x1f\x7f\s]/.test(objectPath)) {
     throw new ValidationError('INVALID_FILE_ID', '照片路径无效');
   }
-  return { fileId, cloudPath: `${prefix}${rest}`, fileName: rest };
+  const prefix = `test-face/${environment}/${openid}/${applicationId}/`;
+  if (!objectPath.startsWith(prefix)) {
+    throw new ValidationError('FILE_OWNERSHIP_MISMATCH', '照片不属于本次申请');
+  }
+  const fileName = objectPath.slice(prefix.length);
+  if (!FILE_NAME_PATTERN.test(fileName) || fileName.includes('..') || fileName.includes('%')) {
+    throw new ValidationError('INVALID_FILE_ID', '照片路径无效');
+  }
+  return { fileId, cloudPath: objectPath, namespace, fileName };
+}
+
+/**
+ * beginTaskExecution request validation (R06 server side). The whitelist
+ * contains no approval flag and no new business targets: the worker can only
+ * name the exact claim it received (taskId/claimId/revision + workerId).
+ * revision must be >= 2 because a CLAIMED task has advanced at least once.
+ */
+function validateBeginTaskExecutionInput(input) {
+  assertAllowedFields(input, ACTION_FIELDS.beginTaskExecution, '开始执行');
+  const taskId = validateText(input.taskId, /^[A-Za-z0-9][A-Za-z0-9|._:-]{0,255}$/, 'INVALID_TASK_ID', 256);
+  const claimId = validateText(input.claimId, /^[A-Za-z0-9-]{16,80}$/, 'INVALID_CLAIM_ID', 80);
+  const workerId = validateWorkerId(input.workerId);
+  if (!Number.isSafeInteger(input.revision) || input.revision < 2) {
+    throw new ValidationError('INVALID_REVISION', '任务版本无效');
+  }
+  validateToken(input.workerToken);
+  return { taskId, claimId, workerId, revision: input.revision };
 }
 
 function validateReportInput(input) {
@@ -228,6 +296,9 @@ module.exports = {
   CLIENT_FORBIDDEN_FIELDS,
   ACTION_FIELDS,
   OUTPUT_ALLOWED_FIELDS,
+  STORAGE_NAMESPACE_PATTERN,
+  FILE_ID_MAX_LENGTH,
+  FILE_NAME_PATTERN,
   isPlainObject,
   assertAllowedFields,
   validateEvent,
@@ -237,6 +308,7 @@ module.exports = {
   validateConsent,
   validateToken,
   validateFileOwnership,
+  validateBeginTaskExecutionInput,
   validateReportInput,
   sanitizeOutputFacts,
   verifyDeviceOutput,

@@ -14,6 +14,7 @@ const ROUTES = Object.freeze({
   accounts: "/api/checkin-face-test/accounts",
   workerToken: "/api/checkin-face-test/worker-token",
   applicationVersion: "/api/checkin-face-test/application-version",
+  storage: "/api/checkin-face-test/storage",
   dispatch: "/api/checkin-face-test/dispatch",
 });
 
@@ -122,6 +123,12 @@ function fillCommon(snapshot) {
   const version = typeof config.applicationVersion === "string" ? config.applicationVersion : "";
   $("#config-application-version").textContent = version || "未设置（申请必然失败）";
   $("#application-version-value").value = version;
+
+  // 可信云存储命名空间：配置事实（非秘密），可直接展示与回填编辑。
+  const storageNamespace = typeof config.storageNamespace === "string" ? config.storageNamespace : "";
+  $("#config-storage-namespace").textContent = storageNamespace || "未设置（上传建任务失败关闭）";
+  $("#storage-namespace-value").value = storageNamespace;
+
   const dispatchEnabled = config.dispatchEnabled === true;
   const dispatchNode = $("#config-dispatch-state");
   dispatchNode.textContent = dispatchEnabled ? "已开启（worker 可领取）" : "已关闭（默认）";
@@ -303,6 +310,14 @@ function bind() {
   bindForm("#application-version-form", ROUTES.applicationVersion, (data) => {
     const version = requiredText(data, "version", 128);
     return { version, reason: reasonOf(data) };
+  });
+
+  bindForm("#storage-form", ROUTES.storage, (data) => {
+    const namespace = requiredText(data, "namespace", 128);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(namespace)) {
+      throw new Error("命名空间须为 1–128 位字母/数字开头，可含 . _ -");
+    }
+    return { namespace, reason: reasonOf(data) };
   });
 
   bindForm("#dispatch-form", ROUTES.dispatch, (data) => {

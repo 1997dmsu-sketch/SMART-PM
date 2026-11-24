@@ -75,6 +75,9 @@ function createMain(deps = {}) {
         case 'claimTask':
           data = await workflow.claimTask(identity.workerId);
           break;
+        case 'beginTaskExecution':
+          data = await workflow.beginTaskExecution(identity.workerId, event);
+          break;
         case 'reportTask':
           data = await workflow.reportTask(event);
           break;

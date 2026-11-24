@@ -4,7 +4,11 @@
  * B05 / §6 — 云函数 checkinFaceTest 的可证伪合成测试（内存 DB 替身）。
  *
  * 覆盖任务卡 §6 的自动通过、房号来源、租期边界、归属、幂等/竞态、
- * 开关隔离、全天规则、report 反校验与未知结果处理。
+ * 开关隔离、全天规则、report 反校验与未知结果处理；并覆盖本次退修：
+ *  - R01：真实 SDK cloud://… fileID 正向贯通与拒绝矩阵；
+ *  - R03：base/tx 上下文分离、事务内查询硬抛错、提交失败业务+审计全回滚；
+ *  - R04：create-only 首建、A/B 创建者受控交错的不可重置性；
+ *  - R06：beginTaskExecution 执行前复核正反例（过期/撤权/换房/改租期/错 worker）。
  * 本测试不连接真实微信云/设备，也不代表真机通过。
  */
 
@@ -17,7 +21,7 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 const ROOT = path.resolve(__dirname, '..');
 const CLOUD_DIR = path.join(ROOT, 'cloudfunctions/checkinFaceTest');
 const { createMain } = require(path.join(CLOUD_DIR, 'index.js'));
-const { ENVIRONMENT, COLLECTIONS, ids } = require(path.join(CLOUD_DIR, 'lib/store.js'));
+const { ENVIRONMENT, COLLECTIONS, ids, createStore } = require(path.join(CLOUD_DIR, 'lib/store.js'));
 const dates = require(path.join(CLOUD_DIR, 'lib/dates.js'));
 const validate = require(path.join(CLOUD_DIR, 'lib/validate.js'));
 const context = require(path.join(CLOUD_DIR, 'lib/context.js'));
@@ -33,16 +37,34 @@ const FINGERPRINT = 'a'.repeat(64);
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 4, 0x4a, 0x46, 0, 1, 0xff, 0xd9]);
 const FIXED = new Date('2026-12-03T04:00:00Z'); // Asia/Shanghai 2026-12-03 12:00:00
 const ENV = ENVIRONMENT;
+// 可信云存储命名空间（合成）：真实环境由负责人按现场联调实际返回填写。
+const NAMESPACE = 'synthetic-env-1g2h3j4k.7465-synthetic-env-1g2h3j4k-1300000000';
+const OTHER_NAMESPACE = 'other-env-9x7y.7465-other-env-9x7y-1300000000';
+const WORKER_ID = 'synthetic-worker-01';
 
 const clone = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 
-/** 只实现被测代码使用的 wx-server-sdk 数据库子集；每次 get/set 均为深拷贝。 */
+/**
+ * 内存 DB：base 上下文支持点读/点写/集合查询；runTransaction 提供独立的
+ * tx 上下文（仅点读/点写/add，集合查询抛 TX_UNSUPPORTED_QUERY）、写暂存、
+ * 快照隔离冲突检测 + 自动重试、提交失败注入与 beforeCommit 受控调度钩子。
+ * contextLog 记录每次读写的实际上下文（base/tx），用于 R03 证据。
+ */
 class MemoryDB {
   constructor() {
     this.collections = new Map();
-    this.writes = 0;
+    this.writes = 0;              // 仅统计已提交（含 base 直接）写入
     this.whereGets = [];
     this.seq = 0;
+    this.contextLog = [];
+    this.commitLog = [];
+    this.txCount = 0;
+    this.keyVersions = new Map();
+    this.keyCommitSeq = new Map();
+    this.commitSeq = 0;
+    this.retryLimit = 5;
+    this.beforeCommit = null;
+    this.failCommits = 0;
   }
 
   bucket(name) {
@@ -53,6 +75,19 @@ class MemoryDB {
   rows(name) { return [...this.bucket(name).values()].map(clone); }
   row(name, id) { const value = this.bucket(name).get(id); return value ? clone(value) : null; }
 
+  _log(op, collection, id, contextFlag) {
+    this.contextLog.push({ op, collection, id: id ?? null, context: contextFlag });
+  }
+
+  _version(key) { return this.keyVersions.get(key) ?? 0; }
+
+  _commitKey(collection, id) {
+    this.commitSeq += 1;
+    const key = `${collection}::${id}`;
+    this.keyVersions.set(key, (this.keyVersions.get(key) ?? 0) + 1);
+    this.keyCommitSeq.set(key, this.commitSeq);
+  }
+
   collection(name) {
     const db = this;
     const store = this.bucket(name);
@@ -60,18 +95,22 @@ class MemoryDB {
     return {
       doc: (id) => ({
         get: async () => {
+          db._log('get', name, id, 'base');
           const value = store.get(id);
           if (!value) throw Object.assign(new Error('document does not exist'), { errCode: -1 });
           return { data: clone(value) };
         },
         set: async ({ data }) => {
+          db._log('set', name, id, 'base');
           db.writes += 1;
           store.set(id, clone({ ...data, _id: id }));
+          db._commitKey(name, id);
           return {};
         },
       }),
       where: (where) => ({
         get: async () => {
+          db._log('query', name, null, 'base');
           db.whereGets.push({ collection: name, where: clone(where), kind: 'get' });
           return { data: db.rows(name).filter((row) => matches(row, where)) };
         },
@@ -82,6 +121,7 @@ class MemoryDB {
             if (matches(row, where)) {
               db.writes += 1;
               store.set(id, clone({ ...row, ...data }));
+              db._commitKey(name, id);
               updated += 1;
             }
           }
@@ -89,16 +129,110 @@ class MemoryDB {
         },
       }),
       add: async ({ data }) => {
-        db.writes += 1;
         const id = data._id || `auto-${++db.seq}`;
+        db._log('add', name, id, 'base');
+        db.writes += 1;
         store.set(id, clone({ ...data, _id: id }));
+        db._commitKey(name, id);
         return { _id: id };
       },
       get: async () => ({ data: db.rows(name) }),
     };
   }
 
-  runTransaction(fn) { return fn(this); }
+  runTransaction(fn) {
+    const db = this;
+    const attempt = async (attemptNo) => {
+      const txId = `${++db.txCount}`;
+      const startSeq = db.commitSeq;
+      const stage = new Map();
+      const readVersions = new Map();
+      const writeKeys = new Set();
+      const tx = {
+        collection: (name) => {
+          const store = db.bucket(name);
+          return {
+            doc: (id) => ({
+              get: async () => {
+                db._log('get', name, id, 'tx');
+                const key = `${name}::${id}`;
+                if (stage.has(key)) return { data: clone(stage.get(key).data) };
+                const value = store.get(id);
+                if (!value) {
+                  readVersions.set(key, 0);
+                  throw Object.assign(new Error('document does not exist'), { errCode: -1 });
+                }
+                readVersions.set(key, db._version(key));
+                return { data: clone(value) };
+              },
+              set: async ({ data }) => {
+                db._log('set', name, id, 'tx');
+                const key = `${name}::${id}`;
+                stage.set(key, { collection: name, id, data: { ...data, _id: id } });
+                writeKeys.add(key);
+                return {};
+              },
+            }),
+            add: async ({ data }) => {
+              const id = data._id || `auto-${++db.seq}`;
+              db._log('add', name, id, 'tx');
+              const key = `${name}::${id}`;
+              stage.set(key, { collection: name, id, data: { ...data, _id: id } });
+              writeKeys.add(key);
+              return { _id: id };
+            },
+            where: () => { throw Object.assign(new Error('TX_UNSUPPORTED_QUERY'), { code: 'TX_UNSUPPORTED_QUERY' }); },
+            get: () => { throw Object.assign(new Error('TX_UNSUPPORTED_QUERY'), { code: 'TX_UNSUPPORTED_QUERY' }); },
+          };
+        },
+      };
+      let result;
+      try {
+        result = await fn(tx);
+      } catch (error) {
+        db.commitLog.push({ tx: txId, attempt: attemptNo, outcome: 'callback-error', code: error && (error.code || error.name) });
+        throw error; // 业务错误：stage 丢弃 = 全回滚
+      }
+      if (typeof db.beforeCommit === 'function') {
+        try { await db.beforeCommit(txId, attemptNo); }
+        catch (error) {
+          db.commitLog.push({ tx: txId, attempt: attemptNo, outcome: 'before-commit-error', code: error && (error.code || error.name) });
+          throw error;
+        }
+      }
+      let conflict = false;
+      for (const key of writeKeys) {
+        const readVersion = readVersions.get(key);
+        const currentVersion = db._version(key);
+        if (readVersion === undefined) {
+          if ((db.keyCommitSeq.get(key) ?? 0) >= startSeq) { conflict = true; break; }
+        } else if (currentVersion !== readVersion) {
+          conflict = true; break;
+        }
+      }
+      if (conflict && attemptNo < db.retryLimit) {
+        db.commitLog.push({ tx: txId, attempt: attemptNo, outcome: 'conflict-retry' });
+        return attempt(attemptNo + 1);
+      }
+      if (conflict) {
+        db.commitLog.push({ tx: txId, attempt: attemptNo, outcome: 'conflict-exhausted' });
+        throw Object.assign(new Error('TRANSACTION_CONFLICT'), { code: 'TRANSACTION_CONFLICT' });
+      }
+      if (db.failCommits > 0) {
+        db.failCommits -= 1;
+        db.commitLog.push({ tx: txId, attempt: attemptNo, outcome: 'commit-failure' });
+        throw Object.assign(new Error('SIMULATED_COMMIT_FAILURE'), { code: 'SIMULATED_COMMIT_FAILURE' });
+      }
+      for (const entry of stage.values()) {
+        db.writes += 1;
+        db.bucket(entry.collection).set(entry.id, clone(entry.data));
+        db._commitKey(entry.collection, entry.id);
+      }
+      db.commitLog.push({ tx: txId, attempt: attemptNo, outcome: 'committed', writes: stage.size });
+      return result;
+    };
+    return attempt(1);
+  }
 }
 
 const ROOM_INPUT = {
@@ -111,10 +245,10 @@ const LEASE_INPUT = { startDate: '2026-12-01', endDate: '2026-12-05' };
 
 /**
  * 只通过 AdminCheckinFaceTestConfig 的公开方法配置测试程序；
- * applicationVersion / dispatchEnabled 不得由测试直接写 mock DB。
+ * applicationVersion / dispatchEnabled / storageNamespace 不得由测试直接写 mock DB。
  * 若公开方法缺失或配置顺序失效，所有依赖本 fixture 的用例都会 FAIL。
  */
-async function fixture({ openid = OPENID, enabled = true, dispatchEnabled = true, now = FIXED } = {}) {
+async function fixture({ openid = OPENID, enabled = true, dispatchEnabled = true, now = FIXED, namespace = NAMESPACE } = {}) {
   const db = new MemoryDB();
   const admin = new AdminCheckinFaceTestConfig(null, {
     database: db, environment: ENV, operator: 'synthetic-admin', now: () => now,
@@ -125,8 +259,10 @@ async function fixture({ openid = OPENID, enabled = true, dispatchEnabled = true
   await admin.upsertLease(LEASE_INPUT);
   await admin.setAllowlist([OPENID]);
   await admin.setWorkerToken(TOKEN);
+  if (namespace) await admin.setStorageNamespace(namespace);
   await admin.setDispatchEnabled(dispatchEnabled);
-  await admin.setSwitch(enabled);
+  // 缺命名空间时总开关无法开启（公开前置校验），跳过开启以构造该失败关闭形态。
+  if (!(enabled && !namespace)) await admin.setSwitch(enabled);
 
   const config = db.row(COLLECTIONS.CONFIG, ids.configId(ENV));
   const room = db.row(COLLECTIONS.ROOM, ids.roomBindingId(ENV));
@@ -154,8 +290,9 @@ async function approvedFixture(options) {
   return { ...ctx, applied, applicationId: applied.data.applicationId };
 }
 
+/** 真实 SDK 形状 fileID：cloud://<可信命名空间>/<服务端下发对象路径>。 */
 function fileId(applicationId, openid = OPENID, name = 'photo.jpg') {
-  return `test-face/${ENV}/${openid}/${applicationId}/${name}`;
+  return `cloud://${NAMESPACE}/test-face/${ENV}/${openid}/${applicationId}/${name}`;
 }
 
 async function queuedFixture(options) {
@@ -169,8 +306,23 @@ async function queuedFixture(options) {
 }
 
 async function claim(ctx) {
-  const result = await ctx.main({ action: 'claimTask', workerToken: TOKEN, workerId: 'synthetic-worker-01' });
+  const result = await ctx.main({ action: 'claimTask', workerToken: TOKEN, workerId: WORKER_ID });
   return result;
+}
+
+async function claimedFixture(options) {
+  const ctx = await queuedFixture(options);
+  const claimed = await claim(ctx);
+  assert.equal(claimed.code, 0, JSON.stringify(claimed));
+  assert.ok(claimed.data.task, 'claim 必须领取到任务');
+  return { ...ctx, claimed, task: claimed.data.task };
+}
+
+function begin(ctx, task, overrides = {}) {
+  return ctx.main({
+    action: 'beginTaskExecution', workerToken: TOKEN, workerId: WORKER_ID,
+    taskId: task.taskId, claimId: task.claimId, revision: task.revision, ...overrides,
+  });
 }
 
 function successOutput(task, overrides = {}) {
@@ -204,7 +356,7 @@ function successOutput(task, overrides = {}) {
 
 /**
  * P0 守门：配置必须完全由 AdminCheckinFaceTestConfig 的公开方法完成。
- * 若任一公开方法缺失、顺序不可用、版本/派发开关无法写入，
+ * 若任一公开方法缺失、顺序不可用、版本/派发开关/命名空间无法写入，
  * 本用例会在 getConfig/apply/claim 任一步失败，而不是恒过。
  */
 test('P0 守门：仅用后台全部公开配置能力即可完成 auto_approved + claim 成功', async () => {
@@ -214,6 +366,8 @@ test('P0 守门：仅用后台全部公开配置能力即可完成 auto_approved
   assert.equal(snapshot.config.enabled, true);
   assert.equal(snapshot.config.dispatchEnabled, true);
   assert.equal(snapshot.config.workerTokenConfigured, true);
+  assert.equal(snapshot.config.storageNamespaceConfigured, true, 'getConfig 必须返回可信命名空间已配置');
+  assert.equal(snapshot.config.storageNamespace, NAMESPACE);
   assert.equal(snapshot.room.displayNo, '102');
   assert.equal(snapshot.lease.validTo, '2026-12-05T23:59:59');
   assert.equal(snapshot.lease.applicationVersion, VERSION, '租期快照必须同步公开配置的版本');
@@ -383,26 +537,72 @@ test('102 只按确定性 _id 单点读取；同号多条报 ROOM_NOT_UNIQUE，�
   assert.equal(duplicated.db.rows(COLLECTIONS.TASK).length, 0);
 });
 
-test('fileID 归属前缀校验：跨用户、跨申请、非法文件名均不得建任务', async () => {
+// ---------------------------------------------------------------------------
+// R01：真实 SDK fileID 契约
+// ---------------------------------------------------------------------------
+
+test('R01：真实 SDK fileID 从上传输出原样贯穿建任务/领取/执行前复核，不再换成裸路径', async () => {
   const ctx = await approvedFixture();
-  const crossUser = await ctx.main({
-    action: 'createFaceTask', applicationId: ctx.applicationId,
-    fileId: fileId(ctx.applicationId, OTHER_OPENID), consent: true,
+  const realFileId = fileId(ctx.applicationId);
+  assert.ok(realFileId.startsWith(`cloud://${NAMESPACE}/`), 'fixture 必须是 SDK 形状 fileID');
+  const created = await ctx.main({
+    action: 'createFaceTask', applicationId: ctx.applicationId, fileId: realFileId, consent: true,
   });
-  assert.equal(crossUser.code, 'FILE_OWNERSHIP_MISMATCH');
-  const crossApplication = await ctx.main({
-    action: 'createFaceTask', applicationId: ctx.applicationId,
-    fileId: fileId('someone-else-application'), consent: true,
-  });
-  assert.equal(crossApplication.code, 'FILE_OWNERSHIP_MISMATCH');
-  for (const suffix of ['photo.png', 'sub/photo.jpg', '..\\photo.jpg', 'photo.jpg?x=1']) {
+  assert.equal(created.code, 0, JSON.stringify(created));
+  const stored = ctx.taskFor(ctx.applicationId);
+  assert.equal(stored.fileId, realFileId, '任务必须持久保存验证过的真实 fileID');
+  assert.equal(stored.cloudPath, realFileId.slice(`cloud://${NAMESPACE}/`.length), '规范对象路径必须与 fileID 一致');
+  const claimed = await claim(ctx);
+  assert.ok(claimed.data.task, 'claim 必须成功');
+  assert.equal(claimed.data.task.fileId, realFileId, 'worker 领取视图必须携带同一真实 fileID');
+  assert.equal(claimed.data.task.cloudPath, stored.cloudPath);
+  const started = await begin(ctx, claimed.data.task);
+  assert.equal(started.code, 0, JSON.stringify(started));
+  assert.equal(started.data.task.fileId, realFileId, '执行前复核快照必须携带同一真实 fileID');
+  assert.equal(started.data.task.cloudPath, stored.cloudPath);
+  assert.equal(started.data.task.status, STATUS.DEVICE_PROCESSING);
+});
+
+test('R01：裸路径/非 cloud/跨环境/跨用户/跨申请/畸形路径全部拒绝且零写入', async () => {
+  const ctx = await approvedFixture();
+  const appId = ctx.applicationId;
+  const beforeWrites = ctx.db.writes;
+  const cases = [
+    ['裸路径（旧实现曾接受）', `test-face/${ENV}/${OPENID}/${appId}/photo.jpg`, 'INVALID_FILE_ID'],
+    ['非 cloud 协议', `https://example.com/${OPENID}/${appId}/photo.jpg`, 'INVALID_FILE_ID'],
+    ['无对象路径', `cloud://${NAMESPACE}`, 'INVALID_FILE_ID'],
+    ['跨环境命名空间', `cloud://${OTHER_NAMESPACE}/test-face/${ENV}/${OPENID}/${appId}/photo.jpg`, 'FILE_NAMESPACE_MISMATCH'],
+    ['跨用户', `cloud://${NAMESPACE}/test-face/${ENV}/${OTHER_OPENID}/${appId}/photo.jpg`, 'FILE_OWNERSHIP_MISMATCH'],
+    ['跨申请', `cloud://${NAMESPACE}/test-face/${ENV}/${OPENID}/someone-else-application/photo.jpg`, 'FILE_OWNERSHIP_MISMATCH'],
+    ['非法扩展名', fileId(appId, OPENID, 'photo.png'), 'INVALID_FILE_ID'],
+    ['子路径', fileId(appId, OPENID, 'sub/photo.jpg'), 'INVALID_FILE_ID'],
+    ['反斜杠穿越', fileId(appId, OPENID, '..\\photo.jpg'), 'INVALID_FILE_ID'],
+    ['查询串', fileId(appId, OPENID, 'photo.jpg?x=1'), 'INVALID_FILE_ID'],
+    ['点穿越', fileId(appId, OPENID, '..photo.jpg'), 'INVALID_FILE_ID'],
+    ['双点', fileId(appId, OPENID, 'a..jpg'), 'INVALID_FILE_ID'],
+    ['百分号编码', fileId(appId, OPENID, 'photo%2Ejpg'), 'INVALID_FILE_ID'],
+    ['控制字符', `cloud://${NAMESPACE}/test-face/${ENV}/${OPENID}/${appId}/photo\x01.jpg`, 'INVALID_FILE_ID'],
+  ];
+  for (const [label, fileIdValue, expectedCode] of cases) {
     const result = await ctx.main({
-      action: 'createFaceTask', applicationId: ctx.applicationId,
-      fileId: fileId(ctx.applicationId, OPENID, suffix), consent: true,
+      action: 'createFaceTask', applicationId: appId, fileId: fileIdValue, consent: true,
     });
-    assert.ok(['INVALID_FILE_ID', 'FILE_OWNERSHIP_MISMATCH'].includes(result.code), `${suffix} 应被拒绝，实际 ${result.code}`);
+    assert.equal(result.code, expectedCode, `${label} 应返回 ${expectedCode}，实际 ${JSON.stringify(result)}`);
   }
-  assert.equal(ctx.db.rows(COLLECTIONS.TASK).length, 0);
+  assert.equal(ctx.db.rows(COLLECTIONS.TASK).length, 0, '任何拒绝都不得建任务');
+  assert.equal(ctx.db.writes, beforeWrites, '拒绝路径零写入');
+});
+
+test('R01：服务端可信命名空间未配置时失败关闭，且 getConfig 如实下发布尔', async () => {
+  const ctx = await fixture({ namespace: false });
+  const view = await ctx.main({ action: 'getConfig' });
+  assert.equal(view.code, 0);
+  assert.equal(view.data.storageNamespaceConfigured, false, 'getConfig 必须如实下发布尔');
+  const created = await ctx.main({
+    action: 'createFaceTask', applicationId: 'arbitrary-application', fileId: fileId('arbitrary-application'), consent: true,
+  });
+  assert.equal(created.code, 'STORAGE_NAMESPACE_UNCONFIGURED', JSON.stringify(created));
+  assert.equal(ctx.db.rows(COLLECTIONS.TASK).length, 0, '配置缺失时不得建任务');
 });
 
 test('未通过申请、他人申请、失效租期均不得创建人脸任务；consent 必须严格为 true', async () => {
@@ -450,6 +650,7 @@ test('getConfig 只读且不下发名单/token/设备秘密；未配置时为待
   assert.equal(result.data.enabled, true);
   assert.equal(result.data.configured, true);
   assert.equal(result.data.accountEligible, true);
+  assert.equal(result.data.storageNamespaceConfigured, true);
   assert.equal(result.data.room.displayNo, '102');
   assert.equal(result.data.lease.validTo, '2026-12-05T23:59:59');
   const serialized = JSON.stringify(result);
@@ -465,7 +666,7 @@ test('getConfig 只读且不下发名单/token/设备秘密；未配置时为待
   assert.equal(pending.data.lease.startDate, '');
 });
 
-test('并发 claim 只有一个成功（revision CAS），其余不领取', async () => {
+test('并发 claim 只有一个成功（事务 CAS），其余不领取', async () => {
   const ctx = await queuedFixture();
   const results = await Promise.all([claim(ctx), claim(ctx), claim(ctx)]);
   const successes = results.filter((entry) => entry.code === 0 && entry.data.task);
@@ -511,7 +712,7 @@ test('claim 超时转为 UNKNOWN_RESULT：保留编号、不重排、不删除',
   assert.equal(after.employeeNo, original.employeeNo);
   assert.ok(ctx.db.rows(COLLECTIONS.TASK).length === 1, '不得删除或新建 Task');
   assert.ok(!ctx.db.rows(COLLECTIONS.TASK).some((row) => row.status === STATUS.QUEUED_FOR_DISPATCH), '不得自动重排');
-  assert.deepEqual(Object.keys(validate.ACTION_FIELDS).sort(), ['applyCheckin', 'claimTask', 'createFaceTask', 'getConfig', 'getMyTask', 'reportTask'].sort());
+  assert.deepEqual(Object.keys(validate.ACTION_FIELDS).sort(), ['applyCheckin', 'beginTaskExecution', 'claimTask', 'createFaceTask', 'getConfig', 'getMyTask', 'reportTask'].sort());
 });
 
 test('report 成功逐项校验：日期/模式/全天指纹/门号/编号/关联/verify 全匹配才确认且 siteVerification 永为 PENDING', async () => {
@@ -620,6 +821,315 @@ test('身份边界：小程序 action 需 OPENID，worker action 不能由小程
   assert.equal(forbidden.code, 'WORKER_UNAUTHORIZED', 'worker action 无 token 必须失败关闭');
   const noToken = await ctx.main({ action: 'reportTask' });
   assert.equal(noToken.code, 'WORKER_UNAUTHORIZED');
+  const noBeginToken = await ctx.main({ action: 'beginTaskExecution', taskId: 'x', claimId: 'y'.repeat(16), revision: 2, workerId: 'w' });
+  assert.equal(noBeginToken.code, 'WORKER_UNAUTHORIZED');
+});
+
+// ---------------------------------------------------------------------------
+// R03：事务上下文与回滚
+// ---------------------------------------------------------------------------
+
+test('R03：base 与 tx 是不同上下文——权威读取与审计全部发生在 tx，事务内集合查询硬抛错', async () => {
+  const ctx = await approvedFixture();
+  ctx.db.contextLog = [];
+  const created = await ctx.main({
+    action: 'createFaceTask', applicationId: ctx.applicationId, fileId: fileId(ctx.applicationId), consent: true,
+  });
+  assert.equal(created.code, 0, JSON.stringify(created));
+  const txLog = ctx.db.contextLog.filter((entry) => entry.context === 'tx');
+  assert.ok(txLog.length > 0, '建任务必须在事务内完成权威读取与写入');
+  for (const collection of [COLLECTIONS.CONFIG, COLLECTIONS.ALLOWLIST, COLLECTIONS.ROOM, COLLECTIONS.LEASE, COLLECTIONS.APPLICATION]) {
+    assert.ok(txLog.some((entry) => entry.collection === collection && entry.op === 'get'),
+      `${collection} 权威读必须发生在 tx 上下文（实际 tx 读：${JSON.stringify(txLog.map((e) => e.collection))}）`);
+  }
+  assert.ok(txLog.some((entry) => entry.op === 'set' && entry.collection === COLLECTIONS.TASK), '任务写入必须在 tx 上下文');
+  assert.ok(txLog.some((entry) => entry.op === 'add' && entry.collection === COLLECTIONS.AUDIT), '审计写入必须在 tx 上下文');
+  const baseAudit = ctx.db.contextLog.filter((entry) => entry.op === 'add' && entry.collection === COLLECTIONS.AUDIT && entry.context === 'base');
+  assert.equal(baseAudit.length, 0, '事务路径审计不得回落到 base 上下文');
+  const baseTaskSet = ctx.db.contextLog.filter((entry) => entry.op === 'set' && entry.collection === COLLECTIONS.TASK && entry.context === 'base');
+  assert.equal(baseTaskSet.length, 0, '事务路径任务写入不得回落到 base 上下文');
+  // tx 上下文内任何集合查询都必须抛 TX_UNSUPPORTED_QUERY，绝不回落外层 DB。
+  const store = createStore(ctx.db, { environment: ENV, now: () => FIXED });
+  for (const operation of ['list', 'count']) {
+    let thrown = null;
+    await store.withTransaction(async (tx) => {
+      try { await tx[operation](COLLECTIONS.TASK); } catch (error) { thrown = error; }
+    });
+    assert.equal(thrown && thrown.code, 'TX_UNSUPPORTED_QUERY', `tx.${operation} 必须抛 TX_UNSUPPORTED_QUERY`);
+  }
+  // 无 runTransaction 能力时失败关闭，绝不静默串行执行。
+  const { db } = await fixture();
+  db.runTransaction = undefined;
+  const fallback = await (async () => {
+    const st = createStore(db, { environment: ENV, now: () => FIXED });
+    let code = '';
+    await st.withTransaction(async () => {}).catch((error) => { code = error.code; });
+    return code;
+  })();
+  assert.equal(fallback, 'TRANSACTION_UNAVAILABLE');
+});
+
+test('R03：无 runTransaction 能力时申请与建任务失败关闭且零写入（不静默串行）', async () => {
+  const ctx = await fixture();
+  const auditBefore = ctx.db.rows(COLLECTIONS.AUDIT).length;
+  ctx.db.runTransaction = undefined;
+  const applied = await ctx.apply();
+  assert.equal(applied.code, 'TRANSACTION_UNAVAILABLE', JSON.stringify(applied));
+  assert.equal(ctx.db.rows(COLLECTIONS.APPLICATION).length, 0);
+  assert.equal(ctx.db.rows(COLLECTIONS.AUDIT).length, auditBefore, '不得新增审计');
+});
+
+test('R03：提交失败时业务写与审计全回滚，不回落到外层 DB', async () => {
+  const ctx = await fixture();
+  const auditBefore = ctx.db.rows(COLLECTIONS.AUDIT).length;
+  ctx.db.failCommits = 1;
+  const beforeWrites = ctx.db.writes;
+  const result = await ctx.apply();
+  assert.equal(result.code, 'SIMULATED_COMMIT_FAILURE', JSON.stringify(result));
+  assert.equal(ctx.db.rows(COLLECTIONS.APPLICATION).length, 0, '提交失败时业务写必须回滚');
+  assert.equal(ctx.db.rows(COLLECTIONS.AUDIT).length, auditBefore, '提交失败时审计必须回滚');
+  assert.equal(ctx.db.writes, beforeWrites, '不得有任何已提交写入');
+  assert.equal(ctx.db.commitLog.filter((entry) => entry.outcome === 'committed').length, 0, '不得有任何事务提交');
+  assert.ok(ctx.db.commitLog.some((entry) => entry.outcome === 'commit-failure'), '必须记录提交失败');
+
+  // 提交前失败同样全回滚：beforeCommit 抛错时业务与审计都不落地。
+  const ctx2 = await fixture();
+  const auditBefore2 = ctx2.db.rows(COLLECTIONS.AUDIT).length;
+  ctx2.db.beforeCommit = async () => { throw new Error('BEFORE_COMMIT_BOOM'); };
+  const applied2 = await ctx2.apply();
+  assert.equal(applied2.code, 'INTERNAL_ERROR', JSON.stringify(applied2));
+  assert.equal(ctx2.db.rows(COLLECTIONS.APPLICATION).length, 0);
+  assert.equal(ctx2.db.rows(COLLECTIONS.AUDIT).length, auditBefore2);
+});
+
+// ---------------------------------------------------------------------------
+// R04：create-only 首建与晚到创建者不可重置
+// ---------------------------------------------------------------------------
+
+test('R04：A/B 创建者受控交错——B 建并领取后，晚到 A 的提交不能重置 claim/终态/revision/employeeNo', async () => {
+  const ctx = await approvedFixture();
+  const applicationId = ctx.applicationId;
+  const employeeNo = ctx.applied.data.employeeNo;
+  let releaseA;
+  const gateA = new Promise((resolve) => { releaseA = resolve; });
+  let paused = 0;
+  ctx.db.beforeCommit = async () => {
+    if (!paused) { paused = 1; await gateA; }
+  };
+  const createPayload = { action: 'createFaceTask', applicationId, fileId: fileId(applicationId), consent: true };
+  const creatorA = ctx.main(createPayload);
+  // 等 A 的事务完成“读无记录 + 暂存写入”并停在提交前挂起点。
+  while (!paused) await new Promise((resolve) => setTimeout(resolve, 5));
+
+  // B 完整跑完创建 + 领取。
+  const createdB = await ctx.main(createPayload);
+  assert.equal(createdB.code, 0, `B 创建失败：${JSON.stringify(createdB)}`);
+  const claimedB = await claim(ctx);
+  assert.ok(claimedB.data.task, 'B 创建后必须能领取');
+  const claimIdB = claimedB.data.task.claimId;
+  assert.equal(claimedB.data.task.revision, 2);
+  assert.equal(claimedB.data.task.employeeNo, employeeNo);
+
+  releaseA(); // A 的提交继续 → 写冲突 → 自动重试 → 读到 CLAIMED → TASK_ALREADY_CLAIMED
+  const resultA = await creatorA;
+  assert.equal(resultA.code, 'TASK_ALREADY_CLAIMED', `晚到创建者必须走已领取分支：${JSON.stringify(resultA)}`);
+
+  const finalTask = ctx.taskFor(applicationId);
+  assert.equal(finalTask.status, STATUS.CLAIMED, '晚到提交不得把状态重置回 QUEUED');
+  assert.equal(finalTask.revision, 2, 'revision 不得回退');
+  assert.equal(finalTask.claimId, claimIdB, 'claimId 不得被覆盖');
+  assert.equal(finalTask.employeeNo, employeeNo, 'employeeNo 不得被换');
+  assert.equal(ctx.db.rows(COLLECTIONS.TASK).length, 1, '不得新建第二个任务');
+  const claimAudits = ctx.db.rows(COLLECTIONS.AUDIT).filter((row) => row.action === 'claimTask');
+  assert.equal(claimAudits.length, 1, '全库只允许一次成功领取审计');
+  const createAudits = ctx.db.rows(COLLECTIONS.AUDIT).filter((row) => row.action === 'createFaceTask');
+  assert.equal(createAudits.length, 1, '建任务审计只来自成功创建方');
+  assert.ok(ctx.db.commitLog.some((entry) => entry.outcome === 'conflict-retry'), '晚到提交必须因写冲突重试后再走已有任务分支');
+});
+
+// ---------------------------------------------------------------------------
+// R06：beginTaskExecution 执行前复核
+// ---------------------------------------------------------------------------
+
+test('R06 正例：复核通过原子推进 DEVICE_PROCESSING、revision 恰好 +1、claim 不延长、快照一致', async () => {
+  const ctx = await claimedFixture();
+  const claimed = ctx.claimed.data.task;
+  const started = await begin(ctx, claimed);
+  assert.equal(started.code, 0, JSON.stringify(started));
+  const snapshot = started.data.task;
+  assert.equal(started.data.authorizedAt, snapshot.authorizedAt, 'authorizedAt 需同时出现在 data.authorizedAt');
+  assert.ok(Number.isSafeInteger(started.data.authorizedAt) && started.data.authorizedAt > 0, 'authorizedAt 为服务端整数毫秒');
+  assert.equal(snapshot.status, STATUS.DEVICE_PROCESSING);
+  assert.equal(snapshot.revision, claimed.revision + 1, 'revision 必须恰好 +1');
+  assert.equal(snapshot.claimExpiresAt, claimed.claimExpiresAt, '成功不得延长原 claim');
+  assert.equal(snapshot.claimId, claimed.claimId);
+  for (const key of ['fileId', 'employeeNo', 'doorNo', 'deviceKey', 'validFrom', 'validTo', 'dailyHours', 'accessPlanFingerprint', 'name']) {
+    assert.equal(snapshot[key], claimed[key], `快照字段 ${key} 必须与领取视图一致`);
+  }
+  const stored = ctx.taskFor(ctx.applicationId);
+  assert.equal(snapshot.configRevision, stored.configRevision, '快照必须携带复核过的配置关联版本');
+  assert.equal(snapshot.roomRevision, stored.roomRevision, '快照必须携带房间关联版本');
+  assert.equal(snapshot.leaseRevision, stored.leaseRevision, '快照必须携带租约关联版本');
+  assert.equal(snapshot.roomBindingId, stored.roomBindingId);
+  assert.equal(snapshot.leaseSnapshotId, stored.leaseSnapshotId);
+  assert.equal(snapshot.workerId, WORKER_ID);
+  assert.equal(stored.status, STATUS.DEVICE_PROCESSING);
+  assert.equal(stored.revision, claimed.revision + 1);
+  assert.equal(stored.claimId, claimed.claimId);
+  assert.equal(stored.claimExpiresAt, claimed.claimExpiresAt);
+  assert.equal(stored.employeeNo, ctx.applied.data.employeeNo);
+  const audits = ctx.db.rows(COLLECTIONS.AUDIT).filter((row) => row.action === 'beginTaskExecution');
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0].revision, stored.revision);
+  // 后续 report 使用推进后 revision 可正常完成。
+  const reported = await ctx.main({
+    action: 'reportTask', workerToken: TOKEN, taskId: stored._id, claimId: stored.claimId,
+    revision: stored.revision, exitCode: 0, output: successOutput(claimed),
+  });
+  assert.equal(reported.code, 0, JSON.stringify(reported));
+  assert.equal(reported.data.status, STATUS.PENDING_SITE_VERIFICATION);
+});
+
+test('R06 拒绝矩阵：错 claim/错 revision/错 worker/重复开始/未领取/不存在，零授权且状态不被破坏', async () => {
+  const ctx = await claimedFixture();
+  const claimed = ctx.claimed.data.task;
+  const baseline = ctx.taskFor(ctx.applicationId);
+
+  const cases = [
+    ['错 claimId', { claimId: 'a'.repeat(16) + '-0001' }, 'CLAIM_MISMATCH'],
+    ['错 revision（旧 revision 重复开始）', { revision: claimed.revision + 1 }, 'REVISION_CONFLICT'],
+    ['错 worker', { workerId: 'other-worker-01' }, 'WORKER_MISMATCH'],
+  ];
+  for (const [label, override, code] of cases) {
+    const result = await begin(ctx, claimed, override);
+    assert.equal(result.code, code, `${label} 应返回 ${code}，实际 ${JSON.stringify(result)}`);
+    const stored = ctx.taskFor(ctx.applicationId);
+    assert.equal(stored.status, STATUS.CLAIMED, `${label} 不得推进状态`);
+    assert.equal(stored.revision, baseline.revision, `${label} 不得改动 revision`);
+  }
+
+  // 非 CLAIMED 状态：排队（从未领取）任务携带与当前一致的 claim/revision 也不授权。
+  const queued = await queuedFixture();
+  const queuedRow = queued.taskFor(queued.applicationId);
+  const syntheticClaim = 'c'.repeat(16) + '-0001';
+  queued.db.collection(COLLECTIONS.TASK).doc(queuedRow._id).set({ data: { ...queuedRow, claimId: syntheticClaim, revision: 2 } });
+  const notClaimed = await begin(queued, { taskId: queued.taskId, claimId: syntheticClaim, revision: 2 });
+  assert.equal(notClaimed.code, 'TASK_NOT_CLAIMED', JSON.stringify(notClaimed));
+  assert.equal(queued.taskFor(queued.applicationId).status, STATUS.QUEUED_FOR_DISPATCH, '排队任务不得被推进');
+
+  // 终态任务同样不得再次授权。
+  const terminal = await claimedFixture();
+  const reported = await terminal.main({
+    action: 'reportTask', workerToken: TOKEN, taskId: terminal.task.taskId, claimId: terminal.task.claimId,
+    revision: terminal.task.revision, exitCode: 4,
+    output: { protocolVersion: 1, outcome: 'failed', mode: 'device', validityMode: 'fixed', siteVerification: 'PENDING' },
+  });
+  assert.equal(reported.code, 0, JSON.stringify(reported));
+  const terminalBegin = await begin(terminal, { ...terminal.task, revision: terminal.task.revision + 1 });
+  assert.equal(terminalBegin.code, 'TASK_NOT_CLAIMED', JSON.stringify(terminalBegin));
+
+  const notFound = await begin(ctx, { taskId: ids.taskId(ENV, 'no-such-application'), claimId: claimed.claimId, revision: claimed.revision });
+  assert.equal(notFound.code, 'TASK_NOT_FOUND');
+
+  // 重复开始：已推进 DEVICE_PROCESSING 后再次 begin 不得再授权。
+  const ok = await begin(ctx, claimed);
+  assert.equal(ok.code, 0, JSON.stringify(ok));
+  const again = await begin(ctx, { ...claimed, revision: ok.data.task.revision });
+  assert.equal(again.code, 'EXECUTION_ALREADY_STARTED', `重复开始必须拒绝：${JSON.stringify(again)}`);
+  const final = ctx.taskFor(ctx.applicationId);
+  assert.equal(final.status, STATUS.DEVICE_PROCESSING);
+  assert.equal(final.revision, claimed.revision + 1, '重复开始不得再次推进 revision');
+});
+
+test('R06 白名单与鉴权：额外字段/自报批准被拒，worker 专用 action 生效', async () => {
+  const ctx = await claimedFixture();
+  const claimed = ctx.claimed.data.task;
+  for (const extra of [{ approved: true }, { status: 'DEVICE_PROCESSING' }, { validFrom: '2026-12-01T00:00:00' }]) {
+    const result = await begin(ctx, claimed, extra);
+    assert.equal(result.code, 'CLIENT_FIELD_FORBIDDEN', `自报字段 ${JSON.stringify(extra)} 必须拒绝，实际 ${JSON.stringify(result)}`);
+  }
+  const result = await begin(ctx, claimed, { workerToken: 'x'.repeat(40) });
+  assert.equal(result.code, 'WORKER_UNAUTHORIZED', '错误 token 必须拒绝');
+  const badRevision = await begin(ctx, claimed, { revision: 1 });
+  assert.equal(badRevision.code, 'INVALID_REVISION', 'revision<2 的 payload 由格式校验拒绝');
+  assert.ok(validate.ACTION_FIELDS.beginTaskExecution, '白名单必须包含 beginTaskExecution');
+  assert.deepEqual(validate.ACTION_FIELDS.beginTaskExecution, ['action', 'workerToken', 'workerId', 'taskId', 'claimId', 'revision']);
+});
+
+test('R06 过期复核：claim 过期后 begin 拒绝并原子转 UNKNOWN_RESULT（不延长、不重授权）', async () => {
+  const ctx = await claimedFixture();
+  const claimed = ctx.claimed.data.task;
+  ctx.setNow(new Date(FIXED.getTime() + 10 * 60 * 1000 + 1)); // 恰好越过 claimExpiresAt
+  const result = await begin(ctx, claimed);
+  assert.equal(result.code, 'CLAIM_EXPIRED', JSON.stringify(result));
+  const stored = ctx.taskFor(ctx.applicationId);
+  assert.equal(stored.status, STATUS.UNKNOWN_RESULT, '过期必须原子转 UNKNOWN_RESULT');
+  assert.equal(stored.resultCode, 'CLAIM_TIMEOUT');
+  assert.equal(stored.revision, claimed.revision + 1);
+  assert.equal(stored.claimExpiresAt, claimed.claimExpiresAt, '不得延长原 claim');
+  assert.equal(stored.employeeNo, ctx.applied.data.employeeNo, '不换号');
+  const audits = ctx.db.rows(COLLECTIONS.AUDIT).filter((row) => row.action === 'beginTaskExecutionRejected');
+  assert.equal(audits.length, 1, '拒绝必须留审计');
+  assert.equal(audits[0].revision, stored.revision, '审计 revision 与推进一致');
+  // 重复开始 / 再 claim 都不得再次授权。
+  const againOld = await begin(ctx, claimed);
+  assert.equal(againOld.code, 'REVISION_CONFLICT', '旧 revision 重复开始必须 REVISION_CONFLICT');
+  const againNew = await begin(ctx, { ...claimed, revision: stored.revision });
+  assert.equal(againNew.code, 'TASK_NOT_CLAIMED', '推进后 revision 的重复开始必须 TASK_NOT_CLAIMED');
+  const reclaim = await claim(ctx);
+  assert.equal(reclaim.data.task, null, '不得自动重领');
+});
+
+test('R06 失效复核：撤名单/关开关/换房/改租期后 begin 拒绝并原子转 INVALIDATED', async () => {
+  const variants = [
+    ['撤名单', async (ctx) => { await ctx.admin.setAllowlist([]); }],
+    ['关派发开关', async (ctx) => { await ctx.admin.setDispatchEnabled(false); }],
+    ['关总开关', async (ctx) => { await ctx.admin.setSwitch(false); }],
+    ['换房', async (ctx) => { await ctx.admin.upsertRoomBinding({ ...ROOM_INPUT, roomId: 'room-stable-2' }); }],
+    ['改租期', async (ctx) => { await ctx.admin.upsertLease({ startDate: '2026-12-01', endDate: '2026-12-06' }); }],
+  ];
+  for (const [label, mutate] of variants) {
+    const ctx = await claimedFixture();
+    const claimed = ctx.claimed.data.task;
+    await mutate(ctx);
+    const result = await begin(ctx, claimed);
+    assert.equal(result.code, 'EXECUTION_INVALIDATED', `${label} 后 begin 应拒绝，实际 ${JSON.stringify(result)}`);
+    const stored = ctx.taskFor(ctx.applicationId);
+    assert.equal(stored.status, STATUS.INVALIDATED, `${label} 后任务必须原子失效`);
+    assert.equal(stored.revision, claimed.revision + 1);
+    assert.equal(stored.claimId, claimed.claimId, '失效保留领取标识');
+    assert.equal(stored.employeeNo, ctx.applied.data.employeeNo, '失效不换号');
+    const audits = ctx.db.rows(COLLECTIONS.AUDIT).filter((row) => row.action === 'beginTaskExecutionRejected');
+    assert.equal(audits.length, 1, `${label} 拒绝必须留审计`);
+  }
+});
+
+test('R06：claim 后、begin 前发生的变化在复核时被拒绝（执行前复核读当前权威状态）', async () => {
+  const ctx = await claimedFixture();
+  const claimed = ctx.claimed.data.task;
+  // claim 与 begin 之间撤名单：复核必须读到当前状态并拒绝。
+  await ctx.admin.setAllowlist([]);
+  const result = await begin(ctx, claimed);
+  assert.equal(result.code, 'EXECUTION_INVALIDATED', JSON.stringify(result));
+});
+
+test('丢失开始回执：DEVICE_PROCESSING 且领取过期的任务由清扫转 UNKNOWN_RESULT，不重派发', async () => {
+  const ctx = await queuedFixture();
+  const claimed = await claim(ctx);
+  assert.ok(claimed.data.task);
+  const stored = ctx.taskFor(ctx.applicationId);
+  // 模拟：begin 已推进但回执丢失；claim 过期。
+  const advanced = { ...stored, status: STATUS.DEVICE_PROCESSING, revision: stored.revision + 1 };
+  ctx.db.collection(COLLECTIONS.TASK).doc(stored._id).set({ data: advanced });
+  ctx.setNow(new Date(FIXED.getTime() + 11 * 60 * 1000));
+  const again = await claim(ctx);
+  assert.equal(again.code, 0);
+  assert.equal(again.data.task, null, '不得重新派发');
+  const after = ctx.taskFor(ctx.applicationId);
+  assert.equal(after.status, STATUS.UNKNOWN_RESULT);
+  assert.equal(after.resultCode, 'CLAIM_TIMEOUT');
+  assert.equal(after.employeeNo, stored.employeeNo, '不换号');
+  assert.equal(after.claimId, stored.claimId, '保留领取标识');
 });
 
 test('云函数路径无 console.log 请求体、无 unlimited 兜底', () => {

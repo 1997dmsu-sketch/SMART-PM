@@ -74,6 +74,7 @@ const ROOM_INPUT = {
   accessPlanFingerprint: 'a'.repeat(64),
 };
 const LEASE_INPUT = { startDate: '2026-12-01', endDate: '2026-12-05' };
+const STORAGE_NAMESPACE = 'synthetic-env-1g2h3j4k.7465-synthetic-env-1g2h3j4k-1300000000';
 
 async function configuredService() {
   const ctx = service();
@@ -91,20 +92,27 @@ test('缺省关闭：空库 getConfig 不包含 token/哈希，revision=0', asyn
   assert.equal(snapshot.config.dispatchEnabled, false);
   assert.equal(snapshot.revision, 0);
   assert.equal(snapshot.config.workerTokenConfigured, false);
+  assert.equal(snapshot.config.storageNamespaceConfigured, false, '空库时可信命名空间必须为未配置');
+  assert.equal(snapshot.config.storageNamespace, '');
   assert.ok(!('workerTokenHash' in snapshot.config));
   assert.ok(!JSON.stringify(snapshot).includes(TOKEN_HASH));
 });
 
 test('setSwitch(true) 在版本/凭据/102 绑定/租期任一缺失时分别被拒', async () => {
-  // 四项前置逐一隔离，只有对应项缺失；每次都必须失败关闭且不写 config.enabled=true。
+  // 四项前置逐一隔离，只有对应项缺失；命名空间预先配好，避免抢占错误码。
   const scenarios = [
-    ['VERSION_UNCONFIGURED', async (config) => {}],
-    ['WORKER_TOKEN_UNCONFIGURED', async (config) => { await config.setApplicationVersion('test-v1'); }],
+    ['VERSION_UNCONFIGURED', async (config) => { await config.setStorageNamespace(STORAGE_NAMESPACE); }],
+    ['WORKER_TOKEN_UNCONFIGURED', async (config) => {
+      await config.setStorageNamespace(STORAGE_NAMESPACE);
+      await config.setApplicationVersion('test-v1');
+    }],
     ['ROOM_UNCONFIGURED', async (config) => {
+      await config.setStorageNamespace(STORAGE_NAMESPACE);
       await config.setApplicationVersion('test-v1');
       await config.setWorkerToken(TOKEN);
     }],
     ['LEASE_UNCONFIGURED', async (config) => {
+      await config.setStorageNamespace(STORAGE_NAMESPACE);
       await config.setApplicationVersion('test-v1');
       await config.setWorkerToken(TOKEN);
       await config.upsertRoomBinding(ROOM_INPUT);
@@ -120,6 +128,7 @@ test('setSwitch(true) 在版本/凭据/102 绑定/租期任一缺失时分别被
   }
 
   const { config: ready } = await configuredService();
+  await ready.setStorageNamespace(STORAGE_NAMESPACE);
   await ready.setWorkerToken(TOKEN);
   const snapshotBefore = await ready.getConfig();
   const switched = await ready.setSwitch(true, '合成测试开启');
@@ -146,6 +155,7 @@ test('P0 配置面守门：公开方法即可产出非空版本、租期快照�
   const { config } = await configuredService();
   await config.setAllowlist(['test-user-01']);
   await config.setWorkerToken(TOKEN);
+  await config.setStorageNamespace(STORAGE_NAMESPACE);
   await config.setDispatchEnabled(true);
   await config.setSwitch(true);
   const snapshot = await config.getConfig();
@@ -153,6 +163,7 @@ test('P0 配置面守门：公开方法即可产出非空版本、租期快照�
   assert.ok(snapshot.config.applicationVersion.length > 0);
   assert.equal(snapshot.lease.applicationVersion, 'test-v1', '租期快照必须跟随公开配置的版本');
   assert.equal(snapshot.config.workerTokenConfigured, true);
+  assert.equal(snapshot.config.storageNamespaceConfigured, true);
   assert.equal(snapshot.config.dispatchEnabled, true);
   assert.equal(snapshot.config.enabled, true);
 });
@@ -269,6 +280,7 @@ test('setApplicationVersion 轮换时同步租期快照版本与 revision，并�
 test('setSwitch(true) 拒绝被 DB 绕过制造的租期版本不一致半配置态', async () => {
   const { db, config } = await configuredService();
   await config.setWorkerToken(TOKEN);
+  await config.setStorageNamespace(STORAGE_NAMESPACE);
   // 模拟绕过公开方法直接改库：config=test-v1 但 lease 快照残留 stale-version。
   const leaseId = `${ENV}|lease|102`;
   const current = (await db.collection('test_lease_snapshot').doc(leaseId).get()).data;
@@ -326,6 +338,56 @@ test('setWorkerToken：至少 32 字符、只存 SHA-256、审计仅记前 8 位
   assert.ok(!JSON.stringify(snapshot).includes(TOKEN));
 });
 
+test('setStorageNamespace：与云端校验器同源正则，持久化+审计+revision，非法零写入', async () => {
+  const { db, config } = service();
+  assert.ok(cloudValidate.STORAGE_NAMESPACE_PATTERN.test(STORAGE_NAMESPACE), '合法样本必须通过云端正则');
+  const saved = await config.setStorageNamespace(STORAGE_NAMESPACE, { reason: '合成配置' });
+  assert.equal(saved.storageNamespace, STORAGE_NAMESPACE);
+  assert.equal(saved.revision, 1);
+  const snapshot = await config.getConfig();
+  assert.equal(snapshot.config.storageNamespace, STORAGE_NAMESPACE, 'getConfig 必须回读命名空间值');
+  assert.equal(snapshot.config.storageNamespaceConfigured, true);
+  const audit = db.rows('test_checkin_face_audit').find((row) => row.action === 'STORAGE_NAMESPACE_SET');
+  assert.equal(audit.after.storageNamespace, STORAGE_NAMESPACE, '审计必须记录命名空间值');
+  assert.equal(audit.revision, 1);
+
+  // 双端一致：admin 拒绝集与云端正则拒绝集完全相同。
+  const samples = ['ok-1.ab_c-9', 'A', '-bad', '_bad', 'has space', 'a/b', 'a'.repeat(129), '中文', '', '   '];
+  for (const sample of samples) {
+    const patternOk = cloudValidate.STORAGE_NAMESPACE_PATTERN.test(sample);
+    const { db: freshDb, config: fresh } = service();
+    let rejected = false;
+    try { await fresh.setStorageNamespace(sample); } catch (error) { rejected = error.code === 'INVALID_STORAGE_NAMESPACE'; }
+    assert.equal(rejected, !patternOk, `样本 ${JSON.stringify(sample)} 双端必须一致`);
+    if (rejected) assert.equal(freshDb.writes, 0, '非法命名空间必须零写入');
+    else assert.equal(freshDb.writes, 2, '合法命名空间写配置+审计各一次');
+  }
+  const { db: nullDb, config: nullConfig } = service();
+  const before = nullDb.writes;
+  await assert.rejects(() => nullConfig.setStorageNamespace(null), (error) => error.code === 'INVALID_STORAGE_NAMESPACE');
+  await assert.rejects(() => nullConfig.setStorageNamespace(123), (error) => error.code === 'INVALID_STORAGE_NAMESPACE');
+  assert.equal(nullDb.writes, before, '非字符串输入零写入');
+});
+
+test('setSwitch(true) 新增前置：可信云存储命名空间未配置时 STORAGE_NAMESPACE_UNCONFIGURED 且零写入', async () => {
+  // 其余四项前置（版本/凭据/102/租期）已满足，仅缺命名空间。
+  const { db, config } = service();
+  await config.setApplicationVersion('test-v1');
+  await config.setWorkerToken(TOKEN);
+  await config.upsertRoomBinding(ROOM_INPUT);
+  await config.upsertLease(LEASE_INPUT);
+  const before = db.writes;
+  await assert.rejects(() => config.setSwitch(true), (error) => error.code === 'STORAGE_NAMESPACE_UNCONFIGURED');
+  assert.equal(db.writes, before, '缺命名空间时开启开关必须零写入');
+  assert.equal((await config.getConfig()).config.enabled, false);
+
+  // 配置命名空间后开启成功。
+  await config.setStorageNamespace(STORAGE_NAMESPACE, { reason: '合成配置' });
+  const opened = await config.setSwitch(true, '合成开启');
+  assert.equal(opened.enabled, true);
+  assert.equal((await config.getConfig()).config.storageNamespaceConfigured, true);
+});
+
 test('publicDoc 过滤秘密字段；后台路由保持 admin-only + CSRF/origin 校验', async () => {
   const { db, config } = service();
   db.collection('test_room_binding_102').doc(`${ENV}|102`).set({
@@ -343,4 +405,8 @@ test('publicDoc 过滤秘密字段；后台路由保持 admin-only + CSRF/origin
   assert.match(server, /if\s*\(account\.role\s*!==\s*"admin"\)/);
   assert.ok(/csrf/i.test(server) && /origin/i.test(server), '后台写操作必须延续 session+CSRF+origin 校验');
   assert.match(server, /workerTokenConfigured/);
+  // R01 新增公开配置路由：命名空间必须走同一 admin-only 路由并复用云端正则。
+  assert.match(server, /CHECKIN_FACE_STORAGE_NAMESPACE_PATTERN/, '路由必须复用云端命名空间正则');
+  assert.match(server, /\$\{CHECKIN_FACE_TEST_API\}storage/, '必须存在 /api/checkin-face-test/storage 路由');
+  assert.match(server, /setStorageNamespace/, '路由必须调用配置服务的 setStorageNamespace');
 });

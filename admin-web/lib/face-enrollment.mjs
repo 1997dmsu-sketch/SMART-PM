@@ -1,6 +1,7 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { HttpError } from "./model.mjs";
 import { HikvisionClient } from "./hikvision-client.mjs";
+import { loadAllDayPlan } from "./face-access-plan.mjs";
 
 export const FACE_PHOTO_LIMIT = 200 * 1024;
 const stepNames = [["person", "建人"], ["face", "上传人脸"], ["access", "授权门"], ["verify", "查询确认"]];
@@ -46,11 +47,33 @@ function normalizeLocalTime(value, label) {
   if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || hour > 23 || minute > 59 || second > 59) invalid(`${label}无效`);
   return normalized;
 }
-function matchesValidity(actual, expected) {
-  return actual?.enable === (expected.validityMode !== "unlimited")
-    && actual.beginTime === expected.validFrom && actual.endTime === expected.validTo
-    && (actual.timeType === undefined || actual.timeType === "local");
+const canonicalUnlimitedTime = "1970-01-01T00:00:00";
+function matchesValidity(actual, expected, allowObservedCanonicalization = false) {
+  if (actual?.enable !== (expected.validityMode !== "unlimited") || (actual.timeType !== undefined && actual.timeType !== "local")) return false;
+  if (actual.beginTime === expected.validFrom && actual.endTime === expected.validTo) return true;
+  return allowObservedCanonicalization && expected.validityMode === "unlimited" && actual.enable === false
+    && actual.beginTime === canonicalUnlimitedTime && actual.endTime === canonicalUnlimitedTime;
 }
+function allDayPlanProof(plan) {
+  if (!plan || typeof plan.templateNo !== "string" || !/^[1-9]\d*$/.test(plan.templateNo)
+    || typeof plan.fingerprint !== "string" || !/^[a-f0-9]{64}$/i.test(plan.fingerprint)
+    || typeof plan.name !== "string" || !plan.name.trim()) invalid("设备未确认每天24小时权限计划，请重新连接", 409);
+  return plan;
+}
+function matchesPlanProof(person, plan) {
+  return person.accessPlanTemplateNo === plan.templateNo && person.accessPlanFingerprint === plan.fingerprint;
+}
+function matchesAccessPlan(actual, expected) {
+  if (!Array.isArray(actual.RightPlan)) return false;
+  const bindings = actual.RightPlan.filter(plan => plan && String(plan.doorNo) === String(expected.doorNo));
+  if (bindings.length !== 1 || typeof bindings[0].planTemplateNo !== "string") return false;
+  const templates = bindings[0].planTemplateNo.split(",").map(value => value.trim());
+  return templates.length === 1 && templates[0] === expected.accessPlanTemplateNo;
+}
+const simulatedAllDayPlan = {
+  templateNo: "1", fingerprint: createHash("sha256").update("smartpm-synthetic-all-day-plan-v1").digest("hex"),
+  name: "每天24小时", weekPlanNo: 1, holidayGroupNos: [],
+};
 export function decodeFacePhoto(value, limit = FACE_PHOTO_LIMIT) {
   if (typeof value !== "string" || value.length > Math.ceil(limit / 3) * 4 + 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) invalid("请选择有效的 JPEG 照片");
   const bytes = Buffer.from(value, "base64");
@@ -72,7 +95,8 @@ export function faceMultipart(person, photo) {
 }
 
 export class HikvisionFaceProvider {
-  constructor(client) { this.client = client; }
+  #planTemplateNo;
+  constructor(client, { planTemplateNo = "1" } = {}) { this.client = client; this.#planTemplateNo = planTemplateNo; }
   async json(method, path, data) {
     return jsonResponse(await this.client.request({ method, path, body: data === undefined ? undefined : Buffer.from(JSON.stringify(data)), contentType: data === undefined ? undefined : "application/json" }));
   }
@@ -101,9 +125,11 @@ export class HikvisionFaceProvider {
     if (!Number.isInteger(minDoor) || !Number.isInteger(maxDoor) || minDoor < 1 || maxDoor < minDoor) invalid("设备门编号能力无效", 502);
     const functions = opt(user.supportFunction);
     if (functions.length && !["get", "post", "put"].every((method) => functions.includes(method))) invalid("设备人员能力缺少查询、新增或修改", 502);
+    const allDayPlan = await loadAllDayPlan(path => this.json("GET", path), this.#planTemplateNo);
     return {
       device: { model: xmlValue(text, "model") || "未返回型号", firmware: xmlValue(text, "firmwareVersion") || "" },
       capabilities: {
+        allDayPlan,
         libraries, doorNumbers: Array.from({ length: Math.min(maxDoor - minDoor + 1, 64) }, (_, index) => minDoor + index),
         maxPhotoBytes: FACE_PHOTO_LIMIT, photoLimitSource: "guide-default",
         employeeNoMaxLength: Math.min(Number(user.employeeNo?.["@max"]) || 32, 64),
@@ -135,7 +161,13 @@ export class HikvisionFaceProvider {
     finally { multipart.body.fill(0); }
   }
   async grantAccess(person) {
-    await this.json("PUT", "/ISAPI/AccessControl/UserInfo/Modify?format=json", { UserInfo: { employeeNo: person.employeeNo, doorRight: String(person.doorNo) } });
+    allDayPlanProof({ templateNo: person.accessPlanTemplateNo, fingerprint: person.accessPlanFingerprint, name: "每天24小时" });
+    const plan = await loadAllDayPlan(path => this.json("GET", path), person.accessPlanTemplateNo);
+    if (!matchesPlanProof(person, plan)) invalid("每天24小时权限计划已变更，请断开后重新连接确认", 409);
+    await this.json("PUT", "/ISAPI/AccessControl/UserInfo/Modify?format=json", { UserInfo: {
+      employeeNo: person.employeeNo, doorRight: String(person.doorNo),
+      RightPlan: [{ doorNo: Number(person.doorNo), planTemplateNo: person.accessPlanTemplateNo }],
+    } });
   }
   async findFace(person) {
     const value = await this.json("POST", "/ISAPI/Intelligent/FDLib/FDSearch?format=json", { searchResultPosition: 0, maxResults: 1, faceLibType: person.faceLibType, FDID: person.FDID, FPID: person.employeeNo });
@@ -147,11 +179,14 @@ export class HikvisionFaceProvider {
 
 export class SimulatedFaceProvider {
   constructor() { this.people = new Map(); this.faces = new Set(); }
-  async describe() { return { device: { model: "模拟门禁设备", firmware: "simulation" }, capabilities: { libraries: [{ FDID: "SIMULATION_FD_01", faceLibType: "blackFD" }], doorNumbers: [1], maxPhotoBytes: FACE_PHOTO_LIMIT, photoLimitSource: "guide-default", employeeNoMaxLength: 32, employeeNoPattern: "^[A-Za-z0-9_-]+$", nameMaxBytes: 128, faceSearchSupported: true, personFaceCountSupported: true, longTermValiditySupported: true, timeRangeBegin: "1970-01-01T00:00:00", timeRangeEnd: "2037-12-31T23:59:59" } }; }
+  async describe() { return { device: { model: "模拟门禁设备", firmware: "simulation" }, capabilities: { allDayPlan: copy(simulatedAllDayPlan), libraries: [{ FDID: "SIMULATION_FD_01", faceLibType: "blackFD" }], doorNumbers: [1], maxPhotoBytes: FACE_PHOTO_LIMIT, photoLimitSource: "guide-default", employeeNoMaxLength: 32, employeeNoPattern: "^[A-Za-z0-9_-]+$", nameMaxBytes: 128, faceSearchSupported: true, personFaceCountSupported: true, longTermValiditySupported: true, timeRangeBegin: "1970-01-01T00:00:00", timeRangeEnd: "2037-12-31T23:59:59" } }; }
   async findPerson(id) { return copy(this.people.get(id) || null); }
   async createPerson(person) { if (this.people.has(person.employeeNo)) invalid("人员编号已存在", 409); this.people.set(person.employeeNo, { employeeNo: person.employeeNo, name: person.name, Valid: { enable: person.validityMode !== "unlimited", beginTime: person.validFrom, endTime: person.validTo, timeType: "local" }, doorRight: "", numOfFace: 0 }); }
   async putFace(person) { this.faces.add(person.employeeNo); this.people.get(person.employeeNo).numOfFace = 1; }
-  async grantAccess(person) { this.people.get(person.employeeNo).doorRight = String(person.doorNo); }
+  async grantAccess(person) {
+    if (!matchesPlanProof(person, simulatedAllDayPlan)) invalid("模拟每天24小时权限计划与连接记录不一致", 409);
+    Object.assign(this.people.get(person.employeeNo), { doorRight: String(person.doorNo), RightPlan: [{ doorNo: Number(person.doorNo), planTemplateNo: person.accessPlanTemplateNo }] });
+  }
   async findFace(person) { return this.faces.has(person.employeeNo); }
   close() { this.people.clear(); this.faces.clear(); }
 }
@@ -163,8 +198,10 @@ export class FaceEnrollmentService {
   #busy = false;
   #closed = false;
   #providerFactory;
+  #canonicalUnlimitedRows = new WeakSet();
+  #observedUnlimitedCanonicalization = false;
   #state = { mode: "simulation", connected: false, device: {}, capabilities: { libraries: [], doorNumbers: [], maxPhotoBytes: FACE_PHOTO_LIMIT } };
-  constructor({ providerFactory = (config) => new HikvisionFaceProvider(new HikvisionClient(config)) } = {}) { this.#providerFactory = providerFactory; }
+  constructor({ providerFactory = (config) => new HikvisionFaceProvider(new HikvisionClient(config), { planTemplateNo: config.planTemplateNo }) } = {}) { this.#providerFactory = providerFactory; }
   state() { return copy({ ...this.#state, busy: this.#busy, enrollments: [...this.#rows.values()] }); }
   async #exclusive(action) {
     if (this.#closed) invalid("设备会话已关闭，请重新登录", 409);
@@ -172,7 +209,7 @@ export class FaceEnrollmentService {
     this.#busy = true;
     try { return await action(); } finally { this.#busy = false; }
   }
-  #clear() { for (const photo of this.#photos.values()) { clearTimeout(photo.timer); photo.bytes.fill(0); } this.#photos.clear(); this.#rows.clear(); }
+  #clear() { for (const photo of this.#photos.values()) { clearTimeout(photo.timer); photo.bytes.fill(0); } this.#photos.clear(); this.#rows.clear(); this.#canonicalUnlimitedRows = new WeakSet(); this.#observedUnlimitedCanonicalization = false; }
   async connect(data) {
     await this.#exclusive(async () => {
       if (!data || !["simulation", "device"].includes(data.mode)) invalid("连接模式无效");
@@ -195,7 +232,8 @@ export class FaceEnrollmentService {
         throw error;
       }
       this.#provider?.close(); this.#clear(); this.#provider = provider;
-      this.#state = { mode: data.mode, connected: true, device: { ...description.device, ...(data.mode === "device" ? { origin: new URL(data.origin).origin } : {}) }, capabilities: description.capabilities };
+      this.#state = { mode: data.mode, connected: true, device: { ...copy(description.device), ...(data.mode === "device" ? { origin: new URL(data.origin).origin } : {}) }, capabilities: copy(description.capabilities) };
+      this.#observedUnlimitedCanonicalization = data.mode === "device" && this.#state.device.model === "DS-K1T671BM" && this.#state.device.firmware === "V3.3.180";
     });
     return this.state();
   }
@@ -212,6 +250,7 @@ export class FaceEnrollmentService {
     if (!caps.doorNumbers.includes(Number(data.doorNo))) invalid("请选择设备返回的有效门编号");
     const library = caps.libraries.find((entry) => entry.FDID === data.FDID && entry.faceLibType === data.faceLibType);
     if (!library) invalid("请选择设备返回的人脸库");
+    const accessPlan = allDayPlanProof(caps.allDayPlan);
     const validityMode = data.validityMode === undefined ? "fixed" : data.validityMode;
     if (!["fixed", "unlimited"].includes(validityMode)) invalid("有效期模式无效");
     if (validityMode === "unlimited" && caps.longTermValiditySupported !== true) invalid("设备未确认支持长期有效");
@@ -223,7 +262,8 @@ export class FaceEnrollmentService {
     if ((rangeBegin !== undefined && validFrom < rangeBegin) || (rangeEnd !== undefined && validTo > rangeEnd)) invalid("有效期超出设备能力范围");
     if (caps.userTypes?.length && !caps.userTypes.includes("normal")) invalid("设备不支持普通测试人员");
     if (caps.timeTypes?.length && !caps.timeTypes.includes("local")) invalid("设备不支持本地时间有效期");
-    return { employeeNo: data.employeeNo, name: data.name.trim(), doorNo: Number(data.doorNo), ...library, validityMode, validFrom, validTo };
+    return { employeeNo: data.employeeNo, name: data.name.trim(), doorNo: Number(data.doorNo), ...library, validityMode, validFrom, validTo,
+      accessPlanTemplateNo: accessPlan.templateNo, accessPlanFingerprint: accessPlan.fingerprint, accessPlanName: accessPlan.name };
   }
   #savePhoto(id, bytes) {
     const old = this.#photos.get(id); clearTimeout(old?.timer); old?.bytes.fill(0);
@@ -240,6 +280,7 @@ export class FaceEnrollmentService {
       if ([...this.#rows.values()].some((row) => row.employeeNo === person.employeeNo)) invalid("本次会话已有该人员，请使用继续同步或查询状态", 409);
       const photo = decodeFacePhoto(data.photoBase64, this.#state.capabilities.maxPhotoBytes);
       const row = { id: randomUUID(), ...person, mode: this.#state.mode, status: "pending", steps: stepNames.map(([key, label]) => ({ key, label, state: "pending", message: "" })), createdAt: Date.now() };
+      if (this.#observedUnlimitedCanonicalization && row.validityMode === "unlimited") this.#canonicalUnlimitedRows.add(row);
       this.#rows.set(row.id, row); this.#savePhoto(row.id, photo);
       return this.#run(row);
     });
@@ -253,7 +294,7 @@ export class FaceEnrollmentService {
         this.#step(row, stage, "running");
         const existing = await this.#provider.findPerson(row.employeeNo);
         if (existing && !row.createAttempted) invalid("设备已有此人员编号，未覆盖原人员，请使用新的测试编号", 409);
-        if (existing && (existing.name !== row.name || !matchesValidity(existing.Valid, row))) invalid("设备人员与本次测试不一致，已停止继续同步", 409);
+        if (existing && (existing.name !== row.name || !matchesValidity(existing.Valid, row, this.#canonicalUnlimitedRows.has(row)))) invalid("设备人员与本次测试不一致，已停止继续同步", 409);
         if (!existing) { row.createAttempted = true; await this.#provider.createPerson(row); }
         this.#step(row, stage, "success", "人员记录已建立");
       }
@@ -269,7 +310,7 @@ export class FaceEnrollmentService {
       }
       if (this.#closed) invalid("设备会话已关闭", 409);
       stage = "access";
-      if (row.steps[2].state !== "success") { this.#step(row, stage, "running"); await this.#provider.grantAccess(row); this.#step(row, stage, "success", `已授予 ${row.doorNo} 号门，${row.validityMode === "unlimited" ? "长期有效" : "受人员有效期约束"}`); }
+      if (row.steps[2].state !== "success") { this.#step(row, stage, "running"); await this.#provider.grantAccess(row); this.#step(row, stage, "success", `已授予 ${row.doorNo} 号门，${row.accessPlanName}，${row.validityMode === "unlimited" ? "长期有效" : "受人员有效期约束"}`); }
       if (this.#closed) invalid("设备会话已关闭", 409);
       stage = "verify"; this.#step(row, stage, "running");
       await this.#verify(row);
@@ -281,7 +322,8 @@ export class FaceEnrollmentService {
   }
   async #verify(row) {
     const person = await this.#provider.findPerson(row.employeeNo);
-    if (!person || person.name !== row.name || !matchesValidity(person.Valid, row) || !String(person.doorRight || "").split(",").includes(String(row.doorNo))) invalid("设备人员、有效期或门权限尚未查询确认", 502);
+    if (!person || person.name !== row.name || !matchesValidity(person.Valid, row, this.#canonicalUnlimitedRows.has(row)) || !String(person.doorRight || "").split(",").includes(String(row.doorNo))) invalid("设备人员、有效期或门权限尚未查询确认", 502);
+    if (!matchesAccessPlan(person, row)) invalid("每天24小时权限计划尚未查询确认绑定到所选门", 502);
     if (!row.faceSubmitted) invalid("人脸照片尚未确认提交成功，请先继续同步", 409);
     const searchable = this.#state.capabilities.faceSearchSupported === true;
     if (searchable) {

@@ -7,6 +7,18 @@ import { HttpError } from "../lib/model.mjs";
 const photo = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 4, 0x4a, 0x46, 0, 1, 0xff, 0xd9]);
 const input = (overrides = {}) => ({ employeeNo: "SYNTHETIC_01", name: "合成测试人员", doorNo: 1, FDID: "SIMULATION_FD_01", faceLibType: "blackFD", validFrom: "2026-11-24T09:00", validTo: "2026-11-24T10:00", photoBase64: photo.toString("base64"), photoName: "synthetic.jpg", consent: true, ...overrides });
 async function simulated() { const service = new FaceEnrollmentService(); await service.connect({ mode: "simulation" }); return service; }
+const jsonReply = value => ({ status: 200, body: Buffer.from(JSON.stringify(value)) });
+function allDayPlanFixtures(templateNo = "1") {
+  const fullWeek = () => ({ enable: true, WeekPlanCfg: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map(week => ({
+    week, id: 1, enable: true, authenticationTimesEnabled: false, TimeSegment: { beginTime: "00:00:00", endTime: "23:59:59" },
+  })) });
+  return {
+    "/ISAPI/AccessControl/UserRightPlanTemplate/capabilities?format=json": { UserRightPlanTemplate: { templateNo: { "@min": 1, "@max": 128 } } },
+    [`/ISAPI/AccessControl/UserRightPlanTemplate/${templateNo}?format=json`]: { UserRightPlanTemplate: { enable: true, templateName: "合成全天", weekPlanNo: 1, holidayGroupNo: "" } },
+    "/ISAPI/AccessControl/UserRightWeekPlanCfg/1?format=json": { UserRightWeekPlanCfg: fullWeek() },
+    "/ISAPI/AccessControl/UserRightWeekPlanCfg/2?format=json": { UserRightWeekPlanCfg: fullWeek() },
+  };
+}
 
 test("simulation explicitly reports its mode and completes four stages without a real client", async () => {
   const service = await simulated();
@@ -14,6 +26,9 @@ test("simulation explicitly reports its mode and completes four stages without a
   assert.equal(row.status, "ready");
   assert.equal(row.mode, "simulation");
   assert.equal(row.validityMode, "fixed");
+  assert.equal(row.accessPlanTemplateNo, "1");
+  assert.match(row.accessPlanFingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(row.accessPlanName, "每天24小时");
   assert.deepEqual(row.steps.map((step) => [step.key, step.state]), [["person", "success"], ["face", "success"], ["access", "success"], ["verify", "success"]]);
   assert.equal(row.validFrom, "2026-11-24T09:00:00");
   assert.equal(service.state().enrollments.length, 1);
@@ -226,32 +241,41 @@ test("switching mode clears records and photos; closing blocks later operations"
 
 test("device payload separates creating a person, binary face upsert and selected-door grant", async () => {
   const calls = [];
-  const client = { async request(call) { calls.push({ ...call, body: Buffer.from(call.body) }); return { status: 200, body: Buffer.from('{"statusCode":1,"statusString":"OK"}') }; }, close() {} };
+  const fixtures = allDayPlanFixtures();
+  const proof = (await new HikvisionFaceProvider(describedClient()).describe()).capabilities.allDayPlan;
+  const client = { async request(call) {
+    calls.push({ ...call, body: call.body === undefined ? undefined : Buffer.from(call.body) });
+    return jsonReply(fixtures[call.path] || { statusCode: 1, statusString: "OK" });
+  }, close() {} };
   const provider = new HikvisionFaceProvider(client);
-  const person = { ...input(), validFrom: "2026-11-24T09:00:00", validTo: "2026-11-24T10:00:00" };
+  const person = { ...input(), validFrom: "2026-11-24T09:00:00", validTo: "2026-11-24T10:00:00", accessPlanTemplateNo: proof.templateNo, accessPlanFingerprint: proof.fingerprint };
   await provider.createPerson(person);
   await provider.putFace(person, photo);
   await provider.grantAccess(person);
-  const create = JSON.parse(calls[0].body), grant = JSON.parse(calls[2].body);
+  const writes = calls.filter(call => call.method !== "GET");
+  const create = JSON.parse(writes[0].body), grant = JSON.parse(writes[2].body);
   assert.equal(create.UserInfo.employeeNo, person.employeeNo);
   assert.equal(create.UserInfo.Valid.timeType, "local");
   assert.equal(create.UserInfo.Valid.enable, true);
   assert.equal(create.UserInfo.doorRight, "");
-  assert.equal(calls[1].method, "PUT");
-  assert.equal(calls[1].path, "/ISAPI/Intelligent/FDLib/FDSetUp?format=json");
-  assert(calls[1].body.includes(photo));
-  assert.deepEqual(grant, { UserInfo: { employeeNo: person.employeeNo, doorRight: "1" } });
+  assert.equal(writes[1].method, "PUT");
+  assert.equal(writes[1].path, "/ISAPI/Intelligent/FDLib/FDSetUp?format=json");
+  assert(writes[1].body.includes(photo));
+  assert.deepEqual(grant, { UserInfo: { employeeNo: person.employeeNo, doorRight: "1", RightPlan: [{ doorNo: 1, planTemplateNo: "1" }] } });
+  assert.equal(calls.filter(call => call.method === "GET").length, 3, "plan is re-read before the access PUT");
   assert(!JSON.stringify(calls).includes("RemoteControl/door"));
 });
 
 function describedClient(overrides = {}) {
+  const plans = overrides.plans || allDayPlanFixtures();
   return {
     async request({ path }) {
       let value;
-      if (path === "/ISAPI/System/deviceInfo") return { status: 200, body: Buffer.from("<DeviceInfo><model>SYNTHETIC</model><firmwareVersion>V0.0</firmwareVersion></DeviceInfo>") };
+      if (path === "/ISAPI/System/deviceInfo") return { status: 200, body: Buffer.from(`<DeviceInfo><model>${overrides.model || "SYNTHETIC"}</model><firmwareVersion>${overrides.firmware || "V0.0"}</firmwareVersion></DeviceInfo>`) };
       if (path.includes("UserInfo/capabilities")) value = { UserInfo: { supportFunction: { "@opt": "post,put,get" }, employeeNo: { "@max": 32 }, name: { "@max": 128 }, userType: { "@opt": "normal,visitor" }, Valid: { timeType: { "@opt": "local" } }, RightPlan: { doorNo: { "@min": 1, "@max": 1 } }, ...overrides.user } };
       else if (path.includes("FDLib/capabilities")) value = { statusCode: 1, supportFDFunction: "post,delete,get,put,setUp", isSuportFDSearch: false, ...overrides.face };
       else if (path === "/ISAPI/Intelligent/FDLib?format=json") value = { FDLib: [{ FDID: "ACTUAL_SHAPE_A", faceLibType: "blackFD" }, { FDID: "ACTUAL_SHAPE_B", faceLibType: "infraredFD" }] };
+      else if (Object.hasOwn(plans, path)) value = plans[path];
       else return { status: 403, body: Buffer.from('{"statusCode":4}') };
       return { status: 200, body: Buffer.from(JSON.stringify(value)) };
     }, close() {},
@@ -267,6 +291,9 @@ test("discovery normalizes the observed capability shapes without inventing FDID
   assert.equal(state.capabilities.photoLimitSource, "guide-default");
   assert.equal(state.capabilities.timeRangeEnd, "2037-12-31T23:59:59");
   assert.equal(state.capabilities.longTermValiditySupported, false);
+  assert.equal(state.capabilities.allDayPlan.templateNo, "1");
+  assert.equal(state.capabilities.allDayPlan.name, "每天24小时");
+  assert.match(state.capabilities.allDayPlan.fingerprint, /^[a-f0-9]{64}$/);
 });
 
 test("missing door capability is not replaced with an invented door 1", async () => {
@@ -425,4 +452,168 @@ for (const validityMode of ["fixed", "unlimited"]) test(`${validityMode} retry d
   assert.equal(uploads, 1);
   assert.equal(creates, 1);
   service.close();
+});
+
+test("default fixed enrollment binds the internal all-day plan and ignores request/state proof forgeries", async t => {
+  const provider = new SimulatedFaceProvider();
+  const advertised = await provider.describe();
+  provider.describe = async () => advertised;
+  const service = new FaceEnrollmentService({ providerFactory: () => provider });
+  t.after(() => service.close());
+  const connected = await service.connect({ mode: "device", origin: "https://synthetic.invalid" });
+  const expected = structuredClone(connected.capabilities.allDayPlan);
+  connected.capabilities.allDayPlan.templateNo = "2";
+  advertised.capabilities.allDayPlan.templateNo = "3";
+  advertised.capabilities.allDayPlan.fingerprint = "0".repeat(64);
+  const row = await service.enroll(input({
+    accessPlanTemplateNo: "4", accessPlanFingerprint: "f".repeat(64), accessPlanName: "伪造计划",
+    allDayPlan: { templateNo: "5", fingerprint: "e".repeat(64), name: "伪造计划" },
+  }));
+  assert.equal(row.status, "ready");
+  assert.equal(row.validityMode, "fixed");
+  assert.equal(row.validTo, "2026-11-24T10:00:00");
+  assert.equal(row.accessPlanTemplateNo, expected.templateNo);
+  assert.equal(row.accessPlanFingerprint, expected.fingerprint);
+  assert.equal(row.accessPlanName, "每天24小时");
+  assert.deepEqual(provider.people.get(row.employeeNo).RightPlan, [{ doorNo: 1, planTemplateNo: expected.templateNo }]);
+});
+
+test("missing or invalid all-day proof stops before creating a person even when the request supplies a proof", async t => {
+  for (const invalidProof of [undefined, { templateNo: "0", name: "每天24小时", fingerprint: "a".repeat(64) }, { templateNo: "1", name: "每天24小时", fingerprint: "" }]) {
+    const provider = new SimulatedFaceProvider();
+    const describe = provider.describe.bind(provider);
+    provider.describe = async () => { const state = await describe(); state.capabilities.allDayPlan = invalidProof; return state; };
+    const service = new FaceEnrollmentService({ providerFactory: () => provider });
+    t.after(() => service.close());
+    await service.connect({ mode: "device", origin: "https://synthetic.invalid" });
+    await assert.rejects(service.enroll(input({ accessPlanTemplateNo: "1", accessPlanFingerprint: "a".repeat(64) })), /未确认每天24小时权限计划/);
+    assert.equal(provider.people.size, 0);
+    assert.deepEqual(service.state().enrollments, []);
+  }
+});
+
+test("real discovery rejects a partial-day plan and supports an explicitly configured all-day candidate", async () => {
+  const partialPlans = allDayPlanFixtures();
+  partialPlans["/ISAPI/AccessControl/UserRightWeekPlanCfg/1?format=json"].UserRightWeekPlanCfg.WeekPlanCfg[6].TimeSegment.endTime = "23:00:00";
+  await assert.rejects(new HikvisionFaceProvider(describedClient({ plans: partialPlans })).describe());
+  const state = await new HikvisionFaceProvider(describedClient({ plans: allDayPlanFixtures("2") }), { planTemplateNo: "2" }).describe();
+  assert.equal(state.capabilities.allDayPlan.templateNo, "2");
+  assert.match(state.capabilities.allDayPlan.fingerprint, /^[a-f0-9]{64}$/);
+});
+
+test("access grant revalidates the plan fingerprint and never PUTs after a changed or invalid plan", async () => {
+  const plans = allDayPlanFixtures();
+  const base = describedClient({ plans });
+  const writes = [];
+  const provider = new HikvisionFaceProvider({
+    async request(call) {
+      if (call.method === "PUT") { writes.push(call); return jsonReply({ statusCode: 1 }); }
+      return base.request(call);
+    }, close() {},
+  });
+  const proof = (await provider.describe()).capabilities.allDayPlan;
+  const person = { ...input(), accessPlanTemplateNo: proof.templateNo, accessPlanFingerprint: proof.fingerprint };
+  plans["/ISAPI/AccessControl/UserRightPlanTemplate/1?format=json"].UserRightPlanTemplate.weekPlanNo = 2;
+  await assert.rejects(provider.grantAccess(person), /权限计划已变更/);
+  assert.equal(writes.length, 0);
+  plans["/ISAPI/AccessControl/UserRightPlanTemplate/1?format=json"].UserRightPlanTemplate.weekPlanNo = 1;
+  plans["/ISAPI/AccessControl/UserRightWeekPlanCfg/1?format=json"].UserRightWeekPlanCfg.enable = false;
+  await assert.rejects(provider.grantAccess(person));
+  assert.equal(writes.length, 0);
+});
+
+test("a door number alone is insufficient and verification requires the selected template on that door", async t => {
+  const provider = new SimulatedFaceProvider();
+  provider.grantAccess = async person => { provider.people.get(person.employeeNo).doorRight = String(person.doorNo); };
+  const service = new FaceEnrollmentService({ providerFactory: () => provider });
+  t.after(() => service.close());
+  await service.connect({ mode: "device", origin: "https://synthetic.invalid" });
+  const first = await service.enroll(input());
+  assert.equal(first.status, "failed");
+  assert.equal(first.steps[3].state, "failed");
+  assert.match(first.error, /权限计划尚未查询确认/);
+  const stored = provider.people.get(first.employeeNo);
+  for (const binding of [
+    undefined, [], [{ doorNo: 2, planTemplateNo: first.accessPlanTemplateNo }],
+    [{ doorNo: 1, planTemplateNo: "2" }], [{ doorNo: 1, planTemplateNo: 1 }],
+    [{ doorNo: 1, planTemplateNo: "2,1" }], [{ doorNo: 1, planTemplateNo: "1,1" }],
+    [{ doorNo: 1, planTemplateNo: "1," }],
+    [{ doorNo: 1, planTemplateNo: "1" }, { doorNo: 1, planTemplateNo: "1" }],
+    [{ doorNo: 1, planTemplateNo: "1" }, { doorNo: 1, planTemplateNo: "2" }],
+  ]) {
+    stored.RightPlan = binding;
+    const result = await service.verify({ id: first.id });
+    assert.equal(result.status, "failed");
+    assert.match(result.error, /权限计划尚未查询确认/);
+  }
+  stored.RightPlan = [{ doorNo: 1, planTemplateNo: ` ${first.accessPlanTemplateNo} ` }];
+  assert.equal((await service.verify({ id: first.id })).status, "ready");
+});
+
+async function canonicalizingProvider(t, { model = "DS-K1T671BM", firmware = "V3.3.180", actual = {}, failCreate = false } = {}) {
+  const provider = new SimulatedFaceProvider();
+  const describe = provider.describe.bind(provider), create = provider.createPerson.bind(provider);
+  let creates = 0;
+  provider.describe = async () => { const state = await describe(); state.device = { model, firmware }; return state; };
+  provider.createPerson = async person => {
+    creates += 1;
+    await create(person);
+    Object.assign(provider.people.get(person.employeeNo).Valid, { beginTime: "1970-01-01T00:00:00", endTime: "1970-01-01T00:00:00", ...actual });
+    if (failCreate) throw Error("synthetic unknown create outcome");
+  };
+  const service = new FaceEnrollmentService({ providerFactory: () => provider });
+  t.after(() => service.close());
+  await service.connect({ mode: "device", origin: "https://synthetic.invalid" });
+  return { service, provider, creates: () => creates };
+}
+
+for (const timeType of [undefined, "local"]) test(`observed exact device profile accepts only its unlimited 1970 date pair with ${timeType || "omitted"} timeType`, async t => {
+  const { service } = await canonicalizingProvider(t, { actual: { timeType } });
+  const row = await service.enroll(input({ validityMode: "unlimited" }));
+  assert.equal(row.status, "ready");
+  assert.equal(row.validityMode, "unlimited");
+  assert.equal(row.validTo, "2037-12-31T23:59:59", "the requested legal range is retained in the enrollment record");
+  assert.equal((await service.verify({ id: row.id })).status, "ready");
+  assert.ok(!Object.keys(row).some(key => /canonical/i.test(key)), "profile flag stays private");
+});
+
+for (const [label, options, validityMode] of [
+  ["different model", { model: "DS-K1T671BM-X" }, "unlimited"],
+  ["different firmware", { firmware: "V3.3.181" }, "unlimited"],
+  ["firmware suffix", { firmware: "V3.3.180 build 1" }, "unlimited"],
+  ["fixed validity", {}, "fixed"],
+  ["true enable", { actual: { enable: true } }, "unlimited"],
+  ["string false enable", { actual: { enable: "false" } }, "unlimited"],
+  ["another end date", { actual: { endTime: "1970-01-02T00:00:00" } }, "unlimited"],
+  ["another begin date", { actual: { beginTime: "1970-01-02T00:00:00" } }, "unlimited"],
+  ["UTC timeType", { actual: { timeType: "UTC" } }, "unlimited"],
+]) test(`observed date canonicalization does not relax ${label}`, async t => {
+  const { service } = await canonicalizingProvider(t, options);
+  const row = await service.enroll(input({ validityMode, observedUnlimitedCanonicalization: true, allowObservedCanonicalization: true }));
+  assert.equal(row.status, "failed");
+  assert.match(row.error, /人员、有效期或门权限尚未查询确认/);
+});
+
+test("request profile claims cannot enable date canonicalization on an unobserved device", async t => {
+  const { service } = await canonicalizingProvider(t, { model: "SYNTHETIC", firmware: "V0.0" });
+  const row = await service.enroll(input({
+    validityMode: "unlimited", model: "DS-K1T671BM", firmware: "V3.3.180",
+    observedUnlimitedCanonicalization: true, allowObservedCanonicalization: true,
+    device: { model: "DS-K1T671BM", firmware: "V3.3.180" },
+  }));
+  assert.equal(row.status, "failed");
+  assert.match(row.error, /有效期/);
+});
+
+test("explicit retry on the observed profile queries its canonicalized person without duplicate creation", async t => {
+  const { service, creates } = await canonicalizingProvider(t, { failCreate: true });
+  const first = await service.enroll(input({ validityMode: "unlimited" }));
+  assert.equal(first.status, "failed");
+  assert.equal(first.steps[0].state, "failed");
+  assert.equal(creates(), 1);
+  const retried = await service.retry({ id: first.id, accessPlanTemplateNo: "2", accessPlanFingerprint: "f".repeat(64), validityMode: "fixed" });
+  assert.equal(retried.status, "ready");
+  assert.equal(retried.validityMode, "unlimited");
+  assert.equal(retried.accessPlanTemplateNo, "1");
+  assert.equal(creates(), 1);
 });

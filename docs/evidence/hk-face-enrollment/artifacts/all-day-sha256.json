@@ -1,0 +1,52 @@
+[
+  {
+    "path": "all-day-admin-tests.exit-code.txt",
+    "bytes": 12,
+    "sha256": "1ca4a13146b2891c0e462123ac0cb848f92e6221f18b870a1b78c232d1956c35"
+  },
+  {
+    "path": "all-day-admin-tests.stderr.txt",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "all-day-admin-tests.stdout.txt",
+    "bytes": 16621,
+    "sha256": "9a2d27f6639e152619f648e9bc8f3ef1af236bc34033f73c8e787a9dce61400b"
+  },
+  {
+    "path": "all-day-plan-replay.exit-code.txt",
+    "bytes": 12,
+    "sha256": "1ca4a13146b2891c0e462123ac0cb848f92e6221f18b870a1b78c232d1956c35"
+  },
+  {
+    "path": "all-day-plan-replay.stderr.txt",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "all-day-plan-replay.stdout.json",
+    "bytes": 668,
+    "sha256": "9e58279e36ed88af1e2f391b6aaed35aeb204424c9d923c5aed36dc4883e5700"
+  },
+  {
+    "path": "all-day-source-after.json",
+    "bytes": 994,
+    "sha256": "967d0833c89e314af2f47d92f8ccbc00a3a8dcaa7a5c7a1b432cd9d9e944a1b1"
+  },
+  {
+    "path": "all-day-source-before.json",
+    "bytes": 994,
+    "sha256": "967d0833c89e314af2f47d92f8ccbc00a3a8dcaa7a5c7a1b432cd9d9e944a1b1"
+  },
+  {
+    "path": "all-day-source-git-index.json",
+    "bytes": 1207,
+    "sha256": "4e406a1109e0e8b8f017f430b137cbd240deba6bb6fcfb39c379eb568a6b2c3f"
+  },
+  {
+    "path": "all-day-validation.json",
+    "bytes": 322,
+    "sha256": "ed95ace9bc9b059ce3a3f34670bfbc0e64c94b2443a660fc5eef18de7c1e1d09"
+  }
+]

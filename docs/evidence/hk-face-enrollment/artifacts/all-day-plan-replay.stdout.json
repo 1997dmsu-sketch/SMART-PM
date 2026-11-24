@@ -1,0 +1,21 @@
+{
+  "kind": "OFFLINE_REPLAY_OF_CAPTURED_PLAN",
+  "networkRequests": 0,
+  "deviceWrites": 0,
+  "calls": [
+    "/ISAPI/AccessControl/UserRightPlanTemplate/capabilities?format=json",
+    "/ISAPI/AccessControl/UserRightPlanTemplate/1?format=json",
+    "/ISAPI/AccessControl/UserRightWeekPlanCfg/1?format=json",
+    "/ISAPI/AccessControl/UserRightHolidayGroupCfg/32?format=json",
+    "/ISAPI/AccessControl/UserRightHolidayPlanCfg/128?format=json"
+  ],
+  "plan": {
+    "templateNo": "1",
+    "fingerprint": "99822a58d185ca7e63f521364df38701c18f9fbbf71a015fb07551d121feb6e9",
+    "name": "每天24小时",
+    "weekPlanNo": 1,
+    "holidayGroupNos": [
+      "32"
+    ]
+  }
+}

@@ -2,11 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildFaceEnrollment,
+  faceAccessPeriodLabel,
+  faceHasAllDayPlan,
   facePhotoDimensions,
   faceSiteNote,
   faceStatus,
   faceValidityLabel,
   fitFacePhoto,
+  renderFaceAccessPeriod,
   renderFaceValidityFields,
   renderFaceSteps,
   validateFacePhoto,
@@ -16,6 +19,7 @@ const capabilities = {
   libraries: [{ FDID: "7", faceLibType: "blackFD" }, { FDID: "42", faceLibType: "ordinaryFD" }],
   doorNumbers: [2, 4],
   maxPhotoBytes: 204800,
+  allDayPlan: { templateNo: "9", fingerprint: "a".repeat(64), name: "每天24小时" },
 };
 const values = {
   employeeNo: "  TEST-200  ", name: "  测试人员  ",
@@ -34,6 +38,71 @@ test("enrollment uses the selected device library and door without assuming FDID
     FDID: "42", faceLibType: "ordinaryFD",
     photoBase64: "/9j/", photoName: "test.jpg", consent: true,
   });
+});
+
+test("enrollment requires a complete backend all-day plan proof before any sync", () => {
+  const validPlan = capabilities.allDayPlan;
+  assert.equal(faceHasAllDayPlan(capabilities), true);
+  for (const allDayPlan of [
+    undefined, null, true, [], {},
+    { ...validPlan, templateNo: undefined }, { ...validPlan, templateNo: "" },
+    { ...validPlan, templateNo: "0" }, { ...validPlan, templateNo: true },
+    { ...validPlan, templateNo: "unverified" },
+    { ...validPlan, fingerprint: "" }, { ...validPlan, fingerprint: "not-a-hash" },
+    { ...validPlan, fingerprint: "x".repeat(64) },
+    { ...validPlan, name: undefined }, { ...validPlan, name: " " },
+  ]) {
+    const unverified = { ...capabilities, allDayPlan };
+    assert.equal(faceHasAllDayPlan(unverified), false);
+    assert.throws(() => buildFaceEnrollment(values, unverified, photo), /全天通行计划核验未完成/);
+  }
+});
+
+test("the all-day policy is separate from personnel validity and never accepts caller plan bindings", () => {
+  const supported = { ...capabilities, longTermValiditySupported: true };
+  const unlimited = { ...values, validityMode: "unlimited" };
+  assert.throws(() => buildFaceEnrollment(unlimited, { ...supported, allDayPlan: undefined }, photo), /全天通行计划核验未完成/);
+  assert.throws(() => buildFaceEnrollment({ ...unlimited, allDayPlan: capabilities.allDayPlan }, { ...supported, allDayPlan: undefined }, photo), /全天通行计划核验未完成/);
+  const payload = buildFaceEnrollment({
+    ...unlimited, rawplanNo: "123", rawPlanNo: "123", templateNo: "123", fingerprint: "b".repeat(64),
+    allDayPlan: { templateNo: "123", fingerprint: "b".repeat(64) },
+    accessPlanTemplateNo: "123", accessPlanFingerprint: "b".repeat(64),
+  }, supported, photo);
+  assert.equal(payload.validityMode, "unlimited");
+  assert.equal(Object.hasOwn(payload, "validFrom"), false);
+  assert.equal(Object.hasOwn(payload, "validTo"), false);
+  for (const key of ["rawplanNo", "rawPlanNo", "templateNo", "fingerprint", "allDayPlan", "accessPlanTemplateNo", "accessPlanFingerprint"])
+    assert.equal(Object.hasOwn(payload, key), false);
+  assert.equal(faceValidityLabel(unlimited), "长期有效");
+  assert.equal(faceAccessPeriodLabel(unlimited), "每天24小时（计划待核验）");
+});
+
+test("the form states daily 24-hour access independently and reports missing plan verification", () => {
+  const verified = renderFaceAccessPeriod(capabilities, escapeHtml);
+  assert.match(verified, /每天24小时/);
+  assert.match(verified, /通行时段与人员有效期分别设置/);
+  assert.match(verified, /全天通行计划已核验/);
+  assert.doesNotMatch(verified, /input|select|templateNo|fingerprint|name="/);
+  assert.doesNotMatch(verified, new RegExp(capabilities.allDayPlan.fingerprint));
+  const unverified = renderFaceAccessPeriod({ ...capabilities, allDayPlan: undefined }, escapeHtml);
+  assert.match(unverified, /每天24小时/);
+  assert.match(unverified, /核验未完成，暂不可同步/);
+  assert.doesNotMatch(unverified, /计划已核验/);
+});
+
+test("record access labels reflect the person's bound proof and query state while face scans remain pending", () => {
+  const binding = { accessPlanTemplateNo: "9", accessPlanFingerprint: "a".repeat(64) };
+  assert.equal(faceAccessPeriodLabel({ status: "ready" }), "每天24小时（计划待核验）");
+  assert.equal(faceAccessPeriodLabel({ ...binding, accessPlanFingerprint: "bad", status: "pending-site" }), "每天24小时（计划待核验）");
+  assert.equal(faceAccessPeriodLabel({ ...binding, status: "running", steps: [{ key: "access", state: "pending" }] }), "每天24小时（计划待核验）");
+  const submitted = { ...binding, status: "failed", steps: [{ key: "access", state: "success" }] };
+  assert.equal(faceAccessPeriodLabel(submitted), "每天24小时（计划已提交，待查询）");
+  for (const status of ["ready", "pending-site"]) {
+    const row = { ...binding, status };
+    assert.equal(faceAccessPeriodLabel(row), "每天24小时（计划已查询确认）");
+    assert.equal(faceStatus(row, "device"), "已下发，待现场刷脸");
+    assert.doesNotMatch(faceAccessPeriodLabel(row), /刷脸已成功|识别成功/);
+  }
 });
 
 test("fixed validity remains the default and keeps date ordering checks", () => {

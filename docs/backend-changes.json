@@ -1,12 +1,22 @@
 {
   "cloudfunctions/phoneLogin/index.js": {
     "originalSha256": "b3a2f8ac9fee3472a3110d061c6f0fc050fe28005c4c9aa68a6ff2c3cb67a371",
-    "sha256": "3ca1634f5b8d23603366850fab754334edab2df21be574bddb6546d5a7cad2a1",
-    "reason": "修复房产绑定状态；保留网页管理后台手动维护的 housesManaged 绑定，不被旧 owners 覆盖。"
+    "sha256": "c6aa152eb14947e6df9acdc7be111e81a9e25710799f7f770843acab2b7a4fcf",
+    "reason": "租客管理员开通账号密码：同微信确定性身份索引协调，保留旧用户及房屋权限，拒绝重复身份；与独立部署函数本地同字节helper配套。"
   },
   "cloudfunctions/getHouses/index.js": {
     "originalSha256": "204bb88b13078e19910038035420ae83d444b3e68ee57358c72066878614518d",
     "sha256": "8c110cbb3302b7bf7155dbb7d4450782992f60c2fd1bc75114a7a04f6760edef",
     "reason": "在分页和计数前排除公共用房；支持按 ID 重新验证客户房源详情可见性。"
+  },
+  "cloudfunctions/adminLogin/index.js": {
+    "originalSha256": "9baec8d1b6bb46f12b13f823e0a7734b052a4deaf98bdf15aeb75b13d7565a7e",
+    "sha256": "019f588e0e4969fa4b063277e34d81385b13da11e1e23ab86e4a3fbbfbdf6c3b",
+    "reason": "租客管理员开通账号密码：同微信确定性身份索引协调，保留旧用户及房屋权限，拒绝重复身份；与独立部署函数本地同字节helper配套。"
+  },
+  "cloudfunctions/login/index.js": {
+    "originalSha256": "24e6a1e0b5d86bd045659e0f8ca9b016ef1cada2d3887225f0ae3084acc646df",
+    "sha256": "e36e539fed1800817d20ef88c51c8ca36b89eff4e27b784ecf3296d1dfe1160b",
+    "reason": "租客管理员开通账号密码：同微信确定性身份索引协调，保留旧用户及房屋权限，拒绝重复身份；与独立部署函数本地同字节helper配套。"
   }
 }

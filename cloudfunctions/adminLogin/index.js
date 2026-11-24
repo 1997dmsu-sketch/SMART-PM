@@ -9,6 +9,7 @@
  * 账号/初始密码由 dbInit 环境变量 ADMIN_USERNAME / ADMIN_INITIAL_PASSWORD 种子写入，不落代码库。
  */
 const crypto = require('crypto');
+const { withIdentity, putDoc, publicUser } = require('./lib/identity-core');
 const cloud = require('wx-server-sdk');
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
@@ -56,25 +57,13 @@ async function isAdmin(openid) {
   }
 }
 
-async function upsertAdminUser(OPENID, UNIONID) {
-  const users = await db.collection('users').where({ _openid: OPENID }).get();
-  if (users.data.length > 0) {
-    const updateData = { role: 'admin', lastLoginAt: db.serverDate() };
-    if (UNIONID) updateData.unionid = UNIONID;
-    await db.collection('users').doc(users.data[0]._id).update({ data: updateData });
-    return Object.assign({}, users.data[0], { role: 'admin' });
-  }
-  const newUser = {
-    _openid: OPENID,
-    unionid: UNIONID || null,
-    role: 'admin',
-    houses: [],
-    points: 0,
-    createdAt: db.serverDate(),
-    lastLoginAt: db.serverDate(),
-  };
-  await db.collection('users').add({ data: newUser });
-  return newUser;
+async function upsertAdminUser(context) {
+  return withIdentity({ db, context }, async ({ tx, trusted, user, timestamp }) => {
+    const next = { ...user, role: 'admin', lastLoginAt: timestamp };
+    if (trusted.unionid) next.unionid = trusted.unionid;
+    await putDoc(tx, 'users', user._id, next);
+    return publicUser(next);
+  });
 }
 
 // 幂等写 sys_config 单字段
@@ -88,7 +77,8 @@ async function setConfig(key, value, description) {
 }
 
 exports.main = async (event) => {
-  const { OPENID, UNIONID } = cloud.getWXContext();
+  const context = cloud.getWXContext();
+  const { OPENID } = context;
   const { action } = event || {};
 
   if (!OPENID) return { code: 403, msg: '无法识别身份' };
@@ -106,7 +96,7 @@ exports.main = async (event) => {
       const okPass = verifyPassword(password, storedHash);
       if (!okUser || !okPass) return { code: 401, msg: '账号或密码错误' };
 
-      const userInfo = await upsertAdminUser(OPENID, UNIONID);
+      const userInfo = await upsertAdminUser(context);
       return { code: 0, userInfo, mustChangePassword: mustChange === 'true' };
     }
 

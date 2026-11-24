@@ -54,6 +54,10 @@ Page({
     catch (err) { wx.showToast({ title: err.message || '登录失败，请重试', icon: 'none' }); }
     finally { this.setData({ loggingIn: false }); }
   },
+  openAccountLogin() {
+    if (this.data.loggingIn || this.data.authenticated || this.data.demo) return;
+    wx.navigateTo({ url: '/pages/account-login/index' });
+  },
   unavailable(title) {
     wx.showModal({ title, content: '该服务尚未完成接口对接，当前不会提交或修改真实数据。', showCancel: false, confirmColor: '#ff2450' });
   },
@@ -89,7 +93,7 @@ Page({
   },
   settings() {
     if (this.data.demo || !this.data.authenticated) {
-      wx.showModal({ title: '账号设置', content: this.data.demo ? '当前为设计演示模式，没有登录真实账号。' : '请先通过手机号授权登录。', showCancel: false, confirmColor: '#ff2450' }); return;
+      wx.showModal({ title: '账号设置', content: this.data.demo ? '当前为设计演示模式，没有登录真实账号。' : '请先使用手机号或账号密码登录。', showCancel: false, confirmColor: '#ff2450' }); return;
     }
     wx.showActionSheet({ itemList: ['退出当前账号'], success: result => {
       if (result.tapIndex !== 0) return;

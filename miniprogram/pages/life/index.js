@@ -12,7 +12,7 @@ Page({
   data: {
     statusBarHeight:20, community:'宇宙智联智慧物业', services:SERVICES, activeService:'house',
     searching:false, keyword:'', loading:true, error:'', columns:[[],[]], empty:false,
-    isDemo:false, total:0, filterOpen:false, filterKind:'all', filters:{ community:'', price:'all', roomType:'', rentType:'all' },
+    isDemo:false, isTestPreset:false, total:0, filterOpen:false, filterKind:'all', filters:{ community:'', price:'all', roomType:'', rentType:'all' },
     draft:{ community:'',price:'all',roomType:'',rentType:'all' },
     areas:['不限'], prices:PRICE_OPTIONS,
     rooms:[{ label:'不限',value:'' },{ label:'1室',value:'1' },{ label:'2室',value:'2' },{ label:'3室',value:'3' },{ label:'4室',value:'4' }],
@@ -38,23 +38,38 @@ Page({
     if (price.priceMin !== undefined) query.priceMin = price.priceMin;
     if (price.priceMax !== undefined) query.priceMax = price.priceMax;
     try {
-      const result = await api.listHouses(query);
+      let result = await api.listHouses(query);
+      // Only the explicit, labelled local preset gets the larger local page.
+      // Keep the existing live-cloud page size and its failure behaviour.
+      const initialRows = Array.isArray(result) ? result : (result.houses || []);
+      if ((result.isTestPreset === true || initialRows.some(item => item.isTestPreset === true)) && result.total > initialRows.length) {
+        result = await api.listHouses({ ...query, pageSize:500 });
+      }
       if (requestId !== this.requestId) return;
       const list = Array.isArray(result) ? result : (result.houses || []);
       this.houses = list.map((item,index) => ({
         id:String(item._id || item.id || `house-${index}`), title:item.title || item.name || '社区房源',
         cover:item.cover || item.image || item.coverImage || (item.images && item.images[0]) || '',
-        area:item.area || item.buildingArea || '', rooms:item.rooms || item.layout || '',
+        area:item.isTestPreset === true ? item.area : (item.area || item.buildingArea || ''),
+        areaText:item.isTestPreset === true && item.area === null ? '待配置' : ((item.area || item.buildingArea) ? `${item.area || item.buildingArea}㎡` : ''),
+        rooms:item.isTestPreset === true ? item.layoutName : (item.rooms || item.layout || ''),
         orientation:item.orientation || item.direction || '', rentType:item.rentType || '',
-        price:item.price === undefined || item.price === null ? '面议' : item.price,
+        price:item.isTestPreset === true ? item.price : (item.price === undefined || item.price === null ? '面议' : item.price),
+        priceText:item.isTestPreset === true && item.price === null ? '待配置' : (item.price === undefined || item.price === null ? '面议' : String(item.price)),
+        hasPrice:item.price !== null && item.price !== undefined && item.price !== '' && Number.isFinite(Number(item.price)),
+        isTestPreset:item.isTestPreset === true, canBook:item.isTestPreset !== true && item.canBook !== false,
         address:item.address || '', community:item.community || '',
         tags:Array.isArray(item.tags) ? item.tags.slice(0,3) : [], imageHeight:index%4===1?478:398,
       }));
       const areas = [...new Set([...this.data.areas,...this.houses.map(item=>item.community).filter(Boolean)])];
-      this.setData({ total:result.total || list.length,areas });
+      const isTestPreset = result.isTestPreset === true || list.some(item => item.isTestPreset === true);
+      this.setData({ total:result.total || list.length,areas,isTestPreset,community:isTestPreset ? '栖山苑' : '宇宙智联智慧物业' });
       this.applySearch();
     } catch(err) {
-      if (requestId === this.requestId) this.setData({ error:err.message || '房源加载失败，请稍后重试',columns:[[],[]],empty:false });
+      if (requestId === this.requestId) {
+        this.houses = [];
+        this.setData({ error:err.message || '房源加载失败，请稍后重试',columns:[[],[]],empty:false,total:0,isTestPreset:false,community:'宇宙智联智慧物业' });
+      }
     } finally { if (requestId === this.requestId) this.setData({ loading:false }); }
   },
   applySearch() {

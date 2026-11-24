@@ -7,7 +7,7 @@ const {createRequire}=require('node:module');
 const config=require('../miniprogram/config/runtime');
 let api, calls,storage;
 beforeEach(()=>{
- config.mode='demo';config.cloudEnv='';config.allowDeviceOperations=false;
+ config.mode='demo';config.cloudEnv='';config.allowDeviceOperations=false;delete config.testPropertyPreset;
  delete require.cache[require.resolve('../miniprogram/services/api')];api=require('../miniprogram/services/api');
  calls=[];storage=new Map();
  global.wx={getStorageSync:k=>storage.get(k),setStorageSync:(k,v)=>storage.set(k,v),showToast:x=>calls.push(['toast',x]),showModal:x=>calls.push(['modal',x]),switchTab:x=>calls.push(['tab',x]),navigateTo:x=>calls.push(['navigate',x]),stopPullDownRefresh(){},cloud:{callFunction:async x=>{calls.push(x);throw Error('unexpected cloud request');}}};

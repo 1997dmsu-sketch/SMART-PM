@@ -66,7 +66,7 @@ if (!Array.isArray(manifest?.files) || manifest.files.length === 0) {
 // ---------------------------------------------------------------------------
 // 2. 登记范围声明（C1：范围必须明确，范围外路径一律失败关闭）
 // ---------------------------------------------------------------------------
-const CLOUD_DIRS = ['cloudfunctions/checkinFaceTest'];
+const CLOUD_DIRS = ['cloudfunctions/checkinFaceTest', 'cloudfunctions/accountLogin'];
 const ALLOWED_LOCAL = [
   'package.json',
   'miniprogram/pages/checkin/',
@@ -74,6 +74,40 @@ const ALLOWED_LOCAL = [
   'miniprogram/services/api.js',
   'miniprogram/config/runtime.js',
   'miniprogram/app.json',
+  'miniprogram/data/qishanyuan-test-preset.js',
+  'miniprogram/pages/account-login/',
+  'miniprogram/pages/profile/',
+  'miniprogram/pages/life/index.js',
+  'miniprogram/pages/life/index.wxml',
+  'miniprogram/pages/rental/index.js',
+  'miniprogram/pages/rental/index.wxml',
+  'miniprogram/config/version.js',
+  'miniprogram/config/version.json',
+  'cloudfunctions/login/lib/identity-core.js',
+  'cloudfunctions/phoneLogin/lib/identity-core.js',
+  'cloudfunctions/adminLogin/lib/identity-core.js',
+  'admin-web/lib/local-cloud-database.mjs',
+  'admin-web/lib/tenant-password-accounts.mjs',
+  'admin-web/lib/qishanyuan-test-data.mjs',
+  'admin-web/qishanyuan-demo.mjs',
+  'admin-web/public/index.html',
+  'admin-web/public/tenant-password-accounts.html',
+  'admin-web/public/tenant-password-accounts.js',
+  'admin-web/public/qishanyuan-test.html',
+  'admin-web/public/qishanyuan-test.js',
+  'admin-web/tests/tenant-password-accounts.test.mjs',
+  'admin-web/tests/local-cloud-database.test.mjs',
+  'admin-web/tests/tenant-password-routes.test.mjs',
+  'admin-web/tests/qishanyuan-test-data.test.mjs',
+  'tests/account-login-cloud.test.cjs',
+  'tests/account-login-api.test.cjs',
+  'tests/account-login-pages.test.cjs',
+  'tests/identity.test.cjs',
+  'tests/tenant-password-gates.test.cjs',
+  'tests/qishanyuan-pages.test.cjs',
+  'tests/qishanyuan-test-preset.test.cjs',
+  'tests/phone-login.test.cjs',
+  'tests/frontend.test.cjs',
   'tools/checkin-face-worker/',
   'admin-web/lib/checkin-face-test-config.mjs',
   'admin-web/public/checkin-face-test.html',
@@ -191,6 +225,15 @@ for (const dir of CLOUD_DIRS) {
     if (!registered.has(`${dir}/${file}`)) fail(`新云函数目录未登记文件（闭合缺口）：${dir}/${file}`);
   }
 }
+
+// Cloud functions deploy independently. They must ship the same reviewed
+// identity coordinator locally, never require a sibling function at runtime.
+const authCore = readFileSync(join(ROOT, 'cloudfunctions/accountLogin/lib/identity-core.js'));
+for (const fn of ['login', 'phoneLogin', 'adminLogin']) {
+  const rel = `cloudfunctions/${fn}/lib/identity-core.js`;
+  if (!existsAsAuthCore(rel) || !authCore.equals(readFileSync(join(ROOT, rel)))) fail(`${rel}: 登录身份协调器必须与 accountLogin 逐字节一致`);
+}
+function existsAsAuthCore(rel) { return existsSync(join(ROOT, rel)) && statSync(join(ROOT, rel)).isFile(); }
 
 // ---------------------------------------------------------------------------
 // 4. 本地导入闭包：相对导入必须可解析；范围内的目标必须登记

@@ -1,95 +1,47 @@
-/**
- * 手机号快捷登录云函数（租户登录）
- *
- * 入参：{ code } —— 来自 <button open-type="getPhoneNumber"> 回调的 e.detail.code
- *
- * 流程：
- *   1. cloud.openapi.phonenumber.getPhoneNumber({ code }) 换取手机号（云调用，无需自管 access_token / 合法域名）
- *   2. 按 OPENID upsert users：存在补 phone，不存在建号
- *   3. 按 phone 查 owners 集合，命中则回填 users.houses 绑定房产
- *
- * 出参：{ code:0, phone, bound, userInfo }
- * 说明：开发者工具虚拟号返回 12066600001~0004（自然查不到 owners → bound=false，验证流程照常走通）；
- *      真机需企业认证 + 额度（0.03 元/次，1000 次免费）。
- */
-const cloud = require('wx-server-sdk');
-cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
+/** Verified phone login, preserving the same canonical WeChat user. */
+'use strict';
+const { withIdentity, putDoc, publicUser, validId } = require('./lib/identity-core');
 
-const db = cloud.database();
-
-exports.main = async (event) => {
-  const { code } = event || {};
-  const { OPENID, UNIONID } = cloud.getWXContext();
-
-  if (!code) return { code: 400, msg: '缺少 code' };
-  if (!OPENID) return { code: 403, msg: '无法识别身份' };
-
-  try {
-    // 1. code 换手机号
-    let phone;
+function createMain({ cloud, db, now = Date.now } = {}) {
+  let sdk = cloud;
+  return async (event = {}) => {
+    if (!event || typeof event.code !== 'string' || !event.code) return { code: 400, msg: '缺少 code' };
     try {
-      const res = await cloud.openapi.phonenumber.getPhoneNumber({ code });
-      phone = res.phoneInfo && res.phoneInfo.purePhoneNumber;
-      if (!phone) return { code: 500, msg: '未获取到手机号' };
-    } catch (e) {
-      // 额度不足单独提示（errno 1400001）
-      if (e && (e.errno === 1400001 || e.errCode === 1400001)) {
-        return { code: 500, msg: '手机号验证额度已用完，请联系管理员充值' };
+      if (!sdk) { sdk = require('wx-server-sdk'); sdk.init({ env: sdk.DYNAMIC_CURRENT_ENV }); }
+      const context = sdk.getWXContext();
+      if (!context || !context.OPENID) return { code: 403, msg: '无法识别身份' };
+      const database = db || sdk.database();
+      let phone;
+      try {
+        const result = await sdk.openapi.phonenumber.getPhoneNumber({ code: event.code });
+        phone = result && result.phoneInfo && result.phoneInfo.purePhoneNumber;
+        if (typeof phone !== 'string' || !phone || phone.length > 32 || /[\x00-\x1f\x7f]/.test(phone)) {
+          return { code: 500, msg: '未获取到手机号' };
+        }
+      } catch (error) {
+        return { code: 500, msg: error && (error.errno === 1400001 || error.errCode === 1400001)
+          ? '手机号验证额度已用完，请联系管理员充值' : '获取手机号失败' };
       }
-      console.error('getPhoneNumber error:', e);
-      return { code: 500, msg: (e && e.errMsg) || '获取手机号失败' };
-    }
-
-    // 2. 按 OPENID upsert users
-    const users = await db.collection('users').where({ _openid: OPENID }).get();
-    let userId;
-    let userInfo;
-
-    if (users.data.length > 0) {
-      userId = users.data[0]._id;
-      const updateData = { phone, phoneBoundAt: db.serverDate(), lastLoginAt: db.serverDate() };
-      if (UNIONID) updateData.unionid = UNIONID;
-      await db.collection('users').doc(userId).update({ data: updateData });
-      userInfo = Object.assign({}, users.data[0], { phone });
-    } else {
-      const newUser = {
-        _openid: OPENID,
-        unionid: UNIONID || null,
-        role: 'user',
-        phone,
-        phoneBoundAt: db.serverDate(),
-        houses: [],
-        points: 0,
-        createdAt: db.serverDate(),
-        lastLoginAt: db.serverDate(),
-      };
-      const added = await db.collection('users').add({ data: newUser });
-      userId = added._id;
-      userInfo = Object.assign({}, newUser, { phone });
-    }
-
-    // 3. 按 phone 回填房产（owners 集合）
-    let bound = Array.isArray(userInfo.houses) && userInfo.houses.length > 0;
-    try {
-      const owners = await db.collection('owners').where({ phone }).limit(1).get();
-      // 管理后台手动维护的房产优先，不再被旧 owners 记录覆盖。
-      if (owners.data.length > 0 && !userInfo.housesManaged) {
-        const owner = owners.data[0];
-        const houseIds = (owner.houses || []).map(h => h.houseId).filter(Boolean);
-        const patch = { houses: houseIds };
-        if (owner.name) patch.name = owner.name;
-        await db.collection('users').doc(userId).update({ data: patch });
-        userInfo = Object.assign({}, userInfo, patch);
-        bound = houseIds.length > 0;
-      }
-    } catch (e) {
-      // owners 集合可能尚未初始化，回填失败不影响登录本身
-      console.warn('owners 匹配失败（可忽略）:', e.message);
-    }
-
-    return { code: 0, phone, bound, userInfo };
-  } catch (err) {
-    console.error('phoneLogin error:', err);
-    return { code: 500, msg: '登录失败' };
-  }
-};
+      // Optional compatibility lookup; ambiguous/unavailable owners do not grant houses.
+      let owner = null;
+      try {
+        const result = await database.collection('owners').where({ phone }).limit(2).get();
+        if (result && Array.isArray(result.data) && result.data.length === 1) owner = result.data[0];
+      } catch { /* Existing owner binding survives an unavailable legacy collection. */ }
+      return await withIdentity({ db: database, context, now }, async ({ tx, trusted, user, timestamp }) => {
+        const next = { ...user, phone, phoneBoundAt: timestamp, lastLoginAt: timestamp };
+        if (trusted.unionid) next.unionid = trusted.unionid;
+        // Re-check the current transactional value, not the earlier profile.
+        if (owner && user.housesManaged !== true) {
+          next.houses = Array.isArray(owner.houses) ? owner.houses.map((house) => house && house.houseId).filter(validId) : [];
+          if (typeof owner.name === 'string' && owner.name.length <= 128 && !/[\x00-\x1f\x7f]/.test(owner.name)) next.name = owner.name;
+        }
+        await putDoc(tx, 'users', user._id, next);
+        const userInfo = publicUser(next);
+        return { code: 0, phone, bound: userInfo.houses.length > 0, userInfo };
+      });
+    } catch { return { code: 'SERVICE_UNAVAILABLE', msg: '登录服务暂不可用' }; }
+  };
+}
+exports.createMain = createMain;
+exports.main = createMain();

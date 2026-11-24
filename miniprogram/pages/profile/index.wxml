@@ -12,6 +12,7 @@
     <button wx:if="{{authenticated}}" class="edit-profile" bindtap="editProfile">编辑资料 ›</button>
   </view>
   <button wx:if="{{!authenticated && !demo}}" class="login-button" open-type="getPhoneNumber" bindgetphonenumber="login" loading="{{loggingIn}}" disabled="{{loggingIn}}">手机号快捷登录</button>
+  <button wx:if="{{!authenticated && !demo}}" class="account-login-button" bindtap="openAccountLogin" disabled="{{loggingIn}}">账号密码登录</button>
   <view wx:if="{{error}}" class="error-panel"><text>{{error}}</text><button bindtap="loadProfile">重新加载</button></view>
   <view class="profile-stats">
     <button bindtap="openService" data-name="我的积分"><text class="stat-value">{{profile.points}}</text><text>我的积分</text></button>

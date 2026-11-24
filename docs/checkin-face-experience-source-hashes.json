@@ -1,8 +1,8 @@
 {
   "schema": "checkin-face-experience-source-hashes/v1",
   "baselineCommit": "6ecb337d4d7e84de6080af53e335b75ec7f46875",
-  "branch": "fix/checkin-face-codex-r2-2026-11-24",
-  "registrationReason": "Codex R2 integrated freeze: CF-R2-01..14 fixes plus mandatory source/request gates and explicit offline package profile. Text hashes use the verifier CRLF-to-LF policy; evidence archive hashes remain raw bytes. Legacy upstream provenance stays separate.",
+  "branch": "feat/tenant-password-qishanyuan-test-2026-11-25",
+  "registrationReason": "Previous R2 freeze preserved; Nov25 extends the test source package with administrator-provisioned same-WeChat tenant password login and the explicit Qishanyuan 242-room fixture. Legacy imported functions retain separate upstream provenance.",
   "baselineSha256Note": "baselineSha256 一律为 null：本清单不登记旧上游原件（旧来源校验由 docs/backend-provenance.json 承担），null 表示“无旧上游登记”，不是未检查；不虚构 originalSha256。原有 10 条条目语义保持不变（仅 sha256 按当前磁盘/契约内容复算，purpose 随实现更新）。",
   "files": [
     {
@@ -10,6 +10,24 @@
       "sha256": "7d2d494c606d4f112465de705fe0ef91772ceeddd48721c80056f256909b5863",
       "purpose": "本地管理后台配置服务：默认关闭、申请版本、派发开关、102 唯一绑定、手填租期、名单、worker 凭据哈希、可信云存储命名空间设置与审计；复用云函数确定性 id 与日期规则。",
       "baselineSha256": null
+    },
+    {
+      "path": "admin-web/lib/local-cloud-database.mjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "0f441bc403e8a1db0f6013f547739809cd010731f8ef4939fdcb1a1eadb74574"
+    },
+    {
+      "path": "admin-web/lib/qishanyuan-test-data.mjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "e0e519f77000185e26c1798dfb1f1acb2014e556a160d024527561e681a93aaa"
+    },
+    {
+      "path": "admin-web/lib/tenant-password-accounts.mjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "fd5b46f197d638f901753cbb234fba6d13b13af68bbb4d5e1fdf8c9fa1e7b45d"
     },
     {
       "path": "admin-web/public/checkin-face-test-config.js",
@@ -24,8 +42,44 @@
       "baselineSha256": null
     },
     {
+      "path": "admin-web/public/index.html",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "0f3f2d8a7c1382fbdf3aaa61d8618f3685d19dfc857447c0c64549ffbc6ef4b4"
+    },
+    {
+      "path": "admin-web/public/qishanyuan-test.html",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "139c2572dcfc058543c1bbe500e25c8df1152fb5d570438b131df8e7d7be117d"
+    },
+    {
+      "path": "admin-web/public/qishanyuan-test.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "13b6186e586c1cc1c7b11b384fe82c5f40dc2b5319d228228b262d9fd963fac3"
+    },
+    {
+      "path": "admin-web/public/tenant-password-accounts.html",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "e1c1eb07dbf3f375501d595c4feed5831c5910e53398eed0a735e8ce839174bf"
+    },
+    {
+      "path": "admin-web/public/tenant-password-accounts.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "615b760e0a121e666c3fceaff5a885f79df7014094a100ca89c8b89c2cf44fd7"
+    },
+    {
+      "path": "admin-web/qishanyuan-demo.mjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "333553063e18603ebed329659543d8f8eccae8565064cdc198321fe9ba875dfa"
+    },
+    {
       "path": "admin-web/server.mjs",
-      "sha256": "4ef7d2844f71e7a3c52a794d1b87490e5630a79a76e68e416a94caba86a4887e",
+      "sha256": "7669516b17e84d5e63ed5a88d982a5a9848ef8694bd6bd875e0357e1feca14b4",
       "purpose": "管理后台 HTTP 服务：新增 PUT /api/checkin-face-test/storage 路由（admin-only，session+CSRF+origin 校验，与云函数共用命名空间正则）。",
       "baselineSha256": null
     },
@@ -40,6 +94,72 @@
       "sha256": "aa0c47ced857348e900d2387f40299a79a39a318d705e7ff072b793abb3cf78d",
       "purpose": "C 路 worker 构造与退出码合成测试。",
       "baselineSha256": null
+    },
+    {
+      "path": "admin-web/tests/local-cloud-database.test.mjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "e97b2f47a6a3208a3f4e33d03056f71a06c3965737c5c985bb4e7feadb3844b5"
+    },
+    {
+      "path": "admin-web/tests/qishanyuan-test-data.test.mjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "baeb45e261992ae6da04d3ccfb96772e33d703bf9f9691bbaad2f612bcdccec3"
+    },
+    {
+      "path": "admin-web/tests/tenant-password-accounts.test.mjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "c60d5536845930878c1e619839b9718e50cb0e7863c217ba3e0e99243c175f91"
+    },
+    {
+      "path": "admin-web/tests/tenant-password-routes.test.mjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "26fbd179ae4d7827a3201c36869daedb9ade129d09b18966bb9e9840ea748ba2"
+    },
+    {
+      "path": "cloudfunctions/accountLogin/README.md",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "24e5435f598e2adfb2a3761aaea437f168eb2821b58383af93811ae8ab26f406"
+    },
+    {
+      "path": "cloudfunctions/accountLogin/index.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "616f254c8948e8f440249bb16eba61ab8191842af21e08c42216978dbfc1b753"
+    },
+    {
+      "path": "cloudfunctions/accountLogin/lib/credentials.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "c4cb0d46957a1934a5d8fdb98708f0194514ce33a4354568d2aa8d7835bd2dab"
+    },
+    {
+      "path": "cloudfunctions/accountLogin/lib/identity-core.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "533c6cb2d11f8513e79f1d195e2f15ac30080c303f5f065cb10c716f6962eca4"
+    },
+    {
+      "path": "cloudfunctions/accountLogin/lib/service.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "20742280300319723ccbd904d3c549dba0f4692f88815a273244e43c4ba1bb08"
+    },
+    {
+      "path": "cloudfunctions/accountLogin/package.json",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "866a658334402628fc81bdce6a28fa38054d574ec311d873340b4bed3f6e9e2f"
+    },
+    {
+      "path": "cloudfunctions/adminLogin/lib/identity-core.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "533c6cb2d11f8513e79f1d195e2f15ac30080c303f5f065cb10c716f6962eca4"
     },
     {
       "path": "cloudfunctions/checkinFaceTest/config.json",
@@ -100,6 +220,30 @@
       "sha256": "57c19a43a080ac54e988bfdd91a4412439a4cf21555ad00dc00348a97ccdf346",
       "purpose": "新测试云函数依赖声明，仅 wx-server-sdk ^3.0.0。",
       "baselineSha256": null
+    },
+    {
+      "path": "cloudfunctions/login/lib/identity-core.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "533c6cb2d11f8513e79f1d195e2f15ac30080c303f5f065cb10c716f6962eca4"
+    },
+    {
+      "path": "cloudfunctions/phoneLogin/lib/identity-core.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "533c6cb2d11f8513e79f1d195e2f15ac30080c303f5f065cb10c716f6962eca4"
+    },
+    {
+      "path": "docs/evidence/auth-qishanyuan-2026-11-25/README.md",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "6f1bdc52758cc4a88f6348bf4f79005fc4d52208a2c624c394c7af28aea37a8c"
+    },
+    {
+      "path": "docs/evidence/auth-qishanyuan-2026-11-25/VALIDATION.md",
+      "purpose": "Nov25集成离线验证及限定范围记录。",
+      "baselineSha256": null,
+      "sha256": "63c63db37425af87367310770e2970a0894751b117fada21690f8df1f8c8d519"
     },
     {
       "path": "docs/evidence/checkin-face-rework-2026-11-24/ARCHIVE-CORRECTION-2026-11-24.md",
@@ -492,10 +636,58 @@
       "baselineSha256": null
     },
     {
+      "path": "miniprogram/app.json",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "1018fe7ebd3388a139415d1a9f43d38bb60a25f4c214cd07dac1d161c1b2faa8"
+    },
+    {
       "path": "miniprogram/config/runtime.js",
-      "sha256": "abd7aace953569eeeff780b4a463163a1dd6f0d57bf7f9bbd32548b58934ee04",
+      "sha256": "0eff56b384f11ba4060e5377ab3ff9dc932679fc27075afe67a3cfa8741dcf3e",
       "purpose": "小程序运行时配置（allowDeviceOperations:false 等门禁）；api.js 的本地导入闭包对象，随闭包登记。",
       "baselineSha256": null
+    },
+    {
+      "path": "miniprogram/config/version.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "0858028225dc68cd6de9c1c0806d64f2a04cff275efdb7d745c70db851c5efff"
+    },
+    {
+      "path": "miniprogram/config/version.json",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "24433429db0ac8a733c9b55a6bdd44eb9649d4a34c77d5e245e03295ae222b2d"
+    },
+    {
+      "path": "miniprogram/data/qishanyuan-test-preset.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "ad4b639f05439474be96f10989f89aef067a0307083019e6fb7629aee2ccc4a7"
+    },
+    {
+      "path": "miniprogram/pages/account-login/index.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "f1a98cce6f21814afcbb74398a8106f67789d6b04baee5aadf6330569177fe59"
+    },
+    {
+      "path": "miniprogram/pages/account-login/index.json",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "ee29d7e47ea708cc023368fa9d84276ce47ea7ae8ec888d33f674227cd03a571"
+    },
+    {
+      "path": "miniprogram/pages/account-login/index.wxml",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "0c1d86da20336582492451e4c15f74cc64bd15a06c5f813e3b9f8817d6bf94c4"
+    },
+    {
+      "path": "miniprogram/pages/account-login/index.wxss",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "c15d4808dd0737e1ba5f4b424fcead1303aff80124d2fac69be5bf5b551c1354"
     },
     {
       "path": "miniprogram/pages/checkin/index.js",
@@ -546,26 +738,68 @@
       "baselineSha256": null
     },
     {
+      "path": "miniprogram/pages/life/index.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "cc48422e7fedbd355ae31639b43c6b34f4ac1f2fdf2dda3835718b10592c569f"
+    },
+    {
+      "path": "miniprogram/pages/life/index.wxml",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "7ab2ef996d6e4dc7ede2febd1e6b7fe78449fc0866e4de14d6e9b951703b8206"
+    },
+    {
+      "path": "miniprogram/pages/profile/index.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "6f759bd14befb0c7541d910ccc736ceebefc2dc383369162c24acb70f52f1fcc"
+    },
+    {
+      "path": "miniprogram/pages/profile/index.wxml",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "933bd84268aca7e7a79464d8e2a041933532fba879e7d05bd33680a827a42e2d"
+    },
+    {
+      "path": "miniprogram/pages/profile/index.wxss",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "ec8f3d77244d61838d76ea0bd99e747323ebef997faa2e2d8918716fdfa3dada"
+    },
+    {
+      "path": "miniprogram/pages/rental/index.js",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "b9d120e847326d9cc04d5ec01b5410a28b779ed9127220e4d1ba9966419657ae"
+    },
+    {
+      "path": "miniprogram/pages/rental/index.wxml",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "fd202e5d969d31ff4c1ee1c9f0273187b47b245f469884006e6a6571bb014977"
+    },
+    {
       "path": "miniprogram/services/api.js",
-      "sha256": "00648cc9e9bd8735868f945d26053b222495c0b4dca5477d03c1a48546daefc0",
+      "sha256": "965f6757f410d48b06bce4d753d71c31b7d4adb63aa92b3580e8dbf671cbc71e",
       "purpose": "API 适配层：严格客户端字段白名单、uploadTestFace 原样透传 fileID、createFaceTask 白名单载荷。",
       "baselineSha256": null
     },
     {
       "path": "package.json",
-      "sha256": "347cc721123bedf2f5d9c0696b7b57396cf22532b2a6875fdac454250b16e2ed",
+      "sha256": "809b624d9f650742b08c60b0309f00ff0dc48ec193ba2c5b66e96af1ecc89665",
       "purpose": "根发布检查入口：check:checkin-face = 静态检查 && 来源校验；新增 check:checkin-face:sources。",
       "baselineSha256": null
     },
     {
       "path": "scripts/checkin-face-static-check.mjs",
-      "sha256": "1c3ebaa0ed72cdddda718eae1bd6ac7d851ff304552d1d3c5ec7c23555eb676d",
+      "sha256": "fa8765b1a53cf8e3e089663bc791bbd08054ad9da60638c9562ce02b6cf72c24",
       "purpose": "R10 静态门禁：mode=device 与 validityMode=fixed 逐项断言（构造处锚定、注释剔除），设备秘密/监听/重发等守护。",
       "baselineSha256": null
     },
     {
       "path": "scripts/package-release.py",
-      "sha256": "87b0dac823e89b0bcc06a304040cc861859e63080f0a793aafd9032e9bc37cf8",
+      "sha256": "3b2cd825ce05795cbe3b62cc6e6c3613af3057aa2c5db6a2261ae4a3ca8f5b20",
       "purpose": "Codex R2: explicit release gates, safe offline packaging, or immutable archive correction; see CODEX-R2-PACKAGE-NOTES-2026-11-24.md.",
       "baselineSha256": null
     },
@@ -577,9 +811,27 @@
     },
     {
       "path": "scripts/verify-checkin-face-sources.mjs",
-      "sha256": "480db189b80a5dec66aba843218cbb3fc633ecf011a2288467d1a8e6010b3302",
+      "sha256": "aca70959d71fe69b856020a789fa5ab089eed94d8868e788795b3a19d384eb00",
       "purpose": "C1 新文件来源清单机器校验器：路径/哈希/云目录闭合/本地导入闭包/baseline 不伪造/旧来源隔离；接入 check:checkin-face。",
       "baselineSha256": null
+    },
+    {
+      "path": "tests/account-login-api.test.cjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "649d5c63eee58c844acac19dd13365f5b47d8f4d04496cd76b5787484e2a40c6"
+    },
+    {
+      "path": "tests/account-login-cloud.test.cjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "da7eaa432fd507a8212a169f28f2c35cc7e8d164ffabce88d79161aa9fbe1284"
+    },
+    {
+      "path": "tests/account-login-pages.test.cjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "f7961f69cf8da47b771993fa00f3267dadec9b13eea64f29fa4d0c55f8afa69c"
     },
     {
       "path": "tests/checkin-face-api.test.cjs",
@@ -612,10 +864,52 @@
       "baselineSha256": null
     },
     {
+      "path": "tests/frontend.test.cjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "1fee63e1668286d3cf8d41b7380b20a299c37d358137784a0655c7891dfb54f2"
+    },
+    {
+      "path": "tests/identity.test.cjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "7559947ed0240c0ff269db9f2628231e019655101cb2cc98935e223b0b6ae480"
+    },
+    {
+      "path": "tests/phone-login.test.cjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "bf8c1faaf2a75f716d031d262b81a9f55bfaca0b2104fe98f70a1b597688d79b"
+    },
+    {
+      "path": "tests/qishanyuan-pages.test.cjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "8e5aa1faade89c6fc2afceb92bbb74317f85e1c0b1cd31832a863e8f2b54f3e5"
+    },
+    {
+      "path": "tests/qishanyuan-test-preset.test.cjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "89ac83af289c9a77ea67d9b96d247650bd41fda6d22ed53c3f5b8bc77fd1c2d0"
+    },
+    {
       "path": "tests/support/d-network-guard.cjs",
       "sha256": "01f165f3bf14446b208ddf8b0961413875563760d594067301a2d5fabdc3b416",
       "purpose": "D 路不转发网络守卫（预载、命名绑定、自检、子进程继承）。",
       "baselineSha256": null
+    },
+    {
+      "path": "tests/support/tenant-auth-memory-db.cjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "36810f1ef5d0d92219a54656118c7b7251386ffaab157a65840d42bda85ab0e2"
+    },
+    {
+      "path": "tests/tenant-password-gates.test.cjs",
+      "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+      "baselineSha256": null,
+      "sha256": "b8c133a084446b057932c787c7b80df661f3df8c55ebfc8e8f07fe77f2512585"
     },
     {
       "path": "tools/checkin-face-worker/README.md",

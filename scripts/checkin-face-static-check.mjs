@@ -182,7 +182,7 @@ function requireRequestConstruction(file, pairs) {
 }
 
 const DEVICE_SECRET_CHECKS = [
-  [/(?:password|privateKey|certificatePath|certificateBase64|clientSecret|accessToken)\s*[:=]/i, '设备/凭据秘密关键字不得进入小程序或云函数'],
+  [/(?:privateKey|certificatePath|certificateBase64|clientSecret|accessToken)\s*[:=]/i, '设备/凭据秘密关键字不得进入小程序或云函数'],
   [/\borigin\s*[:=]\s*['"]https?:\/\//i, '设备 origin 主机不得进入小程序或云函数'],
   [/https?:\/\/[^\s'"<>]+/i, '源码不得硬编码设备/服务端主机地址'],
   [/-----BEGIN (?:RSA |EC )?PRIVATE KEY-----|BEGIN CERTIFICATE-----/, '证书/私钥内容不得进入源码'],
@@ -193,7 +193,28 @@ const CLIENT_FILES = [
   ...sourceFiles('miniprogram', ['.js', '.json', '.wxml', '.wxss']),
   ...sourceFiles('cloudfunctions/checkinFaceTest', ['.js', '.json']),
 ];
-for (const file of CLIENT_FILES) checkLines(file, DEVICE_SECRET_CHECKS);
+for (const file of CLIENT_FILES) {
+  checkLines(file, DEVICE_SECRET_CHECKS);
+  const rel = relative(ROOT, file).replaceAll('\\', '/');
+  // Tenant login handles an end user's password transiently; this is not a
+  // device credential. Permit only these exact input/clear operations. A
+  // nonempty literal password, any other file, or device secrets still fail.
+  const tenantInput = (line) => {
+    if (rel === 'miniprogram/pages/account-login/index.wxml') {
+      const assignments = [...line.matchAll(/\bpassword\s*[:=]\s*("[^"]*"|'[^']*'|\S+)/g)];
+      return assignments.length === 1 && assignments[0][1] === '"{{true}}"';
+    }
+    if (rel === 'miniprogram/services/api.js') return /^\s*let password = input && typeof input\.password === 'string' \? input\.password : '';\s*$/.test(line)
+      || /^\s*password = '';\s*$/.test(line);
+    if (rel === 'miniprogram/pages/account-login/index.js') return /^\s*let password = this\.data\.password;\s*$/.test(line)
+      || /^\s*password = '';\s*$/.test(line)
+      || /^\s*if \(!this\.data\.submitting && !this\.data\.preparing\) this\.setData\(\{ password: String\(event\.detail\.value \|\| ''\) \}\);\s*$/.test(line)
+      || (/password:\s*''/.test(line) && !/password\s*:\s*(?!'')\S/.test(line));
+    return false;
+  };
+  checkLines(file, [[(line) => /\bpassword\s*[:=]/i.test(line) && !tenantInput(line),
+    '设备密码/硬编码密码不得进入客户端；仅允许已审查的租客密码输入及清空操作']]);
+}
 
 // 新客户端路径：载荷字段白名单与模式/长期兜底。
 const API_FILE = join(ROOT, 'miniprogram/services/api.js');

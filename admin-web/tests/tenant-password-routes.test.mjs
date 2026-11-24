@@ -1,0 +1,105 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { Readable } from "node:stream";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createRequire } from "node:module";
+import { createApp } from "../server.mjs";
+import { LocalStore } from "../lib/store.mjs";
+import { LocalCloudDatabase } from "../lib/local-cloud-database.mjs";
+const { TenantAccountService } = createRequire(import.meta.url)("../../cloudfunctions/accountLogin/lib/service.js");
+const guard = globalThis.__DSH_D_NETWORK_GUARD__;
+let baseline;
+test.before(() => guard.assertLoadTimeClean());
+test.beforeEach(() => { baseline = guard.snapshot(); });
+test.afterEach(() => guard.assertNoViolations(baseline, "tenant-admin routes"));
+
+async function harness(t, options = {}) {
+  const directory = await mkdtemp(join(tmpdir(), "smartpm-admin-route-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = options.store || await new LocalStore(directory).init();
+  const account = { _id: "synthetic-admin", username: "local.test", enabled: true,
+    revision: 1, role: options.role || "admin", name: "测试管理员" };
+  const accounts = { rows: [account], login: async () => account };
+  let handler;
+  const origin = "http://127.0.0.1:4173";
+  await createApp({ directory, store, accounts, origin, mode: options.mode || "demo",
+    serverFactory(fn) { handler = fn; return { on() {}, address() { return { port: 4173 }; } }; } });
+  let cookie, csrf;
+  async function request(path, { method = "GET", data, authenticated = true, withCsrf = true, withOrigin = true } = {}) {
+    const req = Readable.from(data === undefined ? [] : [Buffer.from(JSON.stringify(data))]);
+    Object.assign(req, { url: path, method, socket: { remoteAddress: "127.0.0.1" }, headers: {
+      ...(withOrigin ? { origin } : {}), ...(authenticated && cookie ? { cookie } : {}),
+      ...(withCsrf && csrf ? { "x-csrf-token": csrf } : {}),
+    } });
+    const headers = {};
+    const result = {};
+    const res = { headersSent: false, setHeader(key, value) { headers[key.toLowerCase()] = value; },
+      writeHead(status) { this.headersSent = true; result.status = status; },
+      end(value) { result.payload = value === undefined ? null : JSON.parse(String(value)); } };
+    await handler(req, res);
+    result.headers = headers;
+    return result;
+  }
+  async function login() {
+    const response = await request("/api/login", { method: "POST", data: { username: "local.test", password: "synthetic-admin-input" } });
+    assert.equal(response.status, 200);
+    cookie = response.headers["set-cookie"].split(";")[0];
+    csrf = response.payload.csrf;
+  }
+  return { store, accounts, request, login };
+}
+
+test("actual admin handler enforces session, origin, CSRF and current administrator", async (t) => {
+  const h = await harness(t);
+  assert.equal((await h.request("/api/tenant-password-accounts")).status, 401);
+  await h.login();
+  const before = structuredClone(h.store.data);
+  assert.equal((await h.request("/api/tenant-password-accounts/create", { method: "POST", data: {}, withCsrf: false })).status, 403);
+  assert.equal((await h.request("/api/tenant-password-accounts/create", { method: "POST", data: {}, withOrigin: false })).status, 403);
+  assert.deepEqual(h.store.data, before);
+  assert.deepEqual((await h.request("/api/tenant-password-accounts")).payload, { rows: [] });
+  const preset = await h.request("/api/test-property-preset");
+  assert.equal(preset.payload.preset.rooms.length, 242);
+  h.accounts.rows = [{ ...h.accounts.rows[0], revision: 2 }];
+  assert.equal((await h.request("/api/tenant-password-accounts")).status, 401);
+});
+
+test("actual admin route opens a code-bound tenant through real local atomic service", async (t) => {
+  const h = await harness(t);
+  await h.login();
+  const service = new TenantAccountService({ db: new LocalCloudDatabase(h.store) });
+  const context = { APPID: "synthetic-app", OPENID: "synthetic-tenant" };
+  const opening = await service.prepare(context);
+  const response = await h.request("/api/tenant-password-accounts/create", { method: "POST", data: {
+    requestCode: opening.requestCode, username: "tenant.route", password: "synthetic-tenant-input" } });
+  assert.equal(response.status, 200);
+  assert.equal(response.payload.username, "tenant.route");
+  assert.equal(JSON.stringify(response.payload).includes("hashHex"), false);
+  const result = await service.login(context, { username: "tenant.route", password: "synthetic-tenant-input" });
+  assert.equal(result.code, 0);
+  assert.equal(result.userInfo._id, response.payload.userId);
+  assert.equal((await h.request("/api/tenant-password-accounts")).payload.rows.length, 1);
+});
+
+test("ordinary staff cannot manage tenants or view internal rooms", async (t) => {
+  const h = await harness(t, { role: "viewer" });
+  await h.login();
+  const before = structuredClone(h.store.data);
+  for (const path of ["/api/tenant-password-accounts", "/api/test-property-preset"]) {
+    assert.equal((await h.request(path)).status, 403);
+  }
+  assert.equal((await h.request("/api/tenant-password-accounts/create", { method: "POST", data: {} })).status, 403);
+  assert.deepEqual(h.store.data, before);
+});
+
+test("database initialization failures are redacted inside tenant route boundary", async (t) => {
+  const store = { app: { database() { throw Object.assign(Error("SYNTHETIC_INTERNAL_SENTINEL"), { status: 503 }); } } };
+  const h = await harness(t, { mode: "live", store });
+  await h.login();
+  const response = await h.request("/api/tenant-password-accounts");
+  assert.equal(response.status, 503);
+  assert.equal(response.payload.code, "SERVICE_UNAVAILABLE");
+  assert.equal(JSON.stringify(response).includes("SYNTHETIC_INTERNAL_SENTINEL"), false);
+});

@@ -68,6 +68,10 @@ def validation_commands(checkout, checkin_face=False):
         files += [
             'admin-web/tests/checkin-face-config.test.mjs',
             'admin-web/tests/checkin-face-worker.test.mjs',
+            'admin-web/tests/tenant-password-accounts.test.mjs',
+            'admin-web/tests/local-cloud-database.test.mjs',
+            'admin-web/tests/tenant-password-routes.test.mjs',
+            'admin-web/tests/qishanyuan-test-data.test.mjs',
             'tools/checkin-face-worker/tests/rework-r05-r06.test.mjs',
             'tools/checkin-face-worker/tests/rework-r08-r09.test.mjs',
             'tools/checkin-face-worker/tests/sdk-resolution.test.mjs',

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>栖山苑测试房源基准 · 管理工作台</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/qishanyuan-test.js"></script>
+  </head>
+  <body>
+    <div class="main-wrap">
+      <header class="topbar"><div class="breadcrumb">管理控制台 <span>/ <b>栖山苑测试房源</b></span></div><a class="link" href="/">返回管理工作台</a></header>
+      <main class="workspace">
+        <div class="page-head"><div><h1>栖山苑测试房源基准</h1><p>内置测试数据预览，非真实出租报价。</p></div></div>
+        <div class="notice">9 层共 242 间：2–9 层共 232 间单间供测试展示；1 层 10 间仅内部管理，其中 102 保留为内部测试房。<br />租金、面积、真实地址均待配置，不能预订或据此签约。本页只读查看默认基准；实际管理记录请在专用本地测试实例的物业管理中维护。</div>
+        <section class="panel">
+          <div class="panel-head"><h2>默认楼栋与房间</h2><button id="reload-preset" class="btn" type="button">刷新预览</button></div>
+          <p id="preset-summary" role="status">正在读取测试基准…</p>
+          <label class="field">查看楼层<select id="preset-floor"><option value="">全部 9 层（含内部）</option><option value="1">1 层（内部隐藏）</option><option value="2">2 层</option><option value="3">3 层</option><option value="4">4 层</option><option value="5">5 层</option><option value="6">6 层</option><option value="7">7 层</option><option value="8">8 层</option><option value="9">9 层</option></select></label>
+          <div class="table-wrap"><table><thead><tr><th>房号</th><th>楼层</th><th>户型</th><th>测试展示</th><th>租金</th><th>面积</th><th>地址</th></tr></thead><tbody id="preset-rows"></tbody></table></div>
+          <p id="preset-message" class="muted" role="alert" hidden></p>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

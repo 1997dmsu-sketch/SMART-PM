@@ -13,10 +13,13 @@ function normalizeHouse(raw) {
   const house = Object.assign({}, raw);
   house.id = String(house.id || house._id || '');
   house.title = house.title || house.name || '房源详情';
-  house.priceText = formatPrice(house.price);
-  house.payment = house.payment || '待咨询';
-  house.rooms = house.rooms || house.roomType || '待补充';
-  house.areaText = house.area ? `${house.area}㎡` : '待补充';
+  house.isTestPreset = house.isTestPreset === true;
+  house.canBook = !house.isTestPreset && house.canBook !== false;
+  house.hasPrice = house.price !== null && house.price !== undefined && house.price !== '' && Number.isFinite(Number(house.price));
+  house.priceText = house.isTestPreset && !house.hasPrice ? '待配置' : formatPrice(house.price);
+  house.payment = house.payment || (house.isTestPreset ? '待配置' : '待咨询');
+  house.rooms = (house.isTestPreset && house.layoutName) || house.rooms || house.roomType || '待补充';
+  house.areaText = house.area ? `${house.area}㎡` : (house.isTestPreset ? '待配置' : '待补充');
   house.orientation = house.orientation || '待补充';
   house.floorText = house.floor ? `${house.floor}${String(house.floor).includes('层') ? '' : '层'}` : '待补充';
   house.tags = Array.isArray(house.tags) ? house.tags : [];
@@ -26,8 +29,8 @@ function normalizeHouse(raw) {
   house.nearby = house.nearby || house.address || '位置信息待补充';
   house.availableFrom = house.availableFrom || '入住时间待咨询';
   house.leaseTerm = house.leaseTerm || '租期与看房安排请咨询';
-  house.agencyFee = house.agencyFee === undefined ? '需咨询' : String(house.agencyFee);
-  house.depositText = formatPrice(house.deposit);
+  house.agencyFee = house.agencyFee === undefined || house.agencyFee === null ? (house.isTestPreset ? '待配置' : '需咨询') : String(house.agencyFee);
+  house.depositText = house.isTestPreset && (house.deposit === undefined || house.deposit === null) ? '待配置' : formatPrice(house.deposit);
   const facilities = Array.isArray(house.facilities) ? house.facilities : [];
   house.facilityItems = FACILITIES.map(item => Object.assign({}, item, { available: facilities.includes(item.name) || facilities.includes(item.key) }));
   return house;
@@ -60,7 +63,7 @@ Page({
     this.setData({ loading: true, error: '' });
     try {
       const raw = await api.getHouse(this.houseId);
-      if (!raw) { this.setData({ loading: false, house: null }); return; }
+      if (!raw) { this.setData({ loading:false,house:null,recommendations:[],galleryImages:[],appointmentOpen:false }); return; }
       const house = normalizeHouse(raw);
       this.houseId = house.id || this.houseId;
       let favorites = [];
@@ -70,7 +73,7 @@ Page({
         const result = await api.listHouses({ pageSize: 6 });
         this.setData({ recommendations: (result.houses || []).filter(item => String(item.id || item._id) !== this.houseId).slice(0, 5).map(normalizeHouse) });
       } catch (_) { this.setData({ recommendations: [] }); }
-    } catch (error) { this.setData({ loading: false, error: error.message || '房源加载失败，请稍后重试' }); }
+    } catch (error) { this.setData({ loading:false,error:error.message || '房源加载失败，请稍后重试',house:null,recommendations:[],galleryImages:[],appointmentOpen:false }); }
   },
   goBack() {
     if (getCurrentPages().length > 1) wx.navigateBack();
@@ -108,12 +111,18 @@ Page({
       wx.showToast({ title: next ? '已关注此房源' : '已取消关注', icon: 'none' });
     } catch (_) { wx.showToast({ title: '保存失败，请重试', icon: 'none' }); }
   },
-  openAppointment() { this.setData({ appointmentOpen: true, formError: '' }); },
+  bookingUnavailable() {
+    if (this.data.house && this.data.house.canBook) return false;
+    wx.showToast({ title:this.data.house && this.data.house.isTestPreset ? '测试房源仅供浏览，暂不可预约' : '此房源暂不可预约',icon:'none' });
+    return true;
+  },
+  openAppointment() { if (this.bookingUnavailable()) return; this.setData({ appointmentOpen:true,formError:'' }); },
   closeAppointment() { this.setData({ appointmentOpen: false }); },
   stopPropagation() {},
   changeDate(event) { this.setData({ appointmentDate: event.detail.value }); },
   changeTime(event) { this.setData({ appointmentTime: event.detail.value }); },
   saveAppointment(event) {
+    if (this.bookingUnavailable()) return;
     const { name, phone, note } = event.detail.value;
     if (!String(name || '').trim()) { this.setData({ formError: '请填写联系人' }); return; }
     if (!/^1\d{10}$/.test(String(phone || '').trim())) { this.setData({ formError: '请填写有效的 11 位手机号' }); return; }
@@ -127,12 +136,13 @@ Page({
     } catch (_) { this.setData({ formError: '草稿保存失败，请重试' }); }
   },
   contactPhone() {
+    if (this.data.house && this.data.house.isTestPreset) { wx.showToast({ title:'测试房源暂未配置联系电话',icon:'none' }); return; }
     if (this.data.demo) { wx.showModal({ title: '设计演示', content: '当前为演示房源，不会拨打电话。接入真实房源后可联系工作人员。', showCancel: false }); return; }
     const phone = String(this.data.house.phone || '').replace(/[\s-]/g, '');
     if (!/^(\+?86)?1\d{10}$|^0\d{9,11}$/.test(phone)) { wx.showToast({ title: '此房源暂未提供联系电话', icon: 'none' }); return; }
     wx.makePhoneCall({ phoneNumber: phone, fail: () => {} });
   },
-  consult() { wx.switchTab({ url: '/pages/messages/index' }); },
+  consult() { if (this.data.house && this.data.house.isTestPreset) { wx.showToast({ title:'测试房源仅供浏览，暂未开放咨询',icon:'none' }); return; } wx.switchTab({ url:'/pages/messages/index' }); },
   seeMore() { wx.switchTab({ url: '/pages/life/index' }); },
   openRecommendation(event) { wx.navigateTo({ url: `/pages/rental/index?id=${encodeURIComponent(event.currentTarget.dataset.id)}` }); },
   onShareAppMessage() {

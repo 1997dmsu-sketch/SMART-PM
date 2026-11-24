@@ -32,8 +32,9 @@
       </view>
     </view>
     <view class="summary" id="section-overview">
+      <view wx:if="{{house.isTestPreset}}" class="demo-label">栖山苑测试基准 · 房源仅供浏览，不可预约或付款</view>
       <view wx:if="{{demo}}" class="demo-label">设计演示 · 房源信息仅用于预览</view>
-      <view class="price-row"><text class="price">{{house.priceText}}</text><text class="price-unit">元/月</text><text class="payment">（{{house.payment}}）</text></view>
+      <view class="price-row"><text class="price">{{house.priceText}}</text><text wx:if="{{house.hasPrice}}" class="price-unit">元/月</text><text class="payment">（{{house.payment}}）</text></view>
       <view class="facts">
         <view class="fact"><text class="fact-value">{{house.rooms}}</text><text class="fact-label">{{house.rentType || '租赁方式待补充'}}</text></view>
         <view class="fact"><text class="fact-value">{{house.areaText}}</text><text class="fact-label">建筑面积</text></view>
@@ -55,11 +56,11 @@
       <view class="detail-card" id="section-lease">
         <view class="card-title">租住详情</view>
         <view class="availability">{{house.availableFrom}}</view>
-        <view class="lease-row"><text>{{house.leaseTerm}}</text><text class="green" bindtap="openAppointment">◷ 预约看房 ›</text></view>
+        <view class="lease-row"><text>{{house.leaseTerm}}</text><text wx:if="{{house.canBook}}" class="green" bindtap="openAppointment">◷ 预约看房 ›</text><text wx:else class="booking-note">暂不可预约</text></view>
         <view class="subheading">费用明细</view>
         <view class="fee-table">
           <view><text class="fee-label">付款方式</text><text class="fee-value">{{house.payment}}</text></view>
-          <view><text class="fee-label">租金</text><text class="fee-value">{{house.priceText}}元/月</text></view>
+          <view><text class="fee-label">租金</text><text class="fee-value">{{house.priceText}}<text wx:if="{{house.hasPrice}}">元/月</text></text></view>
           <view><text class="fee-label">中介费 ⓘ</text><text class="fee-value">{{house.agencyFee}}</text></view>
           <view><text class="fee-label">押金 ⓘ</text><text class="fee-value">{{house.depositText}}</text></view>
         </view>
@@ -92,10 +93,10 @@
         <view class="card-title">附近好房推荐<text class="see-more" bindtap="seeMore">查看更多 ›</text></view>
         <scroll-view wx:if="{{recommendations.length}}" scroll-x class="recommendation-scroll">
           <view wx:for="{{recommendations}}" wx:key="id" class="recommendation" data-id="{{item.id}}" bindtap="openRecommendation">
-            <view class="recommendation-cover"><image wx:if="{{item.images.length}}" src="{{item.images[0]}}" mode="aspectFill" /><text wx:else class="no-photo">暂无图片</text><text class="cover-badge">在租房源</text></view>
+            <view class="recommendation-cover"><image wx:if="{{item.images.length}}" src="{{item.images[0]}}" mode="aspectFill" /><text wx:else class="no-photo">暂无图片</text><text class="cover-badge">{{item.isTestPreset ? '测试房源' : '在租房源'}}</text></view>
             <text class="recommendation-title">{{item.title}}</text>
             <text class="recommendation-desc">{{item.areaText}}/{{item.rooms}}</text>
-            <text class="recommendation-price">{{item.priceText}}<text>元/月</text></text>
+            <text class="recommendation-price">{{item.priceText}}<text wx:if="{{item.hasPrice}}">元/月</text></text>
           </view>
         </scroll-view>
         <view wx:else class="no-recommendations">暂无其他推荐房源</view>
@@ -104,7 +105,7 @@
 
     <view class="bottom-actions">
       <button class="minor-action {{favorite ? 'is-favorite' : ''}}" bindtap="toggleFavorite"><image src="/assets/rental-follow.png" /><text>{{favorite ? '已关注' : '关注'}}</text></button>
-      <button class="minor-action" bindtap="openAppointment"><image src="/assets/rental-appointment.png" /><text>预约</text></button>
+      <button class="minor-action" disabled="{{!house.canBook}}" bindtap="openAppointment"><image src="/assets/rental-appointment.png" /><text>{{house.canBook ? '预约' : '暂不可预约'}}</text></button>
       <button class="contact-action phone" bindtap="contactPhone"><image src="/assets/rental-phone.png" />电话联系</button>
       <button class="contact-action chat" bindtap="consult"><text class="chat-bubble">•••</text>在线咨询</button>
     </view>

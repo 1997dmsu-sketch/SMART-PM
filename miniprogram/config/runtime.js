@@ -6,5 +6,7 @@ module.exports = {
   allowDeviceOperations: false,
   // UI-only entry visibility for the check-in / face-enrollment experience build.
   // This flag is NOT a server-side approval input and never grants device access.
-  checkinFaceTestEntry: true
+  checkinFaceTestEntry: true,
+  // Explicit bundled fixture, never a fallback for a failed live API call.
+  testPropertyPreset: 'qishanyuan-test-v1'
 };

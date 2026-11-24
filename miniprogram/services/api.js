@@ -3,6 +3,8 @@ const demo = require('./demo');
 const clone = value => JSON.parse(JSON.stringify(value));
 const isDemo = () => config.mode === 'demo';
 let profile = null;
+let authGeneration = 0;
+let activeLogin = null;
 const pendingUnlocks = new Set();
 let demoConversations = clone(demo.conversations);
 function unsupported(message) { return Promise.reject(new Error(message)); }
@@ -129,7 +131,54 @@ async function getFaceTask(input) {
 function normalizeHouse(h) {
   return Object.assign({},h,{id:h.id||h._id,cover:h.cover||h.image||(h.images||[])[0]||'',images:h.images||(h.cover?[h.cover]:[])});
 }
+function usesQishanyuanPreset() {
+  return config.mode === 'live' && config.testPropertyPreset === 'qishanyuan-test-v1';
+}
+function presetHouse(room) {
+  return normalizeHouse(Object.assign({}, room, {
+    isTestPreset: true, isPublic: false, canBook: false,
+    floor: room.floorNumber, roomType: room.layoutName || '待配置',
+    rentType: '待配置', price: room.price, area: room.area,
+    priceText: '租金待配置', areaText: '面积待配置',
+    cover: '', images: [], tags: ['栖山苑测试预设', '租金待配置']
+  }));
+}
+function positivePage(value, fallback, maximum) {
+  return Number.isSafeInteger(value) && value > 0 ? Math.min(value, maximum) : fallback;
+}
+function listPresetHouses(filters) {
+  // 这是显式测试数据源，绝不在真实云端失败的 catch 中调用。
+  const preset = require('../data/qishanyuan-test-preset');
+  const options = filters && typeof filters === 'object' ? filters : {};
+  let rows;
+  if (options.id !== undefined) {
+    const room = preset.getPublicRoom(options.id);
+    rows = room ? [room] : [];
+  } else rows = preset.listPublicRooms();
+  rows = rows.map(presetHouse).filter(room => {
+    if (options.community && room.community !== options.community) return false;
+    if (options.roomType && options.roomType !== 'all') {
+      const wanted = String(options.roomType);
+      if (!room.rooms.startsWith(wanted) && room.roomType !== wanted && room.layoutCode !== wanted) return false;
+    }
+    if (options.rentType && options.rentType !== 'all') {
+      const wanted = options.rentType === 'whole' ? '整租' : (options.rentType === 'share' ? '合租' : options.rentType);
+      if (room.rentType !== wanted) return false;
+    }
+    if (options.priceMin !== undefined || options.priceMax !== undefined) {
+      if (typeof room.price !== 'number' || !Number.isFinite(room.price)) return false;
+      if (options.priceMin !== undefined && room.price < options.priceMin) return false;
+      if (options.priceMax !== undefined && room.price >= options.priceMax) return false;
+    }
+    return true;
+  });
+  const page = positivePage(options.page, 1, Number.MAX_SAFE_INTEGER);
+  const pageSize = positivePage(options.pageSize, 20, 500);
+  return { houses: rows.slice((page - 1) * pageSize, page * pageSize), total: rows.length,
+    page, pageSize, isTestPreset: true, presetId: preset.PRESET_ID };
+}
 async function listHouses(filters = {}) {
+  if (usesQishanyuanPreset()) return listPresetHouses(filters);
   let result;
   if (isDemo()) {
     const rows=demo.houses.filter(h => h.isPublic !== true && (!filters.community||h.community===filters.community) && (filters.priceMin===undefined||h.price>=filters.priceMin) && (filters.priceMax===undefined||h.price<filters.priceMax) && (!filters.roomType||h.rooms.startsWith(String(filters.roomType))) && (!filters.rentType||filters.rentType==='all'||h.rentType===(filters.rentType==='whole'?'整租':'合租')));
@@ -141,6 +190,10 @@ async function listHouses(filters = {}) {
   return result;
 }
 async function getHouse(id) {
+  if (usesQishanyuanPreset()) {
+    const room = require('../data/qishanyuan-test-preset').getPublicRoom(id);
+    return room ? presetHouse(room) : null;
+  }
   if (isDemo()) return clone(demo.houses.find(h=>h.isPublic !== true && (h.id===id || !id)) || null);
   if (!id) return null;
   // Revalidate visibility; a previously viewed rental may now be a public room.
@@ -199,9 +252,88 @@ async function getProfile() { if(isDemo())return clone(demo.profile);return prof
 async function loginWithPhone(code) {
   if(isDemo())throw new Error('演示模式无需授权手机号');
   if(!code)throw new Error('未获得手机号授权');
-  const r=await call('phoneLogin',{code});profile=mapProfile(r.userInfo||{});return clone(profile);
+  const generation = ++authGeneration;
+  activeLogin = { generation, kind: 'phone' };
+  try {
+    const r = await call('phoneLogin', { code });
+    if (generation !== authGeneration) throw new Error('登录已取消，请重新操作');
+    profile = mapProfile(r.userInfo || {});
+    return clone(profile);
+  } finally {
+    if (activeLogin && activeLogin.generation === generation) activeLogin = null;
+  }
 }
-function logout(){profile=null;}
+function passwordBytes(value) {
+  try { return encodeURIComponent(value).replace(/%[0-9a-f]{2}/gi, 'x').length; }
+  catch (_) { return Infinity; }
+}
+function validatePasswordProfile(user) {
+  const required = ['_id', 'role', 'houses', 'points'];
+  const optional = ['name', 'nickname', 'avatar', 'phone', 'community', 'house', 'propertyId', 'couponsCount', 'ordersCount'];
+  if (!user || typeof user !== 'object' || Array.isArray(user)) throw new Error('登录服务返回资料异常，请稍后重试');
+  const clean = {};
+  for (const key of Reflect.ownKeys(user)) {
+    const descriptor = Object.getOwnPropertyDescriptor(user, key);
+    if (typeof key !== 'string' || !required.concat(optional).includes(key)
+        || !descriptor || !descriptor.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      throw new Error('登录服务返回资料异常，请稍后重试');
+    }
+    clean[key] = descriptor.value;
+  }
+  const safeText = (value, maximum) => typeof value === 'string' && value.length <= maximum && !/[\x00-\x1f\x7f]/.test(value);
+  const safeId = value => typeof value === 'string' && value.length > 0 && value.length <= 256 && !/[\x00-\x20\x7f/\\]/.test(value);
+  if (!required.every(key => Object.prototype.hasOwnProperty.call(clean, key))
+      || !safeId(clean._id)
+      || !['user', 'admin'].includes(clean.role)
+      || !Array.isArray(clean.houses) || !clean.houses.every(safeId)
+      || typeof clean.points !== 'number' || !Number.isFinite(clean.points) || clean.points < 0) {
+    throw new Error('登录服务返回资料异常，请稍后重试');
+  }
+  for (const key of optional) {
+    if (!Object.prototype.hasOwnProperty.call(clean, key)) continue;
+    if (key === 'couponsCount' || key === 'ordersCount') {
+      if (!Number.isSafeInteger(clean[key]) || clean[key] < 0) throw new Error('登录服务返回资料异常，请稍后重试');
+    } else if (!safeText(clean[key], 512)) throw new Error('登录服务返回资料异常，请稍后重试');
+  }
+  clean.houses = clean.houses.slice();
+  return clean;
+}
+async function prepareAccountOpening() {
+  const r = await call('accountLogin', { action: 'prepare' });
+  if (typeof r.requestCode !== 'string' || !/^[A-Z2-7]{16}$/.test(r.requestCode)
+      || !Number.isSafeInteger(r.expiresAt) || r.expiresAt <= 0) throw new Error('开户信息暂不可用，请稍后重试');
+  return { requestCode: r.requestCode, expiresAt: r.expiresAt };
+}
+async function loginWithPassword(input) {
+  if (isDemo()) throw new Error('演示模式不会登录真实账号');
+  const username = input && typeof input.username === 'string' ? input.username.trim().toLowerCase() : '';
+  let password = input && typeof input.password === 'string' ? input.password : '';
+  if (!/^[a-z0-9][a-z0-9._-]{3,31}$/.test(username)) throw new Error('账号需为4–32位字母、数字或._-');
+  if (password.length < 12 || password.length > 128 || passwordBytes(password) > 256) throw new Error('密码需为12–128个字符，且不超过256字节');
+  const generation = ++authGeneration;
+  activeLogin = { generation, kind: 'password' };
+  try {
+    const r = await call('accountLogin', { action: 'login', username, password });
+    if (generation !== authGeneration) throw new Error('登录已取消，请重新操作');
+    const user = validatePasswordProfile(r.userInfo);
+    profile = mapProfile(user);
+    return clone(profile);
+  } catch (error) {
+    if (error && error.code === 'AUTH_FAILED') error.message = '账号或密码不正确，或当前微信尚未关联该账号';
+    if (error && error.code === 'SERVICE_UNAVAILABLE') error.message = '登录服务暂不可用，请稍后重试';
+    throw error;
+  } finally {
+    password = '';
+    if (activeLogin && activeLogin.generation === generation) activeLogin = null;
+  }
+}
+function cancelPasswordLogin() {
+  if (activeLogin && activeLogin.kind === 'password') {
+    authGeneration += 1;
+    activeLogin = null;
+  }
+}
+function logout(){authGeneration+=1;activeLogin=null;profile=null;}
 function listFamily(){return isDemo()?Promise.resolve(clone(demo.family)):unsupported('旧后端尚未提供家庭成员查询接口');}
 function addFamily(){return unsupported('家庭成员添加接口尚未接入，未保存成员');}
 function getProperty(){return isDemo()?Promise.resolve(clone(demo.property)):unsupported('旧后端尚未提供住户房产详情接口');}
@@ -209,4 +341,4 @@ function listMeters(type){
  if(isDemo())return Promise.resolve(type==='water'?[]:[clone(demo.meter)]);
  return unsupported('旧水电表接口尚未按住户房产过滤，完成权限对接后开放');
 }
-module.exports={isDemo,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,logout,listFamily,addFamily,getProperty,listMeters,getCheckinFaceConfig,applyTestCheckin,uploadTestFace,createFaceTask,getFaceTask,isReviewChannelCode,REVIEW_CHANNEL_CODES};
+module.exports={isDemo,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,prepareAccountOpening,loginWithPassword,cancelPasswordLogin,logout,listFamily,addFamily,getProperty,listMeters,getCheckinFaceConfig,applyTestCheckin,uploadTestFace,createFaceTask,getFaceTask,isReviewChannelCode,REVIEW_CHANNEL_CODES};

@@ -7,6 +7,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve, extname } from "node:path";
 import { PropertyService } from "./lib/property.mjs";
 import { LocalStore, CloudStore } from "./lib/store.mjs";
+import { LocalCloudDatabase } from "./lib/local-cloud-database.mjs";
+import { AdminTenantPasswordAccounts } from "./lib/tenant-password-accounts.mjs";
 import { resolvePublicFile } from "./lib/static-path.mjs";
 import { Accounts, publicAccount } from "./lib/auth.mjs";
 import { FaceEnrollmentService } from "./lib/face-enrollment.mjs";
@@ -51,70 +53,6 @@ async function body(req, limit = 65536, raw = false) {
     fail("JSON 格式错误");
   }
 }
-/**
- * Demo-mode adapter: exposes the minimal cloudbase-database surface used by
- * the B02 admin config service on top of the existing LocalStore, so the
- * config page works without a cloud account. Live mode passes app.database()
- * directly. All writes still go through store.change(), which persists with
- * 0o600 and appends an admin_audit row.
- */
-class LocalCheckinFaceCollection {
-  constructor(store, name, auditContext) {
-    this.store = store;
-    this.name = name;
-    this.auditContext = auditContext;
-  }
-  async rows() {
-    if (this.store.data && !Array.isArray(this.store.data[this.name])) this.store.data[this.name] = [];
-    const rows = await this.store.list(this.name);
-    return Array.isArray(rows) ? rows : [];
-  }
-  doc(id) {
-    return {
-      get: async () => {
-        const row = (await this.rows()).find((item) => item._id === id) || null;
-        return { data: row ? structuredClone(row) : null };
-      },
-      set: async ({ data }) => {
-        // transact() is an upsert for deterministic ids; change() would 404 on
-        // first write because it requires an existing record.
-        await this.store.transact([{ collection: this.name, id }], () => [
-          { collection: this.name, id, data: { ...data, _id: id } },
-        ], this.auditContext);
-        return { stats: { updated: 1 } };
-      },
-    };
-  }
-  async add({ data }) {
-    const id = typeof data?._id === "string" && data._id ? data._id : randomUUID();
-    await this.store.transact([{ collection: this.name, id }], () => [
-      { collection: this.name, id, data: { ...data, _id: id } },
-    ], this.auditContext);
-    return { id };
-  }
-  where(query) {
-    const matches = (row) => Object.entries(query).every(([key, value]) => row?.[key] === value);
-    return {
-      get: async () => ({ data: (await this.rows()).filter(matches).map((row) => structuredClone(row)) }),
-      count: async () => ({ total: (await this.rows()).filter(matches).length }),
-    };
-  }
-}
-
-class LocalCheckinFaceDatabase {
-  constructor(store, actor, actorId) {
-    this.store = store;
-    this.auditContext = {
-      actor,
-      actorId,
-      action: "入住人脸测试配置写入",
-    };
-  }
-  collection(name) {
-    return new LocalCheckinFaceCollection(this.store, name, this.auditContext);
-  }
-}
-
 async function readCheckinFaceAudit(database, environment, limit = 1) {
   try {
     const collection = database.collection(CHECKIN_FACE_COLLECTIONS.AUDIT);
@@ -153,6 +91,7 @@ export async function createApp({
   secure = false,
   faceServiceFactory = () => new FaceEnrollmentService(),
   checkinFaceTestConfigFactory = null,
+  serverFactory = http.createServer,
 } = {}) {
   if (!["demo", "live"].includes(mode))
     throw Error("ADMIN_MODE must be demo or live");
@@ -175,7 +114,7 @@ export async function createApp({
     faceSessions.delete(token);
   }
   const sessionAge = 8 * 60 * 60 * 1000;
-  const server = http.createServer(async (req, res) => {
+  const server = serverFactory(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("X-Frame-Options", "DENY");
@@ -315,6 +254,40 @@ export async function createApp({
           action,
         });
 
+        if (path === "/api/test-property-preset" && method === "GET") {
+          if (account.role !== "admin") fail("仅系统管理员可查看内部测试房源", 403);
+          const { getPreset } = require("../miniprogram/data/qishanyuan-test-preset.js");
+          return send({ preset: getPreset() });
+        }
+        if (path === "/api/tenant-password-accounts" || path.startsWith("/api/tenant-password-accounts/")) {
+          if (account.role !== "admin") fail("仅系统管理员可管理租客密码账号", 403);
+          try {
+            const database = mode === "live"
+              ? store.app?.database?.()
+              : new LocalCloudDatabase(store, audit("租客密码账号管理"));
+            if (!database) fail("账号服务未配置", 503);
+            const service = new AdminTenantPasswordAccounts({ database });
+            const actor = { id: account._id, role: account.role };
+            if (path === "/api/tenant-password-accounts" && method === "GET") {
+              return send({ rows: await service.listAccounts(actor) });
+            }
+            const operations = {
+              "/api/tenant-password-accounts/create": "createAccount",
+              "/api/tenant-password-accounts/reset": "resetPassword",
+              "/api/tenant-password-accounts/status": "setStatus",
+            };
+            if (method !== "POST" || !Object.hasOwn(operations, path)) fail("接口不存在", 404);
+            return send(await service[operations[path]](actor, await body(req, 4096)));
+          } catch (error) {
+            // Do not send arbitrary database messages or submitted credentials.
+            const publicCodes = new Set(["ADMIN_REQUIRED", "INVALID_INPUT", "REQUEST_INVALID",
+              "ACCOUNT_EXISTS", "ACCOUNT_NOT_FOUND", "REVISION_CONFLICT"]);
+            const code = publicCodes.has(error.code) ? error.code : "SERVICE_UNAVAILABLE";
+            const status = code === "SERVICE_UNAVAILABLE" ? 503 : error.status || 400;
+            return send({ code, error: "账号操作未获确认，请刷新列表核对" }, status);
+          }
+        }
+
         // B04: admin-only local test configuration. Session + CSRF + origin have
         // already been enforced above for every /api/ PUT; existing /api/face/*
         // behaviour is untouched.
@@ -335,7 +308,7 @@ export async function createApp({
             if (typeof Service !== "function") throw Error("Admin config service export is invalid");
             const database = mode === "live" && store.app && typeof store.app.database === "function"
               ? store.app.database()
-              : new LocalCheckinFaceDatabase(store, account.username, account._id);
+              : new LocalCloudDatabase(store, audit("入住人脸测试配置写入"));
             return new Service(null, { database, operator: account.username });
           };
           const configService = await makeConfigService();

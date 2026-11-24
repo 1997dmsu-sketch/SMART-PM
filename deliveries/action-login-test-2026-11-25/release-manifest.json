@@ -1,0 +1,29 @@
+{
+  "version": "0.1.0-beta.19-checkin-face.3",
+  "tag": null,
+  "commit": "ffa9f97bed367c119a0c73a45ddd762f59e3aba8",
+  "validation_profile": "checkin-face-offline",
+  "channel": "checkin-face-experience-source",
+  "mode": "live",
+  "appid": "wxd83b20cbba2a0b24",
+  "cloudEnv": "cloud1-d6gs08jbb8aa7a138",
+  "platform_upload": "not_performed",
+  "cloud_deployment": "not_performed",
+  "artifact": "SMART-PM-v0.1.0-beta.19-checkin-face.3-ffa9f97b-checkin-face-test.zip",
+  "bytes": 10099327,
+  "sha256": "3fe0cbf0f63c0ed2cb28d9e1e84278e2faf0eb5e3b2df85c6698a323b2b66366",
+  "validated": [
+    "extracted-source root synthetic tests",
+    "focused check-in/cloud/worker synthetic tests",
+    "static miniprogram checks",
+    "mandatory check-in source and request gates",
+    "archive safety tests"
+  ],
+  "not_validated": [
+    "WeChat compilation",
+    "device rendering",
+    "live cloud services",
+    "admin live cloud integration and deployment",
+    "hardware"
+  ]
+}

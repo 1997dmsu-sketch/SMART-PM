@@ -1,7 +1,7 @@
 {
     "schema":  "checkin-face-experience-source-hashes/v1",
     "baselineCommit":  "67051b2bacfc68363dd2c424f5b9686d6ac787b5",
-    "branch":  "release/miniprogram-experience-2026-11-25",
+    "branch":  "release/miniprogram-phone-register-2026-11-25",
     "registrationReason":  "2026-11-25 experience release candidate: remove account-opening-code flow end to end (tenant UI/prepare call, cloud prepare rejection, admin code consumption replaced by verified-phone resident selection); registration no longer auto-grants legacy owner houses; phone cross-WeChat conflict fails closed; add phoneLogin/messageSend openapi permission declarations; reject HEAD on /api (Origin/CSRF bypass fix); worker adapter rejects default unlimited validity; unlock/getLockKey deny empty identity; houseAdmin bindings write housesManaged and validate rooms.",
     "baselineSha256Note":  "baselineSha256 一律为 null：本清单不登记旧上游原件（旧来源校验由 docs/backend-provenance.json 承担），null 表示“无旧上游登记”，不是未检查；不虚构 originalSha256。原有 10 条条目语义保持不变（仅 sha256 按当前磁盘/契约内容复算，purpose 随实现更新）。",
     "files":  [

@@ -1,0 +1,24 @@
+.checkin-page{box-sizing:border-box;width:100%;min-height:100vh;background:#f7f7f7;padding-bottom:calc(48rpx + env(safe-area-inset-bottom));color:#202124}
+.checkin-page button{box-sizing:border-box;min-width:0;padding:0;margin:0;border:0;background:transparent;font-size:inherit;line-height:inherit;font-weight:normal;border-radius:0}
+.checkin-page button::after{border:0}
+.checkin-nav{position:relative;display:flex;align-items:center;justify-content:center;font-size:34rpx;font-weight:600}
+.checkin-nav .nav-title{position:absolute;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.checkin-nav .nav-back{position:absolute;left:24rpx;top:0;height:100%;display:flex;align-items:center;font-size:56rpx;line-height:1;color:#333}
+.test-badge-line{display:flex;align-items:center;gap:12rpx;padding:12rpx 28rpx 4rpx;flex-wrap:wrap}
+.test-badge-line .test-scope{font-size:21rpx;line-height:1.5;color:#8a6a2f}
+.info-card,.ability-card,.submit-card,.result-card{margin:20rpx 24rpx;background:#fff;border-radius:24rpx;padding:26rpx 24rpx}
+.info-card .section-heading{display:block;font-size:30rpx;font-weight:600;line-height:1.5;margin-bottom:16rpx}
+.info-row{display:flex;align-items:flex-start;gap:16rpx;padding:14rpx 0;border-bottom:1rpx solid #f2f2f2;font-size:26rpx;line-height:1.6}
+.info-row .info-label{flex:0 0 150rpx;color:#888}
+.info-row .info-value{flex:1;min-width:0;color:#202124;word-break:break-all}
+.info-row .room-no{font-size:36rpx;font-weight:700;color:#ff2450}
+.info-row .readonly-tag{flex:0 0 auto;font-size:20rpx;line-height:1.5;color:#999;background:#f5f5f5;border-radius:16rpx;padding:2rpx 10rpx}
+.info-card .daily-hours{display:block;margin-top:20rpx;font-size:26rpx;font-weight:600;color:#18794e;background:#e9f7ef;border-radius:16rpx;padding:14rpx 18rpx}
+.ability-card .ability-hint,.result-card .result-hint{display:block;font-size:24rpx;line-height:1.7;color:#666;margin-top:16rpx}
+.ability-card .pending-config{margin-top:16rpx}
+.ability-disabled{background:#fafafa}
+.submit-card .confirm-row{display:flex;align-items:flex-start;gap:14rpx;padding:6rpx 0 22rpx}
+.submit-card .confirm-text{flex:1;min-width:0;font-size:25rpx;line-height:1.7;color:#444}
+.submit-card .submit-button,.result-card .submit-button{width:100%;background:#ff2450;color:#fff;border-radius:48rpx;padding:22rpx;font-size:30rpx;font-weight:600;line-height:1.5}
+.submit-card .safety-note{display:block;margin-top:18rpx;font-size:21rpx;line-height:1.6;color:#999}
+.result-card .submit-button{margin-top:24rpx}

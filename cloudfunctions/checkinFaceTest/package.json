@@ -1,0 +1,9 @@
+{
+  "name": "checkinFaceTest",
+  "version": "1.0.0",
+  "description": "入住＋人脸登记体验版专用测试云函数（独立命名空间，默认关闭）",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0"
+  }
+}

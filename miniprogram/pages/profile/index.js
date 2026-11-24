@@ -1,6 +1,7 @@
 const api = require('../../services/api');
 const { getNavigationLayout } = require('../../utils/layout');
 const release = require('../../config/version');
+const runtime = require('../../config/runtime');
 const EMPTY_PROFILE = { nickname: '未登录', avatar: '/assets/profile-avatar.png', propertyId: '—', community: '', house: '', points: '—', coupons: '—', orders: '—' };
 
 Page({
@@ -18,10 +19,13 @@ Page({
       { id: 'access', name: '门禁管理' }, { id: 'coupon', name: '优惠券' },
       { id: 'favorite', name: '我的收藏' }, { id: 'about', name: '关于我们' },
     ],
+    // 纯 UI 显隐开关；不是服务端审批依据，也不改变 mode / allowDeviceOperations。
+    checkinFaceEntry: runtime.checkinFaceTestEntry === true,
+    checkinTestMenu: { id: 'checkinTest', name: '测试入住' },
     showFavorites: false, favorites: [],
   },
   onLoad() {
-    this.setData({ ...getNavigationLayout(), demo: api.isDemo() });
+    this.setData({ ...getNavigationLayout(), demo: api.isDemo(), checkinFaceEntry: runtime.checkinFaceTestEntry === true });
   },
   onResize() { this.setData(getNavigationLayout()); },
   onShow() {
@@ -57,6 +61,11 @@ Page({
   openService(event) { this.unavailable(event.currentTarget.dataset.name || '物业服务'); },
   openMenu(event) {
     const id = event.currentTarget.dataset.id;
+    if (id === 'checkinTest') {
+      if (!this.data.checkinFaceEntry || !this.data.authenticated) return;
+      wx.navigateTo({ url: '/pages/checkin/index' });
+      return;
+    }
     if (id === 'house') { wx.navigateTo({ url: '/pages/property/index' }); return; }
     if (id === 'family' || id === 'access') {
       getApp().globalData.openFamily = id === 'family';

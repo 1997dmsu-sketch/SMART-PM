@@ -21,6 +21,87 @@ async function call(name, data = {}) {
   if (!result || result.code !== 0) throw new Error(result && result.msg || '服务返回异常');
   return result;
 }
+
+// ---- 入住＋人脸登记体验版：严格客户端字段白名单 ----
+// 以下字段由服务端生成或判定；客户端入参一旦出现即本地抛错，绝不下发云端。
+const CHECKIN_FACE_FORBIDDEN_FIELDS = [
+  'approved', 'testMode', 'mode', 'validityMode', 'roomNo', 'roomId', 'houseId',
+  'doorNo', 'employeeNo', 'validFrom', 'validTo', 'status',
+  'openid', 'environment', 'projectId', 'buildingId', 'roomBindingId',
+  'leaseSnapshotId', 'leaseRevision', 'configRevision', 'result',
+  'decisionReasons', 'claimId', 'revision', 'siteVerification', 'deviceOutcome',
+  'deviceKey', 'origin', 'username', 'password', 'pin', 'privateKey', 'cert'
+];
+
+function assertCheckinFaceInput(name, input, allowedFields) {
+  if (input === undefined || input === null) return {};
+  if (typeof input !== 'object' || Array.isArray(input)) throw new Error(`[${name}] 入参必须是对象`);
+  const fields = Array.isArray(allowedFields) ? allowedFields : [];
+  Object.keys(input).forEach(key => {
+    if (CHECKIN_FACE_FORBIDDEN_FIELDS.indexOf(key) !== -1) {
+      throw new Error(`[${name}] 字段 ${key} 由服务端决定，客户端禁止提交`);
+    }
+    if (fields.indexOf(key) === -1) throw new Error(`[${name}] 不支持的字段 ${key}`);
+  });
+  return input;
+}
+
+async function callCheckinFace(data) {
+  const result = await call('checkinFaceTest', data);
+  return result.data || {};
+}
+
+async function getCheckinFaceConfig(input) {
+  assertCheckinFaceInput('getCheckinFaceConfig', input, []);
+  return callCheckinFace({ action: 'getConfig' });
+}
+
+async function applyTestCheckin(input) {
+  const payload = assertCheckinFaceInput('applyTestCheckin', input, ['applicationVersion']);
+  if (!payload.applicationVersion) throw new Error('[applyTestCheckin] 缺少服务端配置版本');
+  return callCheckinFace({ action: 'applyCheckin', applicationVersion: payload.applicationVersion });
+}
+
+async function uploadTestFace(input) {
+  assertCheckinFaceInput('uploadTestFace', input, ['applicationId', 'cloudPath', 'filePath']);
+  if (isDemo()) throw new Error('演示模式不会上传真实人脸照片');
+  const payload = input || {};
+  if (!payload.applicationId) throw new Error('[uploadTestFace] 缺少入住申请标识');
+  if (!payload.filePath) throw new Error('[uploadTestFace] 缺少本地照片路径');
+  if (typeof payload.cloudPath !== 'string' || payload.cloudPath.indexOf('test-face/') !== 0) {
+    throw new Error('[uploadTestFace] 上传路径必须由服务端下发');
+  }
+  if (!wx.cloud || !wx.cloud.uploadFile) throw new Error('当前环境不支持微信云存储上传');
+  const response = await wx.cloud.uploadFile({
+    cloudPath: payload.cloudPath,
+    filePath: payload.filePath,
+    config: { env: config.cloudEnv }
+  });
+  const fileId = response && (response.fileID || response.fileId);
+  if (!fileId) throw new Error('[uploadTestFace] 上传未返回 fileID');
+  return fileId;
+}
+
+async function createFaceTask(input) {
+  const payload = assertCheckinFaceInput('createFaceTask', input, ['applicationId', 'fileId', 'consent']);
+  if (!payload.applicationId) throw new Error('[createFaceTask] 缺少入住申请标识');
+  if (!payload.fileId) throw new Error('[createFaceTask] 缺少上传文件标识');
+  if (payload.consent !== true) throw new Error('[createFaceTask] 需要本人确认照片用途');
+  return callCheckinFace({
+    action: 'createFaceTask',
+    applicationId: payload.applicationId,
+    fileId: payload.fileId,
+    consent: true
+  });
+}
+
+async function getFaceTask(input) {
+  if (input && typeof input === 'object') assertCheckinFaceInput('getFaceTask', input, ['applicationId']);
+  const applicationId = typeof input === 'string' ? input : (input && input.applicationId);
+  if (!applicationId) throw new Error('[getFaceTask] 缺少入住申请标识');
+  return callCheckinFace({ action: 'getMyTask', applicationId });
+}
+
 function normalizeHouse(h) {
   return Object.assign({},h,{id:h.id||h._id,cover:h.cover||h.image||(h.images||[])[0]||'',images:h.images||(h.cover?[h.cover]:[])});
 }
@@ -104,4 +185,4 @@ function listMeters(type){
  if(isDemo())return Promise.resolve(type==='water'?[]:[clone(demo.meter)]);
  return unsupported('旧水电表接口尚未按住户房产过滤，完成权限对接后开放');
 }
-module.exports={isDemo,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,logout,listFamily,addFamily,getProperty,listMeters};
+module.exports={isDemo,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,logout,listFamily,addFamily,getProperty,listMeters,getCheckinFaceConfig,applyTestCheckin,uploadTestFace,createFaceTask,getFaceTask};

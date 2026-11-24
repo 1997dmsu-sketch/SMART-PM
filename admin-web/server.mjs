@@ -1,5 +1,6 @@
 import { VR_LIMIT, vrUpload, vrFile } from "./lib/vr.mjs";
 import http from "node:http";
+import { createRequire } from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -19,6 +20,11 @@ import {
   fail,
 } from "./lib/model.mjs";
 const root = fileURLToPath(new URL(".", import.meta.url));
+const require = createRequire(import.meta.url);
+// Reuse the same namespace constants as the isolated cloud test function so the
+// admin pages and server gates can never disagree about collection names.
+const { COLLECTIONS: CHECKIN_FACE_COLLECTIONS, ids: CHECKIN_FACE_IDS } = require("../cloudfunctions/checkinFaceTest/lib/store.js");
+const CHECKIN_FACE_TEST_API = "/api/checkin-face-test/";
 const mime = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -44,6 +50,99 @@ async function body(req, limit = 65536, raw = false) {
     fail("JSON 格式错误");
   }
 }
+/**
+ * Demo-mode adapter: exposes the minimal cloudbase-database surface used by
+ * the B02 admin config service on top of the existing LocalStore, so the
+ * config page works without a cloud account. Live mode passes app.database()
+ * directly. All writes still go through store.change(), which persists with
+ * 0o600 and appends an admin_audit row.
+ */
+class LocalCheckinFaceCollection {
+  constructor(store, name, auditContext) {
+    this.store = store;
+    this.name = name;
+    this.auditContext = auditContext;
+  }
+  async rows() {
+    if (this.store.data && !Array.isArray(this.store.data[this.name])) this.store.data[this.name] = [];
+    const rows = await this.store.list(this.name);
+    return Array.isArray(rows) ? rows : [];
+  }
+  doc(id) {
+    return {
+      get: async () => {
+        const row = (await this.rows()).find((item) => item._id === id) || null;
+        return { data: row ? structuredClone(row) : null };
+      },
+      set: async ({ data }) => {
+        // transact() is an upsert for deterministic ids; change() would 404 on
+        // first write because it requires an existing record.
+        await this.store.transact([{ collection: this.name, id }], () => [
+          { collection: this.name, id, data: { ...data, _id: id } },
+        ], this.auditContext);
+        return { stats: { updated: 1 } };
+      },
+    };
+  }
+  async add({ data }) {
+    const id = typeof data?._id === "string" && data._id ? data._id : randomUUID();
+    await this.store.transact([{ collection: this.name, id }], () => [
+      { collection: this.name, id, data: { ...data, _id: id } },
+    ], this.auditContext);
+    return { id };
+  }
+  where(query) {
+    const matches = (row) => Object.entries(query).every(([key, value]) => row?.[key] === value);
+    return {
+      get: async () => ({ data: (await this.rows()).filter(matches).map((row) => structuredClone(row)) }),
+      count: async () => ({ total: (await this.rows()).filter(matches).length }),
+    };
+  }
+}
+
+class LocalCheckinFaceDatabase {
+  constructor(store, actor, actorId) {
+    this.store = store;
+    this.auditContext = {
+      actor,
+      actorId,
+      action: "入住人脸测试配置写入",
+    };
+  }
+  collection(name) {
+    return new LocalCheckinFaceCollection(this.store, name, this.auditContext);
+  }
+}
+
+async function readCheckinFaceAudit(database, environment, limit = 1) {
+  try {
+    const collection = database.collection(CHECKIN_FACE_COLLECTIONS.AUDIT);
+    let rows = [];
+    if (typeof collection.where === "function") {
+      const result = await collection.where({ environment }).get();
+      rows = Array.isArray(result?.data) ? result.data : [];
+    }
+    return rows
+      .sort((a, b) => (Number(b?.createdAt) || 0) - (Number(a?.createdAt) || 0))
+      .slice(0, Math.max(1, Math.min(limit, 10)));
+  } catch {
+    return [];
+  }
+}
+
+/** 只向配置页暴露布尔状态；hash 与明文永不离开服务端。 */
+async function readWorkerTokenConfigured(database, environment) {
+  try {
+    const result = await database
+      .collection(CHECKIN_FACE_COLLECTIONS.CONFIG)
+      .doc(CHECKIN_FACE_IDS.configId(environment))
+      .get();
+    return Boolean(result?.data?.workerTokenHash);
+  } catch {
+    return false;
+  }
+}
+
 export async function createApp({
   mode = "demo",
   directory = join(root, ".data", mode),
@@ -52,6 +151,7 @@ export async function createApp({
   origin,
   secure = false,
   faceServiceFactory = () => new FaceEnrollmentService(),
+  checkinFaceTestConfigFactory = null,
 } = {}) {
   if (!["demo", "live"].includes(mode))
     throw Error("ADMIN_MODE must be demo or live");
@@ -213,6 +313,147 @@ export async function createApp({
           actorId: account._id,
           action,
         });
+
+        // B04: admin-only local test configuration. Session + CSRF + origin have
+        // already been enforced above for every /api/ PUT; existing /api/face/*
+        // behaviour is untouched.
+        if (path.startsWith(CHECKIN_FACE_TEST_API)) {
+          if (account.role !== "admin") fail("仅系统管理员可配置入住人脸测试", 403);
+          const makeConfigService = async () => {
+            if (typeof checkinFaceTestConfigFactory === "function") {
+              return checkinFaceTestConfigFactory({
+                store,
+                mode,
+                environment: mode === "live" ? process.env.CLOUDBASE_ENV_ID : undefined,
+                actor: account.username,
+                actorId: account._id,
+              });
+            }
+            const module = await import("./lib/checkin-face-test-config.mjs");
+            const Service = module.AdminCheckinFaceTestConfig || module.default;
+            if (typeof Service !== "function") throw Error("Admin config service export is invalid");
+            const database = mode === "live" && store.app && typeof store.app.database === "function"
+              ? store.app.database()
+              : new LocalCheckinFaceDatabase(store, account.username, account._id);
+            return new Service(null, { database, operator: account.username });
+          };
+          const configService = await makeConfigService();
+          const envForAudit = configService?.environment || "checkin-face-test";
+
+          if (path === `${CHECKIN_FACE_TEST_API}config` && method === "GET") {
+            const snapshot = (await configService.getConfig()) || {};
+            const audits = await readCheckinFaceAudit(configService.db, envForAudit, 5);
+            const configured = snapshot?.config?.workerTokenConfigured === true
+              ? true
+              : await readWorkerTokenConfigured(configService.db, envForAudit);
+            // Only a boolean leaves the server: never the hash or the plaintext.
+            return send({
+              ...snapshot,
+              workerTokenConfigured: configured,
+              lastAudit: audits[0] || null,
+              recentAudits: audits,
+            });
+          }
+          if (method !== "PUT") fail("接口不存在", 404);
+          const data = await body(req);
+          const reason = typeof data?.reason === "string" ? data.reason.trim().slice(0, 200) : "";
+          if (!reason) fail("请填写本次变更原因（写入审计）", 400);
+
+          let result;
+          try {
+            if (path === `${CHECKIN_FACE_TEST_API}switch`) {
+              if (typeof data.enabled !== "boolean") fail("测试开关必须是布尔值");
+              // The service enforces "enabled only with unique 102 binding + fixed lease".
+              result = await configService.setSwitch(data.enabled, reason);
+            } else if (path === `${CHECKIN_FACE_TEST_API}room`) {
+              // The all-day plan fingerprint is device trust material: it must be
+              // entered by the owner after actually verifying the device plan.
+              const fingerprint = typeof data.accessPlanFingerprint === "string"
+                ? data.accessPlanFingerprint.trim()
+                : "";
+              if (!/^[a-f0-9]{64}$/i.test(fingerprint)) {
+                fail("请先核验设备全天计划并手填 64 位指纹", 400);
+              }
+              // Strict allowlist: the service rejects unknown keys, so strip the
+              // audit reason and pin displayNo to 102 here.
+              const optionalName = (value, label) => {
+                if (value === undefined || value === null || value === "") return undefined;
+                if (typeof value !== "string") fail(`${label}格式错误`, 400);
+                const text = value.trim();
+                if (!text || text.length > 128) fail(`${label}需为 1–128 字`, 400);
+                return text;
+              };
+              const roomInput = {
+                displayNo: "102",
+                projectId: data.projectId,
+                buildingId: data.buildingId,
+                roomId: data.roomId,
+                houseId: data.houseId,
+                doorNo: data.doorNo,
+                deviceKey: data.deviceKey,
+                accessPlanFingerprint: fingerprint,
+              };
+              // Human-readable names are optional admin input only; omit rather
+              // than guessing when not provided (server view falls back to IDs).
+              const projectName = optionalName(data.projectName, "项目名称");
+              const buildingName = optionalName(data.buildingName, "楼栋名称");
+              if (projectName) roomInput.projectName = projectName;
+              if (buildingName) roomInput.buildingName = buildingName;
+              result = await configService.upsertRoomBinding(roomInput, { reason });
+            } else if (path === `${CHECKIN_FACE_TEST_API}lease`) {
+              // Only manually entered YYYY-MM-DD boundaries; no "one year",
+              // "long term" or "auto today" input is accepted anywhere.
+              result = await configService.upsertLease({
+                startDate: data.startDate,
+                endDate: data.endDate,
+                ...(data.status === undefined ? {} : { status: data.status }),
+              }, { reason });
+            } else if (path === `${CHECKIN_FACE_TEST_API}accounts`) {
+              result = await configService.setAllowlist(data.openids, { reason });
+            } else if (path === `${CHECKIN_FACE_TEST_API}worker-token`) {
+              // 明文 token 只在本次请求的 body 内存中存在；服务内部转为 SHA-256 后
+              // 才落库。这里对返回值做白名单，杜绝 hash 或明文被回显。
+              if (typeof configService.setWorkerToken !== "function") {
+                fail("配置服务尚不支持 worker token 设置", 503);
+              }
+              const plainToken = typeof data.token === "string" ? data.token : "";
+              if (plainToken.length < 32 || plainToken.length > 256 || /[\s\x00-\x1f\x7f]/.test(plainToken)) {
+                fail("worker token 必须是 32–256 位随机字符串", 400);
+              }
+              const tokenResult = await configService.setWorkerToken(plainToken.trim(), {
+                operator: account.username,
+                reason,
+              });
+              result = {
+                workerTokenConfigured: true,
+                revision: Number.isSafeInteger(tokenResult?.revision) ? tokenResult.revision : null,
+              };
+            } else fail("接口不存在", 404);
+          } catch (error) {
+            if (error?.status) throw error;
+            if (/^INVALID_DATE/.test(error?.message || "")) {
+              fail("租期日期无效，请手动填写有效的 YYYY-MM-DD 起止日期", 400);
+            }
+            if (typeof error?.code === "string") fail(error.message || "配置无效", 400);
+            throw error;
+          }
+
+          const snapshot = (await configService.getConfig()) || {};
+          const audits = await readCheckinFaceAudit(configService.db, envForAudit, 1);
+          const configured = result?.workerTokenConfigured === true
+            || snapshot?.config?.workerTokenConfigured === true
+            || await readWorkerTokenConfigured(configService.db, envForAudit);
+          return send({
+            ...result,
+            // upsertRoomBinding/upsertLease return per-document revision;
+            // configRevision is the authoritative config revision for CAS.
+            revision: result?.configRevision ?? result?.revision ?? snapshot.revision ?? null,
+            workerTokenConfigured: configured,
+            lastAudit: audits[0] || null,
+            config: snapshot.config || null,
+          });
+        }
+
         if (path.startsWith("/api/face/")) {
           if (account.role !== "admin") fail("仅系统管理员可联调人脸门禁", 403);
           if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress))

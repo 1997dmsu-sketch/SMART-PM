@@ -1,0 +1,69 @@
+{
+  "schema": "checkin-face-experience-source-hashes/v1",
+  "baselineCommit": "6ecb337d4d7e84de6080af53e335b75ec7f46875",
+  "branch": "release/miniprogram-checkin-face-test-2026-11-24",
+  "registrationReason": "C1: scripts/verify-import.mjs asserts every backend-changes.json entry has a matching backend-provenance.json originalSha256. This task adds a new isolated cloud function rather than patching an imported one, so these files are registered here and are deliberately NOT added to docs/backend-changes.json or docs/backend-provenance.json.",
+  "baselineSha256Note": "All entries are newly created files; there is no pre-existing baseline content, so baselineSha256 is null. Do not reinterpret null as an unchecked hash.",
+  "files": [
+    {
+      "path": "cloudfunctions/checkinFaceTest/index.js",
+      "sha256": "831134a10f70473d44ade9cf57faea519a3a1df0a3c7b6df129889fa478a223d",
+      "purpose": "单一云函数入口：action 白名单分派、身份解析、统一 {code,data,msg} 响应；不记录请求体/响应体/文件/凭据。",
+      "baselineSha256": null
+    },
+    {
+      "path": "cloudfunctions/checkinFaceTest/package.json",
+      "sha256": "57c19a43a080ac54e988bfdd91a4412439a4cf21555ad00dc00348a97ccdf346",
+      "purpose": "新测试云函数依赖声明，仅 wx-server-sdk ^3.0.0。",
+      "baselineSha256": null
+    },
+    {
+      "path": "cloudfunctions/checkinFaceTest/config.json",
+      "sha256": "615d688df21f279280a3935ffe98ca79359e4ebb1354550be834f350a75d860c",
+      "purpose": "新测试云函数权限声明，openapi 列表为空。",
+      "baselineSha256": null
+    },
+    {
+      "path": "cloudfunctions/checkinFaceTest/lib/context.js",
+      "sha256": "5b102151ded3a113c0bd8236b8b08a9da29b11a610853277e0fdb6f371cddad0",
+      "purpose": "身份边界：小程序仅取 getWXContext().OPENID；worker 仅取 token，SHA-256 后常量时间比对配置哈希；action 分两组白名单。",
+      "baselineSha256": null
+    },
+    {
+      "path": "cloudfunctions/checkinFaceTest/lib/store.js",
+      "sha256": "ace6511e4a7e045ba82539dc0643e4dd7ec9ca43f08c87ec96d472f9ae9781af",
+      "purpose": "独立命名空间集合名、环境锚定的确定性 _id、revision CAS 封装与审计写入；102 只按 _id 单点读取。",
+      "baselineSha256": null
+    },
+    {
+      "path": "cloudfunctions/checkinFaceTest/lib/config.js",
+      "sha256": "934a863451eb2d09cd0eb1afeafe6758b05207b8c3ddf042b963e1f3517b9aff",
+      "purpose": "失败关闭的配置门：apply/dispatch 两道 revalidate；同号多条 102 以计数检出但绝不取第一条。",
+      "baselineSha256": null
+    },
+    {
+      "path": "cloudfunctions/checkinFaceTest/lib/dates.js",
+      "sha256": "49906768ce17a106af4b105a77b91c5acfa3cfa210476dcb34ba8884d17f9ab2",
+      "purpose": "Asia/Shanghai 墙上时间：手填 YYYY-MM-DD 映射 T00:00:00 / T23:59:59 含首尾边界；无 UTC 偏移、无 +1 day、无默认期限。",
+      "baselineSha256": null
+    },
+    {
+      "path": "cloudfunctions/checkinFaceTest/lib/workflow.js",
+      "sha256": "5904dc9a33e5f0ccd890c3b7ba747fe872987981e3e1edb315e775df59b34bd1",
+      "purpose": "入住/人脸任务状态机、幂等键、claim 二次校验与 CAS、租期变化失效、超时与不确定结果保留事实且不重发。",
+      "baselineSha256": null
+    },
+    {
+      "path": "cloudfunctions/checkinFaceTest/lib/validate.js",
+      "sha256": "b3964d237cb69633456f2efe2b2873c1cf627baf621b22c3ae9f43ccadac85cf",
+      "purpose": "严格入参白名单与未知字段拒绝、fileID 归属校验、device 输出逐项对齐服务端快照。",
+      "baselineSha256": null
+    },
+    {
+      "path": "admin-web/lib/checkin-face-test-config.mjs",
+      "sha256": "5a1286cbe37224a3d346aa1b428aa92ee70b15977ad66b3d5c168cff48f6b339",
+      "purpose": "本地管理后台配置服务：默认关闭、102 唯一绑定、手填租期、名单、worker 凭据哈希设置与审计；复用云函数确定性 id 与日期规则。",
+      "baselineSha256": null
+    }
+  ]
+}

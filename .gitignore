@@ -11,3 +11,8 @@ dist/
 
 admin-web/.data/
 admin-web/test-results/
+
+# Check-in / face-enrollment worker: credentials and transient photo material.
+tools/checkin-face-worker/*.local.json
+tools/checkin-face-worker/.data/
+tools/checkin-face-worker/.cache/

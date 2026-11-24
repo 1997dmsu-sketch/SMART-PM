@@ -24,6 +24,7 @@
   </view>
   <view class="menu-card">
     <text class="section-heading">更多服务</text>
+    <button wx:if="{{checkinFaceEntry && authenticated}}" class="menu-row test-entry" data-id="checkinTest" bindtap="openMenu"><text class="test-entry-icon">住</text><text class="test-entry-name">{{checkinTestMenu.name}}</text><text class="test-badge">测试</text><text class="chevron">›</text></button>
     <button wx:for="{{menus}}" wx:key="id" class="menu-row" data-id="{{item.id}}" bindtap="openMenu"><image src="/assets/profile-{{item.id}}.png" /><text>{{item.name}}</text><text class="chevron">›</text></button>
   </view>
   <view class="release-info">v{{release.version}} · {{release.channel}}</view>

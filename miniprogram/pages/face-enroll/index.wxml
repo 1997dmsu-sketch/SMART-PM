@@ -1,0 +1,44 @@
+<view class="face-page" style="padding-top: {{statusBarHeight}}px;">
+  <view class="face-nav" style="height:{{navHeight}}px;">
+    <view class="nav-back" bindtap="back" aria-label="返回">‹</view>
+    <text class="nav-title" style="left:{{navSideWidth}}px;right:{{navSideWidth}}px;">人脸登记</text>
+  </view>
+  <view class="test-badge-line"><text class="test-badge">测试流程</text><text class="test-scope">房号与租期由服务端下发，本页只读</text></view>
+
+  <view wx:if="{{error}}" class="error-panel"><text>{{error}}</text><button bindtap="retry">重新查询</button></view>
+  <view wx:if="{{loading}}" class="empty-state">正在查询服务端登记状态…</view>
+
+  <block wx:if="{{!loading && !error}}">
+    <view class="info-card">
+      <text class="section-heading">入住信息（只读）</text>
+      <view class="info-row"><text class="info-label">展示房号</text><text class="info-value room-no">{{task.room.displayNo || '—'}}</text><text class="readonly-tag">只读</text></view>
+      <view class="info-row"><text class="info-label">项目 / 楼栋</text><text class="info-value">{{projectBuilding}}</text></view>
+      <view class="info-row"><text class="info-label">租期</text><text class="info-value">{{leaseText}}</text></view>
+      <view class="info-row"><text class="info-label">通行时段</text><text class="info-value">租期内每日24小时</text></view>
+    </view>
+
+    <view class="status-card state-{{taskView.key}}">
+      <text class="status-pill {{taskView.tone}}">{{taskView.label}}</text>
+      <text class="status-hint">{{taskView.hint}}</text>
+      <text wx:if="{{taskView.showSite}}" class="site-notice">待现场刷脸验证</text>
+    </view>
+
+    <view wx:if="{{showUpload}}" class="upload-card">
+      <text class="section-heading">上传本人照片</text>
+      <label class="consent-row">
+        <checkbox value="consent" checked="{{consentConfirmed}}" bindchange="onConsentChange" color="#ff2450" />
+        <text class="consent-text">本人确认：本次上传的是本人照片，仅用于本次测试入住的人脸登记。</text>
+      </label>
+      <button class="primary-button upload-button" bindtap="chooseAndUpload" loading="{{uploading}}" disabled="{{!canUpload}}">选择照片并上传</button>
+      <view wx:if="{{!cloudPathReady}}" class="pending-config">上传路径待服务端下发，请稍后重新查询；本页不会自行拼接路径。</view>
+      <text class="upload-note">照片上传至服务端下发的私有路径；上传成功仅代表平台收件，不代表设备已识别。</text>
+    </view>
+
+    <view wx:else class="upload-card uploaded-card">
+      <text class="section-heading">照片与任务</text>
+      <text class="upload-note">照片已由服务端收件并维持登记任务；状态将自动刷新，无需重复提交，也不会自动重发。</text>
+    </view>
+
+    <text class="safety-note">本页不展示现场识别结果；现场刷脸由本人到门禁设备完成。失败或结果待核不会自动重发，也不会扩大通行范围。</text>
+  </block>
+</view>

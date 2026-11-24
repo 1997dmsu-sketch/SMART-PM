@@ -1,0 +1,24 @@
+{
+  "_readMe": "仅非机密示例。复制为同目录 checkin-face-worker.local.json（Git 已忽略）后填写真实值；不要把本文件填写成真实凭据，也不要贴聊天、提交 Git 或打进发布包。",
+  "_secretNotice": "worker token、云密钥、设备 origin/账号/密码/公开证书路径/私钥/pin 只允许写在 Git 忽略的 *.local.json 或环境变量中，且只在 worker 进程内存使用；本示例中的 device 段一律留空。",
+  "_workerTokenNotice": "worker token 由负责人在本地管理后台「入住＋人脸登记测试配置」页设置（服务端只存 SHA-256，页面只显示已设置/未设置、不回显明文）。worker 从下面 workerTokenEnv 指定的环境变量读取该 token，不从本文件读取。禁止贴聊天、提交 Git 或打进发布包。workerId/deviceKey 是与后台配置对应的非机密标识。",
+  "environment": "checkin-face-test",
+  "cloudEnv": "cloud1-xxxxxxxxxxxx",
+  "functionName": "checkinFaceTest",
+  "workerId": "local-worker-01",
+  "workerTokenEnv": "CHECKIN_FACE_WORKER_TOKEN",
+  "cloudSecretIdEnv": "TENCENTCLOUD_SECRETID",
+  "cloudSecretKeyEnv": "TENCENTCLOUD_SECRETKEY",
+  "deviceKey": "102-test-door",
+  "device": {
+    "origin": "",
+    "username": "",
+    "password": "",
+    "certificatePath": "",
+    "expectedModel": "",
+    "planTemplateNo": "",
+    "developmentTls": false
+  },
+  "name": "",
+  "roomNote": "102"
+}

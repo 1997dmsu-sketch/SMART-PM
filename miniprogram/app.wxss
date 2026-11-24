@@ -1,1 +1,9 @@
 page{background:#f7f7f7;color:#202124;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-size:28rpx;box-sizing:border-box}view,button,input,textarea{box-sizing:border-box}button{font-size:28rpx;line-height:1.5}button::after{border:none}button[disabled]{opacity:.5}image{display:block} .demo-notice{background:#fff4f5;color:#a94757;font-size:21rpx;padding:10rpx 24rpx;text-align:center}.empty-state,.error-state{padding:70rpx 30rpx;text-align:center;color:#888}.error-state{color:#aa4658}.primary-button{background:#ff2450;color:white;border-radius:48rpx;padding:20rpx}.safe-bottom{height:env(safe-area-inset-bottom)}
+.test-badge{display:inline-flex;align-items:center;flex-shrink:0;font-size:20rpx;line-height:1.5;padding:2rpx 10rpx;border-radius:20rpx;background:#fff4e2;color:#a16207;border:1rpx solid #ffd591}
+.status-pill{display:inline-flex;align-items:center;flex-shrink:0;font-size:24rpx;line-height:1.5;font-weight:600;padding:8rpx 18rpx;border-radius:28rpx;background:#f2f3f5;color:#5f6368}
+.status-pill.neutral,.status-pill.muted{background:#f2f3f5;color:#5f6368}
+.status-pill.progress{background:#e8f0ff;color:#2b5fbf}
+.status-pill.allowed,.status-pill.site{background:#e9f7ef;color:#18794e}
+.status-pill.fail{background:#fff0f0;color:#b42318}
+.status-pill.review{background:#fff7e6;color:#a16207}
+.pending-config{display:block;box-sizing:border-box;font-size:24rpx;line-height:1.7;color:#a16207;background:#fff9e8;border-radius:16rpx;padding:16rpx 18rpx;margin-top:12rpx}

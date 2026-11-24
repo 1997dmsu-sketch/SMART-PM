@@ -1,0 +1,56 @@
+<view class="checkin-page" style="padding-top: {{statusBarHeight}}px;">
+  <view class="checkin-nav" style="height:{{navHeight}}px;">
+    <view class="nav-back" bindtap="back" aria-label="返回">‹</view>
+    <text class="nav-title" style="left:{{navSideWidth}}px;right:{{navSideWidth}}px;">测试入住</text>
+  </view>
+  <view class="test-badge-line"><text class="test-badge">测试流程</text><text class="test-scope">仅对受邀测试成员开放 · 房号与租期均由服务端下发</text></view>
+
+  <view wx:if="{{error}}" class="error-panel"><text>{{error}}</text><button bindtap="loadConfig">重新加载</button></view>
+  <view wx:if="{{loading}}" class="empty-state">正在读取服务端配置…</view>
+
+  <block wx:if="{{!loading && !error}}">
+    <view class="info-card">
+      <text class="section-heading">测试房间</text>
+      <view class="info-row"><text class="info-label">展示房号</text><text class="info-value room-no">{{config.room.displayNo || '—'}}</text><text class="readonly-tag">只读</text></view>
+      <view class="info-row"><text class="info-label">项目</text><text class="info-value">{{config.room.projectName || config.room.project || config.room.projectId || '—'}}</text></view>
+      <view class="info-row"><text class="info-label">楼栋</text><text class="info-value">{{config.room.buildingName || config.room.building || config.room.buildingId || '—'}}</text></view>
+    </view>
+
+    <view class="info-card">
+      <text class="section-heading">租期（负责人手填 · 服务端下发）</text>
+      <block wx:if="{{leaseConfigured}}">
+        <view class="info-row"><text class="info-label">起始日期</text><text class="info-value">{{config.lease.startDate}}</text></view>
+        <view class="info-row"><text class="info-label">结束日期</text><text class="info-value">{{config.lease.endDate}}</text></view>
+        <view class="info-row"><text class="info-label">生效时间</text><text class="info-value">{{config.lease.validFrom}} 至 {{config.lease.validTo}}</text></view>
+        <view class="info-row"><text class="info-label">时区</text><text class="info-value">{{config.lease.timezone || 'Asia/Shanghai'}}</text></view>
+        <view class="daily-hours">租期内每日24小时</view>
+      </block>
+      <view wx:else class="pending-config">待配置：租期起止尚未由负责人填写。本页不会自动填日期，也不会默认一年或长期有效。</view>
+    </view>
+
+    <view wx:if="{{eligible}}" class="ability-card">
+      <text class="status-pill allowed">自动通过能力已开放</text>
+      <text class="ability-hint">仅限测试名单内的本人；最终审批由服务端依据开关、名单、102 绑定与租期快照判定。</text>
+      <view wx:if="{{!leaseConfigured}}" class="pending-config">租期待配置，当前不能提交申请。</view>
+    </view>
+    <view wx:else class="ability-card ability-disabled">
+      <text class="status-pill muted">自动通过不可用</text>
+      <text class="ability-hint">{{ineligibleReason}}</text>
+    </view>
+
+    <view wx:if="{{!applied}}" class="submit-card">
+      <label class="confirm-row">
+        <checkbox value="primary" checked="{{primaryConfirmed}}" bindchange="onPrimaryChange" color="#ff2450" />
+        <text class="confirm-text">本人为主入住人，确认以上房号与租期信息均来自服务端且无误。</text>
+      </label>
+      <button class="primary-button submit-button" bindtap="submit" loading="{{submitting}}" disabled="{{submitting || !eligible || !leaseConfigured || !primaryConfirmed}}">提交测试入住申请</button>
+      <text class="safety-note">提交内容仅为服务端下发的配置版本；房号、租期与审批字段不会由本页提交。</text>
+    </view>
+
+    <view wx:if="{{applied}}" class="result-card">
+      <text class="status-pill allowed">入住申请已受理</text>
+      <text class="result-hint">房号与租期以服务端关联为准；下一步请上传本人照片完成人脸登记。</text>
+      <button class="primary-button submit-button" bindtap="goFaceEnroll">上传人脸</button>
+    </view>
+  </block>
+</view>

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>入住＋人脸登记测试配置 · 管理工作台</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/checkin-face-test-config.js"></script>
+  </head>
+  <body>
+    <div class="main-wrap">
+      <header class="topbar">
+        <div class="breadcrumb">
+          管理控制台 <span>/ <b>入住＋人脸登记测试配置</b></span>
+        </div>
+        <div class="top-right">
+          <a class="link" href="/">返回管理工作台</a>
+        </div>
+      </header>
+      <main class="workspace" id="config-app">
+        <div class="page-head">
+          <div>
+            <h1>入住＋人脸登记测试配置</h1>
+            <p>仅本地管理后台可配置；所有写操作留审计。本页不展示、不接收任何设备密码、证书或私钥。</p>
+          </div>
+        </div>
+
+        <div class="banner notice">
+          <strong>默认关闭：</strong>测试自动通过开关缺省为关闭；关闭后新申请立即不再自动通过。<br />
+          <strong>不填租期不自动通过：</strong>租期起止必须由负责人手动填写；未填、取消或过期时页面显示「待配置」，不会回退长期或自动取今天。<br />
+          <strong>秘密边界：</strong>设备地址、账号、密码、公开证书路径、私钥与 pin 只存在于本地受控 worker 的 Git 忽略文件中，不在本页、云端、小程序或日志出现。
+        </div>
+
+        <div id="config-login" class="panel" hidden>
+          <div class="panel-head"><h2>需要管理员登录</h2></div>
+          <p id="config-login-msg" class="error">请先在主工作台以系统管理员身份登录，再打开本页。</p>
+          <p><a class="link" href="/">前往管理工作台登录</a></p>
+        </div>
+
+        <div id="config-content" hidden>
+          <section class="panel" aria-labelledby="config-status-title">
+            <div class="panel-head"><h2 id="config-status-title">当前配置状态</h2></div>
+            <div class="form-grid">
+              <div class="field"><label>配置 revision</label><div id="config-revision" class="stat-value">—</div></div>
+              <div class="field"><label>开关状态</label><div id="config-switch-state" class="badge">—</div></div>
+              <div class="field"><label>worker token 状态</label><div id="config-worker-token-state" class="badge">—</div></div>
+              <div class="field"><label>测试环境</label><div id="config-environment" class="muted">—</div></div>
+            </div>
+            <div class="field">
+              <label>上次审计</label>
+              <pre id="config-last-audit" class="notice">—</pre>
+            </div>
+          </section>
+
+          <section class="panel" aria-labelledby="config-switch-form-title">
+            <div class="panel-head"><h2 id="config-switch-form-title">测试自动通过开关</h2></div>
+            <form id="switch-form" class="form-fields">
+              <div class="field">
+                <label for="switch-enabled">状态</label>
+                <select id="switch-enabled" name="enabled" required>
+                  <option value="false">关闭（默认）</option>
+                  <option value="true">开启（仅测试范围）</option>
+                </select>
+              </div>
+              <div class="field"><label for="switch-reason">变更原因</label><input id="switch-reason" name="reason" maxlength="200" placeholder="必填，例如：体验版现场联调开启" required /></div>
+              <div class="actions"><button class="btn primary" type="submit">保存开关</button></div>
+            </form>
+          </section>
+
+          <section class="panel" aria-labelledby="config-token-form-title">
+            <div class="panel-head"><h2 id="config-token-form-title">worker token（本地随机凭据）</h2></div>
+            <p class="notice">这是负责人本地签发的随机凭据，供 worker 主动领取/上报任务使用，不是设备密码。服务端只保存 SHA-256，页面只显示「已设置/未设置」，明文提交后立即从输入框清除，不回显、不缓存、不写日志。禁止贴聊天、提交 Git 或打进发布包；轮换时直接重新设置即可。</p>
+            <form id="worker-token-form" class="form-fields" autocomplete="off">
+              <div class="field"><label for="worker-token-value">新的 worker token（明文，仅本次提交）</label><input id="worker-token-value" name="token" type="password" minlength="32" maxlength="256" autocomplete="new-password" required /></div>
+              <div class="field"><label for="worker-token-reason">变更原因</label><input id="worker-token-reason" name="reason" maxlength="200" placeholder="必填，例如：轮换本地 worker 凭据" required /></div>
+              <div class="actions"><button class="btn primary" type="submit">设置 / 轮换 token</button></div>
+            </form>
+          </section>
+
+          <section class="panel" aria-labelledby="config-room-form-title">
+            <div class="panel-head"><h2 id="config-room-form-title">102 唯一房间绑定</h2></div>
+            <p class="muted">展示房号固定为 102；需唯一绑定稳定 ID 与测试门号。绝不从多条同号房中默认取第一项。</p>
+            <form id="room-form" class="form-fields">
+              <div class="field"><label for="room-project-id">项目 ID（稳定）</label><input id="room-project-id" name="projectId" maxlength="80" required /></div>
+              <div class="field"><label for="room-project-name">项目名称（可选，用于展示）</label><input id="room-project-name" name="projectName" maxlength="128" placeholder="留空则展示项目 ID" /></div>
+              <div class="field"><label for="room-building-id">楼栋 ID（稳定）</label><input id="room-building-id" name="buildingId" maxlength="80" required /></div>
+              <div class="field"><label for="room-building-name">楼栋名称（可选，用于展示）</label><input id="room-building-name" name="buildingName" maxlength="128" placeholder="留空则展示楼栋 ID" /></div>
+              <div class="field"><label for="room-room-id">房间 ID（稳定）</label><input id="room-room-id" name="roomId" maxlength="80" required /></div>
+              <div class="field"><label for="room-house-id">房产 ID（稳定）</label><input id="room-house-id" name="houseId" maxlength="80" required /></div>
+              <div class="field"><label for="room-door-no">测试门号 doorNo</label><input id="room-door-no" name="doorNo" type="number" min="1" max="65535" step="1" required /></div>
+              <div class="field"><label for="room-device-key">测试设备标识 deviceKey</label><input id="room-device-key" name="deviceKey" maxlength="80" required /></div>
+              <div class="field"><label for="room-access-plan-fingerprint">全天计划指纹（必填，64 位十六进制）</label><input id="room-access-plan-fingerprint" name="accessPlanFingerprint" maxlength="64" pattern="[a-fA-F0-9]{64}" title="必须是 64 位十六进制指纹" required /></div>
+              <p class="notice">指纹须由负责人实际核验设备全天计划（周计划/假日/时段/次数）后填写，属设备可信材料；未填或不一致时上报不会进入「设备查询已确认」，这是预期的失败关闭行为。</p>
+              <div class="field"><label for="room-reason">变更原因</label><input id="room-reason" name="reason" maxlength="200" placeholder="必填" required /></div>
+              <div class="actions"><button class="btn primary" type="submit">保存 102 绑定</button></div>
+            </form>
+          </section>
+
+          <section class="panel" aria-labelledby="config-lease-form-title">
+            <div class="panel-head"><h2 id="config-lease-form-title">测试租期（负责人手填）</h2></div>
+            <p class="notice">起止日期由负责人手动填写，按 Asia/Shanghai 保存为起始日 00:00:00 至结束日 23:59:59 的固定有效期，租期内每天 24 小时。不提供「一年 / 长期 / 自动今天」选项；未填或取消不会自动通过。</p>
+            <form id="lease-form" class="form-fields">
+              <div class="field"><label for="lease-start">起始日期 YYYY-MM-DD</label><input id="lease-start" name="startDate" type="date" required /></div>
+              <div class="field"><label for="lease-end">结束日期 YYYY-MM-DD</label><input id="lease-end" name="endDate" type="date" required /></div>
+              <div class="field"><label for="lease-status">状态</label><select id="lease-status" name="status"><option value="active">启用（active）</option><option value="cancelled">取消（cancelled）</option></select></div>
+              <div class="field"><label for="lease-reason">变更原因</label><input id="lease-reason" name="reason" maxlength="200" placeholder="必填" required /></div>
+              <div class="actions"><button class="btn primary" type="submit">保存租期快照</button></div>
+            </form>
+          </section>
+
+          <section class="panel" aria-labelledby="config-accounts-form-title">
+            <div class="panel-head"><h2 id="config-accounts-form-title">测试账号名单（openid）</h2></div>
+            <p class="muted">一行一个 openid，只有名单内账号才可能自动通过；名单之外保持原审核流程。openid 由负责人在本机登记，不贴聊天、不写小程序。</p>
+            <form id="accounts-form" class="form-fields">
+              <div class="field"><label for="accounts-list">openid 列表</label><textarea id="accounts-list" name="openids" rows="6" placeholder="每行一个 openid"></textarea></div>
+              <div class="field"><label for="accounts-reason">变更原因</label><input id="accounts-reason" name="reason" maxlength="200" placeholder="必填" required /></div>
+              <div class="actions"><button class="btn primary" type="submit">保存测试账号名单</button></div>
+            </form>
+          </section>
+
+          <p class="footer">入住＋人脸登记体验版 · 测试配置仅在本机管理后台生效 · 设备秘密不进入本页与发布包</p>
+        </div>
+      </main>
+    </div>
+    <div id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

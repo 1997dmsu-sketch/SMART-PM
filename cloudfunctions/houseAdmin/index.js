@@ -87,7 +87,7 @@ exports.main = async (event) => {
         return { code: 400, msg: '未知 action: ' + action };
     }
   } catch (err) {
-    console.error('houseAdmin error:', err);
-    return { code: 500, msg: err.message };
+    console.error('houseAdmin error:', err && err.message);
+    return { code: 500, msg: '服务暂时不可用' };
   }
 };

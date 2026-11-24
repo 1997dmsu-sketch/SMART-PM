@@ -31,7 +31,7 @@
                                            },
     "cloudfunctions/houseAdmin/index.js":  {
                                                "originalSha256":  "bd57841811110501d7b0cebebf32db7cfd1e0415f51f6fe2c52de0f5377c96a7",
-                                               "sha256":  "7af8e862c4dced32de65640b52a75fd9252513e681f4255f244cb2e1df83b3b8",
+                                               "sha256":  "13f135f4b8e57f620a3a9ea4f06aee07f6ece609f9f885e538eecfae71e4d930",
                                                "reason":  "2026-11-25 对齐管理端人工绑定：bind/unbind 写入 housesManaged:true；bind 校验 houseId 存在于 rooms（新绑定必须选存在的房号）。"
                                            }
 }

@@ -73,7 +73,7 @@ node --env-file=.env.local server.mjs
 
 ## 4. 房产绑定配套更新
 
-本期后台在手动绑定/解绑时写入 `users.housesManaged = true`。配套修改 `cloudfunctions/phoneLogin/index.js`，让手机号再次登录时保留这些人工绑定，不被旧 `owners` 数据覆盖。
+本期后台与 `cloudfunctions/houseAdmin` 在手动绑定/解绑时写入 `users.housesManaged = true`。手机号登录不再导入旧 `owners` 集合数据（注册不自动新增房屋或门禁权限），人工绑定保存在用户档案中，登录、解绑或租期结束都不会被自动覆盖或恢复。
 
 **在使用真实房产绑定前，先将本版本 phoneLogin 上传并部署：云端安装依赖。** 原始后端哈希保留，变更在 `docs/backend-changes.json` 中记录。未修改 owners 原始资料，也未启用真实开门。
 

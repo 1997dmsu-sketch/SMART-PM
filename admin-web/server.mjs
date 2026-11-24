@@ -150,7 +150,7 @@ export async function createApp({
           return send({
             mode,
             environment: mode === "live" ? process.env.CLOUDBASE_ENV_ID : null,
-            version: "0.2.0-beta.6",
+            version: "0.2.0-beta.7",
           });
         const token = (req.headers.cookie || "")
           .split(";")

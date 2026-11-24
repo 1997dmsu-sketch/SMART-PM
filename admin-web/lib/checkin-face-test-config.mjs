@@ -7,6 +7,10 @@ const require = createRequire(import.meta.url);
 const { COLLECTIONS, ids, ENVIRONMENT } = require("../../cloudfunctions/checkinFaceTest/lib/store.js");
 const dates = require("../../cloudfunctions/checkinFaceTest/lib/dates.js");
 
+// Must stay identical to the authoritative cloud validator in
+// cloudfunctions/checkinFaceTest/lib/validate.js (validateApplicationVersion).
+const APPLICATION_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
 const SECRET_KEYS = new Set([
   "workerTokenHash", "workerToken", "password", "origin", "certificatePath",
   "privateKey", "pin", "clientSecret", "accessToken",
@@ -199,18 +203,19 @@ export class AdminCheckinFaceTestConfig {
 
   /**
    * Persist the application version that the mini-program must present.
-   * An empty version would make every applyCheckin fail with VERSION_MISMATCH,
-   * so it is validated before any write.
+   * The pattern is intentionally identical to the authoritative cloud
+   * validator, so a version accepted here is never rejected by applyCheckin
+   * with INVALID_VERSION. An empty version is rejected before any write.
    *
-   * @param {string} version 1–128 printable characters, no control characters.
+   * @param {string} version 1–64 chars: alphanumeric first, then A-Za-z0-9._-
    * @param {{operator?:string, reason?:string}} options caller identity/reason.
-   * @returns {Promise<{applicationVersion:string, revision:number}>}
+   * @returns {Promise<{applicationVersion:string, revision:number, leaseVersionSynced:boolean}>}
    */
   async setApplicationVersion(version, options = {}) {
     if (typeof version !== "string") fail("INVALID_APPLICATION_VERSION", "申请版本必须是字符串");
     const normalized = version.trim();
-    if (!normalized || normalized.length > 128 || /[\x00-\x1f\x7f]/.test(normalized)) {
-      fail("INVALID_APPLICATION_VERSION", "申请版本必须是 1–128 个可打印字符");
+    if (!APPLICATION_VERSION_PATTERN.test(normalized)) {
+      fail("INVALID_APPLICATION_VERSION", "申请版本须为 1–64 位字母/数字开头，可含 . _ -");
     }
     const operator = typeof options?.operator === "string" && options.operator.trim()
       ? options.operator.trim() : this.operator;

@@ -61,7 +61,7 @@
     },
     {
       "path": "admin-web/lib/checkin-face-test-config.mjs",
-      "sha256": "1433704e456c4b93194c1a2ca941836cf9362802b5ff3f6f49ee053860398c24",
+      "sha256": "413e41d2acde2d724d4a7eb367f0403a4912433203234324f41a7dc539cf4200",
       "purpose": "本地管理后台配置服务：默认关闭、申请版本、派发开关、102 唯一绑定、手填租期、名单、worker 凭据哈希设置与审计；复用云函数确定性 id 与日期规则。",
       "baselineSha256": null
     }

@@ -9,11 +9,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { AdminCheckinFaceTestConfig } from '../lib/checkin-face-test-config.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const require = createRequire(import.meta.url);
+const cloudValidate = require('../../cloudfunctions/checkinFaceTest/lib/validate.js');
+const CLOUD_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const ENV = 'checkin-face-test';
 const TOKEN = 'SyntheticWorkerToken-0123456789abcdef';
 const TOKEN_HASH = createHash('sha256').update(TOKEN, 'utf8').digest('hex');
@@ -203,6 +207,34 @@ test('upsertLease：手填起止映射 T00:00:00/T23:59:59；非法日期/越界
   }
   const noRoom = service();
   await assert.rejects(() => noRoom.config.upsertLease(LEASE_INPUT), (error) => error.code === 'ROOM_UNCONFIGURED');
+});
+
+test('setApplicationVersion 接受云端同样接受的合法版本并持久化', async () => {
+  const valid = ['0.1.0-beta.19-checkin-face.1', 'v1', 'A', 'a_b-c.d', '9'.repeat(64)];
+  const { config } = service();
+  for (const version of valid) {
+    assert.doesNotThrow(() => cloudValidate.validateApplicationVersion(version), `${version} 必须被云端 validator 接受`);
+    assert.ok(CLOUD_VERSION_PATTERN.test(version));
+    const result = await config.setApplicationVersion(version);
+    assert.equal(result.applicationVersion, version);
+    assert.equal((await config.getConfig()).config.applicationVersion, version);
+  }
+});
+
+test('setApplicationVersion 与云端版本正则一致：中文/空格/!/超64/符号开头均双端拒绝且零写入', async () => {
+  const invalid = ['bad version 版本!', '中文版本', 'ver sion', 'bad!', '-bad', '_bad', '.bad', 'a'.repeat(63) + '!', 'a'.repeat(65), '', '   ', null, 123];
+  for (const version of invalid) {
+    if (typeof version === 'string') {
+      assert.ok(!CLOUD_VERSION_PATTERN.test(version), `样本 ${JSON.stringify(version)} 必须也在云端正则之外`);
+    }
+    assert.throws(() => cloudValidate.validateApplicationVersion(version), undefined, `云端必须拒绝 ${JSON.stringify(version)}`);
+    const { db, config } = service();
+    const before = db.writes;
+    await assert.rejects(() => config.setApplicationVersion(version), (error) => error.code === 'INVALID_APPLICATION_VERSION');
+    assert.equal(db.writes, before, `非法版本 ${JSON.stringify(version)} 必须零写入`);
+    assert.equal((await config.getConfig()).config.applicationVersion, '');
+    assert.equal(db.rows('test_checkin_face_audit').length, 0, '非法版本不得留审计');
+  }
 });
 
 test('upsertLease 在版本未配置时零写入失败关闭（不得落地空版本快照）', async () => {

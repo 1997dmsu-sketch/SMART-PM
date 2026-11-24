@@ -1,0 +1,34 @@
+{
+  "baseCommit": "2d7f935868662d6fe6d4830de9d975af1ba4a260",
+  "branch": "fix/hk-face-enrollment-input-p2-2026-11-24",
+  "command": "npm.cmd --prefix admin-web test",
+  "timezone": "Asia/Shanghai",
+  "startedAt": "2026-11-24T13:53:36.9584938+08:00",
+  "finishedAt": "2026-11-24T13:54:05.0044045+08:00",
+  "elapsedMilliseconds": 28036,
+  "exitCode": 0,
+  "counts": {
+    "tests": 246,
+    "pass": 246,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "stderrBytes": 0,
+  "sourceHashesUnchanged": true,
+  "environment": {
+    "platform": "win32",
+    "windowsProduct": "Windows 10 Home China",
+    "displayVersion": "23H2",
+    "build": "22631.6199",
+    "parentPowerShell": "7.6.9",
+    "parentPSEdition": "Core",
+    "windowsPowerShell": {
+      "PSVersion": null,
+      "PSEdition": null
+    },
+    "node": "v24.16.0"
+  },
+  "scope": "synthetic inputs, fake device services, child processes and loopback synthetic TLS only; no target device requests or real credentials"
+}

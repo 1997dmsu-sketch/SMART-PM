@@ -26,7 +26,8 @@ function invalidInput() {
 function text(value, maxBytes, { path = false } = {}) {
   if (typeof value !== "string" || !value.trim() || Buffer.byteLength(value) > maxBytes || /[\x00-\x1f\x7f]/.test(value)) invalidInput();
   if (!path && /[\\/]/.test(value)) invalidInput();
-  return value.trim();
+  // Whitespace can name a different local file; never silently select that file.
+  return path ? value : value.trim();
 }
 
 function localPath(path) {

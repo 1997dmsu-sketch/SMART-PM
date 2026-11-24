@@ -47,12 +47,23 @@ function Quote-WindowsArgument([string]$Value) {
 }
 
 function Read-BoundedStandardInput([int]$Maximum) {
-    $text = New-Object System.Text.StringBuilder
-    while (($character = [Console]::In.Read()) -ge 0) {
-        if ($text.Length -ge $Maximum) { throw 'input-limit' }
-        [void]$text.Append([char]$character)
+    # Console.In can replace invalid UTF-8 before the CLI sees it. Read bounded
+    # original bytes instead, and reject invalid encodings before child startup.
+    $inputStream = [Console]::OpenStandardInput()
+    $bytes = New-Object byte[] ($Maximum + 1)
+    try {
+        $length = 0
+        while ($length -lt $bytes.Length) {
+            $count = $inputStream.Read($bytes, $length, $bytes.Length - $length)
+            if ($count -eq 0) { break }
+            $length += $count
+        }
+        if ($length -gt $Maximum) { throw 'input-limit' }
+        $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+        return $strictUtf8.GetString($bytes, 0, $length)
+    } finally {
+        [Array]::Clear($bytes, 0, $bytes.Length)
     }
-    return $text.ToString()
 }
 
 function Write-OwnedStream($Stream, [string]$Text) {

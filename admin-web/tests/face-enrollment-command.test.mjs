@@ -84,6 +84,35 @@ test("default command completes an explicitly identified simulation with unlimit
   assertNoSecrets(result);
 });
 
+test("photo paths retain significant leading whitespace instead of selecting a trimmed sibling", async () => {
+  for (const photoPath of [" photos/synthetic.jpg", "\u3000photos/synthetic.jpg"]) {
+    const { deps, observed } = fixture();
+    const result = await runFaceEnrollment(input({ photoPath }), deps);
+    assert.equal(result.exitCode, 0);
+    assert.equal(observed.reads.length, 1);
+    assert.equal(observed.reads[0].path, resolve(photoPath));
+    assert.notEqual(observed.reads[0].path, resolve(photoPath.trim()));
+    assert.equal(observed.enrollments.length, 1);
+    assert.equal(observed.enrollments[0].photoBase64, photo.toString("base64"));
+    assertNoSecrets(result, input({ photoPath }));
+  }
+});
+
+test("public certificate paths retain significant leading whitespace with only a fake device service", async () => {
+  for (const certificatePath of [" certificates/synthetic.cer", "\u3000certificates/synthetic.cer"]) {
+    const { deps, observed } = fixture();
+    const values = deviceInput({ certificatePath });
+    const result = await runFaceEnrollment(values, deps);
+    assert.equal(result.exitCode, 0);
+    const reads = observed.reads.filter(entry => entry.kind === "certificate");
+    assert.equal(reads.length, 1);
+    assert.equal(reads[0].path, resolve(certificatePath));
+    assert.notEqual(reads[0].path, resolve(certificatePath.trim()));
+    assert.equal(observed.enrollments.length, 1);
+    assertNoSecrets(result, values);
+  }
+});
+
 test("automatic IDs use Shanghai's calendar date and at most eight alphanumeric room characters", async () => {
   const { deps } = fixture();
   const result = await runFaceEnrollment(input({ room: "A座-1234567890" }), deps);

@@ -1,0 +1,10 @@
+{
+  "command": "powershell.exe -NoLogo -NoProfile -NonInteractive -Command <explicit version and edition properties>",
+  "exitCode": 0,
+  "stdout": "{\"version\":\"5.1.22621.6133\",\"edition\":\"Desktop\"}",
+  "parsed": {
+    "version": "5.1.22621.6133",
+    "edition": "Desktop"
+  },
+  "note": "Supplemental environment query: the Select-Object query in input-p2-validation.json yielded null PowerShell properties. The test results and source hash evidence are unchanged."
+}

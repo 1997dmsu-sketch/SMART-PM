@@ -40,7 +40,7 @@ async function invoke(input, outputDirectory, script = wrapper, options = {}) {
   if (outputDirectory !== undefined) args.push("-OutputDirectory", outputDirectory);
   if (options.privateConsole) args.push("-PrivateConsoleInput");
   if (options.timeoutSeconds !== undefined) args.push("-TimeoutSeconds", String(options.timeoutSeconds));
-  const result = await run(options.executable || powershell, args, typeof input === "string" ? input : JSON.stringify(input), options.timeout);
+  const result = await run(options.executable || powershell, args, Buffer.isBuffer(input) || typeof input === "string" ? input : JSON.stringify(input), options.timeout);
   assert.equal(result.stderr, "");
   assert.equal(result.stdout.trim().split(/\r?\n/).length, 1);
   assert(result.stdout.startsWith("{"));
@@ -147,6 +147,54 @@ test("the stdin limit counts UTF-8 bytes and never saves the rejected input", { 
   assert.equal(await readFile(join(output, "stderr.txt"), "utf8"), "");
   assert(!result.stdout.includes("合"));
 });
+
+for (const [label, executable] of [["Windows PowerShell 5.1", powershell], ["PowerShell 7", "pwsh.exe"]]) {
+  test(`${label} rejects original malformed UTF-8 bytes before starting any child`, { skip: !windows }, async (context) => {
+    const fixture = await fakeEntry(`import {writeFileSync} from 'node:fs'; writeFileSync('CHILD_MUST_NOT_START','SYNTHETIC'); process.stdout.write('{"protocolVersion":1,"outcome":"simulation-completed","mode":"simulation","siteVerification":"NOT_APPLICABLE"}');`);
+    const malformed = [
+      [0xff],                       // Invalid leading byte.
+      [0xe4, 0x41, 0x80],           // Invalid continuation byte.
+      [0xc0, 0xaf],                 // Overlong form.
+      [0xed, 0xa0, 0x80],           // Encoded UTF-16 surrogate.
+      [0xf4, 0x90, 0x80, 0x80],     // Above the Unicode scalar range.
+      [0xe4, 0xb8],                 // Truncated multibyte sequence.
+    ];
+    for (const [index, bytes] of malformed.entries()) {
+      const input = Buffer.concat([Buffer.from('{"name":"SYNTHETIC'), Buffer.from(bytes), Buffer.from('","consent":true}')]);
+      const output = join(fixture.root, `rejected-${index}`);
+      let result;
+      try { result = await invoke(input, output, fixture.script, { executable }); }
+      catch (error) { if (error.code === "ENOENT" && label === "PowerShell 7") { context.skip("PowerShell 7 is not installed"); return; } throw error; }
+      assert.equal(result.code, 2, `${label} malformed case ${index}`);
+      assert.equal(result.summary.wrapperExitCode, 2);
+      assert.equal(result.summary.childExitCode, null);
+      assert.equal(result.summary.timedOut, false);
+      assert.equal(result.summary.error, "input-invalid-or-too-large");
+      assert.equal(await readFile(join(output, "stdout.txt"), "utf8"), "");
+      assert.equal(await readFile(join(output, "stderr.txt"), "utf8"), "");
+      assert.equal(await readFile(join(output, "exit-code.txt"), "utf8"), "not-started-or-unknown\n");
+      assert(!(await readdir(fixture.root)).includes("CHILD_MUST_NOT_START"));
+      assert(!result.stdout.includes("SYNTHETIC"));
+      assert(!result.stdout.includes("\ufffd"));
+    }
+  });
+
+  test(`${label} preserves valid replacement characters at the exact 32 KiB input boundary`, { skip: !windows }, async (context) => {
+    const fixture = await fakeEntry(`const chunks=[]; for await(const chunk of process.stdin) chunks.push(chunk); const bytes=Buffer.concat(chunks); const value=JSON.parse(bytes.toString('utf8')); process.stdout.write(JSON.stringify({protocolVersion:1,outcome:'failed',nameIntact:value.name==='SYNTHETIC\\ufffd',byteLength:bytes.length})); process.exitCode=4;`);
+    const prefix = Buffer.from('{"name":"SYNTHETIC\ufffd","padding":"');
+    const suffix = Buffer.from('"}');
+    const input = Buffer.concat([prefix, Buffer.alloc(32768 - prefix.length - suffix.length, 0x61), suffix]);
+    const output = join(fixture.root, "accepted-boundary");
+    let result;
+    try { result = await invoke(input, output, fixture.script, { executable }); }
+    catch (error) { if (error.code === "ENOENT" && label === "PowerShell 7") { context.skip("PowerShell 7 is not installed"); return; } throw error; }
+    assert.equal(result.code, 4);
+    assert.equal(result.summary.childExitCode, 4);
+    assert.equal(result.summary.wrapperExitCode, 4);
+    assert.equal(result.summary.error, null);
+    assert.deepEqual(JSON.parse(await readFile(join(output, "stdout.txt"), "utf8")), { protocolVersion: 1, outcome: "failed", nameIntact: true, byteLength: 32768 });
+  });
+}
 
 test("private console mode fails safely when stdin is a pipe", { skip: !windows }, async () => {
   const root = await directory("private-no-console");

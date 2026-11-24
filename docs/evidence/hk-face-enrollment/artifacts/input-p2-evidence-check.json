@@ -1,0 +1,29 @@
+{
+  "baseCommit": "2d7f935868662d6fe6d4830de9d975af1ba4a260",
+  "originalTests": 240,
+  "currentTests": 246,
+  "originalTestsAllPresent": true,
+  "missingOriginalTests": [],
+  "additionalTests": [
+    "Windows PowerShell 5.1 rejects original malformed UTF-8 bytes before starting any child",
+    "Windows PowerShell 5.1 preserves valid replacement characters at the exact 32 KiB input boundary",
+    "PowerShell 7 rejects original malformed UTF-8 bytes before starting any child",
+    "PowerShell 7 preserves valid replacement characters at the exact 32 KiB input boundary",
+    "photo paths retain significant leading whitespace instead of selecting a trimmed sibling",
+    "public certificate paths retain significant leading whitespace with only a fake device service"
+  ],
+  "sourceHashesUnchanged": true,
+  "existingEvidenceFilesUnchanged": 51,
+  "existingEvidenceComparison": "base Git blob bytes vs index Git blob bytes",
+  "unchangedBusinessModules": [
+    "admin-web/lib/face-enrollment.mjs",
+    "admin-web/lib/hikvision-client.mjs",
+    "admin-web/lib/face-access-plan.mjs"
+  ],
+  "stagedSourceChanges": [
+    "admin-web/lib/face-enrollment-command.mjs",
+    "admin-web/tests/face-enroll-powershell.test.mjs",
+    "admin-web/tests/face-enrollment-command.test.mjs",
+    "tools/hikvision-face-enrollment/Invoke-FaceEnrollment.ps1"
+  ]
+}

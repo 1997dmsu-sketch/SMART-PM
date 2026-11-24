@@ -1,0 +1,118 @@
+{
+  "generatedAt": "2026-11-24T14:25:18.288Z",
+  "environment": {
+    "platform": "win32",
+    "arch": "x64",
+    "node": "v24.19.0",
+    "tree": "C:/Users/Administrator/Documents/ChatGPT/宇宙智联/SMART-PM-H3/_rework-tree"
+  },
+  "cases": [
+    {
+      "name": "r10-baseline",
+      "kind": "r10",
+      "mutated": false,
+      "exitCode": 0,
+      "at": "2026-11-24T14:25:07.690Z"
+    },
+    {
+      "name": "r10-no-mode",
+      "kind": "r10",
+      "mutated": true,
+      "exitCode": 1,
+      "at": "2026-11-24T14:25:07.690Z"
+    },
+    {
+      "name": "r10-no-validity",
+      "kind": "r10",
+      "mutated": true,
+      "exitCode": 1,
+      "at": "2026-11-24T14:25:07.690Z"
+    },
+    {
+      "name": "r10-neither",
+      "kind": "r10",
+      "mutated": true,
+      "exitCode": 1,
+      "at": "2026-11-24T14:25:07.690Z"
+    },
+    {
+      "name": "r10-commented",
+      "kind": "r10",
+      "mutated": true,
+      "exitCode": 1,
+      "at": "2026-11-24T14:25:07.690Z"
+    },
+    {
+      "name": "c1-baseline",
+      "kind": "c1",
+      "mutated": false,
+      "exitCode": 0,
+      "at": "2026-11-24T14:25:07.690Z"
+    },
+    {
+      "name": "c1-hash",
+      "kind": "c1",
+      "mutated": true,
+      "exitCode": 1,
+      "at": "2026-11-24T14:25:07.690Z"
+    },
+    {
+      "name": "c1-dup",
+      "kind": "c1",
+      "mutated": true,
+      "exitCode": 1,
+      "at": "2026-11-24T14:25:07.690Z"
+    },
+    {
+      "name": "c1-illegal",
+      "kind": "c1",
+      "mutated": true,
+      "exitCode": 1,
+      "at": "2026-11-24T14:25:07.690Z"
+    },
+    {
+      "name": "c1-missing",
+      "kind": "c1",
+      "mutated": true,
+      "exitCode": 1,
+      "at": "2026-11-24T14:25:07.690Z"
+    },
+    {
+      "name": "c1-fake-baseline",
+      "kind": "c1",
+      "mutated": true,
+      "exitCode": 1,
+      "at": "2026-11-24T14:25:07.690Z"
+    },
+    {
+      "name": "c1-scope",
+      "kind": "c1",
+      "mutated": true,
+      "exitCode": 1,
+      "at": "2026-11-24T14:25:07.690Z"
+    },
+    {
+      "name": "c1-closure",
+      "kind": "c1",
+      "mutated": true,
+      "exitCode": 1,
+      "at": "2026-11-24T14:25:07.690Z"
+    }
+  ],
+  "note": "C1 负控副本先按磁盘复算清单基线（rebaseManifest，与校验器同一 blob 归一规则），再施加单一篡改；共享树上的正式清单由 lead 在集成冻结后统一复算更新，本负控不抢写。",
+  "expectation": {
+    "r10-baseline": "exit 0（负控基线）",
+    "r10-no-mode": "exit 1，仅 mode 消息",
+    "r10-no-validity": "exit 1，仅 validity 消息",
+    "r10-neither": "exit 1，两条消息",
+    "r10-commented": "exit 1，两条消息（注释命中不算）",
+    "c1-baseline": "exit 0（负控基线）",
+    "c1-hash": "exit 1，磁盘哈希不符",
+    "c1-dup": "exit 1，路径重复",
+    "c1-illegal": "exit 1，路径非法",
+    "c1-missing": "exit 1，云目录闭合缺口",
+    "c1-fake-baseline": "exit 1，伪造 baselineSha256",
+    "c1-scope": "exit 1，超出登记范围",
+    "c1-closure": "exit 1，本地导入闭包未登记"
+  }
+}

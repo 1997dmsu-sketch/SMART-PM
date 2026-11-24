@@ -1,0 +1,6 @@
+[FAIL] checkin-face sources: 5 violation(s)
+  - 路径超出 checkin-face 体验版登记范围：cloudfunctions/dbInit/index.js
+  - cloudfunctions/dbInit/index.js: 磁盘哈希 a9c7c1a879425f0959da36e282d17be391c1a5f0973ce17ee9a08f075a00319c 与清单 f3c413a7b1ba30f311e452a22c5499fe07f6512e8b729c46f364eba6d67bc8ae 不符
+  - 本地导入闭包未登记：admin-web/server.mjs 导入 admin-web/lib/checkin-face-test-config.mjs，但 admin-web/lib/checkin-face-test-config.mjs 未在清单中
+  - 本地导入闭包未登记：admin-web/tests/checkin-face-config.test.mjs 导入 admin-web/lib/checkin-face-test-config.mjs，但 admin-web/lib/checkin-face-test-config.mjs 未在清单中
+  - cloudfunctions/dbInit/index.js: 与旧来源清单重叠，旧文件不得改走新清单（保留原来源校验职责）

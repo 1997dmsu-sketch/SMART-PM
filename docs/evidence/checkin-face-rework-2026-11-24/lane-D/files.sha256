@@ -1,0 +1,8 @@
+# D 路交付源码 SHA-256（Git blob 归一：文本 CRLF→LF；与独立复审的固定 blob 复算口径一致）
+# 生成于 2026-11-24T14:25:25.790Z；package.json 为共享文件，D 路仅改发布检查入口。
+cf5a3668b63b96ebb9f421cbcdf7c6d2e20d2c28f9a9c2e821dec69f6d3397e0  scripts/checkin-face-static-check.mjs  (10050 bytes)
+fb38d1cf6d7d873ac834d83cf5541079e496214a4f8a4dc654023ddf9159ac14  scripts/verify-checkin-face-sources.mjs  (13693 bytes)
+c1f48efc311ecb3abf3484040b6c8a703d1679865899571a80f232763b1e380a  package.json  (980 bytes)
+9ca712c36efb841e8f6134087e0f97b9c8509f89658237fc8c961fe5e0dec145  tests/support/d-network-guard.cjs  (5092 bytes)
+c5693cf7097aaafc1b58a0e6a0643039ac1378ee17aa475b74e2f768118d9215  tests/checkin-face-qa-gates.test.cjs  (19689 bytes)
+f85ddc84fde88782be165837844390a7f42646c032e371bde2564b5e4140277e  tests/checkin-face-cross-module.test.cjs  (57711 bytes)

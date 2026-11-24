@@ -1,0 +1,4 @@
+[FAIL] checkin-face sources: 3 violation(s)
+  - 新云函数目录未登记文件（闭合缺口）：cloudfunctions/checkinFaceTest/lib/config.js
+  - 本地导入闭包未登记：cloudfunctions/checkinFaceTest/index.js 导入 cloudfunctions/checkinFaceTest/lib/config.js，但 cloudfunctions/checkinFaceTest/lib/config.js 未在清单中
+  - 本地导入闭包未登记：cloudfunctions/checkinFaceTest/lib/workflow.js 导入 cloudfunctions/checkinFaceTest/lib/config.js，但 cloudfunctions/checkinFaceTest/lib/config.js 未在清单中

@@ -1,0 +1,2 @@
+[FAIL] checkin-face sources: 1 violation(s)
+  - 清单路径重复（大小写不敏感）：admin-web/public/checkin-face-test-config.js 与 admin-web/public/checkin-face-test-config.js

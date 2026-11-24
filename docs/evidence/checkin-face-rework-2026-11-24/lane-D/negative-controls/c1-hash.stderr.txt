@@ -1,0 +1,2 @@
+[FAIL] checkin-face sources: 1 violation(s)
+  - cloudfunctions/checkinFaceTest/index.js: 磁盘哈希 5a601b88c37b0bae635a6ffa75547a5c2cb95e4779c02bc2b9e6d7f0fa3329dd 与清单 0a601b88c37b0bae635a6ffa75547a5c2cb95e4779c02bc2b9e6d7f0fa3329dd 不符

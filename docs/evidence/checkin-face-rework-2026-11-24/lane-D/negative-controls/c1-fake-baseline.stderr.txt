@@ -1,0 +1,2 @@
+[FAIL] checkin-face sources: 1 violation(s)
+  - admin-web/lib/checkin-face-test-config.mjs: baselineSha256 只能是 null 或真实 64 位哈希，不得伪造 originalSha256

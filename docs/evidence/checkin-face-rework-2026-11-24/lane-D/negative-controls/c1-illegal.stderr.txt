@@ -1,0 +1,2 @@
+[FAIL] checkin-face sources: 1 violation(s)
+  - 清单路径非法："../cloudfunctions/checkinFaceTest/index.js"

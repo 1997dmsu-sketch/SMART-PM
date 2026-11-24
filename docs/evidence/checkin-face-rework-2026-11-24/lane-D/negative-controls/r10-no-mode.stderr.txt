@@ -1,0 +1,2 @@
+[FAIL] checkin-face static check: 1 violation(s)
+  - tools/checkin-face-worker/worker-runtime.mjs:1: worker 请求构造必须显式 mode=device（缺失即失败）

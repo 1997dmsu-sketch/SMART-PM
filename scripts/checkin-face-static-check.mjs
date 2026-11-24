@@ -3,7 +3,8 @@
  *
  * 守护：设备秘密不入小程序/云函数/发布包；新链路不回退 unlimited/simulation；
  * 客户端载荷不含服务端字段；不引入 DB-05 occupancy；allowDeviceOperations:false；
- * 云函数不打印请求体。违规打印具体文件:行号并以退出码 1 结束。
+ * 云函数不打印请求体。R10：mode=device 与 validityMode=fixed 逐项断言、全部要求。
+ * 违规打印具体文件:行号并以退出码 1 结束。
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -44,12 +45,63 @@ function checkLines(file, checks) {
   });
 }
 
-function requireText(file, patterns, message) {
-  const text = readFileSync(file, 'utf8');
-  for (const pattern of patterns) {
-    if (pattern.test(text)) return;
+/**
+ * 剔除注释后取代码行：`//` 行、`/* ... *​/` 块（含行内）不参与匹配，
+ * 因此把关键构造写进注释不能冒充实际请求（R10：注释命中不算证据）。
+ */
+function codeLinesOf(file) {
+  return readFileSync(file, 'utf8')
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\/\*[\s\S]*?\*\//g, ''))
+    .filter((line) => {
+      const trimmed = line.trim();
+      return trimmed !== '' && !trimmed.startsWith('//') && !trimmed.startsWith('/*') && !trimmed.startsWith('*');
+    });
+}
+
+function codeTextOf(file) {
+  return codeLinesOf(file).join('\n');
+}
+
+/**
+ * 逐项断言（R10）：每一对 [pattern, message] 都必须命中，缺任何一项都失败，
+ * 并且各自打印专属消息，负控可精确命中。
+ */
+function requireEachText(file, pairs) {
+  const text = codeTextOf(file);
+  const rel = relative(ROOT, file).replaceAll('\\', '/');
+  for (const [pattern, message] of pairs) {
+    if (!pattern.test(text)) issues.push(`${rel}:1: ${message}`);
   }
-  issues.push(`${relative(ROOT, file).replaceAll('\\', '/')}:1: ${message}`);
+}
+
+/**
+ * R10 请求构造段落断言：mode=device 与 validityMode=fixed 必须成对出现在
+ * 与 consent:true 硬要求共置的请求构造处；文件里其他位置的同名字符串
+ * （上报脱敏/失败输出里的 validityMode 常量）不算数。不绑定函数名，
+ * 对 worker 内部重构（Core/wrapper 拆分、内存/落盘两个入口）保持健壮。
+ */
+function requireRequestConstruction(file, pairs) {
+  const rel = relative(ROOT, file).replaceAll('\\', '/');
+  const lines = codeLinesOf(file);
+  const anchors = [];
+  lines.forEach((line, index) => {
+    if (/\bconsent\s*:\s*true\b/.test(line)) anchors.push(index);
+  });
+  if (anchors.length === 0) {
+    issues.push(`${rel}:1: 找不到请求构造锚点（consent:true 硬要求缺失或整体被注释），无法校验 mode/validityMode`);
+    return;
+  }
+  const found = new Set();
+  for (const anchor of anchors) {
+    const window = lines.slice(Math.max(0, anchor - 15), anchor + 16).join('\n');
+    for (const [pattern, message] of pairs) {
+      if (pattern.test(window)) found.add(message);
+    }
+  }
+  for (const [pattern, message] of pairs) {
+    if (!found.has(message)) issues.push(`${rel}:1: ${message}`);
+  }
 }
 
 const DEVICE_SECRET_CHECKS = [
@@ -107,10 +159,9 @@ for (const file of sourceFiles('cloudfunctions/checkinFaceTest', ['.js', '.json'
 }
 
 // 小程序全局：不开远程设备操作，不引入 Node/DB-05 依赖。
-requireText(
+requireEachText(
   join(ROOT, 'miniprogram/config/runtime.js'),
-  [/allowDeviceOperations\s*:\s*false/],
-  'runtime.allowDeviceOperations 必须保持 false',
+  [[/allowDeviceOperations\s*:\s*false/, 'runtime.allowDeviceOperations 必须保持 false']],
 );
 checkLines(join(ROOT, 'miniprogram/config/runtime.js'), [
   [/allowDeviceOperations\s*:\s*true/, '不得开启全局远程设备操作'],
@@ -124,11 +175,16 @@ for (const file of sourceFiles('miniprogram', ['.js'])) {
 }
 
 // worker：显式 device + fixed，不能监听端口/远程开门/自动重发。
+// R10：mode=device 与 validityMode=fixed 分别断言、全部要求；限定在
+// 请求构造处（consent:true 锚点窗口），注释命中不算证据，任一缺失单独报错。
 const WORKER_FILES = [
   join(ROOT, 'tools/checkin-face-worker/worker-runtime.mjs'),
   join(ROOT, 'tools/checkin-face-worker/claim-and-enroll.mjs'),
 ];
-requireText(WORKER_FILES[0], [/mode:\s*['"]device['"]/, /validityMode:\s*['"]fixed['"]/], 'worker 必须显式构造 mode=device 与 validityMode=fixed');
+requireRequestConstruction(WORKER_FILES[0], [
+  [/mode\s*:\s*['"]device['"]/, 'worker 请求构造必须显式 mode=device（缺失即失败）'],
+  [/validityMode\s*:\s*['"]fixed['"]/, 'worker 请求构造必须显式 validityMode=fixed（缺失即失败）'],
+]);
 for (const file of WORKER_FILES) {
   checkLines(file, [
     [/createServer\s*\(|\.listen\s*\(|0\.0\.0\.0/, 'worker 不得开监听端口'],

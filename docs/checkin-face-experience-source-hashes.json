@@ -1,20 +1,44 @@
 {
   "schema": "checkin-face-experience-source-hashes/v1",
   "baselineCommit": "6ecb337d4d7e84de6080af53e335b75ec7f46875",
-  "branch": "release/miniprogram-checkin-face-test-2026-11-24",
-  "registrationReason": "C1: scripts/verify-import.mjs asserts every backend-changes.json entry has a matching backend-provenance.json originalSha256. This task adds a new isolated cloud function rather than patching an imported one, so these files are registered here and are deliberately NOT added to docs/backend-changes.json or docs/backend-provenance.json.",
-  "baselineSha256Note": "All entries are newly created files; there is no pre-existing baseline content, so baselineSha256 is null. Do not reinterpret null as an unchecked hash.",
+  "branch": "fix/checkin-face-review-2026-11-24",
+  "registrationReason": "C1 收口（lead 冻结指令）：四路停止编辑后统一复算。登记四路全部新增/修改文件（A 云函数与 admin-web 配置/路由/测试、B 两页与 api 及测试、C worker 全目录与锁文件及 admin worker 测试、D 静态门禁与来源校验器及回归与证据）。scripts/verify-import.mjs 继续断言 backend-provenance.json 的原始来源；本清单为体验版新/改文件的机器门禁，两者互不替代。",
+  "baselineSha256Note": "baselineSha256 一律为 null：本清单不登记旧上游原件（旧来源校验由 docs/backend-provenance.json 承担），null 表示“无旧上游登记”，不是未检查；不虚构 originalSha256。原有 10 条条目语义保持不变（仅 sha256 按当前磁盘/契约内容复算，purpose 随实现更新）。",
   "files": [
     {
-      "path": "cloudfunctions/checkinFaceTest/index.js",
-      "sha256": "831134a10f70473d44ade9cf57faea519a3a1df0a3c7b6df129889fa478a223d",
-      "purpose": "单一云函数入口：action 白名单分派、身份解析、统一 {code,data,msg} 响应；不记录请求体/响应体/文件/凭据。",
+      "path": "admin-web/lib/checkin-face-test-config.mjs",
+      "sha256": "f3c413a7b1ba30f311e452a22c5499fe07f6512e8b729c46f364eba6d67bc8ae",
+      "purpose": "本地管理后台配置服务：默认关闭、申请版本、派发开关、102 唯一绑定、手填租期、名单、worker 凭据哈希、可信云存储命名空间设置与审计；复用云函数确定性 id 与日期规则。",
       "baselineSha256": null
     },
     {
-      "path": "cloudfunctions/checkinFaceTest/package.json",
-      "sha256": "57c19a43a080ac54e988bfdd91a4412439a4cf21555ad00dc00348a97ccdf346",
-      "purpose": "新测试云函数依赖声明，仅 wx-server-sdk ^3.0.0。",
+      "path": "admin-web/public/checkin-face-test-config.js",
+      "sha256": "fad94d1a24c34db875ff81e7b68fb9b54c470d1b03c21444639f971cde21aa4f",
+      "purpose": "管理后台测试配置页面脚本：公开配置能力的表单驱动与错误展示。",
+      "baselineSha256": null
+    },
+    {
+      "path": "admin-web/public/checkin-face-test.html",
+      "sha256": "54858b07120da54da1f648b71212f5bd6b85741de42567f32213cee913983679",
+      "purpose": "管理后台测试配置页面：含「可信云存储命名空间」小节，只展示/编辑该值，不回显秘密。",
+      "baselineSha256": null
+    },
+    {
+      "path": "admin-web/server.mjs",
+      "sha256": "4ef7d2844f71e7a3c52a794d1b87490e5630a79a76e68e416a94caba86a4887e",
+      "purpose": "管理后台 HTTP 服务：新增 PUT /api/checkin-face-test/storage 路由（admin-only，session+CSRF+origin 校验，与云函数共用命名空间正则）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "admin-web/tests/checkin-face-config.test.mjs",
+      "sha256": "7715fc144c2b0bab5aeeb2410cecb4719996316f730e1fed2ae96a6a1edd672b",
+      "purpose": "A 路配置服务与 storage 路由合成测试。",
+      "baselineSha256": null
+    },
+    {
+      "path": "admin-web/tests/checkin-face-worker.test.mjs",
+      "sha256": "f03bf2f5b9f01dcede13ae145795742ffa7cd1f2d1a43bfb17165094160d288a",
+      "purpose": "C 路 worker 构造与退出码合成测试。",
       "baselineSha256": null
     },
     {
@@ -24,21 +48,21 @@
       "baselineSha256": null
     },
     {
-      "path": "cloudfunctions/checkinFaceTest/lib/context.js",
-      "sha256": "5b102151ded3a113c0bd8236b8b08a9da29b11a610853277e0fdb6f371cddad0",
-      "purpose": "身份边界：小程序仅取 getWXContext().OPENID；worker 仅取 token，SHA-256 后常量时间比对配置哈希；action 分两组白名单。",
-      "baselineSha256": null
-    },
-    {
-      "path": "cloudfunctions/checkinFaceTest/lib/store.js",
-      "sha256": "ace6511e4a7e045ba82539dc0643e4dd7ec9ca43f08c87ec96d472f9ae9781af",
-      "purpose": "独立命名空间集合名、环境锚定的确定性 _id、revision CAS 封装与审计写入；102 只按 _id 单点读取。",
+      "path": "cloudfunctions/checkinFaceTest/index.js",
+      "sha256": "5a601b88c37b0bae635a6ffa75547a5c2cb95e4779c02bc2b9e6d7f0fa3329dd",
+      "purpose": "单一云函数入口：action 白名单分派（R06 新增 beginTaskExecution）、身份解析、统一 {code,data,msg}；不记录请求体/响应体/凭据。",
       "baselineSha256": null
     },
     {
       "path": "cloudfunctions/checkinFaceTest/lib/config.js",
-      "sha256": "934a863451eb2d09cd0eb1afeafe6758b05207b8c3ddf042b963e1f3517b9aff",
-      "purpose": "失败关闭的配置门：apply/dispatch 两道 revalidate；同号多条 102 以计数检出但绝不取第一条。",
+      "sha256": "08232fa5202649c7efc6b6e4f4013941d21522bbfb30dc89daa7b0e55be8b3af",
+      "purpose": "失败关闭的配置门：apply/dispatch/begin 多道 revalidate；同号多条 102 以计数检出但绝不取第一条。",
+      "baselineSha256": null
+    },
+    {
+      "path": "cloudfunctions/checkinFaceTest/lib/context.js",
+      "sha256": "ee1975bdf5da273d97ed93f1f7ba98d502a0d204ae6b78173dd1577b78dd809f",
+      "purpose": "身份边界：小程序仅取 getWXContext().OPENID；worker 仅取 token，SHA-256 后常量时间比对配置哈希；action 分组白名单含 beginTaskExecution。",
       "baselineSha256": null
     },
     {
@@ -48,21 +72,579 @@
       "baselineSha256": null
     },
     {
-      "path": "cloudfunctions/checkinFaceTest/lib/workflow.js",
-      "sha256": "5904dc9a33e5f0ccd890c3b7ba747fe872987981e3e1edb315e775df59b34bd1",
-      "purpose": "入住/人脸任务状态机、幂等键、claim 二次校验与 CAS、租期变化失效、超时与不确定结果保留事实且不重发。",
+      "path": "cloudfunctions/checkinFaceTest/lib/INTERFACES.md",
+      "sha256": "29b16ae36eb85250d7aac8e12389dcf16ea097525c7fd0f4707e6d8ca5800200",
+      "purpose": "A 路唯一接口清单（R01/R03/R04/R06 契约、闭式错误码全表、未验证项）；B/C/D 接入对齐的唯一依据。",
+      "baselineSha256": null
+    },
+    {
+      "path": "cloudfunctions/checkinFaceTest/lib/store.js",
+      "sha256": "40b16c57368cd93edcc07ca8ee0d6363ed04a91f94105b284529969504f67721",
+      "purpose": "独立命名空间集合名、确定性 _id、revision CAS、上下文绑定的事务 store（R03：tx 内只点读写，集合查询抛 TX_UNSUPPORTED_QUERY，无事务失败关闭）。",
       "baselineSha256": null
     },
     {
       "path": "cloudfunctions/checkinFaceTest/lib/validate.js",
-      "sha256": "b3964d237cb69633456f2efe2b2873c1cf627baf621b22c3ae9f43ccadac85cf",
-      "purpose": "严格入参白名单与未知字段拒绝、fileID 归属校验、device 输出逐项对齐服务端快照。",
+      "sha256": "e6b1c3ad3ee7dd4173c4e1fec0c4eb178a91519aa9c8606fb20865dd46ceb566",
+      "purpose": "严格入参白名单与未知字段拒绝（R06 beginTaskExecution 白名单）、SDK fileID 归属校验（R01：命名空间/对象路径/文件名三级）、device 输出逐项对齐服务端快照；STORAGE_NAMESPACE_PATTERN 唯一定义。",
       "baselineSha256": null
     },
     {
-      "path": "admin-web/lib/checkin-face-test-config.mjs",
-      "sha256": "413e41d2acde2d724d4a7eb367f0403a4912433203234324f41a7dc539cf4200",
-      "purpose": "本地管理后台配置服务：默认关闭、申请版本、派发开关、102 唯一绑定、手填租期、名单、worker 凭据哈希设置与审计；复用云函数确定性 id 与日期规则。",
+      "path": "cloudfunctions/checkinFaceTest/lib/workflow.js",
+      "sha256": "fa366a75a57c614ee557e57e1edca60631bc90c7a019862448314012a9dae892",
+      "purpose": "入住/人脸任务状态机、事务化原子边界（R03/R04）、beginTaskExecution 权威复核（R06）、claim 二次校验与 CAS、超时与不确定结果保留事实且不重发。",
+      "baselineSha256": null
+    },
+    {
+      "path": "cloudfunctions/checkinFaceTest/package.json",
+      "sha256": "57c19a43a080ac54e988bfdd91a4412439a4cf21555ad00dc00348a97ccdf346",
+      "purpose": "新测试云函数依赖声明，仅 wx-server-sdk ^3.0.0。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/files.sha256",
+      "sha256": "9d97dde5dce5ac2815b0056d4bf9723f568f9c3621eb539e12efa3ab3f254cce",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/MANIFEST.json",
+      "sha256": "85a6ac50f4c4bf238bd31504efbec58371a01773e4c65484d3ec9390e00c1123",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-baseline.exit-code.txt",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-baseline.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-baseline.stdout.txt",
+      "sha256": "931265cbc38315f28135f706152193db46f77946ab0224ccf65f06551ebc0aab",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-closure.exit-code.txt",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-closure.stderr.txt",
+      "sha256": "aa54877f93622f60df3e95eb46d370270a975b76122e2f981587c1533fec30da",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-closure.stdout.txt",
+      "sha256": "bb67399509e302297e2747ad939a3616b3a6453dd462fc4bb11fce249b022927",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-dup.exit-code.txt",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-dup.stderr.txt",
+      "sha256": "7801d8f0c879f0ef60b3f5fe2931b7483f48ca72456ef20b18a6d3fd27ec69d9",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-dup.stdout.txt",
+      "sha256": "bb67399509e302297e2747ad939a3616b3a6453dd462fc4bb11fce249b022927",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-fake-baseline.exit-code.txt",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-fake-baseline.stderr.txt",
+      "sha256": "7b59a70e8f8bc507d618f8681a77ca059f62689d39bf315f7ebd25786049925c",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-fake-baseline.stdout.txt",
+      "sha256": "bb67399509e302297e2747ad939a3616b3a6453dd462fc4bb11fce249b022927",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-hash.exit-code.txt",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-hash.stderr.txt",
+      "sha256": "71b0d0494fa090587c7decdea82fc66251fde760fe314417b68dad7418c86d98",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-hash.stdout.txt",
+      "sha256": "bb67399509e302297e2747ad939a3616b3a6453dd462fc4bb11fce249b022927",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-illegal.exit-code.txt",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-illegal.stderr.txt",
+      "sha256": "517d986bd6720fa4ffcdb238111abe3694aef7873dab6d3896fa291cc47f9dd5",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-illegal.stdout.txt",
+      "sha256": "bb67399509e302297e2747ad939a3616b3a6453dd462fc4bb11fce249b022927",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-missing.exit-code.txt",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-missing.stderr.txt",
+      "sha256": "716966893e68706742a37fb5b8c30b74d16cc209bc54a2e51b1b19685c794cad",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-missing.stdout.txt",
+      "sha256": "bb67399509e302297e2747ad939a3616b3a6453dd462fc4bb11fce249b022927",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-scope.exit-code.txt",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-scope.stderr.txt",
+      "sha256": "7d6d28a5a69a5b48e23ea1985e8c68d4cad2b178ce3dadadebefa8f8a5ff28d6",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/c1-scope.stdout.txt",
+      "sha256": "d41dcefa8d45d0e6eebac538632332324259700024e66d0f20ab20d8d5c4c455",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-baseline.exit-code.txt",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-baseline.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-baseline.stdout.txt",
+      "sha256": "bfa3c9834861a1a7a83ee6aa59ca5e8c5a03c0a7ff9b83ff4075760385110028",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-commented.exit-code.txt",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-commented.stderr.txt",
+      "sha256": "def43e421c89c526506560dc5fa28164330dd49fdfc315a8535437eeb5f88a8f",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-commented.stdout.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-neither.exit-code.txt",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-neither.stderr.txt",
+      "sha256": "def43e421c89c526506560dc5fa28164330dd49fdfc315a8535437eeb5f88a8f",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-neither.stdout.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-no-mode.exit-code.txt",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-no-mode.stderr.txt",
+      "sha256": "daefa613953043699eb5285ecbf8cc36b3c9dc658e4a6b406e6fe603f9cc49f4",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-no-mode.stdout.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-no-validity.exit-code.txt",
+      "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-no-validity.stderr.txt",
+      "sha256": "9f4b850afc135251b4aa999eee9d6a11014631022eb83ab0b6f1d481151048ba",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/r10-no-validity.stdout.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/results.json",
+      "sha256": "580aaec8afef94debaca77467461dbca8dd773908ffe9dea6989cc8da92a0a5b",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/run-negatives.cjs",
+      "sha256": "d570b1158ebe9209205e1178b752dfcb89bf0fd2bfd4b039d47de235d3be4db8",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/README.md",
+      "sha256": "37d26294d63bcc551afe83ce542000f348928ae12859913565e828b7a523e509",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-cross-module-frozen-candidate.exit-code.txt",
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-cross-module-frozen-candidate.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-cross-module-frozen-candidate.stdout.txt",
+      "sha256": "2030c39716b4bcd427f0b113769715c943e4271fbe7b9c4553e82870c10167c9",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-cross-module.exit-code.txt",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-cross-module.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-cross-module.stdout.txt",
+      "sha256": "8439603f57cd846ce302ae667064de2f092a21a72270bc4b842737c112fd058e",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-qa-gates-raw.exit-code.txt",
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-qa-gates-raw.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-qa-gates-raw.stdout.txt",
+      "sha256": "31c4f2cfe5161657e466f9c25b093437dc55c2767365e39b6b2f860ec0647cf5",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-qa-gates.exit-code.txt",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-qa-gates.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-qa-gates.stdout.txt",
+      "sha256": "314d44cdb740fdaeaefe64e3a84b3a55c08ca0399ab2386c6f5ecfbf6678daf0",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-source-verify.exit-code.txt",
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-source-verify.stderr.txt",
+      "sha256": "9a103f5980d82b0764162661cf71e737607751cf793faf91abf42e9985955bde",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-source-verify.stdout.txt",
+      "sha256": "fdf445895f6534e55a350fee8a1d9bb8fe849e2da7fb2f75dac93d5e71981cdf",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-static-check.exit-code.txt",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-static-check.stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-rework-2026-11-24/lane-D/run-static-check.stdout.txt",
+      "sha256": "5e4c2d53cb3b5fab02de2f620b6a5301afec6002343501726b295b699e61d588",
+      "purpose": "D 路测试证据（本机 Windows x64 / Node 实际运行日志、负控结果与哈希清单）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "miniprogram/config/runtime.js",
+      "sha256": "abd7aace953569eeeff780b4a463163a1dd6f0d57bf7f9bbd32548b58934ee04",
+      "purpose": "小程序运行时配置（allowDeviceOperations:false 等门禁）；api.js 的本地导入闭包对象，随闭包登记。",
+      "baselineSha256": null
+    },
+    {
+      "path": "miniprogram/pages/checkin/index.js",
+      "sha256": "b5904456f6feacbb1c53e365774f7662de7f45aebe9dd34134185f9cdba8ef33",
+      "purpose": "测试入住页逻辑：只渲染服务端事实、checkbox-group 事件、apply 结果分类（auto_approved 才受理，pending_review 走既有审核渠道）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "miniprogram/pages/checkin/index.json",
+      "sha256": "29d3f099ae669cc3f3fef33f0a70463276ce6609eb0d4ae518b631519fb8c816",
+      "purpose": "测试入住页配置。",
+      "baselineSha256": null
+    },
+    {
+      "path": "miniprogram/pages/checkin/index.wxml",
+      "sha256": "272e9ce15c7336a4fe70547f1c6f1b19e14917959e8795a113b27243d26ef17a",
+      "purpose": "测试入住页结构：checkbox-group bindchange 真实接线。",
+      "baselineSha256": null
+    },
+    {
+      "path": "miniprogram/pages/checkin/index.wxss",
+      "sha256": "df26d46c74b4ec3c280788cdf9eb66d38344be4741d735ebfdffed14df43ec13",
+      "purpose": "测试入住页样式。",
+      "baselineSha256": null
+    },
+    {
+      "path": "miniprogram/pages/face-enroll/index.js",
+      "sha256": "8608de7bf466867e8abf06700210034179d0885412dc7e5430e01f6e90e8d694",
+      "purpose": "人脸登记页逻辑：六态文案、服务端下发上传路径、上传后建任务、不显示现场识别结论。",
+      "baselineSha256": null
+    },
+    {
+      "path": "miniprogram/pages/face-enroll/index.json",
+      "sha256": "3d86273ee0f67ab3fb8c80938add5d05d5db1f64b7befcab0888a528d1d296b2",
+      "purpose": "人脸登记页配置。",
+      "baselineSha256": null
+    },
+    {
+      "path": "miniprogram/pages/face-enroll/index.wxml",
+      "sha256": "f1d5b95ee6f3de5f3fe1d6c0a9ea5e6b76d7cc9f0b8bd3c7135e5ebf94961f9b",
+      "purpose": "人脸登记页结构：checkbox-group bindchange 真实接线。",
+      "baselineSha256": null
+    },
+    {
+      "path": "miniprogram/pages/face-enroll/index.wxss",
+      "sha256": "f50afe50c1c46a47687c153226cd1c9c0c8e34668fdc010249546fc232bd9e70",
+      "purpose": "人脸登记页样式。",
+      "baselineSha256": null
+    },
+    {
+      "path": "miniprogram/services/api.js",
+      "sha256": "00648cc9e9bd8735868f945d26053b222495c0b4dca5477d03c1a48546daefc0",
+      "purpose": "API 适配层：严格客户端字段白名单、uploadTestFace 原样透传 fileID、createFaceTask 白名单载荷。",
+      "baselineSha256": null
+    },
+    {
+      "path": "package.json",
+      "sha256": "c1f48efc311ecb3abf3484040b6c8a703d1679865899571a80f232763b1e380a",
+      "purpose": "根发布检查入口：check:checkin-face = 静态检查 && 来源校验；新增 check:checkin-face:sources。",
+      "baselineSha256": null
+    },
+    {
+      "path": "scripts/checkin-face-static-check.mjs",
+      "sha256": "cf5a3668b63b96ebb9f421cbcdf7c6d2e20d2c28f9a9c2e821dec69f6d3397e0",
+      "purpose": "R10 静态门禁：mode=device 与 validityMode=fixed 逐项断言（构造处锚定、注释剔除），设备秘密/监听/重发等守护。",
+      "baselineSha256": null
+    },
+    {
+      "path": "scripts/verify-checkin-face-sources.mjs",
+      "sha256": "fb38d1cf6d7d873ac834d83cf5541079e496214a4f8a4dc654023ddf9159ac14",
+      "purpose": "C1 新文件来源清单机器校验器：路径/哈希/云目录闭合/本地导入闭包/baseline 不伪造/旧来源隔离；接入 check:checkin-face。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tests/checkin-face-api.test.cjs",
+      "sha256": "862df73fb302874b35ff60e9d3c50c11df8d35a6aca9fefd105846fc03fe3f8b",
+      "purpose": "B 路 API 适配层合成测试。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tests/checkin-face-cloud-workflow.test.cjs",
+      "sha256": "656ad57e1efd62a3bf57f5502ddef5600ce6af422dea19f3a72aa6e8357adb91",
+      "purpose": "A 路云函数合成测试（R01/R03/R04/R06 正反例，内存 DB 替身）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tests/checkin-face-cross-module.test.cjs",
+      "sha256": "f85ddc84fde88782be165837844390a7f42646c032e371bde2564b5e4140277e",
+      "purpose": "D 路跨模块独立回归（SDK fileID 贯穿、WXML 结构、事务回滚、创建/领取交错、deviceKey、beginTaskExecution、依赖解析、照片、普通账号）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tests/checkin-face-pages.test.cjs",
+      "sha256": "390d5014ed6c5d61c692a3c5b8f6fc711dab75ad06b3d21512b60c06cecc4f9b",
+      "purpose": "B 路两页面合成测试。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tests/checkin-face-qa-gates.test.cjs",
+      "sha256": "c5693cf7097aaafc1b58a0e6a0643039ac1378ee17aa475b74e2f768118d9215",
+      "purpose": "D 路 R10/C1 门禁与网络守卫测试（含套内负控）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tests/support/d-network-guard.cjs",
+      "sha256": "9ca712c36efb841e8f6134087e0f97b9c8509f89658237fc8c961fe5e0dec145",
+      "purpose": "D 路不转发网络守卫（预载、命名绑定、自检、子进程继承）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tools/checkin-face-worker/claim-and-enroll.mjs",
+      "sha256": "4c70e2bfebdb4ddcf2060a5799ef5a9ae24b74b8fe5b1c283afb851b216f89bf",
+      "purpose": "本地受控 worker 主流程（R05–R09）：claim→内存照片→beginTaskExecution 权威复核→设备执行→report；零设备执行语义与清理终态。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tools/checkin-face-worker/enrollment-adapter.mjs",
+      "sha256": "3a4a79b0050122b945cd4f07bb57f574f107237d3af502a547ea21e804f4268d",
+      "purpose": "内存照片登记适配层（R08：Buffer 直驱业务服务，不落盘）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tools/checkin-face-worker/execution-authorization.mjs",
+      "sha256": "ee51966a030737901fb6ef6626dc9509b8e2a7b2a55285df7e47e7eaa56e569c",
+      "purpose": "执行前复核 worker 侧（R06）：claim 时效预检、快照一致性校验、闭式失败分类。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tools/checkin-face-worker/package-lock.json",
+      "sha256": "55643a54500950d38f11a665603b0334d9a3100d7da214c88af75b0526adc439",
+      "purpose": "worker 自有锁文件（R07 可复现解析）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tools/checkin-face-worker/package.json",
+      "sha256": "f86049a715f9e81bf34890382c6e99ff8b1f992edc36d731b77672cb022bf657",
+      "purpose": "worker 自有依赖声明（@cloudbase/node-sdk 3.18.7；R07 依赖归属）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tools/checkin-face-worker/README.md",
+      "sha256": "961dd18bbbbf4dc81bd0af6c8b3e03e31e55fb89bee0c30ca5a9afec82024b6a",
+      "purpose": "worker 运行与安装说明（依赖归属、锁文件、退出码、待集成项）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tools/checkin-face-worker/tests/network-guard-selfcheck.test.mjs",
+      "sha256": "84568fb0ef8a6b44cebae79333c99ccbac268989d2006cc6fe75c3b118d29bfb",
+      "purpose": "C 路守卫自检测试。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tools/checkin-face-worker/tests/network-guard.cjs",
+      "sha256": "68a70ffdcec896d30cc4c5d4d3dfda9cbb95c79b045e320892ef1ea80d2884e3",
+      "purpose": "C 路测试网络守卫（预载模块）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tools/checkin-face-worker/worker-config.example.json",
+      "sha256": "e93d7c279327188d80760601245a1806ea66941d184274a4bece401ed1bd65e0",
+      "purpose": "worker 本地非机密配置样例（不含凭据）。",
+      "baselineSha256": null
+    },
+    {
+      "path": "tools/checkin-face-worker/worker-runtime.mjs",
+      "sha256": "79b3caf64fdc04fcd2e95eb495404fa29eb2ee012873c87829d640521250440e",
+      "purpose": "worker 运行时：配置读取、R05 设备绑定、R06 领取校验、显式 device+fixed 请求构造（R10 锚点）、R07 依赖解析边界、R09 清理结果、脱敏日志。",
       "baselineSha256": null
     }
   ]

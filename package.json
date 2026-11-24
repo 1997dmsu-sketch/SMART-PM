@@ -6,7 +6,8 @@
   "scripts": {
     "test": "node --test tests/*.test.cjs",
     "check": "node scripts/check-miniprogram.mjs",
-    "check:checkin-face": "node scripts/checkin-face-static-check.mjs",
+    "check:checkin-face": "node scripts/checkin-face-static-check.mjs && node scripts/verify-checkin-face-sources.mjs",
+    "check:checkin-face:sources": "node scripts/verify-checkin-face-sources.mjs",
     "verify:backend": "node scripts/verify-import.mjs",
     "setup:backend": "node scripts/install-backend.mjs",
     "release:package": "python3 scripts/package-release.py",

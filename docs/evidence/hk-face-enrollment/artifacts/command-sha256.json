@@ -1,0 +1,62 @@
+[
+  {
+    "path": "command-admin-tests.exit-code.txt",
+    "bytes": 12,
+    "sha256": "1ca4a13146b2891c0e462123ac0cb848f92e6221f18b870a1b78c232d1956c35"
+  },
+  {
+    "path": "command-admin-tests.stderr.txt",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "command-admin-tests.stdout.txt",
+    "bytes": 21558,
+    "sha256": "9878467821758791a39a44ebe81b3e6877357a5c5adba3cbcc71aa0757f53236"
+  },
+  {
+    "path": "command-private-console-child-exit-code.txt",
+    "bytes": 2,
+    "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  {
+    "path": "command-private-console-stderr.txt",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "command-private-console-stdout.txt",
+    "bytes": 1309,
+    "sha256": "86240528c272602b8dc30de82731774d91c19653f221de5a31390bc05e8e910b"
+  },
+  {
+    "path": "command-private-console-validation.json",
+    "bytes": 417,
+    "sha256": "cdb0499f97313c430f78e86f3a82a4bc899685136b8b53e92a28393febd7d827"
+  },
+  {
+    "path": "command-private-console-wrapper-observation.json",
+    "bytes": 381,
+    "sha256": "811d612523f4e92cc228502ddcc9a61a397d1c15df1e0a2a45d305cc0aba62e4"
+  },
+  {
+    "path": "command-source-after.json",
+    "bytes": 1046,
+    "sha256": "5e66e7c5ed0be89d105ea43f041a4fa3742535e682ae593a23a6848492ddc3c7"
+  },
+  {
+    "path": "command-source-before.json",
+    "bytes": 1046,
+    "sha256": "5e66e7c5ed0be89d105ea43f041a4fa3742535e682ae593a23a6848492ddc3c7"
+  },
+  {
+    "path": "command-source-git-index.json",
+    "bytes": 1255,
+    "sha256": "1d90488110e9aedd79a46818c9e35ddea39994e133f3d5881ff63a5e3d4de49b"
+  },
+  {
+    "path": "command-validation.json",
+    "bytes": 448,
+    "sha256": "e6ed1651be98e8bc5c7085332b6443147a78b8dc7e3824ef204e7d893a4d2f3b"
+  }
+]

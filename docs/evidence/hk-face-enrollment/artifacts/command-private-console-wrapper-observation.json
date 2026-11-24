@@ -1,0 +1,14 @@
+{
+  "observedWrapperMetadata": {
+    "childExitCode": 0,
+    "wrapperExitCode": 0,
+    "evidenceRef": "../FACE-COMMAND-OFFLINE-20261124-122550-ae480c13/private-console-run/",
+    "timedOut": false,
+    "error": null,
+    "evidenceBase": "repository"
+  },
+  "actualWrapperProcessExit": 0,
+  "readyBeforeInputObserved": true,
+  "syntheticInputEchoed": false,
+  "deviceRequests": 0
+}

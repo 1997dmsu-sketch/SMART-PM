@@ -1,0 +1,32 @@
+[
+  {
+    "path": "admin-web/lib/face-enrollment-command.mjs",
+    "bytes": 17118,
+    "sha256": "961bfb0e7765d810a038807ec0246c45f830e36828bcd949ec9b351c1652f08e"
+  },
+  {
+    "path": "admin-web/face-enroll.mjs",
+    "bytes": 8499,
+    "sha256": "278a4aafebda9694d76702dc7ebd70ac1f54a979c99f651db0734947b9a69ea6"
+  },
+  {
+    "path": "tools/hikvision-face-enrollment/Invoke-FaceEnrollment.ps1",
+    "bytes": 15464,
+    "sha256": "ad7f56aae5f760d9b776dc10e222a0197a4ba42cb522c204f45a601f21409aff"
+  },
+  {
+    "path": "admin-web/tests/face-enrollment-command.test.mjs",
+    "bytes": 27884,
+    "sha256": "0ad7d042df2da42e6172d72670a3b6b8dc5a58314e4f75ae05d938c396253dbb"
+  },
+  {
+    "path": "admin-web/tests/face-enroll-cli.test.mjs",
+    "bytes": 13996,
+    "sha256": "dc859c97f3bd9eaa6841c1216c1c2ab26f42915970d52cce554f4abbf8aefc51"
+  },
+  {
+    "path": "admin-web/tests/face-enroll-powershell.test.mjs",
+    "bytes": 14670,
+    "sha256": "4f9185df36f95e90f598ff376bd868015307168a40f2b38eab88d51f0fd8f2ad"
+  }
+]

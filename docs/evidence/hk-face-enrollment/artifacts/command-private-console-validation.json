@@ -1,0 +1,15 @@
+{
+  "runtime": "Windows PowerShell 5.1 Desktop",
+  "mode": "simulation",
+  "outcome": "simulation-completed",
+  "nameUtf8Correct": true,
+  "personnelId": "SYNCOMMAND20261124",
+  "validityMode": "unlimited",
+  "dailyHours": "24x7",
+  "childExitCode": "0",
+  "stderrBytes": 0,
+  "fakeCredentialInOutput": false,
+  "photoPathInOutput": false,
+  "siteVerification": "NOT_APPLICABLE",
+  "deviceRequests": 0
+}

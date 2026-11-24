@@ -5,7 +5,9 @@ import {
   facePhotoDimensions,
   faceSiteNote,
   faceStatus,
+  faceValidityLabel,
   fitFacePhoto,
+  renderFaceValidityFields,
   renderFaceSteps,
   validateFacePhoto,
 } from "../public/face-ui.js";
@@ -27,10 +29,66 @@ const escapeHtml = (text) => String(text).replaceAll("<", "&lt;").replaceAll(">"
 test("enrollment uses the selected device library and door without assuming FDID=1", () => {
   assert.deepEqual(buildFaceEnrollment(values, capabilities, photo), {
     employeeNo: "TEST-200", name: "测试人员", doorNo: 4,
+    validityMode: "fixed",
     validFrom: values.validFrom, validTo: values.validTo,
     FDID: "42", faceLibType: "ordinaryFD",
     photoBase64: "/9j/", photoName: "test.jpg", consent: true,
   });
+});
+
+test("fixed validity remains the default and keeps date ordering checks", () => {
+  const original = buildFaceEnrollment(values, capabilities, photo);
+  assert.equal(original.validityMode, "fixed");
+  assert.deepEqual(buildFaceEnrollment({ ...values, validityMode: "fixed" }, capabilities, photo), original);
+  for (const change of [
+    { validFrom: values.validTo }, { validTo: values.validFrom },
+    { validFrom: "" }, { validTo: undefined }, { validTo: "not-a-date" },
+  ]) assert.throws(() => buildFaceEnrollment({ ...values, ...change, validityMode: "fixed" }, capabilities, photo), /开始时间必须早于结束时间/);
+});
+
+test("unlimited validity requires explicit capability support and never sends user or placeholder dates", () => {
+  const unlimited = { ...values, validityMode: "unlimited", validFrom: "not-a-date", validTo: "2037-12-31T23:59" };
+  const supported = { ...capabilities, longTermValiditySupported: true };
+  const result = buildFaceEnrollment(unlimited, supported, photo);
+  assert.equal(result.validityMode, "unlimited");
+  assert.equal(Object.hasOwn(result, "validFrom"), false);
+  assert.equal(Object.hasOwn(result, "validTo"), false);
+  assert.equal(result.consent, true);
+  assert.equal(result.photoBase64, photo.base64);
+  for (const capability of [undefined, null, false, "true", 1])
+    assert.throws(() => buildFaceEnrollment(unlimited, { ...capabilities, longTermValiditySupported: capability }, photo), /未声明支持长期有效/);
+  assert.throws(() => buildFaceEnrollment({ ...unlimited, consent: false }, supported, photo), /确认.*照片/);
+  assert.throws(() => buildFaceEnrollment(unlimited, supported, null), /请选择.*照片/);
+});
+
+test("explicit invalid validity modes cannot coerce into fixed or unlimited", () => {
+  for (const validityMode of [null, "", true, false, "true", "false", "forever", 0, 1, [], {}])
+    assert.throws(() => buildFaceEnrollment({ ...values, validityMode }, { ...capabilities, longTermValiditySupported: true }, photo), /固定期限或长期有效/);
+});
+
+test("validity fields default to fixed and only expose a date-free unlimited option for supported devices", () => {
+  const supported = { ...capabilities, longTermValiditySupported: true };
+  const fixed = renderFaceValidityFields(values, supported, escapeHtml);
+  assert.match(fixed, /value="fixed" selected/);
+  assert.match(fixed, /name="validFrom"/);
+  assert.match(fixed, /name="validTo"/);
+  const unlimited = renderFaceValidityFields({ ...values, validityMode: "unlimited" }, supported, escapeHtml);
+  assert.match(unlimited, /value="unlimited" selected/);
+  assert.match(unlimited, /长期有效，无截止日期/);
+  assert.doesNotMatch(unlimited, /name="validFrom"|name="validTo"|datetime-local|2037/);
+  for (const capability of [undefined, false, "true"] ) {
+    const unsupported = renderFaceValidityFields({ ...values, validityMode: "unlimited" }, { ...capabilities, longTermValiditySupported: capability }, escapeHtml);
+    assert.doesNotMatch(unsupported, /option value="unlimited"/);
+    assert.match(unsupported, /value="fixed" selected/);
+    assert.match(unsupported, /name="validFrom"/);
+    assert.match(unsupported, /未声明支持长期有效/);
+  }
+});
+
+test("unlimited records say long-term validity without exposing backend placeholder dates", () => {
+  assert.equal(faceValidityLabel({ validityMode: "unlimited", validFrom: "2026-11-24T00:00", validTo: "2037-12-31T23:59" }), "长期有效");
+  assert.equal(faceValidityLabel({ validityMode: "fixed", ...values }), `${values.validFrom} 至 ${values.validTo}`);
+  assert.equal(faceValidityLabel(values), `${values.validFrom} 至 ${values.validTo}`);
 });
 
 test("enrollment requires identity, consent, photo, valid dates and advertised capability choices", () => {

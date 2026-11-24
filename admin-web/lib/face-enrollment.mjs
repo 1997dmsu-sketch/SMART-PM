@@ -46,6 +46,11 @@ function normalizeLocalTime(value, label) {
   if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || hour > 23 || minute > 59 || second > 59) invalid(`${label}无效`);
   return normalized;
 }
+function matchesValidity(actual, expected) {
+  return actual?.enable === (expected.validityMode !== "unlimited")
+    && actual.beginTime === expected.validFrom && actual.endTime === expected.validTo
+    && (actual.timeType === undefined || actual.timeType === "local");
+}
 export function decodeFacePhoto(value, limit = FACE_PHOTO_LIMIT) {
   if (typeof value !== "string" || value.length > Math.ceil(limit / 3) * 4 + 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) invalid("请选择有效的 JPEG 照片");
   const bytes = Buffer.from(value, "base64");
@@ -105,6 +110,7 @@ export class HikvisionFaceProvider {
         employeeNoPattern: "^[A-Za-z0-9]+$",
         nameMaxBytes: Math.min(Number(user.name?.["@max"]) || 128, 256),
         timeRangeBegin: user.Valid?.timeRangeBegin || "1970-01-01T00:00:00", timeRangeEnd: user.Valid?.timeRangeEnd || "2037-12-31T23:59:59",
+        longTermValiditySupported: opt(user.Valid?.enable).includes("false"),
         userTypes: opt(user.userType), timeTypes: opt(user.Valid?.timeType),
         faceFunctions,
         faceSearchSupported: (face.isSuportFDSearch ?? face.isSupportFDSearch) === true,
@@ -120,7 +126,7 @@ export class HikvisionFaceProvider {
   async createPerson(person) {
     await this.json("POST", "/ISAPI/AccessControl/UserInfo/Record?format=json", { UserInfo: {
       employeeNo: person.employeeNo, name: person.name, userType: "normal", onlyVerify: false,
-      Valid: { enable: true, beginTime: person.validFrom, endTime: person.validTo, timeType: "local" }, doorRight: "",
+      Valid: { enable: person.validityMode !== "unlimited", beginTime: person.validFrom, endTime: person.validTo, timeType: "local" }, doorRight: "",
     } });
   }
   async putFace(person, photo) {
@@ -141,9 +147,9 @@ export class HikvisionFaceProvider {
 
 export class SimulatedFaceProvider {
   constructor() { this.people = new Map(); this.faces = new Set(); }
-  async describe() { return { device: { model: "模拟门禁设备", firmware: "simulation" }, capabilities: { libraries: [{ FDID: "SIMULATION_FD_01", faceLibType: "blackFD" }], doorNumbers: [1], maxPhotoBytes: FACE_PHOTO_LIMIT, photoLimitSource: "guide-default", employeeNoMaxLength: 32, employeeNoPattern: "^[A-Za-z0-9_-]+$", nameMaxBytes: 128, faceSearchSupported: true, personFaceCountSupported: true, timeRangeBegin: "1970-01-01T00:00:00", timeRangeEnd: "2037-12-31T23:59:59" } }; }
+  async describe() { return { device: { model: "模拟门禁设备", firmware: "simulation" }, capabilities: { libraries: [{ FDID: "SIMULATION_FD_01", faceLibType: "blackFD" }], doorNumbers: [1], maxPhotoBytes: FACE_PHOTO_LIMIT, photoLimitSource: "guide-default", employeeNoMaxLength: 32, employeeNoPattern: "^[A-Za-z0-9_-]+$", nameMaxBytes: 128, faceSearchSupported: true, personFaceCountSupported: true, longTermValiditySupported: true, timeRangeBegin: "1970-01-01T00:00:00", timeRangeEnd: "2037-12-31T23:59:59" } }; }
   async findPerson(id) { return copy(this.people.get(id) || null); }
-  async createPerson(person) { if (this.people.has(person.employeeNo)) invalid("人员编号已存在", 409); this.people.set(person.employeeNo, { employeeNo: person.employeeNo, name: person.name, Valid: { enable: true, beginTime: person.validFrom, endTime: person.validTo }, doorRight: "", numOfFace: 0 }); }
+  async createPerson(person) { if (this.people.has(person.employeeNo)) invalid("人员编号已存在", 409); this.people.set(person.employeeNo, { employeeNo: person.employeeNo, name: person.name, Valid: { enable: person.validityMode !== "unlimited", beginTime: person.validFrom, endTime: person.validTo, timeType: "local" }, doorRight: "", numOfFace: 0 }); }
   async putFace(person) { this.faces.add(person.employeeNo); this.people.get(person.employeeNo).numOfFace = 1; }
   async grantAccess(person) { this.people.get(person.employeeNo).doorRight = String(person.doorNo); }
   async findFace(person) { return this.faces.has(person.employeeNo); }
@@ -206,12 +212,18 @@ export class FaceEnrollmentService {
     if (!caps.doorNumbers.includes(Number(data.doorNo))) invalid("请选择设备返回的有效门编号");
     const library = caps.libraries.find((entry) => entry.FDID === data.FDID && entry.faceLibType === data.faceLibType);
     if (!library) invalid("请选择设备返回的人脸库");
-    const validFrom = normalizeLocalTime(data.validFrom, "开始时间"), validTo = normalizeLocalTime(data.validTo, "结束时间");
+    const validityMode = data.validityMode === undefined ? "fixed" : data.validityMode;
+    if (!["fixed", "unlimited"].includes(validityMode)) invalid("有效期模式无效");
+    if (validityMode === "unlimited" && caps.longTermValiditySupported !== true) invalid("设备未确认支持长期有效");
+    const rangeBegin = typeof caps.timeRangeBegin === "string" ? normalizeLocalTime(caps.timeRangeBegin, "设备有效期范围开始时间") : undefined;
+    const rangeEnd = typeof caps.timeRangeEnd === "string" ? normalizeLocalTime(caps.timeRangeEnd, "设备有效期范围结束时间") : undefined;
+    const validFrom = normalizeLocalTime(validityMode === "unlimited" ? rangeBegin : data.validFrom, "开始时间");
+    const validTo = normalizeLocalTime(validityMode === "unlimited" ? rangeEnd : data.validTo, "结束时间");
     if (validFrom >= validTo) invalid("结束时间必须晚于开始时间");
-    if ((typeof caps.timeRangeBegin === "string" && validFrom < caps.timeRangeBegin) || (typeof caps.timeRangeEnd === "string" && validTo > caps.timeRangeEnd)) invalid("有效期超出设备能力范围");
+    if ((rangeBegin !== undefined && validFrom < rangeBegin) || (rangeEnd !== undefined && validTo > rangeEnd)) invalid("有效期超出设备能力范围");
     if (caps.userTypes?.length && !caps.userTypes.includes("normal")) invalid("设备不支持普通测试人员");
     if (caps.timeTypes?.length && !caps.timeTypes.includes("local")) invalid("设备不支持本地时间有效期");
-    return { employeeNo: data.employeeNo, name: data.name.trim(), doorNo: Number(data.doorNo), ...library, validFrom, validTo };
+    return { employeeNo: data.employeeNo, name: data.name.trim(), doorNo: Number(data.doorNo), ...library, validityMode, validFrom, validTo };
   }
   #savePhoto(id, bytes) {
     const old = this.#photos.get(id); clearTimeout(old?.timer); old?.bytes.fill(0);
@@ -241,7 +253,7 @@ export class FaceEnrollmentService {
         this.#step(row, stage, "running");
         const existing = await this.#provider.findPerson(row.employeeNo);
         if (existing && !row.createAttempted) invalid("设备已有此人员编号，未覆盖原人员，请使用新的测试编号", 409);
-        if (existing && (existing.name !== row.name || existing.Valid?.beginTime !== row.validFrom || existing.Valid?.endTime !== row.validTo)) invalid("设备人员与本次测试不一致，已停止继续同步", 409);
+        if (existing && (existing.name !== row.name || !matchesValidity(existing.Valid, row))) invalid("设备人员与本次测试不一致，已停止继续同步", 409);
         if (!existing) { row.createAttempted = true; await this.#provider.createPerson(row); }
         this.#step(row, stage, "success", "人员记录已建立");
       }
@@ -257,7 +269,7 @@ export class FaceEnrollmentService {
       }
       if (this.#closed) invalid("设备会话已关闭", 409);
       stage = "access";
-      if (row.steps[2].state !== "success") { this.#step(row, stage, "running"); await this.#provider.grantAccess(row); this.#step(row, stage, "success", `已授予 ${row.doorNo} 号门，受人员有效期约束`); }
+      if (row.steps[2].state !== "success") { this.#step(row, stage, "running"); await this.#provider.grantAccess(row); this.#step(row, stage, "success", `已授予 ${row.doorNo} 号门，${row.validityMode === "unlimited" ? "长期有效" : "受人员有效期约束"}`); }
       if (this.#closed) invalid("设备会话已关闭", 409);
       stage = "verify"; this.#step(row, stage, "running");
       await this.#verify(row);
@@ -269,7 +281,7 @@ export class FaceEnrollmentService {
   }
   async #verify(row) {
     const person = await this.#provider.findPerson(row.employeeNo);
-    if (!person || person.name !== row.name || person.Valid?.enable !== true || person.Valid?.beginTime !== row.validFrom || person.Valid?.endTime !== row.validTo || !String(person.doorRight || "").split(",").includes(String(row.doorNo))) invalid("设备人员、有效期或门权限尚未查询确认", 502);
+    if (!person || person.name !== row.name || !matchesValidity(person.Valid, row) || !String(person.doorRight || "").split(",").includes(String(row.doorNo))) invalid("设备人员、有效期或门权限尚未查询确认", 502);
     if (!row.faceSubmitted) invalid("人脸照片尚未确认提交成功，请先继续同步", 409);
     const searchable = this.#state.capabilities.faceSearchSupported === true;
     if (searchable) {

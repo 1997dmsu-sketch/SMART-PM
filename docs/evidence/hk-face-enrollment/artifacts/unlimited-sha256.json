@@ -1,0 +1,37 @@
+[
+  {
+    "path": "unlimited-admin-tests.exit-code.txt",
+    "bytes": 12,
+    "sha256": "1ca4a13146b2891c0e462123ac0cb848f92e6221f18b870a1b78c232d1956c35"
+  },
+  {
+    "path": "unlimited-admin-tests.stderr.txt",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "unlimited-admin-tests.stdout.txt",
+    "bytes": 11920,
+    "sha256": "a653199ffe56a7e23afaa858104ded6a2ad863cdeeffd67c7b6e35946f78fb22"
+  },
+  {
+    "path": "unlimited-source-after.json",
+    "bytes": 659,
+    "sha256": "c1c7a6611dacf82c95e1b777e296b9b1f8fc5a629be3cc12c29fa2e4ac3dc785"
+  },
+  {
+    "path": "unlimited-source-before.json",
+    "bytes": 659,
+    "sha256": "c1c7a6611dacf82c95e1b777e296b9b1f8fc5a629be3cc12c29fa2e4ac3dc785"
+  },
+  {
+    "path": "unlimited-source-git-index.json",
+    "bytes": 802,
+    "sha256": "cad74117822a682ca235dddc73fee5aeca011ab52d13cb8a524c6b605fff4c02"
+  },
+  {
+    "path": "unlimited-validation.json",
+    "bytes": 344,
+    "sha256": "440449ddb145e44bb575a0ad8c3bfcdecac4b455dc08db893493b9afc2533bfb"
+  }
+]

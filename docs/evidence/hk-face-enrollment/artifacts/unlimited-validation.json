@@ -1,0 +1,13 @@
+{
+  "started": "2026-11-24T10:01:11.8245475+08:00",
+  "finished": "2026-11-24T10:01:13.3532651+08:00",
+  "windows": true,
+  "powershell": "7.6.9",
+  "edition": "Core",
+  "node": "v24.16.0",
+  "command": "npm.cmd --prefix admin-web test",
+  "exitCode": 0,
+  "sourceHashesUnchanged": true,
+  "deviceRequests": 0,
+  "deviceWrites": 0
+}

@@ -13,6 +13,7 @@ test("simulation explicitly reports its mode and completes four stages without a
   const row = await service.enroll(input());
   assert.equal(row.status, "ready");
   assert.equal(row.mode, "simulation");
+  assert.equal(row.validityMode, "fixed");
   assert.deepEqual(row.steps.map((step) => [step.key, step.state]), [["person", "success"], ["face", "success"], ["access", "success"], ["verify", "success"]]);
   assert.equal(row.validFrom, "2026-11-24T09:00:00");
   assert.equal(service.state().enrollments.length, 1);
@@ -234,6 +235,7 @@ test("device payload separates creating a person, binary face upsert and selecte
   const create = JSON.parse(calls[0].body), grant = JSON.parse(calls[2].body);
   assert.equal(create.UserInfo.employeeNo, person.employeeNo);
   assert.equal(create.UserInfo.Valid.timeType, "local");
+  assert.equal(create.UserInfo.Valid.enable, true);
   assert.equal(create.UserInfo.doorRight, "");
   assert.equal(calls[1].method, "PUT");
   assert.equal(calls[1].path, "/ISAPI/Intelligent/FDLib/FDSetUp?format=json");
@@ -264,6 +266,7 @@ test("discovery normalizes the observed capability shapes without inventing FDID
   assert.equal(state.capabilities.employeeNoPattern, "^[A-Za-z0-9]+$");
   assert.equal(state.capabilities.photoLimitSource, "guide-default");
   assert.equal(state.capabilities.timeRangeEnd, "2037-12-31T23:59:59");
+  assert.equal(state.capabilities.longTermValiditySupported, false);
 });
 
 test("missing door capability is not replaced with an invented door 1", async () => {
@@ -277,4 +280,149 @@ test("explicitly unsupported face setup is rejected before an enrollment", async
 test("face setup status code zero is not silently treated as documented success", async () => {
   const provider = new HikvisionFaceProvider({ async request() { return { status: 200, body: Buffer.from('{"statusCode":0}') }; }, close() {} });
   await assert.rejects(provider.putFace(input(), photo), /设备拒绝操作/);
+});
+
+test("long-term support requires an explicit false option in the advertised validity capability", async () => {
+  for (const [enable, supported] of [[undefined, false], ["true", false], ["true,false", true], [{ "@opt": [true, false] }, true]]) {
+    const state = await new HikvisionFaceProvider(describedClient({ user: { Valid: { enable } } })).describe();
+    assert.equal(state.capabilities.longTermValiditySupported, supported);
+  }
+});
+
+test("unlimited validity uses capability dates and a boolean false instead of a distant fixed expiry", async () => {
+  const provider = new SimulatedFaceProvider();
+  const describe = provider.describe.bind(provider);
+  provider.describe = async () => {
+    const state = await describe();
+    state.capabilities.timeRangeBegin = "2020-01-01T00:00";
+    state.capabilities.timeRangeEnd = "2030-12-31T23:59";
+    return state;
+  };
+  const service = new FaceEnrollmentService({ providerFactory: () => provider });
+  await service.connect({ mode: "device", origin: "https://synthetic.invalid" });
+  const values = input({ validityMode: "unlimited" });
+  delete values.validFrom;
+  delete values.validTo;
+  const row = await service.enroll(values);
+  assert.equal(row.status, "ready");
+  assert.equal(row.validityMode, "unlimited");
+  assert.equal(row.validFrom, "2020-01-01T00:00:00");
+  assert.equal(row.validTo, "2030-12-31T23:59:00");
+  const stored = provider.people.get(row.employeeNo);
+  assert.equal(stored.Valid.enable, false);
+  assert.equal(stored.Valid.timeType, "local");
+  assert.equal(stored.Valid.beginTime, row.validFrom);
+  assert.equal(stored.Valid.endTime, row.validTo);
+  assert.match(row.steps[2].message, /长期有效/);
+  assert(!row.steps[2].message.includes("2030"));
+  service.close();
+});
+
+test("unlimited device payload retains legal dates and sends enable as a boolean false", async () => {
+  let payload;
+  const provider = new HikvisionFaceProvider({
+    async request(call) { payload = JSON.parse(call.body); return { status: 200, body: Buffer.from('{"statusCode":1}') }; },
+    close() {},
+  });
+  await provider.createPerson({ ...input(), validityMode: "unlimited", validFrom: "2020-01-01T00:00:00", validTo: "2030-12-31T23:59:59" });
+  assert.deepEqual(payload.UserInfo.Valid, { enable: false, beginTime: "2020-01-01T00:00:00", endTime: "2030-12-31T23:59:59", timeType: "local" });
+  assert.equal(payload.UserInfo.doorRight, "");
+});
+
+test("unlimited validity is rejected before writes when capability is false or missing", async () => {
+  for (const supported of [false, undefined]) {
+    const provider = new SimulatedFaceProvider();
+    const describe = provider.describe.bind(provider);
+    let creates = 0;
+    provider.describe = async () => { const state = await describe(); state.capabilities.longTermValiditySupported = supported; return state; };
+    provider.createPerson = async () => { creates++; };
+    const service = new FaceEnrollmentService({ providerFactory: () => provider });
+    await service.connect({ mode: "device", origin: "https://synthetic.invalid" });
+    await assert.rejects(service.enroll(input({ validityMode: "unlimited", validFrom: undefined, validTo: undefined })), /未确认支持长期有效/);
+    assert.equal(creates, 0);
+    assert.equal(service.state().enrollments.length, 0);
+    service.close();
+  }
+});
+
+test("only omitted validity mode defaults to fixed and all other invalid values are rejected", async () => {
+  const service = await simulated();
+  for (const validityMode of [null, "", true, false, 0, {}, [], "permanent", "UNLIMITED"]) {
+    await assert.rejects(service.enroll(input({ validityMode })), /有效期模式无效/);
+    assert.equal(service.state().enrollments.length, 0);
+  }
+  const row = await service.enroll(input());
+  assert.equal(row.status, "ready");
+  assert.equal(row.validityMode, "fixed");
+  assert.equal(row.validTo, "2026-11-24T10:00:00");
+  service.close();
+});
+
+test("unlimited wire dates still require a legal ordered capability range", async () => {
+  for (const overrides of [
+    { timeRangeBegin: "2026-02-30T00:00:00" },
+    { timeRangeBegin: "2030-01-01T00:00:00", timeRangeEnd: "2020-01-01T00:00:00" },
+    { timeRangeEnd: undefined },
+  ]) {
+    const provider = new SimulatedFaceProvider();
+    const describe = provider.describe.bind(provider);
+    provider.describe = async () => { const state = await describe(); Object.assign(state.capabilities, overrides); return state; };
+    const service = new FaceEnrollmentService({ providerFactory: () => provider });
+    await service.connect({ mode: "device", origin: "https://synthetic.invalid" });
+    await assert.rejects(service.enroll(input({ validityMode: "unlimited" })), /时间/);
+    assert.equal(service.state().enrollments.length, 0);
+    assert.equal(provider.people.size, 0);
+    service.close();
+  }
+});
+
+for (const validityMode of ["fixed", "unlimited"]) test(`${validityMode} verification binds enable and dates while accepting omitted or local timeType`, async () => {
+  const provider = new SimulatedFaceProvider();
+  const service = new FaceEnrollmentService({ providerFactory: () => provider });
+  await service.connect({ mode: "device", origin: "https://synthetic.invalid" });
+  const row = await service.enroll(input({ validityMode }));
+  assert.equal(row.status, "ready");
+  const stored = provider.people.get(row.employeeNo), original = structuredClone(stored.Valid);
+  stored.Valid.enable = !original.enable;
+  assert.equal((await service.verify({ id: row.id })).status, "failed");
+  stored.Valid = { ...original, beginTime: "2025-01-01T00:00:00" };
+  assert.equal((await service.verify({ id: row.id })).status, "failed");
+  stored.Valid = { ...original, timeType: "UTC" };
+  assert.equal((await service.verify({ id: row.id })).status, "failed");
+  stored.Valid = { ...original };
+  delete stored.Valid.timeType;
+  assert.equal((await service.verify({ id: row.id })).status, "ready");
+  stored.Valid.timeType = "local";
+  assert.equal((await service.verify({ id: row.id })).status, "ready");
+  service.close();
+});
+
+for (const validityMode of ["fixed", "unlimited"]) test(`${validityMode} retry does not adopt an existing record with the opposite enable`, async () => {
+  const provider = new SimulatedFaceProvider();
+  const create = provider.createPerson.bind(provider), upload = provider.putFace.bind(provider);
+  let creates = 0, uploads = 0;
+  provider.createPerson = async (person) => {
+    creates++;
+    await create(person);
+    provider.people.get(person.employeeNo).Valid.enable = validityMode === "unlimited";
+    throw Error("synthetic create timeout");
+  };
+  provider.putFace = async (person, bytes) => { uploads++; await upload(person, bytes); };
+  const service = new FaceEnrollmentService({ providerFactory: () => provider });
+  await service.connect({ mode: "device", origin: "https://synthetic.invalid" });
+  const first = await service.enroll(input({ validityMode }));
+  assert.equal(first.status, "failed");
+  const rejected = await service.retry({ id: first.id, validityMode: validityMode === "fixed" ? "unlimited" : "fixed" });
+  assert.equal(rejected.status, "failed");
+  assert.equal(rejected.validityMode, validityMode);
+  assert.match(rejected.error, /设备人员与本次测试不一致/);
+  assert.equal(uploads, 0);
+  assert.equal(creates, 1);
+  provider.people.get(first.employeeNo).Valid.enable = validityMode !== "unlimited";
+  const retried = await service.retry({ id: first.id });
+  assert.equal(retried.status, "ready");
+  assert.equal(retried.validityMode, validityMode);
+  assert.equal(uploads, 1);
+  assert.equal(creates, 1);
+  service.close();
 });

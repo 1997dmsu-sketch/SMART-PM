@@ -1,0 +1,22 @@
+[
+  {
+    "path": "admin-web/lib/face-enrollment.mjs",
+    "bytes": 22677,
+    "sha256": "5ee1bad8cfd1da1158a074dbe9474e4c2467777d67ac9cbeb83bc0ccd01d194a"
+  },
+  {
+    "path": "admin-web/public/face-ui.js",
+    "bytes": 29869,
+    "sha256": "a2e1b566bfd1a3a6a356bd9fa41be4637a049b349dd70a2283261898a9359f51"
+  },
+  {
+    "path": "admin-web/tests/face-enrollment.test.mjs",
+    "bytes": 23935,
+    "sha256": "1b42b3874e52c2d2a2714708d9db827897bbb4669bb43e8dad6f4914e789790d"
+  },
+  {
+    "path": "admin-web/tests/face-ui.test.mjs",
+    "bytes": 11555,
+    "sha256": "4b591fa2718d92e2e13d64974f786db88aae4fd975a8772b363fb40166b77d9c"
+  }
+]

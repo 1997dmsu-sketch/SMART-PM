@@ -43,10 +43,21 @@ export function buildFaceEnrollment(values, capabilities, photo) {
   if (capabilities.employeeNoPattern &&
       !new RegExp(`^(?:${capabilities.employeeNoPattern})$`).test(employeeNo))
     throw Error("测试人员编号不符合当前设备要求");
-  const begin = new Date(values.validFrom).getTime();
-  const end = new Date(values.validTo).getTime();
-  if (!Number.isFinite(begin) || !Number.isFinite(end) || begin >= end)
-    throw Error("有效期开始时间必须早于结束时间");
+  const validityMode = values.validityMode === undefined ? "fixed" : values.validityMode;
+  if (!["fixed", "unlimited"].includes(validityMode))
+    throw Error("请选择固定期限或长期有效");
+  const validity = { validityMode };
+  if (validityMode === "unlimited") {
+    if (capabilities.longTermValiditySupported !== true)
+      throw Error("当前设备未声明支持长期有效，请使用固定期限");
+  } else {
+    const begin = new Date(values.validFrom).getTime();
+    const end = new Date(values.validTo).getTime();
+    if (!Number.isFinite(begin) || !Number.isFinite(end) || begin >= end)
+      throw Error("有效期开始时间必须早于结束时间");
+    validity.validFrom = values.validFrom;
+    validity.validTo = values.validTo;
+  }
   const doorNo = Number(values.doorNo);
   if (!capabilities.doorNumbers?.some((door) => Number(door) === doorNo))
     throw Error("请选择设备提供的门号");
@@ -60,14 +71,25 @@ export function buildFaceEnrollment(values, capabilities, photo) {
     throw Error("处理后照片超过本次联调照片上限，请重新选择");
   return {
     employeeNo, name, doorNo,
-    validFrom: values.validFrom,
-    validTo: values.validTo,
+    ...validity,
     FDID: library.FDID,
     faceLibType: library.faceLibType,
     photoBase64: photo.base64,
     photoName: photo.name,
     consent: true,
   };
+}
+
+export function faceValidityLabel(enrollment) {
+  return enrollment.validityMode === "unlimited"
+    ? "长期有效"
+    : `${enrollment.validFrom || "—"} 至 ${enrollment.validTo || "—"}`;
+}
+
+export function renderFaceValidityFields(values, capabilities, esc) {
+  const supported = capabilities.longTermValiditySupported === true;
+  const unlimited = supported && values.validityMode === "unlimited";
+  return `<label class="field full">有效期方式 *<select name="validityMode" required><option value="fixed" ${unlimited ? "" : "selected"}>固定期限</option>${supported ? `<option value="unlimited" ${unlimited ? "selected" : ""}>长期有效</option>` : ""}</select><small>${supported ? "长期有效不设置截止日期；固定期限需填写开始和结束时间。" : "设备未声明支持长期有效，当前仅可设置固定期限。"}</small></label>${unlimited ? '<p class="face-help full">长期有效，无截止日期。</p>' : `<label class="field">有效期开始 *<input name="validFrom" type="datetime-local" value="${esc(values.validFrom || "")}" required></label><label class="field">有效期结束 *<input name="validTo" type="datetime-local" value="${esc(values.validTo || "")}" required></label>`}`;
 }
 
 export function renderFaceSteps(enrollment, esc) {
@@ -193,6 +215,7 @@ export function mountFaceEnrollment(initialState, helpers) {
   const now = new Date();
   const draft = {
     employeeNo: "", name: "", doorNo: "", library: "",
+    validityMode: "fixed",
     validFrom: localDate(now),
     validTo: localDate(new Date(now.getTime() + 86400000)),
     consent: false,
@@ -211,8 +234,8 @@ export function mountFaceEnrollment(initialState, helpers) {
     }
     const form = root.querySelector("#face-enroll-form");
     if (form) {
-      for (const key of ["employeeNo", "name", "doorNo", "library", "validFrom", "validTo"])
-        draft[key] = form.elements[key].value;
+      for (const key of ["employeeNo", "name", "doorNo", "library", "validityMode", "validFrom", "validTo"])
+        if (form.elements[key]) draft[key] = form.elements[key].value;
       draft.consent = form.elements.consent.checked;
     }
   }
@@ -261,12 +284,14 @@ export function mountFaceEnrollment(initialState, helpers) {
     const selected = retryPhotos.get(enrollment.id);
     const failed = enrollment.status === "failed";
     const mode = enrollment.mode || state.mode;
-    return `<article class="face-record" data-face-record="${esc(enrollment.id)}"><div class="face-record-head"><div><h3>${esc(enrollment.name)} <small>${esc(enrollment.employeeNo)}</small></h3><p>门号 ${esc(enrollment.doorNo)} · 人脸库 ${esc(enrollment.FDID)} / ${esc(enrollment.faceLibType)}</p></div><span class="face-result ${failed ? "failed" : enrollment.status === "pending-site" ? "pending-site" : enrollment.status === "ready" ? "ready" : ""}">${esc(faceStatus(enrollment, mode))}</span></div>${renderFaceSteps(enrollment, esc)}${faceSiteNote(enrollment) ? `<p class="face-site-note">${esc(faceSiteNote(enrollment))}</p>` : ""}${enrollment.error ? `<p class="face-record-error" role="alert">${esc(enrollment.error)}</p>` : ""}<p class="face-validity">有效期：${esc(enrollment.validFrom || "—")} 至 ${esc(enrollment.validTo || "—")}</p>${failed ? `<div class="face-retry-photo"><label class="field">补充该人员的 JPEG 照片（可选）<input type="file" accept="image/jpeg,.jpg,.jpeg" data-retry-photo ${disabled()}><small>可直接继续；需要补充照片时，请核对人员编号 ${esc(enrollment.employeeNo)}。</small></label><div class="face-photo-preview compact" data-retry-preview>${previewMarkup(selected?.photo)}</div><label class="face-check" ${selected?.photo ? "" : "hidden"}><input type="checkbox" data-retry-consent ${selected?.consent ? "checked" : ""} ${disabled()}>确认此照片属于该人员，并已同意用于本次测试</label><p class="form-error" data-retry-error role="alert">${esc(selected?.error || "")}</p></div>` : ""}<div class="face-record-actions">${failed ? `<button type="button" class="btn primary" data-face-retry ${!state.connected || connection.mode !== state.mode || busy || selected?.loading ? "disabled" : ""}>继续同步</button>` : ""}<button type="button" class="btn" data-face-verify ${!state.connected || connection.mode !== state.mode || busy ? "disabled" : ""}>查询状态</button></div></article>`;
+    return `<article class="face-record" data-face-record="${esc(enrollment.id)}"><div class="face-record-head"><div><h3>${esc(enrollment.name)} <small>${esc(enrollment.employeeNo)}</small></h3><p>门号 ${esc(enrollment.doorNo)} · 人脸库 ${esc(enrollment.FDID)} / ${esc(enrollment.faceLibType)}</p></div><span class="face-result ${failed ? "failed" : enrollment.status === "pending-site" ? "pending-site" : enrollment.status === "ready" ? "ready" : ""}">${esc(faceStatus(enrollment, mode))}</span></div>${renderFaceSteps(enrollment, esc)}${faceSiteNote(enrollment) ? `<p class="face-site-note">${esc(faceSiteNote(enrollment))}</p>` : ""}${enrollment.error ? `<p class="face-record-error" role="alert">${esc(enrollment.error)}</p>` : ""}<p class="face-validity">有效期：${esc(faceValidityLabel(enrollment))}</p>${failed ? `<div class="face-retry-photo"><label class="field">补充该人员的 JPEG 照片（可选）<input type="file" accept="image/jpeg,.jpg,.jpeg" data-retry-photo ${disabled()}><small>可直接继续；需要补充照片时，请核对人员编号 ${esc(enrollment.employeeNo)}。</small></label><div class="face-photo-preview compact" data-retry-preview>${previewMarkup(selected?.photo)}</div><label class="face-check" ${selected?.photo ? "" : "hidden"}><input type="checkbox" data-retry-consent ${selected?.consent ? "checked" : ""} ${disabled()}>确认此照片属于该人员，并已同意用于本次测试</label><p class="form-error" data-retry-error role="alert">${esc(selected?.error || "")}</p></div>` : ""}<div class="face-record-actions">${failed ? `<button type="button" class="btn primary" data-face-retry ${!state.connected || connection.mode !== state.mode || busy || selected?.loading ? "disabled" : ""}>继续同步</button>` : ""}<button type="button" class="btn" data-face-verify ${!state.connected || connection.mode !== state.mode || busy ? "disabled" : ""}>查询状态</button></div></article>`;
   }
 
   function render() {
     if (!alive()) return;
     const cap = capabilities();
+    if (draft.validityMode === "unlimited" && cap.longTermValiditySupported !== true)
+      draft.validityMode = "fixed";
     const libraries = cap.libraries || [];
     const doors = cap.doorNumbers || [];
     if (!doors.some((door) => String(door) === String(draft.doorNo)))
@@ -275,12 +300,13 @@ export function mountFaceEnrollment(initialState, helpers) {
       draft.library = libraries.length ? "0" : "";
     const deviceMode = state.mode === "device";
     const canEnroll = state.connected && state.mode === connection.mode && libraries.length && doors.length && !busy && !photoLoading;
-    root.innerHTML = `<div class="face-page">${head("人脸门禁", "连接设备，同步测试人员、人脸照片与门禁权限。", `<button type="button" class="btn" id="face-refresh" ${disabled()}>${icon("refresh")} 刷新状态</button>`)}<div class="face-mode-banner ${deviceMode ? "device" : "simulation"}" role="status"><strong>${deviceMode ? "现场设备模式" : "模拟模式 · 不会下发现场设备"}</strong><span>${deviceMode ? `${esc(state.device?.origin || connection.origin)} · ${state.connected ? "已连接" : "未连接"}` : "仅验证联调流程，所有结果均为模拟。"}</span>${deviceMode && (state.device?.model || state.device?.firmware) ? `<small>型号 ${esc(state.device.model || "—")} · 固件 ${esc(state.device.firmware || "—")}</small>` : ""}</div><div class="face-page-error form-error" role="alert">${esc(error)}</div>${busy ? `<div class="face-busy" role="status">${esc(busy)}。阶段：建人 → 上传人脸 → 授权门 → 查询确认；完成后显示设备返回结果。</div>` : ""}<div class="face-columns"><section class="panel"><div class="panel-head"><h2>1. 连接设备</h2><span class="face-connection ${state.connected ? "connected" : ""}">${state.connected ? "已连接" : "未连接"}</span></div><form id="face-connect-form" class="face-form" autocomplete="off"><fieldset ${disabled()}><legend class="face-sr-only">连接方式</legend><div class="face-mode-choice"><label><input type="radio" name="mode" value="simulation" ${connection.mode === "simulation" ? "checked" : ""}>模拟模式</label><label><input type="radio" name="mode" value="device" ${connection.mode === "device" ? "checked" : ""}>现场设备</label></div><div class="face-device-fields form-grid" ${connection.mode === "device" ? "" : "hidden"}><label class="field full">设备地址<input name="origin" type="url" value="${esc(connection.origin)}" placeholder="https://192.168.1.227:443" ${connection.mode === "device" ? "required" : ""}></label><label class="field">设备账号<input name="username" autocomplete="off" value="${esc(connection.username)}" ${connection.mode === "device" ? "required" : ""}></label><label class="field">设备密码<input name="password" type="password" autocomplete="new-password" ${connection.mode === "device" ? "required" : ""}></label><label class="field full">设备证书（.cer / .pem）<input name="certificate" type="file" accept=".cer,.pem"><small>证书与账号密码仅用于当前服务内存中的设备连接。</small></label><label class="face-check full"><input type="checkbox" name="developmentTls" ${connection.developmentTls ? "checked" : ""}>开发联调证书例外</label><p class="face-help full">仅在开发联调设备证书时使用此例外。连接成功后密码会清空。</p></div><p class="face-help">${connection.mode === "simulation" ? "默认使用模拟设备，可先验证人员同步、失败重试和查询流程。" : "连接后将显示现场设备地址与设备返回的人脸库、门号。"}</p><div class="face-form-actions"><button class="btn primary" type="submit">${connection.mode === "device" ? "连接现场设备" : "连接模拟设备"}</button>${state.connected ? '<button class="btn" type="button" id="face-disconnect">断开连接</button>' : ""}</div></fieldset></form></section><section class="panel"><div class="panel-head"><h2>2. 人员与人脸</h2></div><form id="face-enroll-form" class="face-form"><fieldset ${busy || !state.connected || connection.mode !== state.mode ? "disabled" : ""}><legend class="face-sr-only">测试人员信息</legend><div class="form-grid"><label class="field">测试人员编号 *<input name="employeeNo" value="${esc(draft.employeeNo)}" required autocomplete="off">${deviceMode ? "<small>现场设备人员编号使用字母和数字。</small>" : ""}</label><label class="field">显示名 *<input name="name" value="${esc(draft.name)}" required autocomplete="off"></label><label class="field">人脸库 *<select name="library" required>${libraries.length ? libraries.map((library, index) => `<option value="${index}" ${String(index) === draft.library ? "selected" : ""}>${esc(library.FDID)} · ${esc(library.faceLibType)}</option>`).join("") : '<option value="">连接后读取设备能力</option>'}</select></label><label class="field">门号 *<select name="doorNo" required>${doors.length ? doors.map((door) => `<option value="${esc(door)}" ${String(door) === draft.doorNo ? "selected" : ""}>门 ${esc(door)}</option>`).join("") : '<option value="">连接后读取设备能力</option>'}</select></label><label class="field">有效期开始 *<input name="validFrom" type="datetime-local" value="${esc(draft.validFrom)}" required></label><label class="field">有效期结束 *<input name="validTo" type="datetime-local" value="${esc(draft.validTo)}" required></label><label class="field full">JPEG 人脸照片 *<input id="face-photo" type="file" accept="image/jpeg,.jpg,.jpeg"><small>${cap.maxPhotoBytes ? `本次联调照片上限：${Math.floor(cap.maxPhotoBytes / 1024)} KB${cap.photoLimitSource === "guide-default" ? "（按接入指南设置）" : ""}。` : "连接后读取本次联调照片上限。"}在本机按比例处理为最长边不超过 960 像素的 JPEG，不裁剪照片；只随同步请求提交，不进入公共图片库。</small></label><div class="face-photo-preview full" id="face-photo-preview">${previewMarkup(photo)}</div><p class="form-error full" id="face-photo-error" role="alert"></p><label class="face-check full"><input type="checkbox" name="consent" ${draft.consent ? "checked" : ""} required>我确认此人员已同意将其照片用于本次人脸门禁测试</label></div></fieldset><div class="face-form-actions"><button type="submit" class="btn primary" id="face-enroll-submit" ${canEnroll ? "" : "disabled"}>同步人员和人脸</button></div><p class="face-help">${!state.connected ? "请先连接模拟设备或现场设备。" : connection.mode !== state.mode ? "所选模式尚未连接，请先连接该模式的设备。" : deviceMode ? "同步及查询通过后，还需在现场设备刷脸验证。" : "当前为模拟模式，同步完成不会向现场设备下发人员或照片。"}</p></form></section></div><section class="panel face-records"><div class="panel-head"><h2>3. 同步记录与阶段</h2><span class="muted">${(state.enrollments || []).length} 条</span></div>${state.enrollments?.length ? state.enrollments.map(enrollmentMarkup).join("") : '<div class="face-empty">暂无同步记录。连接后，选择一名测试人员开始联调。</div>'}</section>${footer()}</div>`;
+    root.innerHTML = `<div class="face-page">${head("人脸门禁", "连接设备，同步测试人员、人脸照片与门禁权限。", `<button type="button" class="btn" id="face-refresh" ${disabled()}>${icon("refresh")} 刷新状态</button>`)}<div class="face-mode-banner ${deviceMode ? "device" : "simulation"}" role="status"><strong>${deviceMode ? "现场设备模式" : "模拟模式 · 不会下发现场设备"}</strong><span>${deviceMode ? `${esc(state.device?.origin || connection.origin)} · ${state.connected ? "已连接" : "未连接"}` : "仅验证联调流程，所有结果均为模拟。"}</span>${deviceMode && (state.device?.model || state.device?.firmware) ? `<small>型号 ${esc(state.device.model || "—")} · 固件 ${esc(state.device.firmware || "—")}</small>` : ""}</div><div class="face-page-error form-error" role="alert">${esc(error)}</div>${busy ? `<div class="face-busy" role="status">${esc(busy)}。阶段：建人 → 上传人脸 → 授权门 → 查询确认；完成后显示设备返回结果。</div>` : ""}<div class="face-columns"><section class="panel"><div class="panel-head"><h2>1. 连接设备</h2><span class="face-connection ${state.connected ? "connected" : ""}">${state.connected ? "已连接" : "未连接"}</span></div><form id="face-connect-form" class="face-form" autocomplete="off"><fieldset ${disabled()}><legend class="face-sr-only">连接方式</legend><div class="face-mode-choice"><label><input type="radio" name="mode" value="simulation" ${connection.mode === "simulation" ? "checked" : ""}>模拟模式</label><label><input type="radio" name="mode" value="device" ${connection.mode === "device" ? "checked" : ""}>现场设备</label></div><div class="face-device-fields form-grid" ${connection.mode === "device" ? "" : "hidden"}><label class="field full">设备地址<input name="origin" type="url" value="${esc(connection.origin)}" placeholder="https://192.168.1.227:443" ${connection.mode === "device" ? "required" : ""}></label><label class="field">设备账号<input name="username" autocomplete="off" value="${esc(connection.username)}" ${connection.mode === "device" ? "required" : ""}></label><label class="field">设备密码<input name="password" type="password" autocomplete="new-password" ${connection.mode === "device" ? "required" : ""}></label><label class="field full">设备证书（.cer / .pem）<input name="certificate" type="file" accept=".cer,.pem"><small>证书与账号密码仅用于当前服务内存中的设备连接。</small></label><label class="face-check full"><input type="checkbox" name="developmentTls" ${connection.developmentTls ? "checked" : ""}>开发联调证书例外</label><p class="face-help full">仅在开发联调设备证书时使用此例外。连接成功后密码会清空。</p></div><p class="face-help">${connection.mode === "simulation" ? "默认使用模拟设备，可先验证人员同步、失败重试和查询流程。" : "连接后将显示现场设备地址与设备返回的人脸库、门号。"}</p><div class="face-form-actions"><button class="btn primary" type="submit">${connection.mode === "device" ? "连接现场设备" : "连接模拟设备"}</button>${state.connected ? '<button class="btn" type="button" id="face-disconnect">断开连接</button>' : ""}</div></fieldset></form></section><section class="panel"><div class="panel-head"><h2>2. 人员与人脸</h2></div><form id="face-enroll-form" class="face-form"><fieldset ${busy || !state.connected || connection.mode !== state.mode ? "disabled" : ""}><legend class="face-sr-only">测试人员信息</legend><div class="form-grid"><label class="field">测试人员编号 *<input name="employeeNo" value="${esc(draft.employeeNo)}" required autocomplete="off">${deviceMode ? "<small>现场设备人员编号使用字母和数字。</small>" : ""}</label><label class="field">显示名 *<input name="name" value="${esc(draft.name)}" required autocomplete="off"></label><label class="field">人脸库 *<select name="library" required>${libraries.length ? libraries.map((library, index) => `<option value="${index}" ${String(index) === draft.library ? "selected" : ""}>${esc(library.FDID)} · ${esc(library.faceLibType)}</option>`).join("") : '<option value="">连接后读取设备能力</option>'}</select></label><label class="field">门号 *<select name="doorNo" required>${doors.length ? doors.map((door) => `<option value="${esc(door)}" ${String(door) === draft.doorNo ? "selected" : ""}>门 ${esc(door)}</option>`).join("") : '<option value="">连接后读取设备能力</option>'}</select></label>${renderFaceValidityFields(draft, cap, esc)}<label class="field full">JPEG 人脸照片 *<input id="face-photo" type="file" accept="image/jpeg,.jpg,.jpeg"><small>${cap.maxPhotoBytes ? `本次联调照片上限：${Math.floor(cap.maxPhotoBytes / 1024)} KB${cap.photoLimitSource === "guide-default" ? "（按接入指南设置）" : ""}。` : "连接后读取本次联调照片上限。"}在本机按比例处理为最长边不超过 960 像素的 JPEG，不裁剪照片；只随同步请求提交，不进入公共图片库。</small></label><div class="face-photo-preview full" id="face-photo-preview">${previewMarkup(photo)}</div><p class="form-error full" id="face-photo-error" role="alert"></p><label class="face-check full"><input type="checkbox" name="consent" ${draft.consent ? "checked" : ""} required>我确认此人员已同意将其照片用于本次人脸门禁测试</label></div></fieldset><div class="face-form-actions"><button type="submit" class="btn primary" id="face-enroll-submit" ${canEnroll ? "" : "disabled"}>同步人员和人脸</button></div><p class="face-help">${!state.connected ? "请先连接模拟设备或现场设备。" : connection.mode !== state.mode ? "所选模式尚未连接，请先连接该模式的设备。" : deviceMode ? "同步及查询通过后，还需在现场设备刷脸验证。" : "当前为模拟模式，同步完成不会向现场设备下发人员或照片。"}</p></form></section></div><section class="panel face-records"><div class="panel-head"><h2>3. 同步记录与阶段</h2><span class="muted">${(state.enrollments || []).length} 条</span></div>${state.enrollments?.length ? state.enrollments.map(enrollmentMarkup).join("") : '<div class="face-empty">暂无同步记录。连接后，选择一名测试人员开始联调。</div>'}</section>${footer()}</div>`;
     bind();
   }
 
   function bind() {
     root.querySelector("#face-refresh").onclick = () => run("正在查询最新状态", refresh);
+    root.querySelector('[name="validityMode"]').onchange = () => { capture(); render(); };
     const connectForm = root.querySelector("#face-connect-form");
     connectForm.querySelectorAll('[name="mode"]').forEach((input) => {
       input.onchange = () => { capture(); render(); };

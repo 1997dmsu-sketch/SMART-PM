@@ -383,11 +383,17 @@ test('S1 SDK 形状 fileID 同一值贯穿：上传透传→云端接受并持�
       wx: {
         cloud: {
           uploadFile: async (payload) => { uploads.push(payload); return { fileID: cloudFileId }; },
-          callFunction: async (payload) => ({ result: await ctx.main(payload.data) }),
+          callFunction: async (payload) => payload.name === 'phoneLogin'
+            ? { result: { code: 0, userInfo: { _id: 'synthetic-cross-user', role: 'user', houses: [], points: 0 } } }
+            : { result: await ctx.main(payload.data) },
         },
       },
     },
   });
+
+  await api.loginWithPhone('synthetic-authorized-phone-code');
+  assert.equal((await api.getProfile())._id, 'synthetic-cross-user');
+  assert.equal(uploads.length, 0, 'identity preparation is not a photo upload');
 
   // 1) 上传侧：wx.cloud.uploadFile 的实际 fileID 原样透传，不截头、不拼接。
   const uploaded = await api.uploadTestFace({ applicationId, cloudPath: objectPath, filePath: 'C:/synthetic/photo.jpg' });
@@ -1210,6 +1216,11 @@ test('S9 普通账号 pending_review：页面不得显示已受理/开放人脸�
   const toasts = [];
   const navigations = [];
   const apiStub = {
+    isDemo: () => false,
+    // This case tests the ordinary review path after a valid login, not a guest.
+    isAuthenticated: () => true,
+    getLoginEpoch: () => 1,
+    getProfile: async () => ({ _id: 'synthetic-cross-user', authenticated: true }),
     getCheckinFaceConfig: async () => ({
       enabled: true, configured: true, accountEligible: true, applicationVersion: 'test-v1',
       room: { displayNo: '102', projectName: '合成项目', buildingName: '合成楼栋' },
@@ -1223,6 +1234,7 @@ test('S9 普通账号 pending_review：页面不得显示已受理/开放人脸�
   loadCjs(path.join(ROOT, 'miniprogram/pages/checkin/index.js'), {
     requires: {
       '../../services/api': apiStub,
+      '../../utils/require-login': require(path.join(ROOT, 'miniprogram/utils/require-login.js')),
       '../../utils/layout': { getNavigationLayout: () => ({ statusBarHeight: 20, navHeight: 44, navSideWidth: 104 }) },
     },
     globals: {
@@ -1254,6 +1266,6 @@ test('S9 普通账号 pending_review：页面不得显示已受理/开放人脸�
     + toasts.map((entry) => entry.title || '').join('|');
   assert.match(guidance, /既有审核|原审核|人工审核|审核流程/, '必须提示原有审核渠道');
   assert.equal(navigations.length, 0, '不得开放人脸入口导航');
-  page.goFaceEnroll();
+  await page.goFaceEnroll();
   assert.equal(navigations.length, 0, '无 applicationId 时人脸入口必须不可达');
 });

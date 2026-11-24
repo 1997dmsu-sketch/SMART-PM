@@ -1,5 +1,6 @@
 const api = require('../../services/api');
 const { getNavigationLayout } = require('../../utils/layout');
+const { hasLogin, requireLogin, canActNow } = require('../../utils/require-login');
 
 // 页面只渲染服务端 getConfig 返回的受信任数据，不持有、不构造房号/日期/审批字段。
 const EMPTY_CONFIG = {
@@ -62,6 +63,56 @@ Page({
     this.loadConfig();
   },
 
+  onShow() {
+    return this.loadConfig();
+  },
+
+  clearLoginState() {
+    this._loginEpoch = (this._loginEpoch || 0) + 1;
+    this._loginIdentity = '';
+    if (!this._destroyed) this.setData({
+      loading: false, error: '请先登录后再查看测试入住。',
+      config: { ...EMPTY_CONFIG, room: {}, lease: {} }, eligible: false,
+      leaseConfigured: false, ineligibleReason: '请先登录', primaryConfirmed: false,
+      submitting: false, applied: false, reviewRequired: false, reviewReason: '', result: null
+    });
+  },
+
+  async loginGate(action, expected) {
+    if (this._destroyed) return null;
+    try {
+      const requestEpoch = expected ? expected.authEpoch : (typeof api.getLoginEpoch === 'function' ? api.getLoginEpoch() : null);
+      const allowed = await hasLogin(api);
+      if (this._destroyed) return null;
+      if (!allowed) {
+        // Clear private snapshots before waiting for a login modal/navigation.
+        this.clearLoginState();
+        await requireLogin(api, action);
+        return null;
+      }
+      const profile = await api.getProfile();
+      if (this._destroyed) return null;
+      if (!profile || profile.authenticated !== true) { this.clearLoginState(); return null; }
+      const validId = typeof profile._id === 'string' && profile._id.length > 0 && profile._id.length <= 256 && !/[\x00-\x20\x7f/\\]/.test(profile._id);
+      const identity = validId ? profile._id : (typeof api.isDemo === 'function' && api.isDemo() === true ? 'explicit-demo-profile' : '');
+      if (!identity) { this.clearLoginState(); return null; }
+      const epoch = this._loginEpoch || 0;
+      if (expected && expected.epoch !== epoch) return null;
+      if (expected && expected.identity !== identity) { this.clearLoginState(); return null; }
+      if (this._loginIdentity && this._loginIdentity !== identity) this.clearLoginState();
+      if (!canActNow(api, requestEpoch)) { this.clearLoginState(); return null; }
+      this._loginIdentity = identity;
+      return { identity, epoch: this._loginEpoch || 0, authEpoch: requestEpoch };
+    } catch (_) { this.clearLoginState(); return null; }
+  },
+
+  canContinue(session) {
+    if (this._destroyed || !session || session.epoch !== (this._loginEpoch || 0)) return false;
+    // No await may separate this final check from the sensitive operation.
+    if (!canActNow(api, session.authEpoch)) { this.clearLoginState(); return false; }
+    return true;
+  },
+
   onResize() {
     this.setData(getNavigationLayout());
   },
@@ -78,15 +129,19 @@ Page({
     if (this._configLoading) return;
     this._configLoading = true;
     this.setData({ loading: true, error: '' });
+    let session;
     try {
+      session = await this.loginGate('查看测试入住');
+      if (!session || !this.canContinue(session)) return;
       const response = await api.getCheckinFaceConfig();
+      if (!(await this.loginGate('查看测试入住', session)) || !this.canContinue(session)) return;
       const data = response && typeof response === 'object' ? response : {};
       const room = data.room && typeof data.room === 'object' ? data.room : {};
       const lease = data.lease && typeof data.lease === 'object' ? data.lease : {};
       const eligible = data.enabled === true && data.configured === true && data.accountEligible === true;
       const leaseConfigured = lease.status === 'active' && Boolean(lease.startDate && lease.endDate);
       const ineligibleReason = this.buildIneligibleReason(data, lease, leaseConfigured);
-      if (!this._destroyed) {
+      if (this.canContinue(session)) {
         this.setData({
           config: { ...data, room, lease },
           eligible,
@@ -100,6 +155,7 @@ Page({
         });
       }
     } catch (err) {
+      if (!session || !(await this.loginGate('查看测试入住', session)) || !this.canContinue(session)) return;
       if (!this._destroyed) {
         this.setData({
           error: (err && err.message) || '配置加载失败，请重试',
@@ -128,6 +184,12 @@ Page({
   },
 
   async submit() {
+    if (this._submitChecking) return;
+    this._submitChecking = true;
+    let session;
+    try { session = await this.loginGate('提交测试入住申请'); }
+    finally { this._submitChecking = false; }
+    if (!session || !this.canContinue(session)) return;
     // 本地 busy 锁：重复点击、并发提交都被拒绝；未自动通过或已受理后同样不再提交。
     if (this.data.submitting || this.data.applied || this.data.reviewRequired) return;
     if (!this.data.eligible) {
@@ -151,7 +213,7 @@ Page({
     try {
       // 唯一允许客户端提交的业务字段，值来自服务端 getConfig。
       const result = await api.applyTestCheckin({ applicationVersion });
-      if (this._destroyed) return;
+      if (this._destroyed || !(await this.loginGate('提交测试入住申请', session)) || !this.canContinue(session)) return;
       const decision = classifyApplyResult(result);
       if (decision.applied) {
         this.setData({
@@ -169,7 +231,7 @@ Page({
         });
       }
     } catch (err) {
-      if (this._destroyed) return;
+      if (this._destroyed || !(await this.loginGate('提交测试入住申请', session)) || !this.canContinue(session)) return;
       if (api.isReviewChannelCode(err && err.code)) {
         this.setData({
           applied: false,
@@ -184,7 +246,9 @@ Page({
     }
   },
 
-  goFaceEnroll() {
+  async goFaceEnroll() {
+    const session = await this.loginGate('进入人脸登记');
+    if (!session || !this.canContinue(session)) return;
     if (this.data.applied !== true) {
       wx.showToast({ title: '测试入住未自动通过，请走既有审核流程', icon: 'none' });
       return;

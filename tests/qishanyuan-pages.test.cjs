@@ -23,14 +23,18 @@ beforeEach(() => {
   runtime.cloudEnv = '';
   runtime.allowDeviceOperations = false;
   runtime.testPropertyPreset = 'qishanyuan-test-v1';
-  calls = { cloud: 0, cloudInit: 0, payments: 0, phones: 0, navigation: [], toasts: [] };
+  calls = { cloud: 0, cloudInit: 0, payments: 0, phones: 0, navigation: [], toasts: [], modals: [] };
   storage = new Map();
   storageWrites = [];
   global.wx = {
     getStorageSync: (key) => storage.get(key),
     setStorageSync: (key, value) => { storageWrites.push(key); storage.set(key, value); },
     showToast: (value) => calls.toasts.push(value),
-    showModal: () => {},
+    showModal: (value) => {
+      calls.modals.push(value);
+      if (value.success) value.success({ confirm: false, cancel: true });
+      if (value.complete) value.complete();
+    },
     navigateTo: (value) => calls.navigation.push(value),
     switchTab: (value) => calls.navigation.push(value),
     makePhoneCall: () => { calls.phones += 1; throw new Error('UNEXPECTED_PHONE'); },
@@ -66,6 +70,27 @@ function page(name) {
     },
   };
 }
+async function signIn() {
+  const originalCall = global.wx.cloud.callFunction;
+  const originalEnv = runtime.cloudEnv;
+  runtime.cloudEnv = 'synthetic-login-env';
+  global.wx.cloud.callFunction = async (payload) => {
+    calls.cloud += 1;
+    assert.equal(payload.name, 'phoneLogin');
+    return { result: { code: 0, userInfo: { _id: 'synthetic-page-user', role: 'user', houses: [], points: 0 } } };
+  };
+  try {
+    await api.loginWithPhone('synthetic-authorized-phone-code');
+    assert.equal((await api.getProfile()).authenticated, true);
+    assert.equal((await api.getProfile())._id, 'synthetic-page-user');
+  } finally {
+    global.wx.cloud.callFunction = originalCall;
+    runtime.cloudEnv = originalEnv;
+  }
+  assert.equal(calls.cloud, 1, 'one explicit synthetic login preparation');
+  calls.cloud = 0;
+}
+
 function visibleCards(listPage) { return Array.from(listPage.data.columns).flat(); }
 function assertNoExternalEffects() {
   assert.equal(calls.cloud, 0);
@@ -202,28 +227,48 @@ test('102 direct navigation clears previously visible details and cannot book', 
   assert.equal(rental.data.house, null);
   assert.equal(rental.data.recommendations.length, 0);
   assert.equal(rental.data.galleryImages.length, 0);
-  rental.openAppointment();
-  rental.saveAppointment({ detail: { value: {} } });
+  await rental.openAppointment();
+  await rental.saveAppointment({ detail: { value: {} } });
   assert.equal(rental.data.appointmentOpen, false);
   assert.equal(storageWrites.length, 0);
   assertNoExternalEffects();
 });
 
-test('preset appointment and direct-submit handlers cannot persist or send bookings', async () => {
+test('anonymous preset browsing stays public but identity actions uniformly prompt before business rules', async () => {
   const rental = page('rental');
   rental.houseId = '201';
   await rental.load();
-  rental.openAppointment();
+  assert.ok(rental.data.house);
+  assert.equal(await api.getProfile(), null);
+  await rental.openAppointment();
+  await rental.saveAppointment({ detail: { value: {} } });
+  await rental.contactPhone();
+  await rental.consult();
+  assert.equal(calls.modals.length, 4);
+  assert.ok(calls.modals.every((item) => item.title === '请先登录'));
+  assert.equal(calls.toasts.length, 0, 'anonymous actions must not bypass the common login prompt for an unavailable-service message');
+  assert.equal(calls.navigation.length, 0);
+  assert.equal(storageWrites.length, 0);
+  assertNoExternalEffects();
+});
+
+test('authenticated preset appointment and direct-submit handlers still cannot persist or send bookings', async () => {
+  await signIn();
+  const rental = page('rental');
+  rental.houseId = '201';
+  await rental.load();
+  await rental.openAppointment();
   assert.equal(rental.data.appointmentOpen, false);
   rental.data.appointmentDate = '2099-01-01';
   rental.data.appointmentTime = '12:00';
-  rental.saveAppointment({ detail: { value: { name: '合成测试', phone: '13800000000', note: 'synthetic' } } });
-  rental.contactPhone();
-  rental.consult();
+  await rental.saveAppointment({ detail: { value: { name: '合成测试', phone: '13800000000', note: 'synthetic' } } });
+  await rental.contactPhone();
+  await rental.consult();
   assert.equal(storageWrites.length, 0);
   assert.equal(calls.navigation.length, 0);
   assert.equal(rental.data.appointmentOpen, false);
   assert.ok(calls.toasts.some((item) => item.title.includes('测试房源')));
+  assert.equal(calls.modals.filter((item) => item.title === '请先登录').length, 0, 'business restriction is tested after a real synthetic login');
   assertNoExternalEffects();
 });
 
@@ -305,6 +350,7 @@ test('demo protection remains separate even when the test flag is present', asyn
 });
 
 test('ordinary live room prices, area and appointment availability keep their behaviour', async () => {
+  await signIn();
   delete runtime.testPropertyPreset;
   runtime.cloudEnv = 'synthetic-env';
   global.wx.cloud.callFunction = async () => {
@@ -320,7 +366,7 @@ test('ordinary live room prices, area and appointment availability keep their be
   assert.equal(rental.data.house.canBook, true);
   assert.equal(rental.data.house.isTestPreset, false);
   assert.ok(visibleCurrencyUnits(template('rental'), { house: rental.data.house, item: rental.data.house }) > 0);
-  rental.openAppointment();
+  await rental.openAppointment();
   assert.equal(rental.data.appointmentOpen, true);
   assert.equal(calls.payments, 0);
   assert.equal(calls.phones, 0);

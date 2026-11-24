@@ -29,12 +29,17 @@ function loadCjs(filename, { requires = {}, globals = {} } = {}) {
   return module.exports;
 }
 
-function fixture({ result = { code: 0, data: { ok: 1 }, msg: '' }, uploadFileID = 'cloud://synthetic/photo.jpg' } = {}) {
+async function fixture({ result = { code: 0, data: { ok: 1 }, msg: '' }, uploadFileID = 'cloud://synthetic/photo.jpg' } = {}) {
   const calls = [];
   const uploads = [];
   const wx = {
     cloud: {
-      callFunction: async (payload) => { calls.push(payload); return { result }; },
+      callFunction: async (payload) => {
+        calls.push(payload);
+        if (payload.name === 'phoneLogin') return { result: { code: 0,
+          userInfo: { _id: 'synthetic-api-user', role: 'user', houses: [], points: 0 } } };
+        return { result };
+      },
       uploadFile: async (payload) => { uploads.push(payload); return { fileID: uploadFileID }; },
     },
     showToast: () => {},
@@ -43,11 +48,20 @@ function fixture({ result = { code: 0, data: { ok: 1 }, msg: '' }, uploadFileID 
     stopPullDownRefresh: () => {},
   };
   const runtime = { mode: 'live', cloudEnv: 'synthetic-env', allowDeviceOperations: false, checkinFaceTestEntry: true };
-  const demo = { houses: [], feed: [], locks: [], records: [], conversations: [], profile: {}, family: [], property: {}, meter: {} };
+  const demo = { houses: [], feed: [], locks: [], records: [], conversations: [], profile: { authenticated: true }, family: [], property: {}, meter: {} };
   const api = loadCjs(API_FILE, {
     requires: { '../config/runtime': runtime, './demo': demo },
     globals: { wx },
   });
+  // Establish app identity through the actual public login API. Clear only
+  // this preparation call before the unchanged payload/error assertions.
+  await api.loginWithPhone('synthetic-authorized-phone-code');
+  const profile = await api.getProfile();
+  assert.equal(profile.authenticated, true);
+  assert.equal(profile._id, 'synthetic-api-user');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].name, 'phoneLogin');
+  calls.length = 0;
   return { api, calls, uploads, wx, runtime };
 }
 
@@ -67,14 +81,14 @@ const CASES = [
 
 test('五个新 API 都只下发精确白名单载荷', async () => {
   for (const item of CASES) {
-    const { api, calls } = fixture();
+    const { api, calls } = await fixture();
     const data = await api[item.fn](item.input);
     assert.equal(calls.length, 1, `${item.name} 必须调用云端一次`);
     assert.equal(calls[0].name, 'checkinFaceTest');
     assert.deepEqual(calls[0].data, item.expected, `${item.name} 下发字段必须精确`);
     assert.deepEqual(data, { ok: 1 });
   }
-  const { api, calls, uploads } = fixture();
+  const { api, calls, uploads } = await fixture();
   const cloudPath = 'test-face/synthetic-env/openid/app-1/photo.jpg';
   const fileId = await api.uploadTestFace({ applicationId: 'app-1', cloudPath, filePath: '/tmp/photo.jpg' });
   assert.equal(fileId, 'cloud://synthetic/photo.jpg');
@@ -85,7 +99,7 @@ test('五个新 API 都只下发精确白名单载荷', async () => {
 test('注入服务端字段时五个函数在云端调用前本地拒绝（调用计数不变）', async () => {
   for (const item of [...CASES, { name: 'uploadTestFace', fn: 'uploadTestFace', input: { applicationId: 'app-1', cloudPath: 'test-face/env/openid/app-1/p.jpg', filePath: '/tmp/p.jpg' } }]) {
     for (const field of FORBIDDEN_FIELDS) {
-      const { api, calls, uploads } = fixture();
+      const { api, calls, uploads } = await fixture();
       await assert.rejects(
         () => api[item.fn]({ ...item.input, [field]: 'forged' }),
         (error) => /由服务端决定，客户端禁止提交|不支持的字段/.test(error.message),
@@ -99,17 +113,17 @@ test('注入服务端字段时五个函数在云端调用前本地拒绝（调�
 
 test('consent 必须严格等于 true，不是真值即可', async () => {
   for (const consent of [false, 'true', 1, {}, undefined, null]) {
-    const { api, calls } = fixture();
+    const { api, calls } = await fixture();
     await assert.rejects(() => api.createFaceTask({ applicationId: 'app-1', fileId: 'test-face/e/o/a/p.jpg', consent }), /本人确认照片用途/);
     assert.equal(calls.length, 0, `consent=${String(consent)} 不得下发云端`);
   }
-  const { api, calls } = fixture();
+  const { api, calls } = await fixture();
   await api.createFaceTask({ applicationId: 'app-1', fileId: 'test-face/e/o/a/p.jpg', consent: true });
   assert.equal(calls.length, 1);
 });
 
 test('uploadTestFace 只接受服务端下发的 test-face/ 前缀，页面不拼接路径', async () => {
-  const { api, uploads } = fixture();
+  const { api, uploads } = await fixture();
   for (const cloudPath of ['photos/photo.jpg', '/test-face/e/o/a/p.jpg', 123, undefined]) {
     await assert.rejects(() => api.uploadTestFace({ applicationId: 'a', cloudPath, filePath: '/tmp/p.jpg' }), /上传路径必须由服务端下发/);
   }
@@ -120,18 +134,18 @@ test('uploadTestFace 只接受服务端下发的 test-face/ 前缀，页面不�
 });
 
 test('云端 code!==0 一律抛错，绝不返回 data 降级', async () => {
-  const { api } = fixture({ result: { code: 4103, data: { result: 'auto_approved' }, msg: 'TEST_DISABLED' } });
+  const { api } = await fixture({ result: { code: 4103, data: { result: 'auto_approved' }, msg: 'TEST_DISABLED' } });
   await assert.rejects(() => api.applyTestCheckin({ applicationVersion: 'test-v1' }), /TEST_DISABLED/);
   for (const fn of ['getCheckinFaceConfig', 'getFaceTask']) {
-    const failed = fixture({ result: { code: 9001, data: { configured: true }, msg: '服务端失败' } });
+    const failed = await fixture({ result: { code: 9001, data: { configured: true }, msg: '服务端失败' } });
     await assert.rejects(() => failed.api[fn](fn === 'getFaceTask' ? { applicationId: 'app-1' } : {}), /服务端失败/);
   }
-  const empty = fixture({ result: null });
+  const empty = await fixture({ result: null });
   await assert.rejects(() => empty.api.getCheckinFaceConfig(), /服务返回异常/);
 });
 
 test('getFaceTask 同时支持字符串与对象入参，但仍拒绝服务端字段', async () => {
-  const { api, calls } = fixture();
+  const { api, calls } = await fixture();
   await api.getFaceTask('app-1');
   assert.deepEqual(calls[0].data, { action: 'getMyTask', applicationId: 'app-1' });
   await assert.rejects(() => api.getFaceTask({ applicationId: 'app-1', status: 'DEVICE_CONFIRMED' }), /禁止提交/);
@@ -139,20 +153,20 @@ test('getFaceTask 同时支持字符串与对象入参，但仍拒绝服务端�
 });
 
 test('非零错误码透传给页面：err.code 必须保留服务端 code（C2 分类依据）', async () => {
-  const { api, calls } = fixture({ result: { code: 'TEST_DISABLED', data: null, msg: '测试入住当前未启用' } });
+  const { api, calls } = await fixture({ result: { code: 'TEST_DISABLED', data: null, msg: '测试入住当前未启用' } });
   await assert.rejects(
     () => api.applyTestCheckin({ applicationVersion: 'test-v1' }),
     (err) => err instanceof Error && err.code === 'TEST_DISABLED' && /测试入住当前未启用/.test(err.message),
     'applyTestCheckin 抛错必须携带 code=TEST_DISABLED',
   );
   assert.equal(calls.length, 1, '错误码不改变下发载荷');
-  const forbidden = fixture({ result: { code: 'APPLICATION_FORBIDDEN', data: null, msg: '未找到本人申请' } });
+  const forbidden = await fixture({ result: { code: 'APPLICATION_FORBIDDEN', data: null, msg: '未找到本人申请' } });
   await assert.rejects(
     () => forbidden.api.getFaceTask({ applicationId: 'app-1' }),
     (err) => err.code === 'APPLICATION_FORBIDDEN',
   );
   // 连接类失败无服务端 code，不得伪造 code。
-  const dead = fixture({ result: { code: 0, data: {}, msg: '' } });
+  const dead = await fixture({ result: { code: 0, data: {}, msg: '' } });
   dead.wx.cloud.callFunction = async () => { throw new Error('network down'); };
   await assert.rejects(
     () => dead.api.getFaceTask({ applicationId: 'app-1' }),
@@ -161,7 +175,7 @@ test('非零错误码透传给页面：err.code 必须保留服务端 code（C2 
 });
 
 test('审核渠道错误码分类是闭式集合：只认申请/账号拒绝码，不吞并任务与配置码', async () => {
-  const { api } = fixture();
+  const { api } = await fixture();
   assert.equal(typeof api.isReviewChannelCode, 'function', 'api 必须导出 isReviewChannelCode');
   assert.ok(Array.isArray(api.REVIEW_CHANNEL_CODES), 'api 必须导出 REVIEW_CHANNEL_CODES');
   assert.equal(api.REVIEW_CHANNEL_CODES.length, 3, '审核渠道码为闭式集合，大小固定为 3（INTERFACES.md §5 对齐）');
@@ -183,7 +197,7 @@ test('审核渠道错误码分类是闭式集合：只认申请/账号拒绝码�
 });
 
 test('演示模式不提供入住/人脸成功 fallback，一律拒绝且不调用云端与上传', async () => {
-  const { api, calls, uploads, runtime } = fixture();
+  const { api, calls, uploads, runtime } = await fixture();
   runtime.mode = 'demo';
   await assert.rejects(() => api.getCheckinFaceConfig(), /演示模式不会调用云端服务/);
   await assert.rejects(() => api.applyTestCheckin({ applicationVersion: 'test-v1' }), /演示模式不会调用云端服务/);
@@ -199,7 +213,7 @@ test('演示模式不提供入住/人脸成功 fallback，一律拒绝且不调�
 
 test('上传输出与建任务输入使用同一个 SDK 形状 fileID，原样透传不重造（R01 客户端侧）', async () => {
   const sdkFileId = 'cloud://checkin-env-synthetic.636c-checkin-env-synthetic-1250000000/test-face/synthetic-env/openid/app-1/photo.jpg';
-  const { api, calls, uploads } = fixture({ uploadFileID: sdkFileId });
+  const { api, calls, uploads } = await fixture({ uploadFileID: sdkFileId });
   const fileId = await api.uploadTestFace({
     applicationId: 'app-1',
     cloudPath: 'test-face/synthetic-env/openid/app-1/photo.jpg',

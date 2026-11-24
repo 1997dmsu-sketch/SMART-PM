@@ -8,6 +8,31 @@ let activeLogin = null;
 const pendingUnlocks = new Set();
 let demoConversations = clone(demo.conversations);
 function unsupported(message) { return Promise.reject(new Error(message)); }
+function loginRequired() {
+  const error = new Error('请先登录后再操作');
+  error.code = 'AUTH_REQUIRED';
+  return error;
+}
+function isAuthenticated() {
+  if (activeLogin) return false;
+  if (isDemo()) return demo.profile && demo.profile.authenticated === true;
+  return Boolean(profile && profile.authenticated === true && typeof profile._id === 'string'
+    && profile._id.length > 0 && profile._id.length <= 256 && !/[\x00-\x20\x7f/\\]/.test(profile._id));
+}
+function getLoginEpoch() { return isAuthenticated() ? authGeneration : null; }
+function requireAuthenticated() {
+  if (!isAuthenticated()) throw loginRequired();
+  return { generation: authGeneration, demo: isDemo() };
+}
+function assertSameLogin(stamp) {
+  if (!stamp || stamp.generation !== authGeneration || stamp.demo !== isDemo() || !isAuthenticated()) throw loginRequired();
+}
+async function privateCall(name, data) {
+  const stamp = requireAuthenticated();
+  const result = await call(name, data);
+  assertSameLogin(stamp);
+  return result;
+}
 async function call(name, data = {}) {
   if (isDemo()) throw new Error('演示模式不会调用云端服务');
   if (!config.cloudEnv) throw new Error('请先配置微信云开发环境');
@@ -73,7 +98,9 @@ function assertCheckinFaceInput(name, input, allowedFields) {
 }
 
 async function callCheckinFace(data) {
-  const result = await call('checkinFaceTest', data);
+  const stamp = requireAuthenticated();
+  const result = await privateCall('checkinFaceTest', data);
+  assertSameLogin(stamp);
   return result.data || {};
 }
 
@@ -91,6 +118,7 @@ async function applyTestCheckin(input) {
 async function uploadTestFace(input) {
   assertCheckinFaceInput('uploadTestFace', input, ['applicationId', 'cloudPath', 'filePath']);
   if (isDemo()) throw new Error('演示模式不会上传真实人脸照片');
+  const authStamp = requireAuthenticated();
   const payload = input || {};
   if (!payload.applicationId) throw new Error('[uploadTestFace] 缺少入住申请标识');
   if (!payload.filePath) throw new Error('[uploadTestFace] 缺少本地照片路径');
@@ -103,6 +131,7 @@ async function uploadTestFace(input) {
     filePath: payload.filePath,
     config: { env: config.cloudEnv }
   });
+  assertSameLogin(authStamp);
   const fileId = response && (response.fileID || response.fileId);
   if (!fileId) throw new Error('[uploadTestFace] 上传未返回 fileID');
   return fileId;
@@ -207,43 +236,49 @@ async function listContent(type) {
 async function listLocks() {
   if(isDemo())return clone(demo.locks);
   // Use permission-filtered devices, never account-wide listLocks.
-  const r=await call('getDevices');
+  const stamp=requireAuthenticated();
+  const r=await privateCall('getDevices');
+  assertSameLogin(stamp);
   return (r.data.devices||[]).map(d=>Object.assign({},d,{id:d.deviceId,address:d.location,status:d.status}));
 }
 async function unlockDevice(device) {
   if(isDemo())throw new Error('当前为设计演示，不会操作真实门锁');
   if(!config.allowDeviceOperations)throw new Error('真实开门尚未启用，请完成设备联调后开启');
-  if(!profile)throw new Error('请先登录后操作门锁');
+  requireAuthenticated();
   const id=device&&device.deviceId;
   if(!id||String(id).startsWith('demo-'))throw new Error('无效门锁');
   if(pendingUnlocks.has(id))throw new Error('正在开门，请勿重复操作');
   pendingUnlocks.add(id);
-  try {return await call('unlock',{deviceId:id,method:'remote'});} finally {pendingUnlocks.delete(id);}
+  try {return await privateCall('unlock',{deviceId:id,method:'remote'});} finally {pendingUnlocks.delete(id);}
 }
 async function listUnlockRecords() {
   if(isDemo())return clone(demo.records);
-  const r=await call('unlockRecords',{limit:20});
+  const stamp=requireAuthenticated();
+  const r=await privateCall('unlockRecords',{limit:20});
+  assertSameLogin(stamp);
   return (r.data.records||[]).map(x=>({id:x.id,name:x.doorName,time:x.time,status:x.success?'成功':'失败'}));
 }
 async function listConversations() {
   if(isDemo())return clone(demoConversations);
-  const r=await call('messageList',{action:'conversations'});
+  const stamp=requireAuthenticated();
+  const r=await privateCall('messageList',{action:'conversations'});
+  assertSameLogin(stamp);
   return (r.data||[]).map(c=>({id:c._id,name:c.peerName,avatar:c.peerAvatar,lastMessage:c.lastMsg,time:c.lastTimeText,unread:c.unread}));
 }
 async function markRead(conversationId) {
   if(isDemo()){demoConversations.forEach(c=>{if(!conversationId||c.id===conversationId)c.unread=0;});return;}
-  return call('messageRead',conversationId?{conversationId}:{});
+  return privateCall('messageRead',conversationId?{conversationId}:{});
 }
 async function getMessages(conversationId,before) {
   if(!conversationId)throw new Error('缺少会话标识');
   if(isDemo())return {data:[{_id:'demo-msg',from:'peer',content:'您好，这里是本地设计演示。真实消息需连接微信云开发后查看。',timeText:'10:55',createdAt:1}],hasMore:false};
-  return call('messageList',{action:'messages',conversationId,...(before?{before}:{}),limit:30});
+  return privateCall('messageList',{action:'messages',conversationId,...(before?{before}:{}),limit:30});
 }
 async function sendMessage(conversationId,content) {
   if(!content||!content.trim())throw new Error('请输入消息内容');
   if(content.trim().length>500)throw new Error('消息不能超过500字');
   if(isDemo())throw new Error('演示模式不会发送真实消息');
-  return call('messageSend',{conversationId,content:content.trim(),type:'text'});
+  return privateCall('messageSend',{conversationId,content:content.trim(),type:'text'});
 }
 function mapProfile(user) {
   return Object.assign({},user,{nickname:user.nickname||user.nickName||user.name||'业主用户',avatar:user.avatar||user.avatarUrl||'',propertyId:user.propertyId||'',community:user.community||'',house:user.house||((user.houses||[]).join('、')),points:user.points||0,coupons:user.couponsCount||0,orders:user.ordersCount||0,authenticated:true});
@@ -309,7 +344,7 @@ async function loginWithPassword(input) {
   const username = input && typeof input.username === 'string' ? input.username.trim().toLowerCase() : '';
   let password = input && typeof input.password === 'string' ? input.password : '';
   if (!/^[a-z0-9][a-z0-9._-]{3,31}$/.test(username)) throw new Error('账号需为4–32位字母、数字或._-');
-  if (password.length < 12 || password.length > 128 || passwordBytes(password) > 256) throw new Error('密码需为12–128个字符，且不超过256字节');
+  if (password.length < 8 || password.length > 128 || passwordBytes(password) > 256) throw new Error('密码需为8–128个字符，且不超过256字节');
   const generation = ++authGeneration;
   activeLogin = { generation, kind: 'password' };
   try {
@@ -334,11 +369,12 @@ function cancelPasswordLogin() {
   }
 }
 function logout(){authGeneration+=1;activeLogin=null;profile=null;}
-function listFamily(){return isDemo()?Promise.resolve(clone(demo.family)):unsupported('旧后端尚未提供家庭成员查询接口');}
-function addFamily(){return unsupported('家庭成员添加接口尚未接入，未保存成员');}
-function getProperty(){return isDemo()?Promise.resolve(clone(demo.property)):unsupported('旧后端尚未提供住户房产详情接口');}
-function listMeters(type){
+async function listFamily(){requireAuthenticated();return isDemo()?Promise.resolve(clone(demo.family)):unsupported('旧后端尚未提供家庭成员查询接口');}
+async function addFamily(){requireAuthenticated();return unsupported('家庭成员添加接口尚未接入，未保存成员');}
+async function getProperty(){requireAuthenticated();return isDemo()?Promise.resolve(clone(demo.property)):unsupported('旧后端尚未提供住户房产详情接口');}
+async function listMeters(type){
+ requireAuthenticated();
  if(isDemo())return Promise.resolve(type==='water'?[]:[clone(demo.meter)]);
  return unsupported('旧水电表接口尚未按住户房产过滤，完成权限对接后开放');
 }
-module.exports={isDemo,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,prepareAccountOpening,loginWithPassword,cancelPasswordLogin,logout,listFamily,addFamily,getProperty,listMeters,getCheckinFaceConfig,applyTestCheckin,uploadTestFace,createFaceTask,getFaceTask,isReviewChannelCode,REVIEW_CHANNEL_CODES};
+module.exports={isDemo,isAuthenticated,getLoginEpoch,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,prepareAccountOpening,loginWithPassword,cancelPasswordLogin,logout,listFamily,addFamily,getProperty,listMeters,getCheckinFaceConfig,applyTestCheckin,uploadTestFace,createFaceTask,getFaceTask,isReviewChannelCode,REVIEW_CHANNEL_CODES};

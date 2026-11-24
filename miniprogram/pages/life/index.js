@@ -1,4 +1,5 @@
 const api = require('../../services/api');
+const { requireLogin, canActNow } = require('../../utils/require-login');
 const SERVICES = [
   ['house','在线看房','house'], ['mall','智联商城','mall'], ['clean','家政保洁','clean'],
   ['neighbor','邻里互助','neighbor'], ['parcel','快递代收','parcel'], ['repair','便民维修','repair'], ['community','社区圈子','community'],
@@ -79,10 +80,11 @@ Page({
   },
   toggleSearch() { this.setData({ searching:!this.data.searching }); if (!this.data.searching) { this.setData({ keyword:'' });this.applySearch(); } },
   onSearch(event) { this.setData({ keyword:event.detail.value }); this.applySearch(); },
-  chooseService(event) {
+  async chooseService(event) {
     const service=SERVICES.find(item=>item.id===event.currentTarget.dataset.id);
     if (!service || service.id==='house') return;
     if (service.id==='community') { wx.switchTab({ url:'/pages/home/index' }); return; }
+    if (!(await requireLogin(api, service.label)) || !canActNow(api)) return;
     wx.showModal({ title:service.label,content:'该服务暂未开放，敬请期待。',showCancel:false,confirmColor:'#ff2450' });
   },
   openFilter(event) { this.setData({ filterOpen:true,filterKind:event.currentTarget.dataset.kind || 'all',draft:{ ...this.data.filters } }); },

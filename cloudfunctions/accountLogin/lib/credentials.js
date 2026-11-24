@@ -14,7 +14,7 @@ function normalizeUsername(value) {
   return username;
 }
 function validatePassword(value) {
-  if (typeof value !== 'string' || value.length < 12 || value.length > 128 || Buffer.byteLength(value, 'utf8') > 256) fail('INVALID_INPUT', 400);
+  if (typeof value !== 'string' || value.length < 8 || value.length > 128 || Buffer.byteLength(value, 'utf8') > 256) fail('INVALID_INPUT', 400);
   return value; // Preserve spaces, case and Unicode exactly; no trim/normalize.
 }
 function validPasswordHash(value) {

@@ -9,7 +9,7 @@
     <input class="text-input" value="{{password}}" bindinput="onPasswordInput" bindconfirm="submit" password="{{true}}" maxlength="128" placeholder="请输入管理员开通时设置的密码" disabled="{{submitting || preparing}}" confirm-type="done" />
     <view wx:if="{{error}}" class="error" role="alert">{{error}}</view>
     <button class="primary" bindtap="submit" loading="{{submitting}}" disabled="{{submitting || preparing}}">登录</button>
-    <text class="hint">密码不会保存；登录未完成或离开页面后需重新填写。</text>
+    <text class="hint">密码至少8位，不会保存；登录未完成或离开页面后需重新填写。</text>
   </view>
   <view class="account-card">
     <text class="heading">尚未开通账号？</text>

@@ -1,5 +1,6 @@
 const api = require('../../services/api');
 const { getNavigationLayout } = require('../../utils/layout');
+const { hasLogin, requireLogin, canActNow } = require('../../utils/require-login');
 
 // 六态文案映射（严格按方案 §2.3 / §6）。
 // ready 与 pending-site 一律显示「待现场刷脸验证」，绝不呈现任何现场识别结论。
@@ -106,11 +107,14 @@ Page({
     reviewReason: ''
   },
 
-  onLoad(options) {
+  async onLoad(options) {
     this.setData(getNavigationLayout());
     this._destroyed = false;
     this._fetching = false;
     this._timer = null;
+    this._applicationId = '';
+    const session = await this.loginGate('查看人脸登记');
+    if (!session || !this.canContinue(session)) return;
     const app = getApp();
     const applicationId = (options && options.applicationId) || (app && app.globalData && app.globalData.checkinApplicationId) || '';
     this._applicationId = String(applicationId);
@@ -118,9 +122,63 @@ Page({
       this.setData({ loading: false, error: '缺少入住申请标识，请先完成测试入住。' });
       return;
     }
-    this.refreshTask();
+    await this.refreshTask();
+    if (!(await this.loginGate('查看人脸登记', session)) || !this.canContinue(session)) return;
     // 轮询只读 getFaceTask，绝不自动重发 createFaceTask。
     this._timer = setInterval(() => this.refreshTask(), 5000);
+  },
+
+  onShow() {
+    if (this._applicationId) return this.refreshTask();
+  },
+
+  clearLoginState() {
+    this._loginEpoch = (this._loginEpoch || 0) + 1;
+    this._loginIdentity = '';
+    this._applicationId = '';
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    if (!this._destroyed) this.setData({
+      loading: false, error: '请先登录后再查看人脸登记。',
+      task: { room: {}, lease: {} }, taskView: STATUS_VIEW.NO_TASK,
+      projectBuilding: '—', leaseText: '待配置', consentConfirmed: false,
+      uploading: false, cloudPathReady: false, showUpload: false, canUpload: false,
+      reviewRequired: false, reviewReason: ''
+    });
+  },
+
+  async loginGate(action, expected) {
+    if (this._destroyed) return null;
+    try {
+      const requestEpoch = expected ? expected.authEpoch : (typeof api.getLoginEpoch === 'function' ? api.getLoginEpoch() : null);
+      const allowed = await hasLogin(api);
+      if (this._destroyed) return null;
+      if (!allowed) {
+        // Clear private snapshots before waiting for a login modal/navigation.
+        this.clearLoginState();
+        await requireLogin(api, action);
+        return null;
+      }
+      const profile = await api.getProfile();
+      if (this._destroyed) return null;
+      if (!profile || profile.authenticated !== true) { this.clearLoginState(); return null; }
+      const validId = typeof profile._id === 'string' && profile._id.length > 0 && profile._id.length <= 256 && !/[\x00-\x20\x7f/\\]/.test(profile._id);
+      const identity = validId ? profile._id : (typeof api.isDemo === 'function' && api.isDemo() === true ? 'explicit-demo-profile' : '');
+      if (!identity) { this.clearLoginState(); return null; }
+      const epoch = this._loginEpoch || 0;
+      if (expected && expected.epoch !== epoch) return null;
+      if (expected && expected.identity !== identity) { this.clearLoginState(); return null; }
+      if (this._loginIdentity && this._loginIdentity !== identity) this.clearLoginState();
+      if (!canActNow(api, requestEpoch)) { this.clearLoginState(); return null; }
+      this._loginIdentity = identity;
+      return { identity, epoch: this._loginEpoch || 0, authEpoch: requestEpoch };
+    } catch (_) { this.clearLoginState(); return null; }
+  },
+
+  canContinue(session) {
+    if (this._destroyed || !session || session.epoch !== (this._loginEpoch || 0)) return false;
+    // No await may separate this final check from the sensitive operation.
+    if (!canActNow(api, session.authEpoch)) { this.clearLoginState(); return false; }
+    return true;
   },
 
   onResize() {
@@ -140,6 +198,7 @@ Page({
   },
 
   toReviewRequired(message) {
+    if (!canActNow(api)) { this.clearLoginState(); return; }
     this.setData({
       reviewRequired: true,
       reviewReason: String(message || '当前申请未通过测试自动审批，请走既有审核流程。'),
@@ -153,8 +212,13 @@ Page({
   async refreshTask() {
     if (this._destroyed || this._fetching) return;
     this._fetching = true;
+    let session;
     try {
+      session = await this.loginGate('查询人脸登记状态');
+      if (!session || !this.canContinue(session)) return;
+      if (!this._applicationId) { this.setData({ loading: false, error: '缺少入住申请标识，请先完成测试入住。' }); return; }
       const response = await api.getFaceTask(this._applicationId);
+      if (!(await this.loginGate('查询人脸登记状态', session)) || !this.canContinue(session)) return;
       const result = response && typeof response === 'object' ? response : {};
       const task = result.task && typeof result.task === 'object' ? result.task : result;
       if (this._destroyed) return;
@@ -167,7 +231,7 @@ Page({
           return;
         }
         const gate = await api.getCheckinFaceConfig();
-        if (this._destroyed) return;
+        if (this._destroyed || !(await this.loginGate('查询人脸登记状态', session)) || !this.canContinue(session)) return;
         if (!hasCurrentEligibility(gate)) {
           this.toReviewRequired(unavailableReviewReason(gate));
           this.applyTask(task);
@@ -177,7 +241,7 @@ Page({
       }
       if (!this._destroyed) this.applyTask(task);
     } catch (err) {
-      if (this._destroyed) return;
+      if (this._destroyed || !session || !(await this.loginGate('查询人脸登记状态', session)) || !this.canContinue(session)) return;
       const message = String((err && err.message) || '');
       const code = String((err && err.code) || '');
       // 按错误码精确分类，不再用文案猜状态（APPLICATION_FORBIDDEN 的文案同样含「未找到」）。
@@ -195,6 +259,7 @@ Page({
   },
 
   applyTask(task) {
+    if (!canActNow(api)) { this.clearLoginState(); return; }
     const safe = task && typeof task === 'object' ? task : {};
     const room = safe.room && typeof safe.room === 'object' ? safe.room : {};
     const lease = safe.lease && typeof safe.lease === 'object' ? safe.lease : {};
@@ -223,6 +288,7 @@ Page({
   },
 
   refreshCanUpload() {
+    if (!canActNow(api)) { this.clearLoginState(); return; }
     const canUpload = this.data.showUpload && this.data.consentConfirmed && this.data.cloudPathReady
       && !this.data.uploading && !this.data.reviewRequired;
     if (this.data.canUpload !== canUpload) this.setData({ canUpload });
@@ -235,6 +301,12 @@ Page({
   },
 
   async chooseAndUpload() {
+    if (this._uploadChecking) return;
+    this._uploadChecking = true;
+    let session;
+    try { session = await this.loginGate('选择照片并上传人脸'); }
+    finally { this._uploadChecking = false; }
+    if (!session || !this.canContinue(session)) return;
     if (this.data.uploading) return;
     if (this.data.reviewRequired) {
       wx.showToast({ title: '当前申请未通过测试自动审批，请走既有审核流程', icon: 'none' });
@@ -262,27 +334,35 @@ Page({
       // 新下发字段；setSwitch(true) 前置要求命名空间已配置，此处显式失败关闭
       // （仅 false 阻断，旧服务端缺字段不误伤）。
       const gate = await api.getCheckinFaceConfig();
+      if (!(await this.loginGate('选择照片并上传人脸', session)) || !this.canContinue(session)) return;
       if (!hasCurrentEligibility(gate)) {
         if (!this._destroyed) this.toReviewRequired(unavailableReviewReason(gate));
         return;
       }
+      if (!this.canContinue(session)) return;
       const picked = await choosePhoto();
+      if (!(await this.loginGate('上传人脸照片', session)) || !this.canContinue(session)) return;
       const filePath = extractFilePath(picked);
       if (!filePath) throw new Error('未选择有效照片');
+      if (!this.canContinue(session)) return;
       const fileId = await api.uploadTestFace({
         applicationId: this._applicationId,
         cloudPath,
         filePath
       });
+      if (!(await this.loginGate('提交人脸登记任务', session)) || !this.canContinue(session)) return;
       if (!fileId) throw new Error('上传未返回文件标识');
       try {
         // 仅在本人勾选 + 主动选图成功后建任务一次；上传成功不代表现场验证完成。
+        if (!this.canContinue(session)) return;
         await api.createFaceTask({
           applicationId: this._applicationId,
           fileId,
           consent: true
         });
+        if (!(await this.loginGate('查询人脸登记状态', session)) || !this.canContinue(session)) return;
       } catch (taskErr) {
+        if (!(await this.loginGate('提交人脸登记任务', session)) || !this.canContinue(session)) return;
         // 服务端在创建任务时复核名单/开关/租期：拒绝即转入审核渠道态，不显示成功。
         if (api.isReviewChannelCode(taskErr && taskErr.code)) {
           if (!this._destroyed) {
@@ -294,6 +374,7 @@ Page({
       }
       await this.refreshTask();
     } catch (err) {
+      if (!(await this.loginGate('上传人脸照片', session)) || !this.canContinue(session)) return;
       const message = String((err && err.message) || '');
       if (!/cancel|取消/i.test(message) && !this._destroyed) {
         this.setData({ error: message || '上传失败，请重试' });
@@ -305,7 +386,7 @@ Page({
 
   retry() {
     this.setData({ error: '' });
-    this.refreshTask();
+    return this.refreshTask();
   },
 
   back() {

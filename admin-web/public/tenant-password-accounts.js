@@ -28,7 +28,7 @@ export function accountView(row) {
 }
 
 function validPassword(password) {
-  return typeof password === "string" && password.length >= 12 && password.length <= 128
+  return typeof password === "string" && password.length >= 8 && password.length <= 128
     && new TextEncoder().encode(password).length <= 256;
 }
 
@@ -136,7 +136,7 @@ export function createTenantPasswordAccountsPage({ document: doc, fetch: fetcher
       password: $("create-password").value };
     $("create-password").value = "";
     $("enrollment-code").value = "";
-    if (!validPassword(data.password)) { data.password = ""; data.requestCode = ""; message("密码需为12–128个字符，UTF-8不超过256字节。"); return; }
+    if (!validPassword(data.password)) { data.password = ""; data.requestCode = ""; message("密码需为8–128个字符，UTF-8不超过256字节。"); return; }
     await mutate("create", data, "账号已开通，请将账号与初始密码交给本人。");
   });
   $("reset-password-form").addEventListener("submit", async (event) => {
@@ -145,7 +145,7 @@ export function createTenantPasswordAccountsPage({ document: doc, fetch: fetcher
     $("reset-password").value = "";
     const row = selectedAccount("reset-account");
     if (!row) return;
-    if (!validPassword(newPassword)) { message("密码需为12–128个字符，UTF-8不超过256字节。"); return; }
+    if (!validPassword(newPassword)) { message("密码需为8–128个字符，UTF-8不超过256字节。"); return; }
     await mutate("reset", { accountId: row.id, newPassword, expectedRevision: row.revision }, "密码已重置，账号绑定与启停状态保持不变。");
   });
   $("account-status-form").addEventListener("submit", async (event) => {

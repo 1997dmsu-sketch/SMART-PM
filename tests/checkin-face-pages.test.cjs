@@ -28,6 +28,13 @@ const PROFILE_JS = path.join(ROOT, 'miniprogram/pages/profile/index.js');
 const REVIEW_CHANNEL_CODES = ['APPLICATION_FORBIDDEN', 'APPLICATION_NOT_APPROVED', 'ACCOUNT_NOT_ALLOWED'];
 
 function augmentApi(api) {
+  // Historical approval fixtures explicitly represent an authenticated live user.
+  // Production pages have no such fallback: missing getProfile fails closed.
+  const fixtureSession = { profile: { _id: 'synthetic-page-user', authenticated: true }, epoch: 1 };
+  if (typeof api.getProfile !== 'function') api.getProfile = async () => structuredClone(fixtureSession.profile);
+  if (typeof api.isAuthenticated !== 'function') api.isAuthenticated = () => fixtureSession.profile.authenticated === true && typeof fixtureSession.profile._id === 'string';
+  if (typeof api.getLoginEpoch !== 'function') api.getLoginEpoch = () => api.isAuthenticated() ? fixtureSession.epoch : null;
+  if (typeof api.isDemo !== 'function') api.isDemo = () => false;
   if (typeof api.isReviewChannelCode !== 'function') {
     api.isReviewChannelCode = (code) => REVIEW_CHANNEL_CODES.includes(code);
   }
@@ -50,6 +57,7 @@ function makeWx({ media = true } = {}) {
   const navigations = [];
   const wx = {
     showToast: (arg) => toasts.push(arg),
+    showModal: (arg) => { if (arg.success) arg.success({ confirm: false, cancel: true }); },
     navigateTo: (arg) => navigations.push(arg),
     navigateBack: () => {},
     switchTab: () => {},
@@ -72,11 +80,15 @@ function instantiate(config) {
   return page;
 }
 
+function loginHelper(wx) {
+  return loadModule(path.join(ROOT, 'miniprogram/utils/require-login.js'), { globals: { wx } }).exports;
+}
+
 function checkinPage(api, wx) {
   api = augmentApi(api);
   let captured;
   loadModule(CHECKIN_JS, {
-    requires: { '../../services/api': api, '../../utils/layout': { getNavigationLayout: () => ({ statusBarHeight: 20, navHeight: 44, navSideWidth: 104 }) } },
+    requires: { '../../services/api': api, '../../utils/require-login': loginHelper(wx), '../../utils/layout': { getNavigationLayout: () => ({ statusBarHeight: 20, navHeight: 44, navSideWidth: 104 }) } },
     globals: { Page: (config) => { captured = config; }, wx },
   });
   const page = instantiate(captured);
@@ -89,7 +101,7 @@ function facePage(api, wx) {
   let captured;
   const intervals = [];
   loadModule(FACE_JS, {
-    requires: { '../../services/api': api, '../../utils/layout': { getNavigationLayout: () => ({ statusBarHeight: 20, navHeight: 44, navSideWidth: 104 }) } },
+    requires: { '../../services/api': api, '../../utils/require-login': loginHelper(wx), '../../utils/layout': { getNavigationLayout: () => ({ statusBarHeight: 20, navHeight: 44, navSideWidth: 104 }) } },
     globals: {
       Page: (config) => { captured = config; },
       wx,
@@ -343,7 +355,7 @@ test('R11：仅 auto_approved 且有效非空 applicationId 显示受理与人�
     assert.equal(applyCalls, 1, `${item.name}: 必须实际提交一次`);
     assert.equal(page.data.applied, item.applied, `${item.name}: applied 状态`);
     assert.equal(page.data.reviewRequired, item.review, `${item.name}: reviewRequired 状态`);
-    page.goFaceEnroll();
+    await page.goFaceEnroll();
     assert.equal(navigations.length, item.entry ? 1 : 0, `${item.name}: 人脸入口导航`);
     if (item.entry) assert.deepEqual(navigations[0], { url: '/pages/face-enroll/index?applicationId=app-1' });
     if (item.review) assert.ok(page.data.reviewReason && page.data.reviewReason.length > 0, `${item.name}: 必须给出审核渠道/明确错误文案`);
@@ -389,7 +401,7 @@ test('R11：名单在页面加载后撤销——提交得到 pending_review 不�
   assert.equal(page.data.applied, false, '撤销后不得显示已受理');
   assert.equal(page.data.reviewRequired, true, '撤销后必须显示既有审核渠道');
   assert.match(page.data.reviewReason, /既有审核流程/);
-  page.goFaceEnroll();
+  await page.goFaceEnroll();
   assert.equal(navigations.length, 0, '未通过者不得出现人脸入口导航');
 });
 
@@ -541,22 +553,24 @@ test('资料页入口按 runtime.checkinFaceTestEntry && authenticated 显隐', 
     for (const authenticated of [true, false]) {
       let captured;
       const navigations = [];
+      const profileWx = { navigateTo: (arg) => navigations.push(arg), showModal: (arg) => { if (arg.success) arg.success({ confirm: false }); }, showToast: () => {}, getWindowInfo: () => ({}), getMenuButtonBoundingClientRect: () => null };
       loadModule(PROFILE_JS, {
         requires: {
-          '../../services/api': { isDemo: () => false, getProfile: async () => ({}), getCheckinFaceConfig: async () => ({}) },
+          '../../services/api': { isDemo: () => false, isAuthenticated: () => authenticated === true, getLoginEpoch: () => authenticated ? 1 : null, getProfile: async () => authenticated ? ({ _id: 'synthetic-profile-user', authenticated: true }) : null, getCheckinFaceConfig: async () => ({}) },
+          '../../utils/require-login': loginHelper(profileWx),
           '../../config/runtime': { checkinFaceTestEntry: flag },
           '../../config/version': { version: '0.0.0-synthetic', channel: 'test' },
           '../../utils/layout': { getNavigationLayout: () => ({ statusBarHeight: 20, navHeight: 44, navSideWidth: 104 }) },
         },
         globals: {
           Page: (config) => { captured = config; },
-          wx: { navigateTo: (arg) => navigations.push(arg), showModal: () => {}, showToast: () => {}, getWindowInfo: () => ({}), getMenuButtonBoundingClientRect: () => null },
+          wx: profileWx,
           getApp: () => ({ globalData: {} }),
         },
       });
       const page = instantiate(captured);
       page.setData({ authenticated });
-      page.openMenu({ currentTarget: { dataset: { id: 'checkinTest' } } });
+      await page.openMenu({ currentTarget: { dataset: { id: 'checkinTest' } } });
       assert.equal(navigations.length, flag && authenticated ? 1 : 0, `entry=${flag} authenticated=${authenticated}`);
       if (navigations.length) assert.deepEqual(navigations[0], { url: '/pages/checkin/index' });
     }

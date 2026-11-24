@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import { AdminTenantPasswordAccounts } from "../lib/tenant-password-accounts.mjs";
 import { accountView, createTenantPasswordAccountsPage } from "../public/tenant-password-accounts.js";
 
@@ -232,5 +233,46 @@ test("列表容量/损坏记录失败关闭显示维护提示，不展示服务�
     assert.match(doc.getElementById("login-message").textContent, /维护/);
     assert.ok(!doc.getElementById("login-message").textContent.includes("synthetic-private"));
     assert.equal(calls.filter((call) => call.method === "POST").length, 0);
+  }
+});
+
+
+test("后台开户/重置表单统一八位最低，七位不请求、八位及旧十二位均可提交", async () => {
+  const html = readFileSync(new URL('../public/tenant-password-accounts.html', import.meta.url), 'utf8');
+  for (const id of ['create-password', 'reset-password']) {
+    assert.match(html, new RegExp('<input[^>]+id="' + id + '"[^>]+minlength="8"[^>]+maxlength="128"'));
+  }
+  assert.ok(!html.includes('12–128'));
+  for (const form of ['create', 'reset']) {
+    for (const length of [7, 8, 12]) {
+      const doc = documentFixture();
+      const posts = [];
+      const page = createTenantPasswordAccountsPage({ document: doc, fetch: async (path, init) => {
+        if (path === '/api/me') return response({ account: { role: 'admin' }, csrf: 'synthetic-csrf' });
+        if (path === '/api/tenant-password-accounts') return response({ rows: [uiAccount()] });
+        posts.push({ path, payload: JSON.parse(init.body) });
+        return response(uiAccount());
+      } });
+      await page.start();
+      const synthetic = 's'.repeat(length);
+      if (form === 'create') {
+        doc.getElementById('enrollment-code').value = 'synthetic-code';
+        doc.getElementById('create-username').value = 'tenant.safe';
+        doc.getElementById('create-password').value = synthetic;
+        await doc.getElementById('create-account-form').emit('submit');
+        assert.equal(doc.getElementById('create-password').value, '');
+      } else {
+        doc.getElementById('reset-account').value = uiAccount().id;
+        doc.getElementById('reset-password').value = synthetic;
+        await doc.getElementById('reset-password-form').emit('submit');
+        assert.equal(doc.getElementById('reset-password').value, '');
+      }
+      assert.equal(posts.length, length < 8 ? 0 : 1);
+      if (length < 8) assert.match(doc.getElementById('account-message').textContent, /8–128/);
+      else {
+        assert.equal(posts[0].path, '/api/tenant-password-accounts/' + form);
+        assert.equal(posts[0].payload[form === 'create' ? 'password' : 'newPassword'], synthetic);
+      }
+    }
   }
 });

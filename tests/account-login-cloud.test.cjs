@@ -346,7 +346,7 @@ test('用户名/密码冻结边界：规范化账号，保留密码原文及 UTF
     const after = ctx.db.snapshot();
     assert.deepEqual(after, before);
   }
-  const invalidPasswords = ['x'.repeat(11), 'x'.repeat(129), '界'.repeat(86), null, undefined, 999];
+  const invalidPasswords = ['x'.repeat(7), 'x'.repeat(129), '界'.repeat(86), null, undefined, 999];
   for (const password of invalidPasswords) {
     const ctx = fixture();
     const pending = await ctx.service.prepare(CONTEXT, {});
@@ -356,7 +356,7 @@ test('用户名/密码冻结边界：规范化账号，保留密码原文及 UTF
     const after = ctx.db.snapshot();
     assert.deepEqual(after, before);
   }
-  for (const [username, password] of [['a000', 'x'.repeat(12)], ['a'.repeat(32), 'x'.repeat(128)], ['tenant.utf8', '界'.repeat(85)]]) {
+  for (const [username, password] of [['tenant.eight', 'x'.repeat(8)], ['a000', 'x'.repeat(12)], ['a'.repeat(32), 'x'.repeat(128)], ['tenant.utf8', '界'.repeat(85)]]) {
     const ctx = fixture();
     const created = await provision(ctx, { username, password });
     const result = await ctx.service.login(CONTEXT, { username, password });
@@ -495,4 +495,37 @@ test('账号列表稳定分页覆盖101项，损坏凭据不可被静默过滤',
   await assert.rejects(() => ctx.service.listAccounts(ADMIN), (error) => error.code === 'ACCOUNT_DATA_UNVERIFIED');
   const damagedAfter = ctx.db.snapshot();
   assert.deepEqual(damagedAfter, damagedBefore);
+});
+
+
+test('八位最低密码：七位拒绝、八位真实scrypt可登录，十二位旧密码仍可重置使用', async () => {
+  const ctx = fixture();
+  const pending = await ctx.service.prepare(CONTEXT, {});
+  const seven = 's'.repeat(7);
+  const eight = ' ' + 's'.repeat(6) + ' ';
+  const twelve = 't'.repeat(12);
+  const before = ctx.db.snapshot();
+  await assert.rejects(() => ctx.service.createAccount(ADMIN, {
+    requestCode: pending.requestCode, username: 'tenant.eight', password: seven,
+  }), (error) => error.code === 'INVALID_INPUT');
+  const after = ctx.db.snapshot();
+  assert.deepEqual(after, before);
+  const account = await ctx.service.createAccount(ADMIN, {
+    requestCode: pending.requestCode, username: 'tenant.eight', password: eight,
+  });
+  const stored = ctx.db.row(COLLECTIONS.ACCOUNTS, account.id);
+  const derived = scryptSync(eight, Buffer.from(stored.password.saltHex, 'hex'), 64,
+    { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+  assert.equal(derived.toString('hex'), stored.password.hashHex);
+  assert.equal((await ctx.service.login(CONTEXT, { username: account.username, password: eight })).code, 0);
+  assert.equal((await ctx.service.login(CONTEXT, { username: account.username, password: eight.trim() })).code, 'AUTH_FAILED');
+  const beforeReset = ctx.db.snapshot();
+  await assert.rejects(() => ctx.service.resetPassword(ADMIN, {
+    accountId: account.id, newPassword: seven, expectedRevision: account.revision,
+  }), (error) => error.code === 'INVALID_INPUT');
+  const afterReset = ctx.db.snapshot();
+  assert.deepEqual(afterReset, beforeReset);
+  await ctx.service.resetPassword(ADMIN, { accountId: account.id, newPassword: twelve, expectedRevision: account.revision });
+  assert.equal((await ctx.service.login(CONTEXT, { username: account.username, password: twelve })).code, 0);
+  assert.equal((await ctx.service.login(CONTEXT, { username: account.username, password: eight })).code, 'AUTH_FAILED');
 });

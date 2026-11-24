@@ -1,4 +1,5 @@
 const api = require('../../services/api');
+const { requireLogin, hasLogin, canActNow } = require('../../utils/require-login');
 const FACILITIES = [
   { name: '冰箱', key: 'fridge', icon: '/assets/rental-fridge.png' },
   { name: '洗衣机', key: 'washer', icon: '/assets/rental-washer.png' },
@@ -54,6 +55,17 @@ Page({
     this.setData({ statusBarHeight, navHeight: statusBarHeight + 44, demo: api.isDemo(), minimumDate });
     this.load();
   },
+  async onShow() {
+    if (!(await hasLogin(api))) this.setData({ favorite: false, appointmentOpen: false });
+    if (this.data.house) return this.loadFavorite();
+  },
+  async loadFavorite() {
+    let favorites = [];
+    if (await hasLogin(api) && canActNow(api)) {
+      try { favorites = wx.getStorageSync('favorites') || []; } catch (_) {}
+    }
+    this.setData({ favorite: Array.isArray(favorites) && favorites.some(item => item && item.id === this.houseId) });
+  },
   onPullDownRefresh() { this.load().finally(() => wx.stopPullDownRefresh()); },
   onPageScroll(event) {
     const scrolled = event.scrollTop > 220;
@@ -66,9 +78,8 @@ Page({
       if (!raw) { this.setData({ loading:false,house:null,recommendations:[],galleryImages:[],appointmentOpen:false }); return; }
       const house = normalizeHouse(raw);
       this.houseId = house.id || this.houseId;
-      let favorites = [];
-      try { favorites = wx.getStorageSync('favorites') || []; } catch (_) {}
-      this.setData({ house, galleryMode: 'room', galleryImages: house.images, imageIndex: 0, favorite: Array.isArray(favorites) && favorites.some(item => item && item.id === this.houseId), loading: false });
+      this.setData({ house, galleryMode: 'room', galleryImages: house.images, imageIndex: 0, favorite: false, loading: false });
+      await this.loadFavorite();
       try {
         const result = await api.listHouses({ pageSize: 6 });
         this.setData({ recommendations: (result.houses || []).filter(item => String(item.id || item._id) !== this.houseId).slice(0, 5).map(normalizeHouse) });
@@ -99,7 +110,9 @@ Page({
       if (result[0] && result[1]) wx.pageScrollTo({ scrollTop: Math.max(0, result[0].top + result[1].scrollTop - this.data.navHeight - 52), duration: 250 });
     });
   },
-  toggleFavorite() {
+  async toggleFavorite() {
+    if (!(await requireLogin(api, '收藏房源')) || !canActNow(api)) return;
+    if (!this.data.house) return;
     try {
       let favorites = wx.getStorageSync('favorites') || [];
       if (!Array.isArray(favorites)) favorites = [];
@@ -116,12 +129,13 @@ Page({
     wx.showToast({ title:this.data.house && this.data.house.isTestPreset ? '测试房源仅供浏览，暂不可预约' : '此房源暂不可预约',icon:'none' });
     return true;
   },
-  openAppointment() { if (this.bookingUnavailable()) return; this.setData({ appointmentOpen:true,formError:'' }); },
+  async openAppointment() { if (!(await requireLogin(api, '预约看房')) || !canActNow(api)) return; if (this.bookingUnavailable()) return; this.setData({ appointmentOpen:true,formError:'' }); },
   closeAppointment() { this.setData({ appointmentOpen: false }); },
   stopPropagation() {},
   changeDate(event) { this.setData({ appointmentDate: event.detail.value }); },
   changeTime(event) { this.setData({ appointmentTime: event.detail.value }); },
-  saveAppointment(event) {
+  async saveAppointment(event) {
+    if (!(await requireLogin(api, '保存预约')) || !canActNow(api)) return;
     if (this.bookingUnavailable()) return;
     const { name, phone, note } = event.detail.value;
     if (!String(name || '').trim()) { this.setData({ formError: '请填写联系人' }); return; }
@@ -135,14 +149,16 @@ Page({
       wx.showModal({ title: '预约草稿已保存在本机', content: '尚未发送给物业。请通过电话联系或在线咨询，与工作人员确认看房安排。', showCancel: false });
     } catch (_) { this.setData({ formError: '草稿保存失败，请重试' }); }
   },
-  contactPhone() {
+  async contactPhone() {
+    if (!(await requireLogin(api, '电话咨询')) || !canActNow(api)) return;
+    if (!this.data.house) return;
     if (this.data.house && this.data.house.isTestPreset) { wx.showToast({ title:'测试房源暂未配置联系电话',icon:'none' }); return; }
     if (this.data.demo) { wx.showModal({ title: '设计演示', content: '当前为演示房源，不会拨打电话。接入真实房源后可联系工作人员。', showCancel: false }); return; }
     const phone = String(this.data.house.phone || '').replace(/[\s-]/g, '');
     if (!/^(\+?86)?1\d{10}$|^0\d{9,11}$/.test(phone)) { wx.showToast({ title: '此房源暂未提供联系电话', icon: 'none' }); return; }
     wx.makePhoneCall({ phoneNumber: phone, fail: () => {} });
   },
-  consult() { if (this.data.house && this.data.house.isTestPreset) { wx.showToast({ title:'测试房源仅供浏览，暂未开放咨询',icon:'none' }); return; } wx.switchTab({ url:'/pages/messages/index' }); },
+  async consult() { if (!(await requireLogin(api, '在线咨询')) || !canActNow(api)) return; if (this.data.house && this.data.house.isTestPreset) { wx.showToast({ title:'测试房源仅供浏览，暂未开放咨询',icon:'none' }); return; } wx.switchTab({ url:'/pages/messages/index' }); },
   seeMore() { wx.switchTab({ url: '/pages/life/index' }); },
   openRecommendation(event) { wx.navigateTo({ url: `/pages/rental/index?id=${encodeURIComponent(event.currentTarget.dataset.id)}` }); },
   onShareAppMessage() {

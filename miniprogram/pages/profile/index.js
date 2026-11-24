@@ -1,4 +1,5 @@
 const api = require('../../services/api');
+const { hasLogin, requireLogin, canActNow } = require('../../utils/require-login');
 const { getNavigationLayout } = require('../../utils/layout');
 const release = require('../../config/version');
 const runtime = require('../../config/runtime');
@@ -39,9 +40,14 @@ Page({
     this.setData({ loading: true, error: '' });
     try {
       const data = await api.getProfile();
-      const authenticated = Boolean(data && data.authenticated !== false);
-      this.setData({ profile: data ? { ...EMPTY_PROFILE, ...data, avatar: data.avatar || EMPTY_PROFILE.avatar } : EMPTY_PROFILE, authenticated });
-    } catch (err) { this.setData({ error: err.message || '资料加载失败，请重试' }); }
+      // Validate the exact snapshot to be displayed with the shared login
+      // rules, while retaining the API's current authentication capability.
+      const source = { getProfile: async () => data, isDemo: () => typeof api.isDemo === 'function' && api.isDemo() === true };
+      if (typeof api.isAuthenticated === 'function') source.isAuthenticated = () => api.isAuthenticated();
+      const authenticated = (await hasLogin(source)) && canActNow(api);
+      this.setData({ profile: authenticated ? { ...EMPTY_PROFILE, ...data, avatar: data.avatar || EMPTY_PROFILE.avatar } : EMPTY_PROFILE,
+        authenticated, ...(!authenticated ? { showFavorites: false, favorites: [] } : {}) });
+    } catch (err) { this.setData({ profile: EMPTY_PROFILE, authenticated: false, showFavorites: false, favorites: [], error: (err && err.message) || '资料加载失败，请重试' }); }
     finally { this.setData({ loading: false }); }
   },
   async login(event) {
@@ -58,15 +64,23 @@ Page({
     if (this.data.loggingIn || this.data.authenticated || this.data.demo) return;
     wx.navigateTo({ url: '/pages/account-login/index' });
   },
-  unavailable(title) {
+  async unavailable(title) {
+    if (!(await requireLogin(api, title)) || !canActNow(api)) return;
     wx.showModal({ title, content: '该服务尚未完成接口对接，当前不会提交或修改真实数据。', showCancel: false, confirmColor: '#ff2450' });
   },
-  editProfile() { this.unavailable('编辑资料'); },
-  openService(event) { this.unavailable(event.currentTarget.dataset.name || '物业服务'); },
-  openMenu(event) {
+  editProfile() { return this.unavailable('编辑资料'); },
+  openService(event) { return this.unavailable(event.currentTarget.dataset.name || '物业服务'); },
+  async openMenu(event) {
     const id = event.currentTarget.dataset.id;
+    if (id === 'about') {
+      wx.showModal({ title: '宇宙物业智联', content: `版本 v${release.version} · ${release.channel}\n连接社区生活与物业服务。\n演示内容不代表真实房源、账户或设备状态。`, showCancel: false, confirmColor: '#ff2450' }); return;
+    }
+    if (id === 'coupon') return this.unavailable('优惠券');
+    const label = { house: '我的房子', family: '家庭成员', access: '门禁管理', favorite: '我的收藏', checkinTest: '测试入住' }[id];
+    if (!label) return this.unavailable('物业服务');
+    if (!(await requireLogin(api, label)) || !canActNow(api)) return;
     if (id === 'checkinTest') {
-      if (!this.data.checkinFaceEntry || !this.data.authenticated) return;
+      if (!this.data.checkinFaceEntry) return;
       wx.navigateTo({ url: '/pages/checkin/index' });
       return;
     }
@@ -80,10 +94,6 @@ Page({
       const favorites = (Array.isArray(stored) ? stored : []).map(item => typeof item === 'object' ? { ...item, id: item.id || item._id, title: item.title || item.name || '已收藏房源' } : { id: item, title: `房源 ${item}` });
       this.setData({ showFavorites: true, favorites }); return;
     }
-    if (id === 'about') {
-      wx.showModal({ title: '宇宙物业智联', content: `版本 v${release.version} · ${release.channel}\n连接社区生活与物业服务。\n演示内容不代表真实房源、账户或设备状态。`, showCancel: false, confirmColor: '#ff2450' }); return;
-    }
-    this.unavailable('优惠券');
   },
   closeFavorites() { this.setData({ showFavorites: false }); },
   stopTap() {},
@@ -91,9 +101,10 @@ Page({
     this.closeFavorites();
     wx.navigateTo({ url: `/pages/rental/index?id=${encodeURIComponent(event.currentTarget.dataset.id)}` });
   },
-  settings() {
-    if (this.data.demo || !this.data.authenticated) {
-      wx.showModal({ title: '账号设置', content: this.data.demo ? '当前为设计演示模式，没有登录真实账号。' : '请先使用手机号或账号密码登录。', showCancel: false, confirmColor: '#ff2450' }); return;
+  async settings() {
+    if (!(await requireLogin(api, '账号设置')) || !canActNow(api)) return;
+    if (this.data.demo) {
+      wx.showModal({ title: '账号设置', content: '当前为设计演示模式，没有登录真实账号。', showCancel: false, confirmColor: '#ff2450' }); return;
     }
     wx.showActionSheet({ itemList: ['退出当前账号'], success: result => {
       if (result.tapIndex !== 0) return;

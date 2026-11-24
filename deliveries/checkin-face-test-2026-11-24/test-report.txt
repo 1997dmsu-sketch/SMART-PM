@@ -1,0 +1,492 @@
+Version: 0.1.0-beta.19-checkin-face.1
+Commit: 72fe242556aea604473281dc52b45837155fa43a
+Validation: extracted source archive, mocked WeChat APIs
+
+$ /opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/checkin-face-static-check.mjs
+[PASS] checkin-face static check: 102 source files scanned, 0 violations
+
+$ /opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/verify-checkin-face-sources.mjs
+[PASS] checkin-face sources: 115 entries hash-verified (0 CRLF→LF 按 Git blob 归一); cloud dirs cloudfunctions/checkinFaceTest covered 10 source files; local closure resolved 55 import(s), 115 external import(s); baselineSha256 无伪造；与 docs/backend-provenance.json 无重叠；原来源校验由 scripts/verify-import.mjs 继续承担（本脚本不替代）。
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/lib/checkin-face-test-config.mjs -> node:module
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/lib/checkin-face-test-config.mjs -> node:crypto
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/server.mjs -> node:http
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/server.mjs -> node:module
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/server.mjs -> node:crypto
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/server.mjs -> node:fs/promises
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/server.mjs -> node:url
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/server.mjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/server.mjs -> @cloudbase/node-sdk
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-config.test.mjs -> node:test
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-config.test.mjs -> node:assert/strict
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-config.test.mjs -> node:crypto
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-config.test.mjs -> node:fs
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-config.test.mjs -> node:module
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-config.test.mjs -> node:url
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-config.test.mjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-worker.test.mjs -> node:test
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-worker.test.mjs -> node:assert/strict
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-worker.test.mjs -> node:fs/promises
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-worker.test.mjs -> node:os
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-worker.test.mjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-worker.test.mjs -> node:url
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：admin-web/tests/checkin-face-worker.test.mjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：cloudfunctions/checkinFaceTest/index.js -> wx-server-sdk
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：cloudfunctions/checkinFaceTest/lib/context.js -> node:crypto
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：cloudfunctions/checkinFaceTest/lib/store.js -> node:crypto
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：cloudfunctions/checkinFaceTest/lib/workflow.js -> node:crypto
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/run-negatives.cjs -> fs
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/run-negatives.cjs -> path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/run-negatives.cjs -> node:child_process
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：docs/evidence/checkin-face-rework-2026-11-24/lane-D/negative-controls/run-negatives.cjs -> node:crypto
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：scripts/checkin-face-static-check.mjs -> node:fs
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：scripts/checkin-face-static-check.mjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：scripts/checkin-face-static-check.mjs -> node:url
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：scripts/verify-checkin-face-sources.mjs -> node:fs
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：scripts/verify-checkin-face-sources.mjs -> node:crypto
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：scripts/verify-checkin-face-sources.mjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：scripts/verify-checkin-face-sources.mjs -> node:url
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-api.test.cjs -> node:test
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-api.test.cjs -> node:assert/strict
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-api.test.cjs -> node:fs
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-api.test.cjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-api.test.cjs -> node:vm
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-cloud-workflow.test.cjs -> node:test
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-cloud-workflow.test.cjs -> node:assert/strict
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-cloud-workflow.test.cjs -> node:fs
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-cloud-workflow.test.cjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-cloud-workflow.test.cjs -> node:crypto
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-cross-module.test.cjs -> node:test
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-cross-module.test.cjs -> node:assert/strict
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-cross-module.test.cjs -> node:fs
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-cross-module.test.cjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-cross-module.test.cjs -> node:vm
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-cross-module.test.cjs -> node:child_process
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-cross-module.test.cjs -> node:url
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-pages.test.cjs -> node:test
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-pages.test.cjs -> node:assert/strict
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-pages.test.cjs -> node:fs
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-pages.test.cjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-pages.test.cjs -> node:vm
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-qa-gates.test.cjs -> node:test
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-qa-gates.test.cjs -> node:assert/strict
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-qa-gates.test.cjs -> node:fs
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-qa-gates.test.cjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-qa-gates.test.cjs -> node:os
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-qa-gates.test.cjs -> node:child_process
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-qa-gates.test.cjs -> node:crypto
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/checkin-face-qa-gates.test.cjs -> node:net
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/support/d-network-guard.cjs -> node:assert/strict
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/support/d-network-guard.cjs -> node:module
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/support/d-network-guard.cjs -> node:net
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/support/d-network-guard.cjs -> node:tls
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/support/d-network-guard.cjs -> node:http
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/support/d-network-guard.cjs -> node:https
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/support/d-network-guard.cjs -> node:dgram
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/support/d-network-guard.cjs -> node:dns
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tests/support/d-network-guard.cjs -> node:dns/promises
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/claim-and-enroll.mjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/claim-and-enroll.mjs -> node:url
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/enrollment-adapter.mjs -> node:fs
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/enrollment-adapter.mjs -> node:fs/promises
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/enrollment-adapter.mjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/network-guard-selfcheck.test.mjs -> node:test
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/network-guard-selfcheck.test.mjs -> node:assert/strict
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/network-guard-selfcheck.test.mjs -> node:child_process
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/network-guard-selfcheck.test.mjs -> node:https
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/network-guard-selfcheck.test.mjs -> node:https
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/network-guard.cjs -> node:net
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/network-guard.cjs -> node:tls
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/network-guard.cjs -> node:http
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/network-guard.cjs -> node:https
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/network-guard.cjs -> node:dns
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/network-guard.cjs -> node:fs
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/rework-r05-r06.test.mjs -> node:test
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/rework-r05-r06.test.mjs -> node:assert/strict
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/rework-r08-r09.test.mjs -> node:test
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/rework-r08-r09.test.mjs -> node:assert/strict
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/rework-r08-r09.test.mjs -> node:fs/promises
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/rework-r08-r09.test.mjs -> node:os
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/rework-r08-r09.test.mjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/rework-r08-r09.test.mjs -> node:url
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/rework-r08-r09.test.mjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/sdk-resolution.test.mjs -> node:test
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/sdk-resolution.test.mjs -> node:assert/strict
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/sdk-resolution.test.mjs -> node:fs/promises
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/sdk-resolution.test.mjs -> node:os
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/sdk-resolution.test.mjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/sdk-resolution.test.mjs -> node:url
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/sdk-resolution.test.mjs -> node:fs/promises
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/sdk-resolution.test.mjs -> node:url
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/tests/sdk-resolution.test.mjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/worker-runtime.mjs -> node:fs/promises
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/worker-runtime.mjs -> node:module
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/worker-runtime.mjs -> node:path
+  [note] 外部依赖导入（由依赖归属/锁文件负责）：tools/checkin-face-worker/worker-runtime.mjs -> node:url
+
+$ /opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node --require ./tests/support/d-network-guard.cjs --test tests/checkin-face-api.test.cjs tests/checkin-face-cloud-workflow.test.cjs tests/checkin-face-cross-module.test.cjs tests/checkin-face-pages.test.cjs tests/checkin-face-qa-gates.test.cjs tests/cloud-bootstrap.test.cjs tests/frontend.test.cjs tests/layout.test.cjs tests/phone-login.test.cjs tests/public-houses.test.cjs tests/wechat-modules.test.cjs tests/wxml.test.cjs admin-web/tests/checkin-face-config.test.mjs admin-web/tests/checkin-face-worker.test.mjs tools/checkin-face-worker/tests/rework-r05-r06.test.mjs tools/checkin-face-worker/tests/rework-r08-r09.test.mjs tools/checkin-face-worker/tests/sdk-resolution.test.mjs
+✔ 缺省关闭：空库 getConfig 不包含 token/哈希，revision=0 (2.546117ms)
+✔ setSwitch(true) 在版本/凭据/102 绑定/租期任一缺失时分别被拒 (10.500492ms)
+✔ setDispatchEnabled 默认 false，只接受严格 boolean (0.903698ms)
+✔ P0 配置面守门：公开方法即可产出非空版本、租期快照同版本、worker token 与派发开关 (1.782249ms)
+✔ upsertRoomBinding：102 唯一确定性 id、名称可选持久化、同号多条拒绝 (0.896257ms)
+✔ upsertLease：手填起止映射 T00:00:00/T23:59:59；非法日期/越界零写入 (1.597431ms)
+✔ setApplicationVersion 接受云端同样接受的合法版本并持久化 (1.163139ms)
+✔ setApplicationVersion 与云端版本正则一致：中文/空格/!/超64/符号开头均双端拒绝且零写入 (1.306984ms)
+✔ upsertLease 在版本未配置时零写入失败关闭（不得落地空版本快照） (0.544168ms)
+✔ setApplicationVersion 轮换时同步租期快照版本与 revision，并只在实际变更时同步 (2.502702ms)
+✔ setSwitch(true) 拒绝被 DB 绕过制造的租期版本不一致半配置态 (1.565754ms)
+✔ setAllowlist：名单持久化、重复/非法账号拒绝、移除账号转为 inactive (2.662642ms)
+✔ setWorkerToken：至少 32 字符、只存 SHA-256、审计仅记前 8 位、非法输入零写入 (1.091551ms)
+✔ setStorageNamespace：与云端校验器同源正则，持久化+审计+revision，非法零写入 (1.744862ms)
+✔ setSwitch(true) 新增前置：可信云存储命名空间未配置时 STORAGE_NAMESPACE_UNCONFIGURED 且零写入 (1.777692ms)
+✔ publicDoc 过滤秘密字段；后台路由保持 admin-only + CSRF/origin 校验 (1.419413ms)
+✔ CF-R2-02：namespace 与关停交错时自动重试，不能复活开关或复用 revision (2.629913ms)
+✔ CF-R2-02：全部公开配置写与审计同事务，任一提交失败全库回滚 (9.78064ms)
+✔ CF-R2-02：并发替换名单以事务内当前索引撤销，不遗留孤立 active 账号 (2.234088ms)
+✔ CF-R2-02：旧非空名单无索引不自动回填；版本未绑定的空盘点也失败关闭 (2.955372ms)
+✔ CF-R2-02：无真实事务不降级，外部 constructor transaction=true 也不能绕过 (0.278679ms)
+✔ worker 读取本地配置：明文秘密不可枚举、日志视图不含秘密 (3.042303ms)
+✔ R05：本地配置缺少 deviceKey 在配置加载即失败关闭（exit 1 类，不进领取） (0.273771ms)
+✔ R06：本地 workerId 格式预检（清单 §2.1 /^[A-Za-z0-9_-]{1,64}$/） (0.247242ms)
+✔ buildDeviceRequest 显式 mode=device/validityMode=fixed，日期/门号/编号来自任务 (0.694484ms)
+✔ R08：buildInMemoryDeviceRequest 不含 photoPath（内存照片不落盘） (0.701384ms)
+✔ 缺日期/门号/编号或任务试图降级 simulation/unlimited 均拒绝 (0.449546ms)
+✔ R05：deviceKey 缺任一/空/不同立即拒绝，精确一致才放行 (0.366531ms)
+✔ R06：validateClaimedTask 在下载前失败关闭（claim 字段/租期/计划指纹） (0.55224ms)
+✔ R06：checkClaimTime 过期/时钟无效/偏差过大失败关闭 (0.497849ms)
+✔ R06：verifyAuthorizedSnapshot 只接受预期推进/一致字段/明确时间事实（清单 §2.3/§2.5） (2.232545ms)
+✔ runEnrollment：未知 outcome / 非 device / 运行异常统一 exitCode 5 + stopped，不重试 (0.8517ms)
+✔ buildReportPayload 只接受 0/2/4/5，字段仅从任务取，附加 employeeNo/日期不进载荷 (0.571178ms)
+✔ R09：applyCleanupResult 清理失败改记 stopped(5) 并保留设备事实；成功原样返回 (0.165518ms)
+✔ sanitizeEnrollmentOutput 剔除附加键与设备秘密，device 段只留型号/固件 (0.453462ms)
+✔ safeLog 结构化脱敏：token/密码/origin/员工号不留明文 (0.549275ms)
+✔ worker 主流程一次 claim + 一次 begin + 一次 report；report 使用推进后 revision；退出码 4/5 按结果映射，不重试 (16.657747ms)
+✔ worker 空闲只 claim 不 begin/report；example JSON device 段全空；代码无监听/开门/重排队/照片落盘 (5.654839ms)
+✔ 五个新 API 都只下发精确白名单载荷 (6.365507ms)
+✔ 注入服务端字段时五个函数在云端调用前本地拒绝（调用计数不变） (38.360806ms)
+✔ consent 必须严格等于 true，不是真值即可 (2.591605ms)
+✔ uploadTestFace 只接受服务端下发的 test-face/ 前缀，页面不拼接路径 (0.51207ms)
+✔ 云端 code!==0 一律抛错，绝不返回 data 降级 (0.795576ms)
+✔ getFaceTask 同时支持字符串与对象入参，但仍拒绝服务端字段 (0.409245ms)
+✔ 非零错误码透传给页面：err.code 必须保留服务端 code（C2 分类依据） (2.52804ms)
+✔ 审核渠道错误码分类是闭式集合：只认申请/账号拒绝码，不吞并任务与配置码 (0.377928ms)
+✔ 演示模式不提供入住/人脸成功 fallback，一律拒绝且不调用云端与上传 (0.982186ms)
+✔ 上传输出与建任务输入使用同一个 SDK 形状 fileID，原样透传不重造（R01 客户端侧） (0.469365ms)
+✔ P0 守门：仅用后台全部公开配置能力即可完成 auto_approved + claim 成功 (17.865361ms)
+✔ 公开方法轮换版本后租期快照同步，云端全流程仍通过且终态为待现场刷脸 (5.81424ms)
+✔ 名单+102+有效租期+版本一致才 auto_approved，落稳定 id 与 employeeNo (2.313897ms)
+✔ 普通账号语义：ACCOUNT_NOT_ALLOWED 不外露，返回 pending_review 且测试集合零写入 (2.502441ms)
+✔ 伪造 approved/testMode/room/日期/身份字段在云函数入口被拒且不写库 (23.147039ms)
+✔ 关闭开关、版本不符、租期未配置/过期、102 歧义分别返回指定错误码 (12.393658ms)
+✔ 日期边界：2026-12-01..2026-12-05 映射上海墙上时间，含首尾且无 +1/UTC/unlimited (0.756527ms)
+✔ 102 只按确定性 _id 单点读取；同号多条报 ROOM_NOT_UNIQUE，不取第一条 (2.878576ms)
+✔ R01：真实 SDK fileID 从上传输出原样贯穿建任务/领取/执行前复核，不再换成裸路径 (1.859314ms)
+✔ R01：裸路径/非 cloud/跨环境/跨用户/跨申请/畸形路径全部拒绝且零写入 (1.753195ms)
+✔ R01：服务端可信命名空间未配置时失败关闭，且 getConfig 如实下发布尔 (0.764248ms)
+✔ 未通过申请、他人申请、失效租期均不得创建人脸任务；consent 必须严格为 true (3.029533ms)
+✔ apply/create 幂等：重复提交返回同一 id、同一 employeeNo；重传照片不改号 (2.261399ms)
+✔ getConfig 只读且不下发名单/token/设备秘密；未配置时为待配置 (1.365202ms)
+✔ 并发 claim 只有一个成功（事务 CAS），其余不领取 (2.675021ms)
+✔ 排队后租期/审批/配置 revision 变化 → INVALIDATED，不派发 (5.999206ms)
+✔ claim 超时转为 UNKNOWN_RESULT：保留编号、不重排、不删除 (1.702509ms)
+✔ report 成功逐项校验：日期/模式/全天指纹/门号/编号/关联/verify 全匹配才确认且 siteVerification 永为 PENDING (2.852447ms)
+✔ report 输出被篡改任一项 → FAILED_REVIEW（不确认、不换号、不重排） (33.944248ms)
+✔ 退出码 4/5 → FAILED_REVIEW/UNKNOWN_RESULT，无 requeue、不换号、不删除 (10.222324ms)
+✔ 重复 report 幂等；worker token 常量时间比对失败返回 WORKER_UNAUTHORIZED (8.612074ms)
+✔ 身份边界：小程序 action 需 OPENID，worker action 不能由小程序身份调用 (2.125905ms)
+✔ R03：base 与 tx 是不同上下文——权威读取与审计全部发生在 tx，事务内集合查询硬抛错 (2.423953ms)
+✔ R03：无 runTransaction 能力时申请与建任务失败关闭且零写入（不静默串行） (1.408878ms)
+✔ R03：提交失败时业务写与审计全回滚，不回落到外层 DB (2.622101ms)
+✔ R04：A/B 创建者受控交错——B 建并领取后，晚到 A 的提交不能重置 claim/终态/revision/employeeNo (21.185973ms)
+✔ R06 正例：复核通过原子推进 DEVICE_PROCESSING、revision 恰好 +1、claim 不延长、快照一致 (5.457352ms)
+✔ R06 拒绝矩阵：错 claim/错 revision/错 worker/重复开始/未领取/不存在，零授权且状态不被破坏 (12.060316ms)
+✔ R06 白名单与鉴权：额外字段/自报批准被拒，worker 专用 action 生效 (14.436918ms)
+✔ R06 过期复核：claim 过期后 begin 拒绝并原子转 UNKNOWN_RESULT（不延长、不重授权） (3.43995ms)
+✔ R06 失效复核：撤名单/关开关/换房/改租期后 begin 拒绝并原子转 INVALIDATED (13.488162ms)
+✔ R06：claim 后、begin 前发生的变化在复核时被拒绝（执行前复核读当前权威状态） (1.263168ms)
+✔ 丢失开始回执：DEVICE_PROCESSING 且领取过期的任务由清扫转 UNKNOWN_RESULT，不重派发 (1.352814ms)
+✔ 云函数路径无 console.log 请求体、无 unlimited 兜底 (0.961005ms)
+✔ CF-R2-01：下载期间切换 namespace，权威事务拒绝旧文件且零任务/审计写入 (1.598682ms)
+✔ CF-R2-03：CLAIMED 不能绕过 begin 报设备成功或已执行失败 (3.029993ms)
+✔ CF-R2-03：真实 worker 形状的 begin 前输入失败/下载未知报告仍可记账 (3.403215ms)
+✔ CF-R2-03：终态不可翻绿，严格同报告/原请求 revision 才幂等 (5.103561ms)
+✔ CF-R2-06：begin 截止前 1ms 可授权，等于/之后 1ms 均过期且不延长 claim (4.387795ms)
+✔ CF-R2-06：report 与超时清扫都采用 now >= claimExpiresAt (5.80214ms)
+✔ CF-R2-07：claim 缺失/空/非法 worker 均零写拒绝，旧空绑定 begin 也失败关闭 (9.0751ms)
+✔ CF-R2-10 云门：轮询旧申请不恢复上传；合法重新授权可恢复，终态事实只读保留 (3.810096ms)
+{"at":"2026-11-24T15:50:10.508Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:50:10.509Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.509Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:50:10.510Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:50:10.510Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.511Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:50:10.514Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:50:10.514Z","level":"info","message":"task claimed","taskId":"ch***m1","claimId":"49***af","revision":2,"doorNo":7,"employeeNo":"F6***C6","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.516Z","level":"info","message":"execution authorized","taskId":"ch***m1","claimId":"49***af","revision":3,"doorNo":7,"employeeNo":"F6***C6","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.518Z","level":"info","message":"task reported","exitCode":0}
+{"at":"2026-11-24T15:50:10.522Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:50:10.523Z","level":"info","message":"task claimed","taskId":"ch***m1","claimId":"d4***a5","revision":2,"doorNo":7,"employeeNo":"F6***C6","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.524Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:50:10.527Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:50:10.527Z","level":"info","message":"task claimed","taskId":"ch***m1","claimId":"16***2e","revision":2,"doorNo":7,"employeeNo":"F6***C6","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.528Z","level":"error","message":"report delivery failed","exitCode":5,"code":"REPORT_FAILED"}
+{"at":"2026-11-24T15:50:10.531Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:50:10.531Z","level":"info","message":"task claimed","taskId":"ch***m1","claimId":"00***61","revision":2,"doorNo":7,"employeeNo":"F6***C6","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.532Z","level":"error","message":"report delivery failed","exitCode":5,"code":"REPORT_FAILED"}
+{"at":"2026-11-24T15:50:10.608Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:50:10.608Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.608Z","level":"info","message":"execution authorized","taskId":"ch***pp","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.608Z","level":"info","message":"task reported","exitCode":0}
+{"at":"2026-11-24T15:50:10.609Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:50:10.610Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.610Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:50:10.610Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:50:10.610Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.610Z","level":"info","message":"execution authorized","taskId":"ch***pp","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.611Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:50:10.611Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+{"at":"2026-11-24T15:50:10.611Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.612Z","level":"info","message":"execution authorized","taskId":"ch***pp","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:10.612Z","level":"info","message":"task reported","exitCode":4}
+✔ S1 SDK 形状 fileID 同一值贯穿：上传透传→云端接受并持久化→worker 下载同一值 (25.946757ms)
+ℹ [待集成] R01/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+✔ S2a checkin 页 WXML：checkbox-group bindchange=onPrimaryChange 结构配套 (0.900964ms)
+✔ S2b face-enroll 页 WXML：checkbox-group bindchange=onConsentChange 结构配套 (0.969777ms)
+✔ S3a 事务内权威读取（配置/名单/房间/租期/申请）与审计不得回落外层 base (2.585536ms)
+ℹ [待集成] R03/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+✔ S3b 事务提交冲突：业务写与审计整组回滚，base 全库不变 (3.994553ms)
+ℹ [待集成] R03/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+✔ S4 创建/领取交错：单一有效 claim、revision 不回退、employeeNo 稳定 (5.316741ms)
+ℹ [待集成] R04/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+✔ S5 本地 deviceKey 缺失 → DEVICE_KEY_MISSING，执行器调用 0 次 (5.746026ms)
+✔ S5 本地 deviceKey 与任务不一致 → DEVICE_KEY_CONFLICT，执行器调用 0 次 (1.005452ms)
+✔ S6a 实际worker编排：权威begin一次、假设备执行器一次、report使用推进revision (7.786973ms)
+ℹ [待集成] R06/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+▶ S6b 实际worker下载后到期：本地或权威云门均阻断，假执行器零调用
+  ✔ local clock observes the exact deadline (3.776846ms)
+  ✔ stale local clock still cannot bypass server deadline (4.372602ms)
+✔ S6b 实际worker下载后到期：本地或权威云门均阻断，假执行器零调用 (9.943194ms)
+✔ S6c 实际worker下载后撤权：begin拒绝，假设备执行器零调用且不重领/重试 (3.864428ms)
+✔ S6d 错误 worker / 旧 revision / 重复开始：均不得返回可执行授权 (4.368787ms)
+ℹ [待集成] R06/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+✔ S7 worker 依赖归属与锁文件明确；默认入口无需注入替身即可解析（本机未安装时的失败关闭路径） (70.231391ms)
+✔ S8a 成功路径：照片以 Buffer 全程内存传递（不落盘），执行一次，report 用推进后 revision (1.271812ms)
+✔ S8b 照片下载失败 → invalid-input（exit 2），执行器 0 次 (1.03792ms)
+✔ S8c 清理失败：不得误报干净成功（exit 5 / CLEANUP_FAILED），不重发设备 (0.786482ms)
+✔ S8d 设备执行失败：exit 4 / failed 上报，不重试 (1.760777ms)
+✔ S8e R08 静态：worker 不得把照片以 POSIX 模式落盘（内存输入优先） (0.346742ms)
+✔ S9 普通账号 pending_review：页面不得显示已受理/开放人脸入口，须提示既有审核渠道 (1.160735ms)
+✔ 测试入住 onLoad 必须真正拉取服务端配置（当前实现缺陷守门） (8.471748ms)
+✔ enabled/configured/accountEligible 任一不为 true 都禁止申请 (1.425533ms)
+✔ 租期未配置显示待配置，不提交、不生成默认日期/一年/长期/今天 (1.228346ms)
+✔ 房号与租期只读来自服务端，提交载荷只有 applicationVersion；重复点击只提交一次 (6.597496ms)
+✔ 六态文案逐项映射；ready 与 pending-site 都显示待现场刷脸验证 (5.712436ms)
+✔ 页面文件不得出现现场识别通过/已通过/已开门字样 (0.383075ms)
+✔ R02：两页为真实 checkbox-group bindchange 结构，事件归属与处理器配套 (1.158091ms)
+✔ R02：勾选/取消勾选与提交按钮状态联动（真实数组事件） (0.417948ms)
+✔ R02：用途确认勾选/取消与上传按钮状态联动 (1.213965ms)
+✔ R11：仅 auto_approved 且有效非空 applicationId 显示受理与人脸入口 (1.771522ms)
+✔ R11：受理卡片与人脸入口互斥——人脸入口只存在于 applied 卡片 (0.398949ms)
+✔ C2：普通账号反馈不冒称人工申请已提交，并明确提示既有审核渠道 (0.537367ms)
+✔ R11：名单在页面加载后撤销——提交得到 pending_review 不显示成功与人脸入口 (0.354803ms)
+✔ face-enroll：名单撤销后上传前复核拒绝——零照片上传、零 createFaceTask、零入口 (0.566321ms)
+✔ face-enroll：上传前复核发现存储命名空间未配置（§1.2）——零照片上传、零 createFaceTask (0.309836ms)
+✔ face-enroll：申请被拒（APPLICATION_FORBIDDEN）时显示审核渠道、无上传卡片 (0.387423ms)
+✔ face-enroll：createFaceTask 被服务端以审核码拒绝时不显示成功、不保留可用入口 (0.521113ms)
+✔ 照片上传成功仅显示照片收件；上传 cloudPath 原样取服务端字段，不拼接 (0.623316ms)
+✔ 上传按钮 busy 锁：并发点击只建一次任务，未勾选用途不得上传 (6.239708ms)
+✔ 资料页入口按 runtime.checkinFaceTestEntry && authenticated 显隐 (1.149057ms)
+✔ CF-R2-10：撤权锁存跨旧任务轮询，权威重授权后恢复且真实调用上传一次 (0.871149ms)
+ℹ CF-R2-10 calls={"polls":6,"currentEligibility":4,"uploads":1,"creates":1}
+✔ CF-R2-10：资格读取失败及非法/关闭配置保持审核态，终态历史查询也不恢复上传 (0.861044ms)
+✔ CF-R2-10：撤权前已开始的旧任务查询晚返回，不能覆盖新的审核锁存 (0.408233ms)
+✔ guard：本进程在业务模块加载前已安装命名守卫，逐槽哨兵与ESM绑定均受控 (7.53847ms)
+ℹ {"entries":["net.connect","net.createConnection","net.createServer","net.Socket.prototype.connect","net.Server.prototype.listen","tls.connect","tls.createServer","tls.TLSSocket.prototype.connect","tls.Server.prototype.listen","http.request","http.get","http.createServer","https.request","https.get","https.createServer","http.Server.prototype.listen","https.Server.prototype.listen","http.Agent.prototype.createConnection","https.Agent.prototype.createConnection","dgram.createSocket","dgram.Socket.prototype.send","dgram.Socket.prototype.bind","dgram.Socket.prototype.connect","dns.lookup","dns.lookupService","dns.resolve","dns.resolve4","dns.resolve6","dns.resolveAny","dns.resolveCaa","dns.resolveCname","dns.resolveMx","dns.resolveNaptr","dns.resolveNs","dns.resolvePtr","dns.resolveSoa","dns.resolveSrv","dns.resolveTlsa","dns.resolveTxt","dns.reverse","dns.promises.lookup","dns.promises.lookupService","dns.promises.resolve","dns.promises.resolve4","dns.promises.resolve6","dns.promises.resolveAny","dns.promises.resolveCaa","dns.promises.resolveCname","dns.promises.resolveMx","dns.promises.resolveNaptr","dns.promises.resolveNs","dns.promises.resolvePtr","dns.promises.resolveSoa","dns.promises.resolveSrv","dns.promises.resolveTlsa","dns.promises.resolveTxt","dns.promises.reverse","dns.Resolver.prototype.resolveAny","dns.Resolver.prototype.resolve4","dns.Resolver.prototype.resolve6","dns.Resolver.prototype.resolveCaa","dns.Resolver.prototype.resolveCname","dns.Resolver.prototype.resolveMx","dns.Resolver.prototype.resolveNs","dns.Resolver.prototype.resolveTlsa","dns.Resolver.prototype.resolveTxt","dns.Resolver.prototype.resolveSrv","dns.Resolver.prototype.resolvePtr","dns.Resolver.prototype.resolveNaptr","dns.Resolver.prototype.resolveSoa","dns.Resolver.prototype.reverse","dns.Resolver.prototype.resolve","dns.Resolver.prototype.cancel","dns.Resolver.prototype.getServers","dns.Resolver.prototype.setServers","dns.Resolver.prototype.setLocalAddress","dns.promises.Resolver.prototype.resolveAny","dns.promises.Resolver.prototype.resolve4","dns.promises.Resolver.prototype.resolve6","dns.promises.Resolver.prototype.resolveCaa","dns.promises.Resolver.prototype.resolveCname","dns.promises.Resolver.prototype.resolveMx","dns.promises.Resolver.prototype.resolveNs","dns.promises.Resolver.prototype.resolveTlsa","dns.promises.Resolver.prototype.resolveTxt","dns.promises.Resolver.prototype.resolveSrv","dns.promises.Resolver.prototype.resolvePtr","dns.promises.Resolver.prototype.resolveNaptr","dns.promises.Resolver.prototype.resolveSoa","dns.promises.Resolver.prototype.reverse","dns.promises.Resolver.prototype.resolve","dns.promises.Resolver.prototype.cancel","dns.promises.Resolver.prototype.getServers","dns.promises.Resolver.prototype.setServers","dns.promises.Resolver.prototype.setLocalAddress","dns.Resolver","dns.promises.Resolver","globalThis.fetch","globalThis.WebSocket"],"loadTime":{"blocked":0,"forwarded":0,"entries":[{"name":"net.connect","blocked":0,"forwarded":0},{"name":"net.createConnection","blocked":0,"forwarded":0},{"name":"net.createServer","blocked":0,"forwarded":0},{"name":"net.Socket.prototype.connect","blocked":0,"forwarded":0},{"name":"net.Server.prototype.listen","blocked":0,"forwarded":0},{"name":"tls.connect","blocked":0,"forwarded":0},{"name":"tls.createServer","blocked":0,"forwarded":0},{"name":"tls.TLSSocket.prototype.connect","blocked":0,"forwarded":0},{"name":"tls.Server.prototype.listen","blocked":0,"forwarded":0},{"name":"http.request","blocked":0,"forwarded":0},{"name":"http.get","blocked":0,"forwarded":0},{"name":"http.createServer","blocked":0,"forwarded":0},{"name":"https.request","blocked":0,"forwarded":0},{"name":"https.get","blocked":0,"forwarded":0},{"name":"https.createServer","blocked":0,"forwarded":0},{"name":"http.Server.prototype.listen","blocked":0,"forwarded":0},{"name":"https.Server.prototype.listen","blocked":0,"forwarded":0},{"name":"http.Agent.prototype.createConnection","blocked":0,"forwarded":0},{"name":"https.Agent.prototype.createConnection","blocked":0,"forwarded":0},{"name":"dgram.createSocket","blocked":0,"forwarded":0},{"name":"dgram.Socket.prototype.send","blocked":0,"forwarded":0},{"name":"dgram.Socket.prototype.bind","blocked":0,"forwarded":0},{"name":"dgram.Socket.prototype.connect","blocked":0,"forwarded":0},{"name":"dns.lookup","blocked":0,"forwarded":0},{"name":"dns.lookupService","blocked":0,"forwarded":0},{"name":"dns.resolve","blocked":0,"forwarded":0},{"name":"dns.resolve4","blocked":0,"forwarded":0},{"name":"dns.resolve6","blocked":0,"forwarded":0},{"name":"dns.resolveAny","blocked":0,"forwarded":0},{"name":"dns.resolveCaa","blocked":0,"forwarded":0},{"name":"dns.resolveCname","blocked":0,"forwarded":0},{"name":"dns.resolveMx","blocked":0,"forwarded":0},{"name":"dns.resolveNaptr","blocked":0,"forwarded":0},{"name":"dns.resolveNs","blocked":0,"forwarded":0},{"name":"dns.resolvePtr","blocked":0,"forwarded":0},{"name":"dns.resolveSoa","blocked":0,"forwarded":0},{"name":"dns.resolveSrv","blocked":0,"forwarded":0},{"name":"dns.resolveTlsa","blocked":0,"forwarded":0},{"name":"dns.resolveTxt","blocked":0,"forwarded":0},{"name":"dns.reverse","blocked":0,"forwarded":0},{"name":"dns.promises.lookup","blocked":0,"forwarded":0},{"name":"dns.promises.lookupService","blocked":0,"forwarded":0},{"name":"dns.promises.resolve","blocked":0,"forwarded":0},{"name":"dns.promises.resolve4","blocked":0,"forwarded":0},{"name":"dns.promises.resolve6","blocked":0,"forwarded":0},{"name":"dns.promises.resolveAny","blocked":0,"forwarded":0},{"name":"dns.promises.resolveCaa","blocked":0,"forwarded":0},{"name":"dns.promises.resolveCname","blocked":0,"forwarded":0},{"name":"dns.promises.resolveMx","blocked":0,"forwarded":0},{"name":"dns.promises.resolveNaptr","blocked":0,"forwarded":0},{"name":"dns.promises.resolveNs","blocked":0,"forwarded":0},{"name":"dns.promises.resolvePtr","blocked":0,"forwarded":0},{"name":"dns.promises.resolveSoa","blocked":0,"forwarded":0},{"name":"dns.promises.resolveSrv","blocked":0,"forwarded":0},{"name":"dns.promises.resolveTlsa","blocked":0,"forwarded":0},{"name":"dns.promises.resolveTxt","blocked":0,"forwarded":0},{"name":"dns.promises.reverse","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveAny","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolve4","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolve6","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveCaa","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveCname","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveMx","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveNs","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveTlsa","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveTxt","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveSrv","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolvePtr","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveNaptr","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveSoa","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.reverse","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolve","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.cancel","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.getServers","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.setServers","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.setLocalAddress","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveAny","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolve4","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolve6","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveCaa","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveCname","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveMx","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveNs","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveTlsa","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveTxt","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveSrv","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolvePtr","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveNaptr","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveSoa","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.reverse","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolve","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.cancel","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.getServers","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.setServers","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.setLocalAddress","blocked":0,"forwarded":0},{"name":"dns.Resolver","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver","blocked":0,"forwarded":0},{"name":"globalThis.fetch","blocked":0,"forwarded":0},{"name":"globalThis.WebSocket","blocked":0,"forwarded":0}]},"selfTest":{"ok":true,"attempts":99,"caught":99,"blockedDelta":99,"forwarded":0,"entries":[{"name":"net.connect","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"net.createConnection","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"net.createServer","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"net.Socket.prototype.connect","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"net.Server.prototype.listen","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"tls.connect","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"tls.createServer","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"tls.TLSSocket.prototype.connect","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"tls.Server.prototype.listen","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"http.request","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"http.get","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"http.createServer","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"https.request","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"https.get","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"https.createServer","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"http.Server.prototype.listen","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"https.Server.prototype.listen","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"http.Agent.prototype.createConnection","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"https.Agent.prototype.createConnection","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dgram.createSocket","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dgram.Socket.prototype.send","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dgram.Socket.prototype.bind","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dgram.Socket.prototype.connect","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.lookup","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.lookupService","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolve","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolve4","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolve6","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveAny","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveCaa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveCname","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveMx","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveNaptr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveNs","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolvePtr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveSoa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveSrv","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveTlsa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveTxt","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.reverse","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.lookup","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.lookupService","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolve","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolve4","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolve6","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveAny","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveCaa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveCname","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveMx","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveNaptr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveNs","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolvePtr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveSoa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveSrv","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveTlsa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveTxt","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.reverse","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveAny","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolve4","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolve6","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveCaa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveCname","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveMx","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveNs","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveTlsa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveTxt","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveSrv","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolvePtr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveNaptr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveSoa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.reverse","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolve","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.cancel","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.getServers","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.setServers","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.setLocalAddress","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveAny","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolve4","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolve6","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveCaa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveCname","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveMx","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveNs","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveTlsa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveTxt","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveSrv","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolvePtr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveNaptr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveSoa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.reverse","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolve","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.cancel","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.getServers","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.setServers","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.setLocalAddress","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"globalThis.fetch","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"globalThis.WebSocket","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true}]},"esm":{"ok":true,"checked":48}}
+✔ guard：子进程经 --require 继承守卫（继承后同样拦截且不转发） (61.913024ms)
+✔ guard：未显式 --require 的子进程仍经 NODE_OPTIONS 自动继承守卫 (57.502926ms)
+✔ R10：当前共享树静态检查通过（0 violations） (92.5765ms)
+✔ R10：未变更副本静态检查通过（负控基线） (85.868319ms)
+✔ R10：移除 mode=device → 只报 mode 专属消息，精确失败 (97.603636ms)
+✔ R10：移除 validityMode=fixed → 只报 validity 专属消息，精确失败 (81.006562ms)
+✔ R10：两项都移除 → 两条专属消息同时出现 (108.570539ms)
+✔ R10：把两项改成注释 → 仍双双失败（注释命中不算证据） (90.654612ms)
+✔ R10：真实字段删除后多行块注释不能冒充请求构造 (114.646782ms)
+✔ R10：分散假consent锚点、字符串及其他对象不能补齐真实request字段 (98.648386ms)
+✔ C1：共享树冻结清单必须与磁盘一致，任何来源违规均失败关闭 (70.910828ms)
+✔ C1：未变更副本校验通过（负控基线） (162.527326ms)
+✔ C1：篡改任一清单哈希 → 精确失败并指出路径与实际哈希 (176.014967ms)
+✔ C1：清单路径重复 → 精确失败 (163.362885ms)
+✔ C1：非法路径（../ 穿越）→ 精确失败 (149.476446ms)
+✔ C1：遗漏云函数目录内文件 → 闭合缺口失败 (157.868713ms)
+✔ C1：伪造 baselineSha256 → 拒绝（不伪造 originalSha256） (146.851961ms)
+✔ C1：登记范围外路径（旧云函数目录）→ 拒绝 (146.748305ms)
+✔ C1：本地导入闭包未闭合（新文件导入未登记的体验版新文件）→ 失败 (162.637112ms)
+✔ C1：源码漂移但不更新清单，专用校验与正式共享树用例均必须失败 (384.022849ms)
+✔ live bootstrap initializes only the selected cloud environment (1.564121ms)
+✔ demo and incomplete configuration do not initialize a live environment (1.385302ms)
+✔ demo read workflows use zero cloud calls and missing house stays missing (8.896401ms)
+✔ demo writes cannot unlock, send, log in, or add family (2.449592ms)
+✔ demo markRead is local and does not mutate original fixtures (0.913173ms)
+✔ live cloud failures never silently fall back to demo (0.582525ms)
+✔ live device list calls permission-filtered getDevices and maps location (0.825701ms)
+✔ unlock requires opt-in and login, sends only deviceId, suppresses duplicates (1.460786ms)
+✔ missing family/property and unscoped meter operations are explicit (0.547773ms)
+✔ rental favorite appears in profile favorites and toggles off (4.441605ms)
+✔ home search produces a meaningful empty result (1.808618ms)
+✔ life rental filter reaches adapter and only matching houses display (1.581977ms)
+✔ chat preserves draft and displays failed send in demo (2.647059ms)
+✔ phone login cancellation never calls backend (1.151821ms)
+✔ phone login suppresses duplicates, authenticates and logs out (1.142667ms)
+✔ phone login backend rejection clears busy state and permits retry (1.01777ms)
+✔ rental detail rechecks visibility after a cached listing becomes public (0.401694ms)
+✔ VR page resolves published content links by ID and rejects invalid links (2.500869ms)
+✔ navigation stays clear of capsule at 320px (1.092642ms)
+✔ navigation stays clear of capsule at 375px (0.11997ms)
+✔ navigation stays clear of capsule at 393px (0.118058ms)
+✔ navigation stays clear of capsule at 430px (0.080531ms)
+✔ navigation stays clear of capsule at 768px (0.097166ms)
+✔ invalid capsule falls back and zero status bar remains zero (0.161673ms)
+✔ older SDK and unavailable capsule do not break pages (0.248834ms)
+✔ login rejects missing authorization or identity before cloud calls (3.0673ms)
+✔ new login uses trusted WeChat identity and creates an unbound user (1.01117ms)
+✔ returning user updates existing account without duplicate creation (0.774124ms)
+✔ matched owner returns bound state and synchronized houses (1.854568ms)
+✔ existing house binding survives absent or unavailable owners collection (1.542328ms)
+✔ phone exchange errors cannot create an account (1.767076ms)
+✔ user database failure returns login failure (1.014104ms)
+✔ manual admin binding is not overwritten by legacy owner data on login (2.083181ms)
+✔ customer rental query excludes public rooms before pagination and count, preserving legacy rooms (2.279256ms)
+✔ WeChat JS-only loader registers pages/home/index (6.340219ms)
+✔ WeChat JS-only loader registers pages/life/index (2.324564ms)
+✔ WeChat JS-only loader registers pages/unlock/index (1.448558ms)
+✔ WeChat JS-only loader registers pages/messages/index (1.440475ms)
+✔ WeChat JS-only loader registers pages/profile/index (1.892905ms)
+✔ WeChat JS-only loader registers pages/rental/index (1.327315ms)
+✔ WeChat JS-only loader registers pages/property/index (1.604021ms)
+✔ WeChat JS-only loader registers pages/chat/index (1.374776ms)
+✔ WeChat JS-only loader registers pages/vr/index (2.618846ms)
+✔ WeChat JS-only loader registers pages/checkin/index (2.06863ms)
+✔ WeChat JS-only loader registers pages/face-enroll/index (1.504922ms)
+✔ WeChat JS-only loader registers app and custom tab bar (1.246283ms)
+✔ Node-compatible JSON import reproduces the reported WeChat incompatibility (2.125845ms)
+✔ rejects the reported wx:else/wx:for combination (2.050342ms)
+✔ accepts separate conditional and loop blocks for record rendering (0.222465ms)
+✔ rejects the reported entity-escaped filter expression (0.301413ms)
+✔ accepts literal operators inside bindings and entities in ordinary text (0.222084ms)
+✔ rejects orphaned branches and malformed binding syntax (0.37199ms)
+✔ else branches cannot cross loop scope (0.242154ms)
+{"at":"2026-11-24T15:50:14.169Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.169Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.170Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:50:14.170Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.170Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.170Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:50:14.170Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.170Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.170Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:50:14.171Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.172Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.172Z","level":"info","message":"task reported","exitCode":2}
+{"at":"2026-11-24T15:50:14.173Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.173Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.173Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:50:14.174Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.174Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+✔ CF-R2-06：claim 与授权回执在截止前1ms放行，等于及之后1ms拒绝 (1.557ms)
+✔ CF-R2-08：begin已推进后本地恰好到期，仍用新revision上报失败且设备零执行 (3.531437ms)
+✔ R05：任务缺/空/不同 deviceKey → 0 次执行器、0 次 begin、上报 exit 2（invalid-input） (2.013617ms)
+✔ R05：本地配置缺 deviceKey（main 注入路径）→ 0 次执行器、上报 exit 2 (1.887597ms)
+✔ R05：本地配置缺 deviceKey 在 loadWorkerConfig 即失败（WorkerConfigError） (0.36568ms)
+✔ R06：领取时已过期 → 0 次执行器、0 次 begin、上报 exit 5 BEGIN_AUTH_EXPIRED (0.568624ms)
+{"at":"2026-11-24T15:50:14.184Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:50:14.185Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.185Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.185Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:50:14.185Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.185Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.185Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:50:14.185Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.186Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.186Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:50:14.186Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.186Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.187Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:50:14.188Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.188Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.188Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:50:14.189Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.189Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.189Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:50:14.189Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.189Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.189Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:50:14.189Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.189Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.189Z","level":"info","message":"task reported","exitCode":5}
+{"at":"2026-11-24T15:50:14.190Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.190Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.190Z","level":"info","message":"execution authorized","taskId":"ch***-1","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.190Z","level":"info","message":"task reported","exitCode":0}
+{"at":"2026-11-24T15:50:14.191Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01","environment":"checkin-face-test"}
+{"at":"2026-11-24T15:50:14.191Z","level":"info","message":"task claimed","taskId":"ch***-1","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.191Z","level":"info","message":"execution authorized","taskId":"ch***-1","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+{"at":"2026-11-24T15:50:14.191Z","level":"error","message":"report delivery failed","exitCode":0,"code":"REPORT_FAILED"}
+✔ R06：下载中到期（可控时钟推进）→ 0 次执行器、0 次 begin、上报 exit 5 (10.847003ms)
+✔ R06：准备后撤权/改租期/改绑定（快照字段不一致）→ 0 次执行器、上报 exit 5 BEGIN_SNAPSHOT_MISMATCH (1.641276ms)
+✔ R06：复核云端拒绝（非零码）→ BEGIN_AUTH_REJECTED:<云码>，0 次执行器，begin 不重试 (0.647162ms)
+✔ R06：清单 §2.4 服务端码逐条原样映射为 BEGIN_AUTH_REJECTED:<码>（不编造服务端码） (1.16477ms)
+✔ R06：复核不可用（网络失败/回执未知）→ BEGIN_AUTH_UNAVAILABLE，0 次执行器 (0.622556ms)
+✔ R06：复核返回缺字段/仅回显 → BEGIN_AUTH_UNAVAILABLE，0 次执行器 (0.819611ms)
+✔ R06：同一未失效快照正例 → 执行器恰好 1 次、report revision+1、begin 请求只含规定字段 (1.042166ms)
+✔ R06：报告递送失败 → 恰好一次 report、执行器仍为 1 次、进程退出 3（不重发、不重试） (0.529335ms)
+✔ R08：内存照片正例——模式/租期/门号/计划指纹保留，设备侧恰好各一次 (9.186847ms)
+✔ CF-R2-04：获准计划B与稳定设备计划C不同，建人/传脸/授权各零次 (1.003319ms)
+✔ CF-R2-09：ASCII-space前导路径经真实配置/请求/默认受限读取选择原证书，不能选trim后的另一文件 (13.306264ms)
+✔ CF-R2-09：U+3000前导路径经真实配置/请求/默认受限读取选择原证书，不能选trim后的另一文件 (3.867844ms)
+✔ R08：证书受限读取走真实文件路径（合成证书字节，不读真实材料） (2.050983ms)
+✔ R08：型号不符（含 developmentTls=true）仍拒绝，业务写入 0 次 (1.220955ms)
+✔ R08：唯一人脸库选择与门号能力独立校验（不改服务模块） (1.292061ms)
+✔ R08：执行前指纹核验保留——设备计划在 describe 后变更 → failed(4)，不重试 (0.988455ms)
+✔ R08：服务返回行不一致/未知 → INVALID_SERVICE_RESPONSE（5/stopped），不重试 (0.722065ms)
+✔ R09：连接清理失败 → CLEANUP_FAILED(5) 并保留已确认设备事实，不重发设备 (1.008686ms)
+✔ R09：worker 级内存释放失败 → 整体 5/CLEANUP_FAILED、执行器恰好 1 次、report 一次 (1.415397ms)
+✔ R08/R09：内存路径不产生任何照片文件/临时目录（worker 目录与测试目录均无残留） (2.41507ms)
+✔ R08：runEnrollment 包装不绕过材料校验——证书读取失败关闭为 invalid-input(2) (0.901385ms)
+✔ R07：默认边界不解析 admin-web 下层/偶然 node_modules（旧断点复现并拒绝） (7.587684ms)
+✔ R07：显式边界不捡祖先级偶然 node_modules（NC-R07 的对偶断言） (3.980383ms)
+✔ R07：worker 自有 node_modules 是唯一默认边界——无注入替身即可解析并装配（无凭据 init） (4.05798ms)
+✔ R07：解析失败给出 worker 自有安装指引（含 npm install 提示），失败关闭 (0.688875ms)
+✔ CF-R2-09：显式SDK边界路径尾部空格不被解析器trim（仅合成假SDK） (2.530664ms)
+✔ R07：sdkModulePath 经 loadWorkerConfig 解析为绝对路径，缺省为空（默认 worker 自有边界） (0.737789ms)
+✔ R07：worker 自有 package.json 锁定 @cloudbase/node-sdk 3.18.7（与 admin-web 一致） (1.132683ms)
+ℹ tests 242
+ℹ suites 0
+ℹ pass 242
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4892.040896
+
+$ /opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node scripts/check-miniprogram.mjs
+Checked 11 pages, custom tab bar, handlers, literal asset references, JSON, JS syntax; package 910 KiB.
+This is a static check, not a WeChat Developer Tools compilation or visual test.
+
+$ /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python scripts/test-package-release.py
+test_cross_platform_traversal_and_ads (__main__.ArchiveSafety.test_cross_platform_traversal_and_ads) ... ok
+test_gate_failure_precedes_test_execution_in_both_profiles (__main__.ArchiveSafety.test_gate_failure_precedes_test_execution_in_both_profiles) ... ok
+test_offline_profile_preserves_legacy_http_profile (__main__.ArchiveSafety.test_offline_profile_preserves_legacy_http_profile) ... ok
+test_ordinary_project_path (__main__.ArchiveSafety.test_ordinary_project_path) ... ok
+test_secrets_dependencies_and_symlinks (__main__.ArchiveSafety.test_secrets_dependencies_and_symlinks) ... ok
+test_windows_case_aliases_and_duplicate_entries (__main__.ArchiveSafety.test_windows_case_aliases_and_duplicate_entries) ... /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/zipfile/__init__.py:1625: UserWarning: Duplicate name: 'SMART-PM/a.js'
+  return self._open_to_write(zinfo, force_zip64=force_zip64)
+ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.040s
+
+OK
+synthetic gate result
+synthetic gate result
+synthetic gate result
+synthetic gate result

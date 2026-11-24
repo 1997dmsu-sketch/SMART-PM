@@ -1,0 +1,70 @@
+{
+  "schema": "checkin-face-test-delivery/v1",
+  "date": "2026-11-24",
+  "timezone": "Asia/Shanghai",
+  "sourceCommit": "72fe242556aea604473281dc52b45837155fa43a",
+  "acceptanceScope": "R2 code corrections and offline extracted-source package only",
+  "version": "0.1.0-beta.19-checkin-face.1",
+  "tests": {
+    "integration": {
+      "tests": 242,
+      "pass": 242,
+      "fail": 0,
+      "exitCode": 0
+    },
+    "extractedArchive": {
+      "tests": 242,
+      "pass": 242,
+      "fail": 0,
+      "exitCode": 0
+    },
+    "archiveSafety": {
+      "tests": 6,
+      "pass": 6,
+      "exitCode": 0
+    }
+  },
+  "independentPackageAudit": {
+    "verdict": "pass",
+    "gitBlobFilesMatched": 757,
+    "registeredSourcesMatched": 115
+  },
+  "platformUpload": "not_performed",
+  "cloudDeployment": "not_performed",
+  "wechatCompilation": "not_performed",
+  "physicalDevice": "not_tested",
+  "historicalWindowsFinalLogs": "not_obtained; scope correction preserved",
+  "evidenceFiles": 157,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 2927,
+      "sha256": "64ed03aea35fc1cbe873a4d4b11a62855968ea428a97c8c33c9027e7af45ab16"
+    },
+    {
+      "path": "SHA256SUMS",
+      "bytes": 136,
+      "sha256": "106aee7c8a9de3549a184fdc260466ca699d1bc583f10dffa09a154ddd0f1187"
+    },
+    {
+      "path": "SMART-PM-v0.1.0-beta.19-checkin-face.1-72fe2425-checkin-face-test.zip",
+      "bytes": 9977647,
+      "sha256": "f0e5f1b856d3e9c800c45d755205f2e0c75e9b974a0c37ed62c2b797869c588e"
+    },
+    {
+      "path": "VALIDATION-EVIDENCE.zip",
+      "bytes": 154134,
+      "sha256": "d9a5b5fe6ab320e42ec3627fa63e4e48b91ef334759e089aa543ccc0902ae35f"
+    },
+    {
+      "path": "release-manifest.json",
+      "bytes": 971,
+      "sha256": "6e0afb503f9b22d9935023fa7f0ff843383dc1dd675be39ef7c22fab3c7f7e35"
+    },
+    {
+      "path": "test-report.txt",
+      "bytes": 80074,
+      "sha256": "d3e2853d0ded937a7abf569df183cd263ab946034c583b1e7b0df64187e6263e"
+    }
+  ]
+}

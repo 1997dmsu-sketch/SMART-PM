@@ -208,7 +208,7 @@ for (const file of CLIENT_FILES) {
       || /^\s*password = '';\s*$/.test(line);
     if (rel === 'miniprogram/pages/account-login/index.js') return /^\s*let password = this\.data\.password;\s*$/.test(line)
       || /^\s*password = '';\s*$/.test(line)
-      || /^\s*if \(!this\.data\.submitting && !this\.data\.preparing\) this\.setData\(\{ password: String\(event\.detail\.value \|\| ''\) \}\);\s*$/.test(line)
+      || /^\s*if \(!this\.data\.submitting\) this\.setData\(\{ password: String\(event\.detail\.value \|\| ''\) \}\);\s*$/.test(line)
       || (/password:\s*''/.test(line) && !/password\s*:\s*(?!'')\S/.test(line));
     return false;
   };

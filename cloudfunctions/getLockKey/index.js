@@ -52,9 +52,9 @@ async function getToken(cfg) {
   return d.access_token;
 }
 
-// 权限校验：admin / 测试模式 / public / users.houses 含 houseId 任一放行
+// 权限校验：admin / public / users.houses 含 houseId 任一放行；无身份一律拒绝
 async function checkAccess(openid, houseId) {
-  if (!openid) return true; // 测试模式
+  if (!openid) return false;
   const user = await db.collection('users').where({ _openid: openid }).get();
   if (user.data.length && user.data[0].role === 'admin') return true;
   const houses = user.data.length ? (user.data[0].houses || []) : [];
@@ -65,7 +65,7 @@ exports.main = async (event) => {
   const { lockId } = event || {};
   if (!lockId) return { code: 400, msg: '缺少 lockId 参数' };
   const { OPENID } = cloud.getWXContext();
-  const uid = OPENID || 'test_user';
+  const uid = OPENID;
 
   try {
     // 0. 权限校验：按 lockId 取 houseId，未绑定该房产则拒绝

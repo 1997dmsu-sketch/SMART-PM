@@ -136,6 +136,9 @@ export async function createApp({
       if (!["GET", "HEAD", "POST", "PUT"].includes(method))
         fail("不支持此请求方法", 405);
       if (path.startsWith("/api/")) {
+        // HEAD 不得进入任何 API 写分支：Origin/CSRF 写保护仅覆盖 POST/PUT，
+        // 而 /api/accounts 对非 GET 一律走保存分支，需在此统一关闭。
+        if (method === "HEAD") fail("不支持此请求方法", 405);
         const expectedOrigin =
           origin || `http://127.0.0.1:${server.address().port}`;
         if (
@@ -271,6 +274,9 @@ export async function createApp({
             if (path === "/api/tenant-password-accounts" && method === "GET") {
               return send({ rows: await service.listAccounts(actor) });
             }
+            if (path === "/api/tenant-password-accounts/residents" && method === "GET") {
+              return send({ rows: await service.listVerifiedUsers(actor) });
+            }
             const operations = {
               "/api/tenant-password-accounts/create": "createAccount",
               "/api/tenant-password-accounts/reset": "resetPassword",
@@ -281,7 +287,7 @@ export async function createApp({
           } catch (error) {
             // Do not send arbitrary database messages or submitted credentials.
             const publicCodes = new Set(["ADMIN_REQUIRED", "INVALID_INPUT", "REQUEST_INVALID",
-              "ACCOUNT_EXISTS", "ACCOUNT_NOT_FOUND", "REVISION_CONFLICT"]);
+              "USER_NOT_VERIFIED", "IDENTITY_UNVERIFIED", "ACCOUNT_EXISTS", "ACCOUNT_NOT_FOUND", "REVISION_CONFLICT"]);
             const code = publicCodes.has(error.code) ? error.code : "SERVICE_UNAVAILABLE";
             const status = code === "SERVICE_UNAVAILABLE" ? 503 : error.status || 400;
             return send({ code, error: "账号操作未获确认，请刷新列表核对" }, status);

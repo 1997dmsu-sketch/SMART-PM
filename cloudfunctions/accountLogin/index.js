@@ -12,7 +12,8 @@ function createMain({ cloud, db, now = Date.now } = {}) {
       const input = closedInput(event, ['action', 'username', 'password']);
       if (input.action === 'prepare') {
         closedInput(event, ['action']);
-        return service.prepare(context, {});
+        // 开户码功能已按最新需求取消：旧 prepare 调用一律拒绝，不生成、不落库。
+        return { code: 'AUTH_FAILED', msg: '开户码功能已停用，请在「我的」页面用微信手机号登录，再由管理员在后台开通账号密码' };
       }
       if (input.action === 'login') {
         return service.login(context, { username: input.username, password: input.password });

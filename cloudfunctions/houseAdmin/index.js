@@ -62,12 +62,15 @@ exports.main = async (event) => {
 
       case 'bind': {
         if (!userId || !houseId) return { code: 400, msg: '缺少 userId 或 houseId' };
+        const room = await db.collection('rooms').where({ houseId }).limit(1).get();
+        if (!room.data.length) return { code: 400, msg: '房号不存在，不能新增绑定' };
         const user = await db.collection('users').doc(userId).get();
         if (!user.data) return { code: 404, msg: '用户不存在' };
         const houses = Array.isArray(user.data.houses) ? user.data.houses.slice() : [];
         if (houses.includes(houseId)) return { code: 0, msg: '已绑定，无需重复绑定', houses };
         houses.push(houseId);
-        await db.collection('users').doc(userId).update({ data: { houses } });
+        // 人工绑定写入 housesManaged，标记该房产由后台维护（对齐管理端绑定路径）。
+        await db.collection('users').doc(userId).update({ data: { houses, housesManaged: true } });
         return { code: 0, msg: '已绑定', houses };
       }
 
@@ -76,7 +79,7 @@ exports.main = async (event) => {
         const user = await db.collection('users').doc(userId).get();
         if (!user.data) return { code: 404, msg: '用户不存在' };
         const houses = Array.isArray(user.data.houses) ? user.data.houses.filter(h => h !== houseId) : [];
-        await db.collection('users').doc(userId).update({ data: { houses } });
+        await db.collection('users').doc(userId).update({ data: { houses, housesManaged: true } });
         return { code: 0, msg: '已解绑', houses };
       }
 

@@ -23,16 +23,11 @@ function fixture({ respond, runtime = {} } = {}) {
   return { api: module.exports, calls, config };
 }
 
-test('开户只提交prepare，校验16位码和毫秒期限，不产生登录资料', async () => {
-  const { api, calls } = fixture({ respond: () => ({ code: 0, requestCode: 'ABCDEFGHIJKLMNOP', expiresAt: 1900000000000 }) });
-  assert.deepEqual(await api.prepareAccountOpening(), { requestCode: 'ABCDEFGHIJKLMNOP', expiresAt: 1900000000000 });
-  assert.equal(await api.getProfile(), null);
-  assert.deepEqual(calls.map(c => ({ name: c.name, data: c.data })), [{ name: 'accountLogin', data: { action: 'prepare' } }]);
-  for (const payload of [{}, { requestCode: 'abcdefghijklmnop', expiresAt: 1 }, { requestCode: '0123456789ABCDEF', expiresAt: 1 }, { requestCode: 'ABCDEFGHIJKLMNOP', expiresAt: '1900000000000' }]) {
-    const f = fixture({ respond: () => ({ code: 0, ...payload }) });
-    await assert.rejects(f.api.prepareAccountOpening(), /开户信息/);
-    assert.equal(await f.api.getProfile(), null);
-  }
+test('获取开户码入口已按最新需求取消：无 prepare 导出，登录导出保持可用', () => {
+  const { api } = fixture();
+  assert.equal(typeof api.prepareAccountOpening, 'undefined', 'prepareAccountOpening 不得再导出');
+  assert.equal(typeof api.loginWithPassword, 'function');
+  assert.equal(typeof api.loginWithPhone, 'function');
 });
 
 test('账号归一但密码保留原文；成功资料与手机号共用缓存，退出清空', async () => {

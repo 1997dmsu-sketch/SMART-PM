@@ -2,12 +2,14 @@
 const BASE = "/api/tenant-password-accounts";
 const ERROR_MESSAGES = Object.freeze({
   ADMIN_REQUIRED: "仅系统管理员可管理租客密码账号。",
-  INVALID_INPUT: "提交格式无效，请检查开通码、账号及密码要求。",
-  REQUEST_INVALID: "开通码无效、已使用或已过期，请本人重新生成。",
+  INVALID_INPUT: "提交格式无效，请检查住户选择、账号及密码要求。",
+  REQUEST_INVALID: "所选住户未完成微信手机号验证或身份无法核对，请刷新列表。",
+  USER_NOT_VERIFIED: "该住户尚未完成微信手机号注册验证，不能开通账号。",
+  IDENTITY_UNVERIFIED: "住户微信身份无法核对，本次未开通账号。",
   ACCOUNT_EXISTS: "该账号或本人绑定已开通，请刷新列表后核对。",
   ACCOUNT_NOT_FOUND: "账号不存在，请刷新列表。",
   REVISION_CONFLICT: "账号已被其他管理员更新，请刷新后重试。",
-  ACCOUNT_LIST_LIMIT: "账号数量超出本次列表容量，请联系维护人员处理；未返回截断列表。",
+  ACCOUNT_LIST_LIMIT: "记录数量超出本次列表容量，请联系维护人员处理；未返回截断列表。",
   ACCOUNT_DATA_UNVERIFIED: "账号资料完整性未通过检查，请联系维护人员核对；未隐藏异常记录。",
   SERVICE_UNAVAILABLE: "账号服务暂不可用，本次未确认完成，请刷新后核对。",
 });
@@ -25,6 +27,20 @@ export function accountView(row) {
     id: row.id, username: row.username, status: row.status, revision: row.revision,
     updatedAt: Number.isSafeInteger(row.updatedAt) && row.updatedAt > 0 ? row.updatedAt : null,
   };
+}
+
+/** Verified-phone resident projection; openid and other server fields are never retained. */
+export function residentView(row) {
+  if (!row || typeof row !== "object" || Array.isArray(row)
+    || typeof row.userId !== "string" || !row.userId || row.userId.length > 256
+    || /[\x00-\x20\x7f/\\]/.test(row.userId)
+    || typeof row.phone !== "string" || !row.phone || row.phone.length > 32
+    || !Array.isArray(row.houses)) {
+    throw new Error("住户列表格式无效，请联系管理员核对服务端版本。");
+  }
+  return { userId: row.userId, phone: row.phone,
+    name: typeof row.name === "string" ? row.name.slice(0, 128) : "",
+    houses: row.houses.slice() };
 }
 
 function validPassword(password) {
@@ -101,6 +117,20 @@ export function createTenantPasswordAccountsPage({ document: doc, fetch: fetcher
       select.value = rows.some((row) => row.id === previous) ? previous : "";
     }
   }
+  function renderResidents(rows) {
+    const select = $("resident-user"), previous = select.value;
+    const options = rows.map((row) => {
+      const option = doc.createElement("option");
+      option.value = row.userId;
+      option.textContent = `${row.phone}${row.name ? `（${row.name}）` : ""}`;
+      return option;
+    });
+    const placeholder = doc.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "请选择住户";
+    select.replaceChildren(placeholder, ...options);
+    select.value = rows.some((row) => row.userId === previous) ? previous : "";
+  }
   async function reload() {
     const payload = await request(BASE);
     if (!Array.isArray(payload?.rows)) throw new Error("账号列表格式无效，请联系管理员核对服务端版本。");
@@ -108,6 +138,11 @@ export function createTenantPasswordAccountsPage({ document: doc, fetch: fetcher
     if (new Set(rows.map((row) => row.id)).size !== rows.length) throw new Error("账号列表存在重复记录，请联系管理员核对。");
     state.rows = new Map(rows.map((row) => [row.id, row]));
     renderRows(rows);
+    const residents = await request(`${BASE}/residents`);
+    if (!Array.isArray(residents?.rows)) throw new Error("住户列表格式无效，请联系管理员核对服务端版本。");
+    const residentRows = residents.rows.map(residentView);
+    if (new Set(residentRows.map((row) => row.userId)).size !== residentRows.length) throw new Error("住户列表存在重复记录，请联系管理员核对。");
+    renderResidents(residentRows);
   }
   async function mutate(path, data, successMessage) {
     if (!state.authorized || state.busy) return;
@@ -120,7 +155,6 @@ export function createTenantPasswordAccountsPage({ document: doc, fetch: fetcher
     finally {
       if (Object.hasOwn(data, "password")) data.password = "";
       if (Object.hasOwn(data, "newPassword")) data.newPassword = "";
-      if (Object.hasOwn(data, "requestCode")) data.requestCode = "";
       clearSecrets();
       setBusy(false);
     }
@@ -132,11 +166,11 @@ export function createTenantPasswordAccountsPage({ document: doc, fetch: fetcher
   }
   $("create-account-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const data = { requestCode: $("enrollment-code").value, username: $("create-username").value,
+    const data = { userId: $("resident-user").value, username: $("create-username").value,
       password: $("create-password").value };
     $("create-password").value = "";
-    $("enrollment-code").value = "";
-    if (!validPassword(data.password)) { data.password = ""; data.requestCode = ""; message("密码需为8–128个字符，UTF-8不超过256字节。"); return; }
+    if (!data.userId) { data.password = ""; message("请先选择已完成微信手机号验证的住户。"); return; }
+    if (!validPassword(data.password)) { data.password = ""; message("密码需为8–128个字符，UTF-8不超过256字节。"); return; }
     await mutate("create", data, "账号已开通，请将账号与初始密码交给本人。");
   });
   $("reset-password-form").addEventListener("submit", async (event) => {

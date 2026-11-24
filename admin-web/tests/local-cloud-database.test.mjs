@@ -4,6 +4,7 @@ import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { LocalStore } from "../lib/store.mjs";
 import { LocalCloudDatabase } from "../lib/local-cloud-database.mjs";
 const { TenantAccountService } = createRequire(import.meta.url)("../../cloudfunctions/accountLogin/lib/service.js");
@@ -90,9 +91,15 @@ test("real local persistence supports tenant opening, same-user login and passwo
   const service = new TenantAccountService({ db });
   const context = { APPID: "synthetic-app", OPENID: "synthetic-tenant" };
   const actor = { id: "synthetic-admin", role: "admin" };
-  const opening = await service.prepare(context);
-  assert.equal(opening.code, 0);
-  const account = await service.createAccount(actor, { requestCode: opening.requestCode,
+  const bindingHash = createHash("sha256").update("synthetic-app\0synthetic-tenant").digest("hex");
+  const userId = `wxuser_${bindingHash}`;
+  await db.collection("users").doc(userId).set({ data: { _id: userId, _openid: "synthetic-tenant",
+    wechatAppId: "synthetic-app", role: "user", houses: [], points: 0, phone: "13800000000",
+    phoneBoundAt: 1800000000000, createdAt: 1800000000000 } });
+  await db.collection("tenant_auth_identities").doc(`wx_${bindingHash}`).set({ data: {
+    _id: `wx_${bindingHash}`, schemaVersion: 1, appId: "synthetic-app", openid: "synthetic-tenant",
+    userId, revision: 1, createdAt: 1800000000000, updatedAt: 1800000000000 } });
+  const account = await service.createAccount(actor, { userId,
     username: "tenant.test", password: "synthetic-first-value" });
   const first = await service.login(context, { username: "tenant.test", password: "synthetic-first-value" });
   assert.equal(first.code, 0);
@@ -102,7 +109,7 @@ test("real local persistence supports tenant opening, same-user login and passwo
   assert.equal((await service.login(context, { username: "tenant.test", password: "synthetic-first-value" })).code, "AUTH_FAILED");
   assert.equal((await service.login(context, { username: "tenant.test", password: "synthetic-second-value" })).userInfo._id, first.userInfo._id);
   const disk = await readFile(join(directory, "demo-data.json"), "utf8");
-  for (const value of ["synthetic-first-value", "synthetic-second-value", opening.requestCode]) assert.equal(disk.includes(value), false);
+  for (const value of ["synthetic-first-value", "synthetic-second-value"]) assert.equal(disk.includes(value), false);
   assert.equal(JSON.stringify(store.data.admin_audit).includes("saltHex"), false);
   assert.equal(JSON.stringify(store.data.users).includes("hashHex"), false);
 });

@@ -8,7 +8,6 @@ const { createRequire } = require('node:module');
 const { createHash, pbkdf2Sync } = require('node:crypto');
 const { TenantAuthMemoryDB } = require('./support/tenant-auth-memory-db.cjs');
 const identity = require('../cloudfunctions/accountLogin/lib/identity-core');
-const { TenantAccountService } = require('../cloudfunctions/accountLogin/lib/service');
 const { createMain: silentMain } = require('../cloudfunctions/login');
 const { createMain: phoneMain } = require('../cloudfunctions/phoneLogin');
 const ROOT = path.resolve(__dirname, '..');
@@ -27,16 +26,14 @@ test('identity helper bytes are identical and each cloud function is deployment 
   for (const file of files) assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /require\(['"]\.\.\//);
 });
 
-test('silent login, phone login and prepare concurrently create exactly one canonical user', async () => {
+test('silent login and phone login concurrently create exactly one canonical user', async () => {
   const db = new TenantAuthMemoryDB();
   const sdk = cloud(db);
-  const service = new TenantAccountService({ db, now: () => NOW });
-  const [silent, phone, opening] = await Promise.all([
+  const [silent, phone] = await Promise.all([
     silentMain({ cloud: sdk, db, now: () => NOW })({ OPENID: 'spoofed' }),
     phoneMain({ cloud: sdk, db, now: () => NOW })({ code: 'synthetic-phone-code' }),
-    service.prepare(CONTEXT, {}),
   ]);
-  for (const result of [silent, phone, opening]) assert.equal(result.code, 0, JSON.stringify(result));
+  for (const result of [silent, phone]) assert.equal(result.code, 0, JSON.stringify(result));
   assert.equal(db.rows('users').length, 1);
   assert.equal(db.rows('tenant_auth_identities').length, 1);
   assert.equal(silent.userInfo._id, phone.userInfo._id);
@@ -44,7 +41,6 @@ test('silent login, phone login and prepare concurrently create exactly one cano
   assert.equal(db.rows('users')[0]._openid, CONTEXT.OPENID);
   assert.equal(db.rows('users')[0].role, 'user');
   assert.deepEqual(db.rows('users')[0].houses, []);
-  assert.equal(Object.hasOwn(opening, 'userInfo'), false, '开户码不代表登录资料');
 });
 
 test('unique legacy user keeps id and house bindings; duplicate legacy users fail closed', async () => {

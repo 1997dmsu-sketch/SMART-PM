@@ -20,6 +20,10 @@ export class AdminTenantPasswordAccounts {
     return this.#service.listAccounts(actor);
   }
 
+  listVerifiedUsers(actor) {
+    return this.#service.listVerifiedUsers(actor);
+  }
+
   createAccount(actor, input) {
     return this.#service.createAccount(actor, input);
   }

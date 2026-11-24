@@ -205,7 +205,7 @@ async function checkPermission(openid, deviceId) {
   if (!dev.data.length) return { allowed: false, reason: '门禁设备不存在', device: null };
 
   const device = dev.data[0];
-  if (!openid) return { allowed: true, device }; // 测试模式
+  if (!openid) return { allowed: false, reason: '无法识别身份', device: null };
 
   const user = await db.collection('users').where({ _openid: openid }).get();
   if (user.data.length && user.data[0].role === 'admin') return { allowed: true, device };
@@ -223,7 +223,7 @@ async function checkPermission(openid, deviceId) {
 exports.main = async (event) => {
   const { deviceId, method = 'remote' } = event;
   const { OPENID } = cloud.getWXContext();
-  const uid = OPENID || 'test_user';
+  const uid = OPENID;
 
   if (!deviceId) return { code: 400, msg: '缺少 deviceId 参数' };
 

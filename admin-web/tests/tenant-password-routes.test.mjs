@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { createApp } from "../server.mjs";
 import { LocalStore } from "../lib/store.mjs";
 import { LocalCloudDatabase } from "../lib/local-cloud-database.mjs";
@@ -66,21 +67,67 @@ test("actual admin handler enforces session, origin, CSRF and current administra
   assert.equal((await h.request("/api/tenant-password-accounts")).status, 401);
 });
 
-test("actual admin route opens a code-bound tenant through real local atomic service", async (t) => {
+test("actual admin route opens an account for a verified-phone resident through real local atomic service", async (t) => {
   const h = await harness(t);
   await h.login();
-  const service = new TenantAccountService({ db: new LocalCloudDatabase(h.store) });
-  const context = { APPID: "synthetic-app", OPENID: "synthetic-tenant" };
-  const opening = await service.prepare(context);
+  const openid = "synthetic-tenant", appId = "synthetic-app";
+  const bindingHash = createHash("sha256").update(`${appId}\0${openid}`).digest("hex");
+  const userId = `wxuser_${bindingHash}`;
+  const identityId = `wx_${bindingHash}`;
+  h.store.data.users = [{ _id: userId, _openid: openid, wechatAppId: appId, role: "user", houses: [],
+    points: 0, phone: "13800000000", phoneBoundAt: 1800000000000, name: "验证住户",
+    createdAt: 1800000000000, lastLoginAt: 1800000000000 }];
+  h.store.data.tenant_auth_identities = [{ _id: identityId, schemaVersion: 1, appId, openid, userId,
+    revision: 1, createdAt: 1800000000000, updatedAt: 1800000000000 }];
+  const residents = await h.request("/api/tenant-password-accounts/residents");
+  assert.equal(residents.status, 200);
+  assert.equal(residents.payload.rows.length, 1);
+  assert.equal(residents.payload.rows[0].userId, userId);
+  assert.equal(residents.payload.rows[0].phone, "13800000000");
+  assert.equal(JSON.stringify(residents.payload).includes(openid), false);
   const response = await h.request("/api/tenant-password-accounts/create", { method: "POST", data: {
-    requestCode: opening.requestCode, username: "tenant.route", password: "synthetic-tenant-input" } });
+    userId, username: "tenant.route", password: "synthetic-tenant-input" } });
   assert.equal(response.status, 200);
   assert.equal(response.payload.username, "tenant.route");
   assert.equal(JSON.stringify(response.payload).includes("hashHex"), false);
-  const result = await service.login(context, { username: "tenant.route", password: "synthetic-tenant-input" });
+  const service = new TenantAccountService({ db: new LocalCloudDatabase(h.store) });
+  const result = await service.login({ APPID: appId, OPENID: openid }, { username: "tenant.route", password: "synthetic-tenant-input" });
   assert.equal(result.code, 0);
   assert.equal(result.userInfo._id, response.payload.userId);
   assert.equal((await h.request("/api/tenant-password-accounts")).payload.rows.length, 1);
+});
+
+test("unverified resident cannot be opened through the route and old codes stay rejected", async (t) => {
+  const h = await harness(t);
+  await h.login();
+  h.store.data.users = [{ _id: "wxuser_nophone", _openid: "openid-nophone", wechatAppId: "synthetic-app",
+    role: "user", houses: [], points: 0, createdAt: 1800000000000 }];
+  const before = structuredClone(h.store.data);
+  const rejected = await h.request("/api/tenant-password-accounts/create", { method: "POST", data: {
+    userId: "wxuser_nophone", username: "tenant.none", password: "synthetic-tenant-input" } });
+  assert.equal(rejected.status, 409);
+  assert.equal(rejected.payload.code, "USER_NOT_VERIFIED");
+  assert.deepEqual(h.store.data, before);
+  const oldCode = await h.request("/api/tenant-password-accounts/create", { method: "POST", data: {
+    requestCode: "ABCDEFGHIJKLMNOP", username: "tenant.old", password: "synthetic-tenant-input" } });
+  assert.equal(oldCode.status, 400);
+  assert.equal(oldCode.payload.code, "INVALID_INPUT");
+  assert.deepEqual(h.store.data, before);
+});
+
+test("HEAD requests are rejected on every API path before any write branch", async (t) => {
+  const h = await harness(t);
+  const beforeLogin = structuredClone(h.store.data);
+  assert.equal((await h.request("/api/accounts", { method: "HEAD", authenticated: false, withOrigin: false, withCsrf: false })).status, 405);
+  assert.equal((await h.request("/api/tenant-password-accounts", { method: "HEAD", authenticated: false, withOrigin: false, withCsrf: false })).status, 405);
+  assert.deepEqual(h.store.data, beforeLogin);
+  await h.login();
+  const before = structuredClone(h.store.data);
+  const injected = await h.request("/api/accounts", { method: "HEAD", withOrigin: false, withCsrf: false, data: {
+    username: "head.inject", name: "注入", role: "admin", password: "synthetic-password-123" } });
+  assert.equal(injected.status, 405);
+  assert.deepEqual(h.store.data, before, "HEAD 携带请求体不得进入保存分支");
+  assert.equal((await h.request("/api/accounts")).status, 200, "GET 保持可用");
 });
 
 test("ordinary staff cannot manage tenants or view internal rooms", async (t) => {

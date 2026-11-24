@@ -92,8 +92,9 @@ function normalizeInput(input, platform) {
   const name = text(input.name, 128), room = text(input.room, 128);
   const doorNo = input.doorNo === undefined ? 1 : input.doorNo;
   if (!Number.isSafeInteger(doorNo) || doorNo < 1 || doorNo > 65535) invalidInput();
-  const validityMode = input.validityMode === undefined ? "unlimited" : input.validityMode;
-  if (!["fixed", "unlimited"].includes(validityMode)) invalidInput();
+  // worker 链路有效期必须显式下发 fixed 并按租期起止；缺省即拒绝，不回落旧 unlimited 默认。
+  const validityMode = input.validityMode;
+  if (validityMode !== "fixed") invalidInput();
   const validFrom = validityMode === "fixed" ? text(input.validFrom, 64) : undefined;
   const validTo = validityMode === "fixed" ? text(input.validTo, 64) : undefined;
   // worker 链路编号必须显式下发；缺省即拒绝，不自动生成（不换号、不自造）。

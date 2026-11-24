@@ -2,19 +2,13 @@
   <view class="account-nav" style="height:{{navHeight}}px;"><button class="back" bindtap="back" aria-label="返回">‹</button><text class="nav-title" style="left:{{navSideWidth}}px;right:{{navSideWidth}}px;">账号密码登录</text></view>
   <view class="account-card">
     <text class="heading">登录小程序账号</text>
-    <text class="hint">账号由管理员开通，并关联您本人的微信。这里使用小程序账号，不是后台管理账号。</text>
+    <text class="hint">账号由管理员开通，并关联您本人的微信。首次使用请先在「我的」页面用微信手机号登录完成注册，再由管理员在后台为您开通账号密码。这里使用小程序账号，不是后台管理账号。</text>
     <text class="field-label">账号</text>
-    <input class="text-input" value="{{username}}" bindinput="onUsernameInput" maxlength="32" placeholder="4–32位字母、数字或._-" disabled="{{submitting || preparing}}" />
+    <input class="text-input" value="{{username}}" bindinput="onUsernameInput" maxlength="32" placeholder="4–32位字母、数字或._-" disabled="{{submitting}}" />
     <text class="field-label">密码</text>
-    <input class="text-input" value="{{password}}" bindinput="onPasswordInput" bindconfirm="submit" password="{{true}}" maxlength="128" placeholder="请输入管理员开通时设置的密码" disabled="{{submitting || preparing}}" confirm-type="done" />
+    <input class="text-input" value="{{password}}" bindinput="onPasswordInput" bindconfirm="submit" password="{{true}}" maxlength="128" placeholder="请输入管理员开通时设置的密码" disabled="{{submitting}}" confirm-type="done" />
     <view wx:if="{{error}}" class="error" role="alert">{{error}}</view>
-    <button class="primary" bindtap="submit" loading="{{submitting}}" disabled="{{submitting || preparing}}">登录</button>
+    <button class="primary" bindtap="submit" loading="{{submitting}}" disabled="{{submitting}}">登录</button>
     <text class="hint">密码至少8位，不会保存；登录未完成或离开页面后需重新填写。</text>
-  </view>
-  <view class="account-card">
-    <text class="heading">尚未开通账号？</text>
-    <text class="hint">先获取开户码，再联系管理员关联您的微信并开通账号。获取开户码不会登录或自行创建账号。</text>
-    <button class="secondary" bindtap="prepareOpening" loading="{{preparing}}" disabled="{{preparing || submitting}}">获取开户码</button>
-    <view wx:if="{{requestCode}}" class="opening-code"><text class="code-label">开户码</text><text class="code" selectable>{{requestCode}}</text><text class="hint">有效期10分钟，仅向为您开户的管理员提供；过期后重新获取。</text></view>
   </view>
 </view>

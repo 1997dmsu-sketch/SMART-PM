@@ -147,6 +147,25 @@ class CountingDeviceProvider {
   close() { this.calls.close += 1; }
 }
 
+test('R08：适配层缺省回退已移除——缺 validityMode 或 unlimited 一律拒绝，不回落旧默认', async () => {
+  const cfg = await config();
+  const task = makeTask();
+  const base = buildInMemoryDeviceRequest(task, cfg);
+  for (const [label, mutate] of [['missing', (request) => { delete request.validityMode; }],
+    ['unlimited', (request) => { request.validityMode = 'unlimited'; }]]) {
+    const request = { ...base };
+    mutate(request);
+    const result = await runInMemoryEnrollment(request, {
+      createService: () => new FaceEnrollmentService({ providerFactory: () => new CountingDeviceProvider() }),
+      photoBuffer: JPEG,
+      readBoundedFile: async () => Buffer.from(SYNTHETIC_CERT),
+      commandDeps: { platform: 'win32' },
+    });
+    assert.equal(result.exitCode, 2, `${label} 必须拒绝`);
+    assert.equal(result.output.outcome, 'invalid-input', `${label} 不得产生登记输出`);
+  }
+});
+
 test('R08：内存照片正例——模式/租期/门号/计划指纹保留，设备侧恰好各一次', async () => {
   const cfg = await config();
   const task = makeTask();

@@ -1,16 +1,15 @@
 'use strict';
-const { randomBytes, randomUUID } = require('node:crypto');
+const { randomUUID } = require('node:crypto');
 const identity = require('./identity-core');
 const credentials = require('./credentials');
 const { fail, sha256, closedInput, validId, validateContext, identityIdFor,
-  nowMs, readDoc, putDoc, withTransaction, withIdentity, publicUser } = identity;
+  nowMs, readDoc, putDoc, withTransaction, publicUser } = identity;
 
 const COLLECTIONS = Object.freeze({ USERS: 'users', IDENTITIES: 'tenant_auth_identities',
-  ENROLLMENTS: 'tenant_auth_enrollments', ACCOUNTS: 'tenant_auth_accounts',
+  ACCOUNTS: 'tenant_auth_accounts',
   RATE_LIMITS: 'tenant_auth_rate_limits', AUDIT: 'tenant_auth_audit' });
 const AUTH_FAILURE = Object.freeze({ code: 'AUTH_FAILED', msg: '账号或密码错误，或账号暂不可用' });
 const SERVICE_FAILURE = Object.freeze({ code: 'SERVICE_UNAVAILABLE', msg: '登录服务暂不可用' });
-const CODE_TTL = 10 * 60 * 1000;
 
 function requireAdmin(value) {
   let actor;
@@ -18,20 +17,6 @@ function requireAdmin(value) {
   if (!validId(actor.id) || actor.role !== 'admin') fail('ADMIN_REQUIRED', 403);
   if (actor.name !== undefined && (typeof actor.name !== 'string' || actor.name.length > 128 || /[\x00-\x1f\x7f]/.test(actor.name))) fail('ADMIN_REQUIRED', 403);
   return actor;
-}
-function requestHash(value) {
-  if (typeof value !== 'string' || !/^[A-Z2-7]{16}$/.test(value.trim().toUpperCase())) fail('REQUEST_INVALID', 409);
-  return sha256(value.trim().toUpperCase());
-}
-function requestCode() {
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-  const bytes = randomBytes(10);
-  let bits = 0; let bitCount = 0; let result = '';
-  for (const byte of bytes) {
-    bits = (bits << 8) | byte; bitCount += 8;
-    while (bitCount >= 5) { bitCount -= 5; result += alphabet[(bits >>> bitCount) & 31]; }
-  }
-  return result;
 }
 function accountIdFor(username) { return `acct_${sha256(username)}`; }
 function publicAccount(value) {
@@ -66,8 +51,8 @@ class TenantAccountService {
 
   async _reserveRate(context, operation) {
     const id = `rate_${sha256(`${operation}\0${identityIdFor(context)}`)}`;
-    const duration = operation === 'prepare' ? 60 * 1000 : 15 * 60 * 1000;
-    const limit = operation === 'prepare' ? 3 : 10;
+    const duration = 15 * 60 * 1000;
+    const limit = 10;
     return withTransaction(this.db, async (tx) => {
       const now = nowMs(this.now);
       const current = await readDoc(tx, COLLECTIONS.RATE_LIMITS, id);
@@ -80,29 +65,6 @@ class TenantAccountService {
         attempts: expired ? 1 : current.attempts + 1,
         revision: current ? nextRevision(current.revision) : 1 });
     });
-  }
-
-  async prepare(context, input = {}) {
-    try {
-      closedInput(input, []);
-      validateContext(context);
-      await this._reserveRate(context, 'prepare');
-      const code = requestCode();
-      const codeHash = sha256(code);
-      return await withIdentity({ db: this.db, context, now: this.now }, async ({ tx, identity: binding, user, timestamp }) => {
-        if (binding.accountId) fail('AUTH_FAILED', 401);
-        const id = `enroll_${codeHash}`;
-        if (await readDoc(tx, COLLECTIONS.ENROLLMENTS, id)) fail();
-        const expiresAt = timestamp + CODE_TTL;
-        await putDoc(tx, COLLECTIONS.ENROLLMENTS, id, { schemaVersion: 1, identityId: binding._id,
-          userId: user._id, codeHash, status: 'pending', createdAt: timestamp, expiresAt, revision: 1 });
-        await putDoc(tx, COLLECTIONS.IDENTITIES, binding._id, { ...binding,
-          pendingEnrollmentHash: codeHash, revision: nextRevision(binding.revision), updatedAt: timestamp });
-        return { code: 0, requestCode: code, expiresAt };
-      });
-    } catch (error) {
-      return error && ['AUTH_FAILED', 'INVALID_INPUT'].includes(error.code) ? { ...AUTH_FAILURE } : { ...SERVICE_FAILURE };
-    }
   }
 
   async login(context, input = {}) {
@@ -167,35 +129,60 @@ class TenantAccountService {
 
   async createAccount(actorInput, input = {}) {
     const actor = requireAdmin(actorInput);
-    const data = adminInput(input, ['requestCode', 'username', 'password']);
-    const codeHash = requestHash(data.requestCode);
+    const data = adminInput(input, ['userId', 'username', 'password']);
     const username = credentials.normalizeUsername(data.username);
     const password = await credentials.hashPassword(data.password);
+    if (!validId(data.userId)) fail('INVALID_INPUT', 400);
     try {
       return await withTransaction(this.db, async (tx) => {
         const timestamp = nowMs(this.now);
-        const request = await readDoc(tx, COLLECTIONS.ENROLLMENTS, `enroll_${codeHash}`);
-        if (!request || request.status !== 'pending' || request.codeHash !== codeHash
-          || !Number.isSafeInteger(request.expiresAt) || timestamp >= request.expiresAt
-          || !Number.isSafeInteger(request.createdAt) || timestamp < request.createdAt) fail('REQUEST_INVALID', 409);
-        const binding = await readDoc(tx, COLLECTIONS.IDENTITIES, request.identityId);
-        const user = await readDoc(tx, COLLECTIONS.USERS, request.userId);
-        if (!binding || binding.userId !== request.userId || binding.pendingEnrollmentHash !== codeHash
-          || !user || user._openid !== binding.openid || user.wechatAppId !== binding.appId) fail('REQUEST_INVALID', 409);
+        // 只允许为已完成可信手机号注册的住户开通；未验证身份零写入。
+        const user = await readDoc(tx, COLLECTIONS.USERS, data.userId);
+        if (!user || typeof user.phone !== 'string' || !user.phone || user.phone.length > 32
+          || /[\x00-\x1f\x7f]/.test(user.phone)
+          || !Number.isSafeInteger(user.phoneBoundAt) || user.phoneBoundAt <= 0) fail('USER_NOT_VERIFIED', 409);
+        if (!validId(user._openid) || typeof user.wechatAppId !== 'string'
+          || !/^[A-Za-z0-9_-]{1,128}$/.test(user.wechatAppId)) fail('IDENTITY_UNVERIFIED');
+        const bindingId = identityIdFor({ APPID: user.wechatAppId, OPENID: user._openid });
+        const binding = await readDoc(tx, COLLECTIONS.IDENTITIES, bindingId);
+        if (!binding || binding.userId !== user._id) fail('IDENTITY_UNVERIFIED');
         const id = accountIdFor(username);
         const existing = await readDoc(tx, COLLECTIONS.ACCOUNTS, id);
         if (existing || binding.accountId) fail('ACCOUNT_EXISTS', 409);
         const account = { _id: id, schemaVersion: 1, username, identityId: binding._id,
-          userId: user._id, openid: binding.openid, status: 'active', revision: 1,
+          userId: user._id, openid: user._openid, status: 'active', revision: 1,
           credentialVersion: 1, password, createdAt: timestamp, updatedAt: timestamp };
         await putDoc(tx, COLLECTIONS.ACCOUNTS, id, account);
-        await putDoc(tx, COLLECTIONS.ENROLLMENTS, request._id, { ...request, status: 'consumed',
-          revision: nextRevision(request.revision), consumedAt: timestamp });
         await putDoc(tx, COLLECTIONS.IDENTITIES, binding._id, { ...binding, accountId: id,
           pendingEnrollmentHash: null, revision: nextRevision(binding.revision), updatedAt: timestamp });
         await this._audit(tx, actor, 'TENANT_ACCOUNT_CREATE', account);
         return publicAccount(account);
       });
+    } catch (error) { if (error instanceof identity.TenantAuthError) throw error; fail(); }
+  }
+
+  async listVerifiedUsers(actor) {
+    requireAdmin(actor);
+    try {
+      const users = [];
+      for (let offset = 0; offset <= 5000; offset += 100) {
+        const result = await this.db.collection(COLLECTIONS.USERS)
+          .orderBy('_id', 'asc').skip(offset).limit(100).get();
+        if (!result || !Array.isArray(result.data)) fail();
+        if (users.length + result.data.length > 5000) fail('ACCOUNT_LIST_LIMIT', 503);
+        for (const user of result.data) {
+          // 已完成可信手机号注册（phoneLogin 服务端核验后写入 phone+phoneBoundAt）才可被选择。
+          if (validId(user._id) && typeof user.phone === 'string' && user.phone.length > 0
+            && user.phone.length <= 32 && !/[\x00-\x1f\x7f]/.test(user.phone)
+            && Number.isSafeInteger(user.phoneBoundAt) && user.phoneBoundAt > 0) {
+            users.push({ userId: user._id, phone: user.phone,
+              name: typeof user.name === 'string' && user.name.length <= 128 && !/[\x00-\x1f\x7f]/.test(user.name) ? user.name : '',
+              houses: Array.isArray(user.houses) ? user.houses.filter(validId) : [] });
+          }
+        }
+        if (result.data.length < 100) return users;
+      }
+      fail('ACCOUNT_LIST_LIMIT', 503);
     } catch (error) { if (error instanceof identity.TenantAuthError) throw error; fail(); }
   }
 

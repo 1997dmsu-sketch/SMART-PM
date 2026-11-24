@@ -333,12 +333,6 @@ function validatePasswordProfile(user) {
   clean.houses = clean.houses.slice();
   return clean;
 }
-async function prepareAccountOpening() {
-  const r = await call('accountLogin', { action: 'prepare' });
-  if (typeof r.requestCode !== 'string' || !/^[A-Z2-7]{16}$/.test(r.requestCode)
-      || !Number.isSafeInteger(r.expiresAt) || r.expiresAt <= 0) throw new Error('开户信息暂不可用，请稍后重试');
-  return { requestCode: r.requestCode, expiresAt: r.expiresAt };
-}
 async function loginWithPassword(input) {
   if (isDemo()) throw new Error('演示模式不会登录真实账号');
   const username = input && typeof input.username === 'string' ? input.username.trim().toLowerCase() : '';
@@ -377,4 +371,4 @@ async function listMeters(type){
  if(isDemo())return Promise.resolve(type==='water'?[]:[clone(demo.meter)]);
  return unsupported('旧水电表接口尚未按住户房产过滤，完成权限对接后开放');
 }
-module.exports={isDemo,isAuthenticated,getLoginEpoch,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,prepareAccountOpening,loginWithPassword,cancelPasswordLogin,logout,listFamily,addFamily,getProperty,listMeters,getCheckinFaceConfig,applyTestCheckin,uploadTestFace,createFaceTask,getFaceTask,isReviewChannelCode,REVIEW_CHANNEL_CODES};
+module.exports={isDemo,isAuthenticated,getLoginEpoch,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,loginWithPassword,cancelPasswordLogin,logout,listFamily,addFamily,getProperty,listMeters,getCheckinFaceConfig,applyTestCheckin,uploadTestFace,createFaceTask,getFaceTask,isReviewChannelCode,REVIEW_CHANNEL_CODES};

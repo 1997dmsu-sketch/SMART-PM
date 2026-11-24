@@ -54,15 +54,17 @@ test('returning user updates existing account without duplicate creation', async
   assert.equal(h.db.rows('users')[0].phone, 'test-phone');
   assert.equal(h.db.rows('tenant_auth_identities')[0].userId, 'existing');
 });
-test('matched owner returns bound state and synchronized houses', async () => {
+test('注册本身不自动新增房屋或门禁权限：匹配 owners 行也不导入', async () => {
   const h = harness({ owners: [{ name: '测试业主', houses: [{ houseId: 'house-1' }, {}] }] });
   const result = await h.run({ code: 'code' });
   assert.equal(result.code, 0);
-  assert.equal(result.bound, true);
-  assert.deepEqual(result.userInfo.houses, ['house-1']);
-  assert.equal(result.userInfo.name, '测试业主');
+  assert.equal(result.bound, false);
+  assert.deepEqual(result.userInfo.houses, []);
+  assert.equal(result.userInfo.name, undefined, '不导入旧业主姓名');
+  assert.equal(h.db.rows('users')[0].housesManaged, undefined);
 });
-test('existing house binding survives absent or unavailable owners collection', async () => {
+
+test('既有房屋绑定由用户自身档案保留，不依赖旧 owners 集合', async () => {
   for (const ownersError of [false, true]) {
     const h = harness({ users: [{ _id: 'existing', houses: ['house-1'] }], ownersError });
     const result = await h.run({ code: 'code' });
@@ -83,7 +85,7 @@ test('user database failure returns login failure', async () => {
   assert.equal((await h.run({ code: 'code' })).code, 'SERVICE_UNAVAILABLE');
   assert.deepEqual(h.db.snapshot(), h.before);
 });
-test('manual admin binding is not overwritten by legacy owner data on login', async () => {
+test('manual admin binding is not overwritten by any login path', async () => {
   for (const houses of [[], ['manually-bound']]) {
     const h = harness({ users: [{ _id: 'existing', houses, housesManaged: true }], owners: [{ houses: [{ houseId: 'legacy-house' }] }] });
     const result = await h.run({ code: 'code' });
@@ -95,15 +97,14 @@ test('manual admin binding is not overwritten by legacy owner data on login', as
 });
 
 test('phone and password login remain the same canonical user and preserve admin houses', async () => {
-  const h = harness({ users: [{ _id: 'existing', houses: ['manually-bound'], housesManaged: true }] });
+  const h = harness({ users: [{ _id: 'existing', houses: ['manually-bound'], housesManaged: true, wechatAppId: 'wx-synthetic-app' }] });
   const service = new TenantAccountService({ db: h.db, now: () => NOW });
-  const request = await service.prepare(CONTEXT, {});
-  const account = await service.createAccount({ id: 'admin-test', role: 'admin' }, {
-    requestCode: request.requestCode, username: 'tenant-test', password: 'Valid password 123!',
-  });
   const phone = await h.run({ code: 'code' });
-  const password = await service.login(CONTEXT, { username: 'tenant-test', password: 'Valid password 123!' });
   assert.equal(phone.code, 0);
+  const account = await service.createAccount({ id: 'admin-test', role: 'admin' }, {
+    userId: phone.userInfo._id, username: 'tenant-test', password: 'Valid password 123!',
+  });
+  const password = await service.login(CONTEXT, { username: 'tenant-test', password: 'Valid password 123!' });
   assert.equal(password.code, 0);
   assert.equal(phone.userInfo._id, account.userId);
   assert.equal(password.userInfo._id, phone.userInfo._id);
@@ -111,8 +112,8 @@ test('phone and password login remain the same canonical user and preserve admin
   assert.equal(h.db.rows('users').length, 1);
 });
 
-test('phone owners refill rechecks housesManaged after concurrent admin binding', async () => {
-  const h = harness({ users: [{ _id: 'existing', houses: [] }], owners: [{ houses: [{ houseId: 'legacy-house' }] }] });
+test('phone login rechecks the user inside the transaction after concurrent admin binding', async () => {
+  const h = harness({ users: [{ _id: 'existing', houses: [] }] });
   const core = require('../cloudfunctions/phoneLogin/lib/identity-core');
   await core.withIdentity({ db: h.db, context: CONTEXT, now: () => NOW });
   let injected = false;
@@ -126,4 +127,41 @@ test('phone owners refill rechecks housesManaged after concurrent admin binding'
   assert.equal(result.code, 0);
   assert.deepEqual(result.userInfo.houses, ['admin-new-house']);
   assert.ok(h.db.commitLog.some((entry) => entry.result === 'conflict-retry'));
+});
+
+test('同一手机号被其他微信身份使用时失败关闭，不重复建人', async () => {
+  const first = harness();
+  const firstResult = await first.run({ code: 'code' });
+  assert.equal(firstResult.code, 0);
+  assert.equal(first.db.rows('users').length, 1);
+
+  const second = harness({ db: first.db, context: { APPID: 'wx-synthetic-app', OPENID: 'other-openid' } });
+  const before = second.db.snapshot();
+  const conflict = await second.run({ code: 'code' });
+  const after = second.db.snapshot();
+  assert.equal(conflict.code, 409);
+  assert.deepEqual(after, before, '手机号冲突不得创建第二个用户或写入任何数据');
+
+  const again = harness({ db: first.db });
+  assert.equal((await again.run({ code: 'code' })).code, 0, '本人重登仍复用同一用户');
+  assert.equal(again.db.rows('users').length, 1);
+});
+
+test('手机号冲突检查在查询不可用时保持登录可用（fail-open）', async () => {
+  const db = new TenantAuthMemoryDB();
+  const originalCollection = db.collection.bind(db);
+  db.collection = (name) => {
+    const collection = originalCollection(name);
+    if (name !== 'users') return collection;
+    return { ...collection, where(filter) {
+      if (filter && Object.hasOwn(filter, 'phone')) {
+        return { limit() { return this; }, async get() { throw new Error('SYNTHETIC_DATABASE_FAILURE'); } };
+      }
+      return collection.where(filter);
+    } };
+  };
+  const h = harness({ db, users: [{ _id: 'existing', houses: [] }] });
+  const result = await h.run({ code: 'code' });
+  assert.equal(result.code, 0, '冲突检查查询不可用不得阻断既有用户登录');
+  assert.equal(db.rows('users')[0].phone, 'test-phone');
 });

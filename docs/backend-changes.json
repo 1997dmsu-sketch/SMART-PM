@@ -1,22 +1,37 @@
 {
-  "cloudfunctions/phoneLogin/index.js": {
-    "originalSha256": "b3a2f8ac9fee3472a3110d061c6f0fc050fe28005c4c9aa68a6ff2c3cb67a371",
-    "sha256": "c6aa152eb14947e6df9acdc7be111e81a9e25710799f7f770843acab2b7a4fcf",
-    "reason": "租客管理员开通账号密码：同微信确定性身份索引协调，保留旧用户及房屋权限，拒绝重复身份；与独立部署函数本地同字节helper配套。"
-  },
-  "cloudfunctions/getHouses/index.js": {
-    "originalSha256": "204bb88b13078e19910038035420ae83d444b3e68ee57358c72066878614518d",
-    "sha256": "8c110cbb3302b7bf7155dbb7d4450782992f60c2fd1bc75114a7a04f6760edef",
-    "reason": "在分页和计数前排除公共用房；支持按 ID 重新验证客户房源详情可见性。"
-  },
-  "cloudfunctions/adminLogin/index.js": {
-    "originalSha256": "9baec8d1b6bb46f12b13f823e0a7734b052a4deaf98bdf15aeb75b13d7565a7e",
-    "sha256": "019f588e0e4969fa4b063277e34d81385b13da11e1e23ab86e4a3fbbfbdf6c3b",
-    "reason": "租客管理员开通账号密码：同微信确定性身份索引协调，保留旧用户及房屋权限，拒绝重复身份；与独立部署函数本地同字节helper配套。"
-  },
-  "cloudfunctions/login/index.js": {
-    "originalSha256": "24e6a1e0b5d86bd045659e0f8ca9b016ef1cada2d3887225f0ae3084acc646df",
-    "sha256": "e36e539fed1800817d20ef88c51c8ca36b89eff4e27b784ecf3296d1dfe1160b",
-    "reason": "租客管理员开通账号密码：同微信确定性身份索引协调，保留旧用户及房屋权限，拒绝重复身份；与独立部署函数本地同字节helper配套。"
-  }
+    "cloudfunctions/getHouses/index.js":  {
+                                              "originalSha256":  "204bb88b13078e19910038035420ae83d444b3e68ee57358c72066878614518d",
+                                              "sha256":  "8c110cbb3302b7bf7155dbb7d4450782992f60c2fd1bc75114a7a04f6760edef",
+                                              "reason":  "在分页和计数前排除公共用房；支持按 ID 重新验证客户房源详情可见性。"
+                                          },
+    "cloudfunctions/adminLogin/index.js":  {
+                                               "originalSha256":  "9baec8d1b6bb46f12b13f823e0a7734b052a4deaf98bdf15aeb75b13d7565a7e",
+                                               "sha256":  "019f588e0e4969fa4b063277e34d81385b13da11e1e23ab86e4a3fbbfbdf6c3b",
+                                               "reason":  "租客管理员开通账号密码：同微信确定性身份索引协调，保留旧用户及房屋权限，拒绝重复身份；与独立部署函数本地同字节helper配套。"
+                                           },
+    "cloudfunctions/login/index.js":  {
+                                          "originalSha256":  "24e6a1e0b5d86bd045659e0f8ca9b016ef1cada2d3887225f0ae3084acc646df",
+                                          "sha256":  "e36e539fed1800817d20ef88c51c8ca36b89eff4e27b784ecf3296d1dfe1160b",
+                                          "reason":  "租客管理员开通账号密码：同微信确定性身份索引协调，保留旧用户及房屋权限，拒绝重复身份；与独立部署函数本地同字节helper配套。"
+                                      },
+    "cloudfunctions/phoneLogin/index.js":  {
+                                               "originalSha256":  "b3a2f8ac9fee3472a3110d061c6f0fc050fe28005c4c9aa68a6ff2c3cb67a371",
+                                               "sha256":  "9d28e462b3a002113fd95e1bb81f91f795ed1c2822db7af1d0a63307cd022393",
+                                               "reason":  "2026-11-25 取消开户码配套：移除旧 owners 房屋/姓名自动导入（注册不自动新增房屋或门禁权限，合法绑定仅由可信后台维护）；手机号跨微信身份冲突失败关闭（查询不可用时保持登录可用）；服务端手机号核验、身份复用与零写入失败路径不变。"
+                                           },
+    "cloudfunctions/unlock/index.js":  {
+                                           "originalSha256":  "9b4ca266b2472119d0765b8aa0624ad7955836805aadb34d95b601bd9cb707c0",
+                                           "sha256":  "3b8e2623fbdf230e29e2a8f26bb119bcf8a9c8233b0bfb13c49122467b609cb3",
+                                           "reason":  "2026-11-25 安全修正：空 OPENID 不再进入测试模式放行，身份缺失一律拒绝；权限判定与开门逻辑不变。"
+                                       },
+    "cloudfunctions/getLockKey/index.js":  {
+                                               "originalSha256":  "7bba3a7bea597eb796455ba2b50b0227b39f6ba46734eaa09ac6c13c4ac77e40",
+                                               "sha256":  "feb1a8e97096380b2b1bb83921dc096ecece3eb59c77c2d3a12454a81631f616",
+                                               "reason":  "2026-11-25 安全修正：空 OPENID 不再放行且移除 test_user 身份回退，身份缺失一律拒绝；其余逻辑不变。"
+                                           },
+    "cloudfunctions/houseAdmin/index.js":  {
+                                               "originalSha256":  "bd57841811110501d7b0cebebf32db7cfd1e0415f51f6fe2c52de0f5377c96a7",
+                                               "sha256":  "7af8e862c4dced32de65640b52a75fd9252513e681f4255f244cb2e1df83b3b8",
+                                               "reason":  "2026-11-25 对齐管理端人工绑定：bind/unbind 写入 housesManaged:true；bind 校验 houseId 存在于 rooms（新绑定必须选存在的房号）。"
+                                           }
 }

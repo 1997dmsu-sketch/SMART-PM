@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0-beta.20-phone-register.2",
-  "channel": "体验版候选（取消开户码／手机号注册后管理员开通密码；人脸登记修复）",
+  "version": "0.1.0-beta.20-phone-register.3",
+  "channel": "体验版候选（人脸照片自动转 JPEG 并压缩到 200KiB 内）",
   "releaseDate": "2026-11-25"
 }

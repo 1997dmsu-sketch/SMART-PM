@@ -70,6 +70,34 @@ function extractFilePath(response) {
   return '';
 }
 
+// 归一化照片：转 JPEG 并压到 ≤200KiB（云端/下游设备仅接受该规格）。
+// 已是合规小 JPEG 时直接用原文件，避免无谓重编码；压缩失败退回原文件，由服务端如实拒绝。
+const PHOTO_LIMIT_BYTES = 200 * 1024;
+function fileSize(filePath) {
+  return new Promise((resolve) => {
+    if (!wx.getFileInfo) return resolve(-1);
+    wx.getFileInfo({ filePath, success: (r) => resolve(r.size), fail: () => resolve(-1) });
+  });
+}
+function compressPhoto(filePath, quality) {
+  return new Promise((resolve) => {
+    if (!wx.compressImage) return resolve(filePath);
+    wx.compressImage({ src: filePath, quality, success: (r) => resolve(r.tempFilePath), fail: () => resolve(filePath) });
+  });
+}
+async function normalizePhoto(filePath) {
+  if (!filePath) return '';
+  const size = await fileSize(filePath);
+  if (size >= 0 && size <= PHOTO_LIMIT_BYTES) return filePath;
+  for (const quality of [60, 40, 20]) {
+    const next = await compressPhoto(filePath, quality);
+    const nextSize = await fileSize(next);
+    if (nextSize >= 0 && nextSize <= PHOTO_LIMIT_BYTES) return next;
+    filePath = next;
+  }
+  return filePath;
+}
+
 // 任务不存在/尚未创建的云端码；其余错误按审核渠道码分类走既有审核渠道或明确错误。
 const TASK_NOT_FOUND_CODES = ['TASK_NOT_FOUND', 'NO_TASK'];
 
@@ -345,7 +373,7 @@ Page({
       if (!this.canContinue(session)) return;
       const picked = await choosePhoto();
       if (!(await this.loginGate('上传人脸照片', session)) || !this.canContinue(session)) return;
-      const filePath = extractFilePath(picked);
+      const filePath = await normalizePhoto(extractFilePath(picked));
       if (!filePath) throw new Error('未选择有效照片');
       if (!this.canContinue(session)) return;
       const fileId = await api.uploadTestFace({

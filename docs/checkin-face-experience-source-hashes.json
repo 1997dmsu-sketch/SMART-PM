@@ -663,13 +663,13 @@
                       "path":  "miniprogram/config/version.js",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "13e511e2b40a7407b3d5fa7702e0d18adafd988c9495e343549f56070cebcb33"
+                      "sha256":  "3488c5976862da0869403bbae89b2fe3d9dff0d3c023adaa780bd2012bef493a"
                   },
                   {
                       "path":  "miniprogram/config/version.json",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "79ca192f452019d4e36325baea0bfaaccafef1233dbcfb86ab5ee49469320179"
+                      "sha256":  "78a3b0dc08323c4f1bb7a63ddd780b910da64f6e19253259798fec1a5a8dc929"
                   },
                   {
                       "path":  "miniprogram/data/qishanyuan-test-preset.js",
@@ -733,7 +733,7 @@
                   },
                   {
                       "path":  "miniprogram/pages/face-enroll/index.js",
-                      "sha256":  "acbd006e9ac541e980116c1aeda8ef2d0a6befe8ee62f2fae4c7e6401d5c4e94",
+                      "sha256":  "ed046f748224317285be90f54a8cff261c742287a0eb9bbc6614d12a764252e2",
                       "purpose":  "人脸登记页逻辑：六态文案、服务端下发上传路径、上传后建任务、不显示现场识别结论。",
                       "baselineSha256":  null
                   },
@@ -835,7 +835,7 @@
                   },
                   {
                       "path":  "package.json",
-                      "sha256":  "c9df7cd2767305a72aa0a1eee47eaae9087cf2b712fb7b32665425ecdebaecb4",
+                      "sha256":  "70bc2784cbada40ec14f3873c2c0b1b8b64df648886650254e011fd8400d4f01",
                       "purpose":  "根发布检查入口：check:checkin-face = 静态检查 \u0026\u0026 来源校验；新增 check:checkin-face:sources。",
                       "baselineSha256":  null
                   },

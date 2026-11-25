@@ -233,6 +233,10 @@ function requireRequestConstruction(file, pairs) {
   // 序列末值时的 .key / ["key"] 成员（多层括号/嵌套序列均归一化）。'(' 必须是
   // 分组括号而非调用括号（其前不是被调用者）；只读上下文不会进入本函数
   // （isHardMember 仅用于赋值左值收集范围）。
+  // 第六轮：按匹配分隔符确定完整序列基对象分组——前项允许 `:`、`=>`、`?`
+  // 及其他合法表达式 token（三元条件、箭头函数等不改变末值为 request），
+  // 只有语句边界（; { }）或走到词法开头才终止扫描；受限形态无法证明时
+  // 由左值收集整体失败关闭，不在此处枚举 token 提前放行。
   const isHardMemberViaSequence = (at) => {
     if (tokens[at]?.type !== 'identifier' || tokens[at].value !== 'request') return false;
     if (tokens[at - 1]?.value !== ',') return false;
@@ -243,7 +247,6 @@ function requireRequestConstruction(file, pairs) {
       if (CLOSERS.has(t.value)) { depth += 1; continue; }
       if (OPENERS.has(t.value)) { depth -= 1; if (depth < 0) { openIdx = j; break; } continue; }
       if (depth === 0 && STATEMENT_BOUNDARY.has(t.value)) break;
-      if (depth === 0 && LHS_KEYWORDS.has(t.value) && t.value !== ',') break;
     }
     if (openIdx < 0) return false;
     const before = tokens[openIdx - 1];

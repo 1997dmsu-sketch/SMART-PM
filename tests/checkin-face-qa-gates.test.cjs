@@ -715,6 +715,76 @@ test('CF-R2-11 第五轮：合法序列基对象字段（photoPath/planTemplateN
   }
 });
 
+// ---------------------------------------------------------------------------
+// CF-R2-11 第六轮：序列前项含条件/箭头语法（前项 `:`/`=>` 不得提前终止扫描）
+// ---------------------------------------------------------------------------
+
+const CF_R2_11_ROUND6_MUTATIONS = [
+  ['seq-ternary-head', '  (true ? 0 : 1, request).mode = "simulation";'],
+  ['seq-arrow-head', '  (() => 0, request).mode = "simulation";'],
+  ['seq-ternary-bracket', '  ((true ? 0 : 1, request))["mode"] = "simulation";'],
+  ['seq-arrow-in-array', '  [(() => 0, request).mode, request.photoPath] = ["simulation", "x"];'],
+  ['seq-ternary-nested-destructure', '  [ { a: (true ? 0 : 1, request).mode } ] = [ { a: "simulation" } ];'],
+  ['seq-arrow-logical', '  ((() => 0, request)).mode ||= "simulation";'],
+];
+for (const [label, injected] of CF_R2_11_ROUND6_MUTATIONS) {
+  test(`CF-R2-11 第六轮：构造后 ${label} 序列前项条件/箭头覆盖 → node --check 合法且门禁精确失败（绕过负例）`, () => {
+    const dir = buildStaticTree(`cfr6-${label}`);
+    const file = path.join(dir, 'tools', 'checkin-face-worker', 'worker-runtime.mjs');
+    const mutated = realWorkerSource.replace(
+      /(\r?\n)  return request;(\r?\n)/,
+      (m, nl1, nl2) => `${nl1}${injected}${nl1}  return request;${nl2}`,
+    );
+    assert.notEqual(mutated, realWorkerSource, `负控必须实际注入 ${label}`);
+    fs.writeFileSync(file, mutated);
+    const syntax = runNode(['--check', file], dir);
+    assert.equal(syntax.status, 0, `注入必须语法合法：${syntax.stderr}`);
+    const result = runNode([path.join(dir, 'scripts', 'checkin-face-static-check.mjs')], dir);
+    assert.equal(result.status, 1, `${label} 序列前项条件/箭头覆盖必须被门禁拒绝`);
+    assert.match(result.stderr, CF_R2_11_POST_MSG, `stderr: ${result.stderr}`);
+  });
+}
+
+test('CF-R2-11 第六轮：复审两例的纯内存行为证明（mode 实际 device→simulation，无业务/网络）', () => {
+  const cases = [
+    '(true ? 0 : 1, request).mode = "simulation";',
+    '(() => 0, request).mode = "simulation";',
+  ];
+  for (const injected of cases) {
+    const code = `'use strict';\nconst request = { mode: "device", validityMode: "fixed", consent: true, photoPath: "" };\n${injected}\nprocess.stdout.write(String(request.mode === "simulation"));`;
+    const env = { ...process.env };
+    const opts = String(env.NODE_OPTIONS || '').replace(/--require="?[^"\s]*d-network-guard\.cjs"?/g, '').replace(/\s{2,}/g, ' ').trim();
+    if (opts) env.NODE_OPTIONS = opts;
+    else delete env.NODE_OPTIONS;
+    const probe = spawnSync(process.execPath, ['-e', code], { cwd: ROOT, env, encoding: 'utf8' });
+    assert.equal(probe.status, 0, `纯内存探针必须可运行：${probe.stderr}`);
+    assert.equal(probe.stdout, 'true', `${injected} 必须实际把 mode 覆盖为 simulation`);
+  }
+});
+
+test('CF-R2-11 第六轮：合法字段前项含条件/箭头与序列只读对照（正例）→ 门禁通过', () => {
+  const cases = [
+    ['seq-ternary-legal', '  (true ? 0 : 1, request).photoPath = "C:\\\\tmp\\\\p.jpg";'],
+    ['seq-arrow-legal', '  (() => 0, request)["planTemplateNo"] = "T-1";'],
+    ['seq-arrow-read-only', '  const okPath = (() => 0, request).photoPath || "";'],
+  ];
+  for (const [label, injected] of cases) {
+    const dir = buildStaticTree(`cfr6-${label}`);
+    const file = path.join(dir, 'tools', 'checkin-face-worker', 'worker-runtime.mjs');
+    const mutated = realWorkerSource.replace(
+      /(\r?\n)  return request;(\r?\n)/,
+      (m, nl1, nl2) => `${nl1}${injected}${nl1}  return request;${nl2}`,
+    );
+    assert.notEqual(mutated, realWorkerSource, `正例必须实际注入 ${label}`);
+    fs.writeFileSync(file, mutated);
+    const syntax = runNode(['--check', file], dir);
+    assert.equal(syntax.status, 0, `注入必须语法合法：${syntax.stderr}`);
+    const result = runNode([path.join(dir, 'scripts', 'checkin-face-static-check.mjs')], dir);
+    assert.equal(result.status, 0, `${label} 不得误伤：${result.stderr}`);
+    assert.match(result.stdout, /0 violations/);
+  }
+});
+
 test('CF-R2-11：同名 getter 覆盖 mode → 门禁精确失败（绕过负例）', () => {
   const dir = buildStaticTree('cfr2-getter');
   const file = path.join(dir, 'tools', 'checkin-face-worker', 'worker-runtime.mjs');

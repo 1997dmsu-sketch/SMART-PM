@@ -208,10 +208,27 @@ function requireRequestConstruction(file, pairs) {
   const CLOSERS = new Set(['}', ']', ')']);
   const STATEMENT_BOUNDARY = new Set([';', '{', '}']);
   const LHS_KEYWORDS = new Set(['const', 'let', 'var', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'function', '=>', ':', ',']);
-  const isHardMember = (at) => tokens[at]?.type === 'identifier' && tokens[at].value === 'request'
-    && ((tokens[at + 1]?.value === '.' && HARD_REQUEST_KEYS.includes(tokens[at + 2]?.value))
-      || (tokens[at + 1]?.value === '[' && tokens[at + 2]?.type === 'string'
-        && HARD_REQUEST_KEYS.includes(tokens[at + 2].value) && tokens[at + 3]?.value === ']'));
+  const HARD_KEY_AT = (k) => HARD_REQUEST_KEYS.includes(tokens[k]?.value);
+  const isHardMember = (at) => {
+    if (tokens[at]?.type !== 'identifier' || tokens[at].value !== 'request') return false;
+    // 经典直连：request.key / request["key"]
+    if (tokens[at + 1]?.value === '.' && HARD_KEY_AT(at + 2)) return true;
+    if (tokens[at + 1]?.value === '[' && tokens[at + 2]?.type === 'string'
+      && HARD_KEY_AT(at + 2) && tokens[at + 3]?.value === ']') return true;
+    // CF-R2-11 第四轮：括号基对象（语义透明）——(...((request))...).key / ["key"]。
+    // 基对象外侧可有多层括号（含成员整体再被括号包裹的情形）；紧邻基对象前
+    // 的 '(' 数至少 1 且其后为 ')' 串 + 成员操作符即归一化为 request 成员。
+    let openers = 0;
+    let back = at - 1;
+    while (back >= 0 && tokens[back]?.value === '(') { openers += 1; back -= 1; }
+    if (openers === 0) return false;
+    let k = at + 1;
+    while (tokens[k]?.value === ')') k += 1;
+    if (tokens[k]?.value === '.' && HARD_KEY_AT(k + 1)) return true;
+    if (tokens[k]?.value === '[' && tokens[k + 1]?.type === 'string'
+      && HARD_KEY_AT(k + 1) && tokens[k + 2]?.value === ']') return true;
+    return false;
+  };
   const containsHardMember = (from, to) => {
     for (let i = from; i <= to; i++) if (isHardMember(i)) return true;
     return false;

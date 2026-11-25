@@ -559,7 +559,7 @@
     },
     {
       "path": "scripts/checkin-face-static-check.mjs",
-      "sha256": "1f902732f38da82dc91c504012f41b6988de3042279a511d20aa0bc8c6a01c1a",
+      "sha256": "a8c3ff11accd91ffe3ba377b2cf520a06d26785c7a2b7ee6a607a014415f0cbe",
       "purpose": "R10 静态门禁：mode=device 与 validityMode=fixed 逐项断言（构造处锚定、注释剔除），设备秘密/监听/重发等守护。",
       "baselineSha256": null
     },
@@ -607,13 +607,13 @@
     },
     {
       "path": "tests/checkin-face-qa-gates.test.cjs",
-      "sha256": "5fabce47310b814e3d8f107fdba5975d454ad6f3669c3b0ec3bcfc92fc65df26",
+      "sha256": "b87955fc36c740aeb46288c6c8cf0e5e9be6037d75cd054570f6e4e7f28b4ea3",
       "purpose": "D 路 R10/C1 门禁与网络守卫测试（含套内负控）。",
       "baselineSha256": null
     },
     {
       "path": "tests/support/d-network-guard.cjs",
-      "sha256": "51562c7ea3cbcf6e0d483df4f7540d8ca2b0f8f096c36ff5b568550904792344",
+      "sha256": "702a1bfa928a05155ccfde3c5718286d8eb908fe31da84f39f66e57570244390",
       "purpose": "D 路不转发网络守卫（预载、命名绑定、自检、子进程继承）。",
       "baselineSha256": null
     },
@@ -771,6 +771,108 @@
       "path": "docs/evidence/checkin-face-r2-2026-11-25/run-verify.out",
       "sha256": "5f398553a34f1de81a829a7f23bd3e87452fe94d9afa1ff7fde5128a32a59889",
       "purpose": "CF-R2-11/CF-R2-12 最小退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "tests/support/d-network-fakes.cjs",
+      "sha256": "6b87fa741af1ecb66a7e8c76073c97e495b2abe23b2239f75ec8cd7845218858",
+      "purpose": "CF-R2-12 第二轮：安全可计数 fake 注入器",
+      "baselineSha256": null
+    },
+    {
+      "path": "tests/support/r2-vm-scenario.cjs",
+      "sha256": "8fa9a2ff71b3818e32bb263ed94c1195a008ce7a1a868dc6811a443eb7a2af71",
+      "purpose": "CF-R2-12 第二轮：VM 场景夹具（捕获身份/正负控/缺陷检测）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/README.md",
+      "sha256": "71baa8db2a8e9ad37c06f15a60013ba66f883e4d0bbcb86b9c268126cc36cf0e",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-check.err",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-check.out",
+      "sha256": "9e3e67149d5f4317ec03ee038ba6b2f2932e0f20cac3802f849d19b66dee64dd",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-five.err",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-five.out",
+      "sha256": "bd737165d81a380c001fce6b7fc00eee67def974462dd9162b161ed1c5bf9190",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-qa-gates.err",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-qa-gates.out",
+      "sha256": "da162868352281156b46b1d73bdc28e8bd21fc715829ed84565157782ad275c0",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-static.err",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-static.out",
+      "sha256": "5e4c2d53cb3b5fab02de2f620b6a5301afec6002343501726b295b699e61d588",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-verify.err",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-verify.out",
+      "sha256": "fa79cc26978c63e7202a2ac94cb7f7fc286f7d20b5b1b864ffda17dbc73ee2f9",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-vm-clean.err",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-vm-clean.out",
+      "sha256": "cba02eccdfe8f02deff60f7cf9c63c4ecdd44aaeb0b3a9d2db172cfecdc998e6",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-vm-defect-net.err",
+      "sha256": "9a890eeba728ef20ee2ccfe04d22d20021bffe012fdc1f09567c17766fda743c",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
+      "baselineSha256": null
+    },
+    {
+      "path": "docs/evidence/checkin-face-r2-round2-2026-11-25/run-vm-defect-net.out",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "purpose": "CF-R2-11/CF-R2-12 第二轮退修证据（本任务新增）",
       "baselineSha256": null
     }
   ]

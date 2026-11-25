@@ -195,7 +195,8 @@ test('guard：本进程在业务模块加载前已安装命名守卫，逐槽哨
   assert.equal(self.ok, true, JSON.stringify(self));
   assert.equal(self.forwarded, 0, '任何守卫入口都不得转发真实目标');
   assert.equal(self.attempts, guard.patchedCount, 'every installed slot must have an actual positive control');
-  assert.ok(self.caught === self.attempts && self.blockedDelta === self.attempts);
+  assert.ok(self.caught === self.attempts && self.blockedDelta === self.attempts + self.internalBlocked,
+    `每槽 wrapper 各拦截 1 次；blocked 总增量须等于槽数+可归因正控内部拦截：${JSON.stringify(self)}`);
   const bindings = await guard.verifyNamedBindings();
   assert.equal(bindings.ok, true);
   assert.ok(bindings.checked > 0, 'ESM named imports must point at the guarded functions');
@@ -471,7 +472,55 @@ test('C1：源码漂移但不更新清单，专用校验与正式共享树用例
 // ---------------------------------------------------------------------------
 
 const CF_R2_11_OVERRIDE_MSG = /request 硬要求字段不得被同名 getter\/method\/重复字段覆盖或扩展（CF-R2-11）/;
-const CF_R2_11_POST_MSG = /request 构造后不得再赋值覆盖 mode\/validityMode\/consent（CF-R2-11）/;
+const CF_R2_11_POST_MSG = /request 构造后不得再赋值\/更新覆盖 mode\/validityMode\/consent（CF-R2-11）/;
+
+// CF-R2-11 第二轮：逻辑/复合/位/移位赋值、前后缀更新、下标与解构形式全覆盖。
+// 注入位置均为真实 request 作用域、`return request;` 之前（首个出现点）。
+const CF_R2_11_ROUND2_MUTATIONS = [
+  ['logical-and', '  request.mode &&= "simulation";'],
+  ['logical-or', '  request.mode ||= "simulation";'],
+  ['logical-nullish', '  request.mode ??= "simulation";'],
+  ['plus', '  request.mode += "-x";'],
+  ['modulo', '  request.mode %= "x";'],
+  ['exponent', '  request.mode **= "x";'],
+  ['bitor', '  request.mode |= 1;'],
+  ['shift', '  request.mode <<= 1;'],
+  ['postfix-inc', '  request.mode++;'],
+  ['prefix-inc', '  ++request.mode;'],
+  ['bracket-assign', '  request["mode"] = "simulation";'],
+  ['bracket-compound', '  request["mode"] += "-x";'],
+  ['destructure-array', '  [request.mode] = ["simulation"];'],
+  ['object-assign', '  Object.assign(request, { mode: "simulation" });'],
+];
+for (const [label, injected] of CF_R2_11_ROUND2_MUTATIONS) {
+  test(`CF-R2-11 第二轮：构造后 ${label} 覆盖 → 门禁精确失败（绕过负例）`, () => {
+    const dir = buildStaticTree(`cfr2-${label}`);
+    const file = path.join(dir, 'tools', 'checkin-face-worker', 'worker-runtime.mjs');
+    const mutated = realWorkerSource.replace(
+      /(\r?\n)  return request;(\r?\n)/,
+      (m, nl1, nl2) => `${nl1}${injected}${nl1}  return request;${nl2}`,
+    );
+    assert.notEqual(mutated, realWorkerSource, `负控必须实际注入 ${label}`);
+    fs.writeFileSync(file, mutated);
+    const result = runNode([path.join(dir, 'scripts', 'checkin-face-static-check.mjs')], dir);
+    assert.equal(result.status, 1, `${label} 覆盖必须被门禁拒绝`);
+    assert.match(result.stderr, CF_R2_11_POST_MSG, `stderr: ${result.stderr}`);
+  });
+}
+
+test('CF-R2-11 第二轮：合法 planTemplateNo/photoPath 赋值对照（正例）→ 门禁通过', () => {
+  const dir = buildStaticTree('cfr2-legit');
+  const file = path.join(dir, 'tools', 'checkin-face-worker', 'worker-runtime.mjs');
+  const mutated = realWorkerSource.replace(
+    /(\r?\n)  return request;(\r?\n)/,
+    (m, nl1, nl2) => `${nl1}  request.planTemplateNo = "T-1";${nl1}  request.photoPath = "C:\\\\tmp\\\\p.jpg";${nl1}  return request;${nl2}`,
+  );
+  assert.notEqual(mutated, realWorkerSource, '正例必须实际注入合法赋值');
+  fs.writeFileSync(file, mutated);
+  const result = runNode([path.join(dir, 'scripts', 'checkin-face-static-check.mjs')], dir);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /0 violations/);
+});
 
 test('CF-R2-11：同名 getter 覆盖 mode → 门禁精确失败（绕过负例）', () => {
   const dir = buildStaticTree('cfr2-getter');
@@ -586,6 +635,155 @@ test('guard：CF-R2-12 捕获/替换/恢复顺序与 finally 恢复（子进程�
   assert.equal(report.wrapperReplaced, true, 'restore 后包装器必须被原始函数替换（guard 内部 RESTORE_IDENTITY/DESCRIPTOR 断言已通过）');
 });
 
+// ---------------------------------------------------------------------------
+// CF-R2-12 第二轮：安装守卫前注入安全可计数 fake 目标的 VM 控制
+// ---------------------------------------------------------------------------
+
+const FAKES = path.join(ROOT, 'tests', 'support', 'd-network-fakes.cjs');
+const R2_SCENARIO = path.join(ROOT, 'tests', 'support', 'r2-vm-scenario.cjs');
+
+const R2_EXPECTED_LABELS = [
+  'net.connect', 'net.createConnection', 'net.createServer', 'net.Socket.prototype.connect', 'net.Server.prototype.listen',
+  'tls.connect', 'tls.createServer', 'tls.TLSSocket.prototype.connect', 'tls.Server.prototype.listen',
+  'http.request', 'http.get', 'http.createServer', 'https.request', 'https.get', 'https.createServer',
+  'http.Server.prototype.listen', 'https.Server.prototype.listen',
+  'http.Agent.prototype.createConnection', 'https.Agent.prototype.createConnection',
+  'dgram.createSocket', 'dgram.Socket.prototype.send', 'dgram.Socket.prototype.bind', 'dgram.Socket.prototype.connect',
+  'dns.lookup', 'dns.lookupService', 'dns.resolve', 'dns.resolve4', 'dns.resolve6', 'dns.resolveAny', 'dns.resolveCaa',
+  'dns.resolveCname', 'dns.resolveMx', 'dns.resolveNaptr', 'dns.resolveNs', 'dns.resolvePtr', 'dns.resolveSoa',
+  'dns.resolveSrv', 'dns.resolveTlsa', 'dns.resolveTxt', 'dns.reverse',
+  'dns.promises.lookup', 'dns.promises.lookupService', 'dns.promises.resolve', 'dns.promises.resolve4',
+  'dns.promises.resolve6', 'dns.promises.resolveAny', 'dns.promises.resolveCaa', 'dns.promises.resolveCname',
+  'dns.promises.resolveMx', 'dns.promises.resolveNaptr', 'dns.promises.resolveNs', 'dns.promises.resolvePtr',
+  'dns.promises.resolveSoa', 'dns.promises.resolveSrv', 'dns.promises.resolveTlsa', 'dns.promises.resolveTxt',
+  'dns.promises.reverse',
+  'dns.Resolver.prototype.resolveAny', 'dns.Resolver.prototype.resolve4', 'dns.Resolver.prototype.resolve6',
+  'dns.Resolver.prototype.resolveCaa', 'dns.Resolver.prototype.resolveCname', 'dns.Resolver.prototype.resolveMx',
+  'dns.Resolver.prototype.resolveNs', 'dns.Resolver.prototype.resolveTlsa', 'dns.Resolver.prototype.resolveTxt',
+  'dns.Resolver.prototype.resolveSrv', 'dns.Resolver.prototype.resolvePtr', 'dns.Resolver.prototype.resolveNaptr',
+  'dns.Resolver.prototype.resolveSoa', 'dns.Resolver.prototype.reverse', 'dns.Resolver.prototype.resolve',
+  'dns.Resolver.prototype.cancel', 'dns.Resolver.prototype.getServers', 'dns.Resolver.prototype.setServers',
+  'dns.Resolver.prototype.setLocalAddress',
+  'dns.promises.Resolver.prototype.resolveAny', 'dns.promises.Resolver.prototype.resolve4',
+  'dns.promises.Resolver.prototype.resolve6', 'dns.promises.Resolver.prototype.resolveCaa',
+  'dns.promises.Resolver.prototype.resolveCname', 'dns.promises.Resolver.prototype.resolveMx',
+  'dns.promises.Resolver.prototype.resolveNs', 'dns.promises.Resolver.prototype.resolveTlsa',
+  'dns.promises.Resolver.prototype.resolveTxt', 'dns.promises.Resolver.prototype.resolveSrv',
+  'dns.promises.Resolver.prototype.resolvePtr', 'dns.promises.Resolver.prototype.resolveNaptr',
+  'dns.promises.Resolver.prototype.resolveSoa', 'dns.promises.Resolver.prototype.reverse',
+  'dns.promises.Resolver.prototype.resolve', 'dns.promises.Resolver.prototype.cancel',
+  'dns.promises.Resolver.prototype.getServers', 'dns.promises.Resolver.prototype.setServers',
+  'dns.promises.Resolver.prototype.setLocalAddress',
+  'dns.Resolver', 'dns.promises.Resolver',
+  'globalThis.fetch', 'globalThis.WebSocket',
+];
+
+function r2CleanedEnv() {
+  const env = { ...process.env };
+  const opts = String(env.NODE_OPTIONS || '')
+    .replace(/--require="?[^"\s]*(?:d-network-guard|d-network-fakes)\.cjs"?/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  if (opts) env.NODE_OPTIONS = opts;
+  else delete env.NODE_OPTIONS;
+  return env;
+}
+
+function r2RunVM(guardPath, { viaOptions = false } = {}) {
+  const env = r2CleanedEnv();
+  const fakesArg = `--require=${FAKES.replace(/\\/g, '/')}`;
+  const guardArg = `--require=${String(guardPath).replace(/\\/g, '/')}`;
+  if (viaOptions) {
+    env.NODE_OPTIONS = `${fakesArg} ${guardArg}`;
+    return spawnSync(process.execPath, [R2_SCENARIO], { cwd: ROOT, env, encoding: 'utf8' });
+  }
+  return spawnSync(process.execPath, [fakesArg, guardArg, R2_SCENARIO], { cwd: ROOT, env, encoding: 'utf8' });
+}
+
+function r2MutatedGuard(familyCond) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'r2-mutant-'));
+  const src = fs.readFileSync(GUARD, 'utf8');
+  const anchor = "      const error = new Error('D_NETWORK_GUARD_BLOCKED');";
+  assert.ok(src.includes(anchor), '突变锚点必须在守卫源码中存在');
+  const mutated = src.replace(
+    anchor,
+    `      if (${familyCond}) { record.original.apply(this, args); }\n${anchor}`,
+  );
+  const out = path.join(dir, 'd-network-guard-mutant.cjs');
+  fs.writeFileSync(out, mutated);
+  return out;
+}
+
+const R2_FAMILIES = [
+  ['net', "label.startsWith('net')"],
+  ['tls', "label.startsWith('tls')"],
+  ['http', "label.startsWith('http.')"],
+  ['https', "label.startsWith('https')"],
+  ['dgram', "label.startsWith('dgram')"],
+  ['dns', "label.startsWith('dns')"],
+  ['globalThis', "label.startsWith('globalThis')"],
+];
+
+test('guard：CF-R2-12 第二轮：真实环境捕获集合与期望清单相等（99 槽，无缺失无多余）', () => {
+  const guard = globalThis.__DSH_D_NETWORK_GUARD__;
+  assert.ok(guard, '本套件要求守卫预载');
+  assert.equal(guard.version, 4);
+  assert.deepEqual(
+    [...guard.patchedEntries].sort(),
+    [...R2_EXPECTED_LABELS].sort(),
+    '真实环境捕获集合必须与逐槽期望清单完全一致',
+  );
+  assert.equal(guard.patchedCount, R2_EXPECTED_LABELS.length);
+});
+
+test('guard：CF-R2-12 第二轮：VM 干净场景——捕获=安装目标、正控+1、过 wrapper 零增长（逐槽相等断言）', () => {
+  const result = r2RunVM(GUARD);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  const { ok, report } = JSON.parse(result.stdout);
+  assert.equal(ok, true, JSON.stringify(report));
+  assert.equal(report.guardVersion, 4);
+  assert.equal(report.patchedCount, R2_EXPECTED_LABELS.length);
+  assert.equal(report.expectedCount, R2_EXPECTED_LABELS.length);
+  assert.deepEqual(report.identityMismatches, [], '捕获的必须是注入器安装的 fake 目标（逐槽身份相等）');
+  assert.deepEqual(report.positiveFailures, [], '每槽正控调用安装目标必须使计数 +1');
+  assert.deepEqual(report.uncovered, [], '每槽过 wrapper 必须拦截且外部目标计数零增长');
+  assert.equal(report.coveredEqual, true);
+  assert.deepEqual(report.expectedMissingFromPatched, []);
+  assert.deepEqual(report.patchedExtra, []);
+  assert.equal(report.selfTest.ok, true);
+  assert.equal(report.selfTest.internalBlocked, 0, 'fake 目标下正控委托不得产生内部拦截');
+  assert.equal(report.selfTest.blockedDelta, report.patchedCount);
+  assert.equal(report.bindings.ok, true);
+  assert.ok(report.bindings.checked > 0);
+});
+
+for (const [family, cond] of R2_FAMILIES) {
+  test(`guard：CF-R2-12 第二轮：缺陷注入负控（${family} 族 wrapper 直接调用捕获原目标）→ 必须以转发计数拒绝`, () => {
+    const mutant = r2MutatedGuard(cond);
+    const result = r2RunVM(mutant);
+    assert.equal(result.status, 2, `缺陷必须被检出并退出 2：${result.stdout} ${result.stderr}`);
+    assert.match(result.stderr, /FORWARDING_DETECTED: .+ countDelta=1/,
+      '失败原因必须是外部原目标转发计数增长');
+    assert.ok(!/SCENARIO_ERROR|SyntaxError|Cannot find module|ERR_/.test(result.stderr),
+      `不得是加载/语法/环境错误：${result.stderr}`);
+  });
+}
+
+test('guard：CF-R2-12 第二轮：子进程经 NODE_OPTIONS 继承的 VM 正控（干净守卫）→ 通过', () => {
+  const result = r2RunVM(GUARD, { viaOptions: true });
+  assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+  const { ok, report } = JSON.parse(result.stdout);
+  assert.equal(ok, true, JSON.stringify(report));
+  assert.equal(report.coveredEqual, true);
+});
+
+test('guard：CF-R2-12 第二轮：子进程经 NODE_OPTIONS 继承的 VM 安全负控（缺陷守卫）→ 以转发计数拒绝', () => {
+  const mutant = r2MutatedGuard("label.startsWith('net')");
+  const result = r2RunVM(mutant, { viaOptions: true });
+  assert.equal(result.status, 2, `stderr: ${result.stderr}`);
+  assert.match(result.stderr, /FORWARDING_DETECTED: net\.connect countDelta=1/);
+});
+
 test('guard：CF-R2-12 子进程经 NODE_OPTIONS 继承的原目标 canary 正控', () => {
   const childCode = [
     "const guard = globalThis.__DSH_D_NETWORK_GUARD__;",
@@ -598,7 +796,7 @@ test('guard：CF-R2-12 子进程经 NODE_OPTIONS 继承的原目标 canary 正�
   const result = runNode(['-e', childCode], ROOT);
   assert.equal(result.status, 0, result.stderr);
   const report = JSON.parse(result.stdout);
-  assert.equal(report.version, 3, '子进程必须继承 v3 守卫');
+  assert.equal(report.version, 4, '子进程必须继承 v4 守卫');
   assert.equal(report.ok, true);
   assert.ok(report.exercised >= 1, '子进程内原目标相连 canary 必须有效');
   assert.ok(report.blockedCount >= 1);

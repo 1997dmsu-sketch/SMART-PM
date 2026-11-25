@@ -88,7 +88,8 @@ function lexSource(source) {
       continue;
     }
     const previous = tokens.at(-1);
-    const regexPosition = !previous || ['=', '(', '[', '{', ',', ':', ';', '!', '&&', '||', '?', 'return', 'throw', '=>'].includes(previous.value);
+    const regexPosition = !previous || ['=', '(', '[', '{', ',', ':', ';', '!', '&&', '||', '?', 'return', 'throw', '=>',
+      '===', '!==', '==', '!=', '<=', '>=', '??', '++', '--', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<', '>>', '>>>'].includes(previous.value);
     if (char === '/' && regexPosition) {
       let inClass = false;
       index += 1;
@@ -109,7 +110,13 @@ function lexSource(source) {
       continue;
     }
     if (source.startsWith('...', index)) index += 3;
-    else index += 1;
+    else {
+      // 统一运算符词法：复合/逻辑/更新/位/移位赋值与比较符按完整 token 产出，
+      // 与识别器（ASSIGN_OPS/UPDATE_OPS）同源一致（CF-R2-11 第二轮）。
+      const opRun = /^(>>>=|<<=|>>=|>>>|===|!==|=>|&&=|\|\|=|\?\?=|\+=|-=|\*=|\/=|%=|\*\*=|&=|\|=|\^=|==|!=|<=|>=|\+\+|--|&&|\|\||\?\?|\*\*|<<|>>)/.exec(source.slice(index));
+      if (opRun) index += opRun[0].length;
+      else index += 1;
+    }
     token('punctuation', source.slice(start, index), start, index);
   }
   return { tokens, code: masked.join('') };
@@ -192,21 +199,43 @@ function requireRequestConstruction(file, pairs) {
     return;
   }
   const { fields, unsafe, closedAt } = constructors[0];
-  // CF-R2-11：构造后对硬要求成员的赋值覆盖（点访问与下标访问两种形态）。
+  // CF-R2-11 第二轮：构造后对硬要求成员的一切赋值/更新形式——
+  // 普通=、逻辑赋值（&&=/||=/??=）、复合赋值（+=/-=/*=//=//%=//**=）、
+  // 位/移位赋值（&=/|=/^=/<<=/>>=/>>>=）、前后缀 ++/--、
+  // 点访问与静态字符串下标、解构赋值与 Object.assign/defineProperty。
+  const ASSIGN_OPS = ['=', '&&=', '||=', '??=', '+=', '-=', '*=', '/=', '%=', '**=', '&=', '|=', '^=', '<<=', '>>=', '>>>='];
+  const UPDATE_OPS = ['++', '--'];
   let postAssigned = false;
   for (let item = Math.max(0, closedAt); item < tokens.length - 4; item++) {
     if (tokens[item].type !== 'identifier' || tokens[item].value !== 'request') continue;
-    const dotKey = tokens[item + 1]?.value === '.' ? tokens[item + 2]?.value : null;
-    const dotAssign = dotKey !== null && HARD_REQUEST_KEYS.includes(dotKey)
-      && ['=', '+=', '-=', '++', '--'].includes(tokens[item + 3]?.value);
-    const bracketKey = tokens[item + 1]?.value === '[' && tokens[item + 2]?.type === 'string'
-      && HARD_REQUEST_KEYS.includes(tokens[item + 2]?.value) && tokens[item + 3]?.value === ']'
-      ? tokens[item + 2].value : null;
-    const bracketAssign = bracketKey !== null && ['=', '+=', '-='].includes(tokens[item + 4]?.value);
-    if (dotAssign || bracketAssign) postAssigned = true;
+    if (item >= 1 && UPDATE_OPS.includes(tokens[item - 1]?.value)) { postAssigned = true; }
+    const after = tokens[item + 1]?.value;
+    if (after === '.') {
+      const key = tokens[item + 2]?.value;
+      if (HARD_REQUEST_KEYS.includes(key)) {
+        const op = tokens[item + 3]?.value;
+        if (ASSIGN_OPS.includes(op) || UPDATE_OPS.includes(op)) postAssigned = true;
+        // 解构赋值：{ mode: request.mode } = … / [request.mode] = …
+        if ((op === '}' || op === ']') && tokens[item + 4]?.value === '=') postAssigned = true;
+      }
+    } else if (after === '[' && tokens[item + 2]?.type === 'string'
+      && HARD_REQUEST_KEYS.includes(tokens[item + 2]?.value) && tokens[item + 3]?.value === ']') {
+      const op = tokens[item + 4]?.value;
+      if (ASSIGN_OPS.includes(op) || UPDATE_OPS.includes(op)) postAssigned = true;
+    }
+  }
+  // Object.assign(request, …) / Object.defineProperty(request, …) 同样失败关闭。
+  for (let item = Math.max(0, closedAt); item < tokens.length - 3; item++) {
+    if (tokens[item].type === 'identifier' && tokens[item].value === 'Object'
+      && tokens[item + 1]?.value === '.'
+      && ['assign', 'defineProperty'].includes(tokens[item + 2]?.value)
+      && tokens[item + 3]?.value === '('
+      && tokens[item + 4]?.type === 'identifier' && tokens[item + 4]?.value === 'request') {
+      postAssigned = true;
+    }
   }
   if (postAssigned) {
-    issues.push(`${rel}:1: request 构造后不得再赋值覆盖 mode/validityMode/consent（CF-R2-11）`);
+    issues.push(`${rel}:1: request 构造后不得再赋值/更新覆盖 mode/validityMode/consent（CF-R2-11）`);
   }
   if (unsafe) {
     issues.push(`${rel}:1: request 硬要求字段不得被同名 getter/method/重复字段覆盖或扩展（CF-R2-11）`);

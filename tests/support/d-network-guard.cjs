@@ -4,11 +4,11 @@
  * 不覆盖原生 addon、显式剥离环境的子进程或其他系统级网络途径。
  * 被拦截调用不读取/打印参数。
  *
- * CF-R2-12：canary 与「实际捕获的原函数」（record.original）相连——spy
- * 被调用即增加 record.originalInvoked / counters.originalInvoked，并委托
- * 真实原函数。正控使用逐槽实测的「安全快速失败参数」（原函数在自身入参
- * 校验处同步抛错/无害返回，不发网络、不监听），无法安全委托的槽显式
- * BLOCKED，不跳过、不虚构。计数与加载期基线不被清零。
+ * CF-R2-12 第二轮：去除全局 canaryWindow 计数盲区——任何拦截一律计数；
+ * 正控委托期间产生的内部拦截按「可归因增量」逐槽核算（internalBlocked），
+ * 不清零、不掩盖。外部队列目标的可计数控制由测试在安装本守卫前注入
+ * 安全内存 fake 完成（capturedTargets/invokeWrapper 提供捕获身份与过
+ * wrapper 调用通道）；本文件自身不做真实网络/监听。
  */
 'use strict';
 
@@ -32,10 +32,6 @@ if (globalThis.__DSH_D_NETWORK_GUARD__) {
   const namedSlots = [];
   let installed = true;
   let savedLoadTime = null;
-  // 正控窗口：canary/selfTest 委托真实原函数期间，其内部对已守卫入口的命中
-  // 照常抛 D_NETWORK_GUARD_BLOCKED（原函数按失败快速终止）但【不计入 blocked】，
-  // 避免自证正控污染计数；窗口外的任何拦截一律计数，计数永不清零。
-  let canaryWindow = false;
   const hadNodeOptions = Object.hasOwn(process.env, 'NODE_OPTIONS');
   const originalNodeOptions = process.env.NODE_OPTIONS;
   const ownRequire = `--require=${JSON.stringify(__filename.replace(/\\/g, '/'))}`;
@@ -55,10 +51,8 @@ if (globalThis.__DSH_D_NETWORK_GUARD__) {
       impl: original, blocked: 0, forwarded: 0, originalInvoked: 0,
     };
     function guardBlocked(...args) {
-      if (!canaryWindow) {
-        counters.blocked += 1;
-        record.blocked += 1;
-      }
+      counters.blocked += 1;
+      record.blocked += 1;
       // 正控可暂换 record.impl；正常路径绝不调用它，也不读取 args。
       const error = new Error('D_NETWORK_GUARD_BLOCKED');
       error.code = 'D_NETWORK_GUARD_BLOCKED';
@@ -222,6 +216,7 @@ if (globalThis.__DSH_D_NETWORK_GUARD__) {
     const before = counters.blocked;
     const forwardedBefore = counters.forwarded;
     let caught = 0;
+    let internalBlocked = 0;
     const checks = [];
     for (const record of records) {
       const spec = SAFE_CANARY_INVOCATIONS.get(record.label);
@@ -235,24 +230,25 @@ if (globalThis.__DSH_D_NETWORK_GUARD__) {
       const slotBefore = record.blocked;
       let canaryPositive = false;
       let forwarded = 0;
+      let slotInternal = 0;
       try {
         if (spec && spec.syncSafe !== false) {
           record.impl = spy;
           // 正控：调用与被捕获原函数相连的 spy（安全快速失败参数，不发网络）。
+          const internalBefore = counters.blocked;
           try {
-            canaryWindow = true;
             const result = Reflect.apply(spy, spec.thisArg ?? undefined, spec.args);
             if (result && typeof result.then === 'function') result.catch(() => {});
           } catch (error) { /* fail-fast */ }
-          finally { canaryWindow = false; }
+          slotInternal = counters.blocked - internalBefore;
           canaryPositive = record.originalInvoked === originalBefore + 1;
           const targetBefore = record.originalInvoked;
           try { Reflect.apply(record.object[record.key], undefined, []); }
           catch (error) { blockedCode = !!error && error.code === 'D_NETWORK_GUARD_BLOCKED'; }
           forwarded = record.originalInvoked - targetBefore;
         } else {
-          // 无安全委托参数（BLOCKED）：仅以局部计数哨兵证明 wrapper 不调用 impl，
-          // 不触碰真实原函数；委托缺口由 originalCanary 如实报告。
+          // 无安全委托参数或异步原函数：仅以局部计数哨兵证明 wrapper 不调用 impl，
+          // 不触碰真实原函数；委托缺口由 originalCanary 与 VM 外部目标控制覆盖。
           record.impl = countOnly;
           Reflect.apply(record.impl, undefined, []);
           canaryPositive = countOnlyCalls === 1;
@@ -265,19 +261,21 @@ if (globalThis.__DSH_D_NETWORK_GUARD__) {
         restored = record.impl === originalImpl;
       }
       if (blockedCode) caught += 1;
+      internalBlocked += slotInternal;
       checks.push(Object.freeze({
         name: record.label, canaryPositive,
         canaryKind: (spec && spec.syncSafe !== false) ? 'original-connected' : 'count-only-async-or-blocked',
-        blockedCode, blockedDelta: record.blocked - slotBefore, forwarded, restored,
+        blockedCode, blockedDelta: record.blocked - slotBefore, forwarded, internalBlocked: slotInternal, restored,
         wrapperIdentity: record.object[record.key] === record.wrapper,
       }));
     }
     const blockedDelta = counters.blocked - before;
     const forwarded = counters.forwarded - forwardedBefore;
     return Object.freeze({
+      // blocked 总增量 = 每槽 wrapper 各 1 次 + 正控委托期间可归因的内部拦截。
       ok: checks.every((c) => c.canaryPositive && c.blockedCode && c.blockedDelta === 1 &&
-        c.forwarded === 0 && c.restored && c.wrapperIdentity) && blockedDelta === records.length,
-      attempts: records.length, caught, blockedDelta, forwarded,
+        c.forwarded === 0 && c.restored && c.wrapperIdentity) && blockedDelta === records.length + internalBlocked,
+      attempts: records.length, caught, blockedDelta, internalBlocked, forwarded,
       entries: Object.freeze(checks),
     });
   }
@@ -294,6 +292,7 @@ if (globalThis.__DSH_D_NETWORK_GUARD__) {
     const entries = [];
     let exercised = 0;
     let blockedCount = 0;
+    let attributableInternalBlocked = 0;
     for (const record of records) {
       const spec = SAFE_CANARY_INVOCATIONS.get(record.label);
       const before = record.originalInvoked;
@@ -301,7 +300,7 @@ if (globalThis.__DSH_D_NETWORK_GUARD__) {
         blockedCount += 1;
         entries.push(Object.freeze({
           name: record.label, status: 'blocked',
-          reason: '无可安全快速失败的调用参数（真实委托需建立监听或网络连接，超出授权）',
+          reason: '无可安全快速失败的调用参数（真实委托需建立监听或网络连接，超出授权）；外部队列目标合成证据由 VM 控制覆盖',
           originalInvokedDelta: 0,
         }));
         continue;
@@ -311,10 +310,11 @@ if (globalThis.__DSH_D_NETWORK_GUARD__) {
       let returned = false;
       let resolvedUnexpected = false;
       let restored = false;
+      let internalBlocked = 0;
+      const internalBefore = counters.blocked;
       try {
         record.impl = spy;
         try {
-          canaryWindow = true;
           const result = Reflect.apply(spy, spec.thisArg ?? undefined, spec.args);
           if (result && typeof result.then === 'function') {
             await result.then(() => { resolvedUnexpected = true; }, (error) => { threw = (error && error.code) || 'REJECTED'; });
@@ -323,26 +323,43 @@ if (globalThis.__DSH_D_NETWORK_GUARD__) {
           }
         } catch (error) {
           threw = (error && error.code) || 'THREW';
-        } finally {
-          canaryWindow = false;
         }
       } finally {
+        internalBlocked = counters.blocked - internalBefore;
         record.impl = record.original;
         restored = record.impl === record.original;
       }
+      attributableInternalBlocked += internalBlocked;
       const status = resolvedUnexpected ? 'blocked' : 'ok';
       if (resolvedUnexpected) blockedCount += 1; else exercised += 1;
       entries.push(Object.freeze({
         name: record.label, status, exercised: status === 'ok',
         reason: resolvedUnexpected ? 'canary 调用未快速失败（存在实际网络风险，拒绝计入）' : null,
-        returned, threw, restored, originalInvokedDelta: record.originalInvoked - before,
+        returned, threw, restored, internalBlocked,
+        originalInvokedDelta: record.originalInvoked - before,
       }));
     }
     return Object.freeze({
       ok: true, total: records.length, exercised, blockedCount,
+      attributableInternalBlocked,
       originalInvoked: counters.originalInvoked,
       entries: Object.freeze(entries),
     });
+  }
+
+  /** CF-R2-12 第二轮：暴露实际捕获目标（身份证明用，只读）。 */
+  function capturedTargets() {
+    return Object.freeze(records.map((r) => Object.freeze({
+      name: r.label, target: r.original,
+    })));
+  }
+
+  /** CF-R2-12 第二轮：通过 wrapper 调用（正常应抛 D_NETWORK_GUARD_BLOCKED）。 */
+  function invokeWrapper(name) {
+    assert.equal(installed, true, 'D_NETWORK_GUARD_NOT_INSTALLED');
+    const record = records.find((r) => r.label === name);
+    assert.ok(record, `D_NETWORK_GUARD_UNKNOWN_SLOT: ${name}`);
+    Reflect.apply(record.object[record.key], undefined, []);
   }
 
   async function verifyNamedBindings() {
@@ -383,12 +400,13 @@ if (globalThis.__DSH_D_NETWORK_GUARD__) {
   }
 
   const state = Object.freeze({
-    name: 'd-network-guard', version: 3,
+    name: 'd-network-guard', version: 4,
     patchedEntries: Object.freeze(records.map((r) => r.label)), patchedCount: records.length,
     captureOrder: Object.freeze(records.map((r) => r.label)),
     counters, installedAt: new Date().toISOString(),
     snapshot, assertNoViolations, assertLoadTimeClean, loadTimeSnapshot,
     selfTest, originalCanary, verifyNamedBindings, restore,
+    capturedTargets, invokeWrapper,
   });
   globalThis.__DSH_D_NETWORK_GUARD__ = state;
   module.exports = state;

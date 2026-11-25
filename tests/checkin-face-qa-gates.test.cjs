@@ -522,6 +522,53 @@ test('CF-R2-11 第二轮：合法 planTemplateNo/photoPath 赋值对照（正例
   assert.match(result.stdout, /0 violations/);
 });
 
+// ---------------------------------------------------------------------------
+// CF-R2-11 第三轮：完整赋值左值/解构目标识别（括号目标、多目标/嵌套解构）
+// ---------------------------------------------------------------------------
+
+const CF_R2_11_ROUND3_MUTATIONS = [
+  ['paren-target', '  (request.mode) = "simulation";'],
+  ['multi-paren-target', '  ((request.mode)) = "simulation";'],
+  ['array-multi-target', '  [request.mode, request.photoPath] = ["simulation", "x"];'],
+  ['array-multi-target-hard-second', '  [request.photoPath, request.mode] = ["x", "simulation"];'],
+  ['array-bracket-target', '  [request["mode"]] = ["simulation"];'],
+  ['nested-object-destructure', '  ({ a: { b: request.mode } } = { a: { b: "simulation" } });'],
+];
+for (const [label, injected] of CF_R2_11_ROUND3_MUTATIONS) {
+  test(`CF-R2-11 第三轮：构造后 ${label} 左值覆盖 → node --check 合法且门禁精确失败（绕过负例）`, () => {
+    const dir = buildStaticTree(`cfr3-${label}`);
+    const file = path.join(dir, 'tools', 'checkin-face-worker', 'worker-runtime.mjs');
+    const mutated = realWorkerSource.replace(
+      /(\r?\n)  return request;(\r?\n)/,
+      (m, nl1, nl2) => `${nl1}${injected}${nl1}  return request;${nl2}`,
+    );
+    assert.notEqual(mutated, realWorkerSource, `负控必须实际注入 ${label}`);
+    fs.writeFileSync(file, mutated);
+    // 先证明注入是合法 JS（语法级），再断言门禁拒绝。
+    const syntax = runNode(['--check', file], dir);
+    assert.equal(syntax.status, 0, `注入必须语法合法：${syntax.stderr}`);
+    const result = runNode([path.join(dir, 'scripts', 'checkin-face-static-check.mjs')], dir);
+    assert.equal(result.status, 1, `${label} 左值覆盖必须被门禁拒绝`);
+    assert.match(result.stderr, CF_R2_11_POST_MSG, `stderr: ${result.stderr}`);
+  });
+}
+
+test('CF-R2-11 第三轮：仅解构合法字段（planTemplateNo/photoPath）对照（正例）→ 门禁通过', () => {
+  const dir = buildStaticTree('cfr3-legit-destructure');
+  const file = path.join(dir, 'tools', 'checkin-face-worker', 'worker-runtime.mjs');
+  const mutated = realWorkerSource.replace(
+    /(\r?\n)  return request;(\r?\n)/,
+    (m, nl1, nl2) => `${nl1}  [request.planTemplateNo, request.photoPath] = ["T-1", "C:\\\\tmp\\\\p.jpg"];${nl1}  return request;${nl2}`,
+  );
+  assert.notEqual(mutated, realWorkerSource, '正例必须实际注入合法解构');
+  fs.writeFileSync(file, mutated);
+  const syntax = runNode(['--check', file], dir);
+  assert.equal(syntax.status, 0, `注入必须语法合法：${syntax.stderr}`);
+  const result = runNode([path.join(dir, 'scripts', 'checkin-face-static-check.mjs')], dir);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /0 violations/);
+});
+
 test('CF-R2-11：同名 getter 覆盖 mode → 门禁精确失败（绕过负例）', () => {
   const dir = buildStaticTree('cfr2-getter');
   const file = path.join(dir, 'tools', 'checkin-face-worker', 'worker-runtime.mjs');

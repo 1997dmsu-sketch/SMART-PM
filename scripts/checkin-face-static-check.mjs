@@ -199,29 +199,59 @@ function requireRequestConstruction(file, pairs) {
     return;
   }
   const { fields, unsafe, closedAt } = constructors[0];
-  // CF-R2-11 第二轮：构造后对硬要求成员的一切赋值/更新形式——
-  // 普通=、逻辑赋值（&&=/||=/??=）、复合赋值（+=/-=/*=//=//%=//**=）、
-  // 位/移位赋值（&=/|=/^=/<<=/>>=/>>>=）、前后缀 ++/--、
-  // 点访问与静态字符串下标、解构赋值与 Object.assign/defineProperty。
+  // CF-R2-11 第三轮：识别完整赋值左值/解构目标（而非固定相邻 token）——
+  // 覆盖括号赋值目标（含多层）、数组/对象多目标与嵌套解构中的硬字段；
+  // 点访问与静态字符串下标一致；受限语法无法证明安全时失败关闭。
   const ASSIGN_OPS = ['=', '&&=', '||=', '??=', '+=', '-=', '*=', '/=', '%=', '**=', '&=', '|=', '^=', '<<=', '>>=', '>>>='];
   const UPDATE_OPS = ['++', '--'];
+  const OPENERS = new Set(['{', '[', '(']);
+  const CLOSERS = new Set(['}', ']', ')']);
+  const STATEMENT_BOUNDARY = new Set([';', '{', '}']);
+  const LHS_KEYWORDS = new Set(['const', 'let', 'var', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'function', '=>', ':', ',']);
+  const isHardMember = (at) => tokens[at]?.type === 'identifier' && tokens[at].value === 'request'
+    && ((tokens[at + 1]?.value === '.' && HARD_REQUEST_KEYS.includes(tokens[at + 2]?.value))
+      || (tokens[at + 1]?.value === '[' && tokens[at + 2]?.type === 'string'
+        && HARD_REQUEST_KEYS.includes(tokens[at + 2].value) && tokens[at + 3]?.value === ']'));
+  const containsHardMember = (from, to) => {
+    for (let i = from; i <= to; i++) if (isHardMember(i)) return true;
+    return false;
+  };
+  const collectBackward = (start) => {
+    let local = 0;
+    const indexes = [];
+    for (let j = start; j >= 0; j--) {
+      const t = tokens[j];
+      if (CLOSERS.has(t.value)) { local += 1; indexes.unshift(j); continue; }
+      if (OPENERS.has(t.value)) { local -= 1; if (local < 0) break; indexes.unshift(j); continue; }
+      if (local === 0 && (STATEMENT_BOUNDARY.has(t.value) || LHS_KEYWORDS.has(t.value))) break;
+      indexes.unshift(j);
+    }
+    return indexes;
+  };
+  const collectForward = (start) => {
+    let local = 0;
+    const indexes = [];
+    for (let j = start; j < tokens.length; j++) {
+      const t = tokens[j];
+      if (OPENERS.has(t.value)) { local += 1; indexes.push(j); continue; }
+      if (CLOSERS.has(t.value)) { local -= 1; if (local < 0) break; indexes.push(j); continue; }
+      if (local === 0 && (STATEMENT_BOUNDARY.has(t.value) || [',', ':'].includes(t.value))) break;
+      indexes.push(j);
+    }
+    return indexes;
+  };
   let postAssigned = false;
-  for (let item = Math.max(0, closedAt); item < tokens.length - 4; item++) {
-    if (tokens[item].type !== 'identifier' || tokens[item].value !== 'request') continue;
-    if (item >= 1 && UPDATE_OPS.includes(tokens[item - 1]?.value)) { postAssigned = true; }
-    const after = tokens[item + 1]?.value;
-    if (after === '.') {
-      const key = tokens[item + 2]?.value;
-      if (HARD_REQUEST_KEYS.includes(key)) {
-        const op = tokens[item + 3]?.value;
-        if (ASSIGN_OPS.includes(op) || UPDATE_OPS.includes(op)) postAssigned = true;
-        // 解构赋值：{ mode: request.mode } = … / [request.mode] = …
-        if ((op === '}' || op === ']') && tokens[item + 4]?.value === '=') postAssigned = true;
-      }
-    } else if (after === '[' && tokens[item + 2]?.type === 'string'
-      && HARD_REQUEST_KEYS.includes(tokens[item + 2]?.value) && tokens[item + 3]?.value === ']') {
-      const op = tokens[item + 4]?.value;
-      if (ASSIGN_OPS.includes(op) || UPDATE_OPS.includes(op)) postAssigned = true;
+  for (let item = Math.max(0, closedAt); item < tokens.length; item++) {
+    const current = tokens[item];
+    if (current.type !== 'punctuation') continue;
+    if (ASSIGN_OPS.includes(current.value)) {
+      const lhs = collectBackward(item - 1);
+      if (lhs.length && containsHardMember(lhs[0], lhs[lhs.length - 1])) postAssigned = true;
+    } else if (UPDATE_OPS.includes(current.value)) {
+      const lhs = collectBackward(item - 1);
+      if (lhs.length && containsHardMember(lhs[0], lhs[lhs.length - 1])) { postAssigned = true; continue; }
+      const operand = collectForward(item + 1);
+      if (operand.length && containsHardMember(operand[0], operand[operand.length - 1])) postAssigned = true;
     }
   }
   // Object.assign(request, …) / Object.defineProperty(request, …) 同样失败关闭。

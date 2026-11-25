@@ -1,0 +1,472 @@
+pageType: content
+background:
+  type: solid
+  color: "$background"
+elements:
+  # 页眉
+  - elementId: title
+    elementType: text
+    bounds: [48, 24, 980, 44]
+    content:
+      style: "$title"
+      wrap: false
+      align: [left, middle]
+      text: CORE-01｜端到端验收流程图
+  - elementId: subtitle
+    elementType: text
+    bounds: [48, 72, 1030, 24]
+    content:
+      style: "$subtitle"
+      wrap: false
+      align: [left, middle]
+      text: 在线签约 → 签约后录入人脸 → 授权开门｜M3 · P1 必须跑通
+  - elementId: status-box
+    elementType: shape
+    bounds: [1190, 28, 362, 60]
+    shapeName: roundRect
+    adjustments: [9000]
+    fill: {type: solid, color: "$dangerSoft"}
+  - elementId: status-text
+    elementType: text
+    bounds: [1208, 36, 326, 44]
+    content:
+      fontSize: 12.5
+      bold: true
+      color: "$danger"
+      lineHeight: 1.3
+      align: [left, middle]
+      text: 当前：只有分散代码片段，尚无完整实现与端到端验收证据
+  - elementId: header-rule
+    elementType: line
+    bounds: [48, 106, 1504, 2]
+    viewBox: [1504, 2]
+    points: "0,1 1504,1"
+    border: {style: solid, width: 1, color: "$faint"}
+
+  # 验收执行准备
+  - elementId: prep-title
+    elementType: text
+    bounds: [48, 122, 160, 30]
+    content: {style: "$section", wrap: false, align: [left, middle], text: 验收执行准备}
+  - elementId: prep-subtitle
+    elementType: text
+    bounds: [48, 156, 154, 46]
+    content: {style: "$small", align: [left, top], text: 先固定测试对象与口径，再开始三阶段操作}
+  - elementId: prep1-box
+    elementType: shape
+    bounds: [220, 120, 300, 88]
+    shapeName: roundRect
+    adjustments: [7000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 1, color: "$faint"}
+  - elementId: prep1-title
+    elementType: text
+    bounds: [238, 132, 264, 24]
+    content: {fontSize: 13.5, bold: true, color: "$forest", wrap: false, align: [left, middle], text: 01｜目标环境}
+  - elementId: prep1-body
+    elementType: text
+    bounds: [238, 162, 264, 34]
+    content: {fontSize: 12, color: "$ink", lineHeight: 1.3, align: [left, top], text: 环境、平台权限与体验成员等执行条件已核实}
+  - elementId: prep2-box
+    elementType: shape
+    bounds: [545, 120, 300, 88]
+    shapeName: roundRect
+    adjustments: [7000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 1, color: "$faint"}
+  - elementId: prep2-title
+    elementType: text
+    bounds: [563, 132, 264, 24]
+    content: {fontSize: 13.5, bold: true, color: "$forest", wrap: false, align: [left, middle], text: 02｜测试对象}
+  - elementId: prep2-body
+    elementType: text
+    bounds: [563, 162, 264, 34]
+    content: {fontSize: 12, color: "$ink", lineHeight: 1.3, align: [left, top], text: 同一住户、本人房屋与有效租期作为贯穿主键}
+  - elementId: prep3-box
+    elementType: shape
+    bounds: [870, 120, 300, 88]
+    shapeName: roundRect
+    adjustments: [7000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 1, color: "$faint"}
+  - elementId: prep3-title
+    elementType: text
+    bounds: [888, 132, 264, 24]
+    content: {fontSize: 13.5, bold: true, color: "$forest", wrap: false, align: [left, middle], text: 03｜合同与设备}
+  - elementId: prep3-body
+    elementType: text
+    bounds: [888, 162, 264, 34]
+    content: {fontSize: 12, color: "$ink", lineHeight: 1.3, align: [left, top], text: 合同 ID／版本、房屋范围与目标设备范围明确}
+  - elementId: prep4-box
+    elementType: shape
+    bounds: [1195, 120, 357, 88]
+    shapeName: roundRect
+    adjustments: [7000]
+    fill: {type: solid, color: "$amberSoft"}
+    border: {style: solid, width: 1, color: "#B85E2E55"}
+  - elementId: prep4-title
+    elementType: text
+    bounds: [1213, 132, 321, 24]
+    content: {fontSize: 13.5, bold: true, color: "$amber", wrap: false, align: [left, middle], text: 04｜实施前待确认}
+  - elementId: prep4-body
+    elementType: text
+    bounds: [1213, 160, 321, 40]
+    content: {fontSize: 12, color: "$ink", lineHeight: 1.3, align: [left, top], text: 签署主体／生效、房屋／设备范围及现场验收条件}
+
+  # 主流程标题
+  - elementId: flow-title
+    elementType: text
+    bounds: [48, 224, 720, 30]
+    content: {style: "$section", wrap: false, align: [left, middle], text: 主流程｜任一阶段未通过，全链路不通过}
+  - elementId: flow-note
+    elementType: text
+    bounds: [1090, 226, 462, 26]
+    content: {fontSize: 12, color: "$muted", wrap: false, align: [right, middle], text: 操作、系统结果与现场事实分别记录}
+
+  # 阶段一卡片
+  - elementId: stage1-card
+    elementType: shape
+    bounds: [48, 264, 460, 460]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 1, color: "$faint"}
+    shadow: {blur: 10, color: "#173F3514", offset: [0, 4]}
+  - elementId: stage1-head
+    elementType: shape
+    bounds: [48, 264, 460, 64]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$forest"}
+  - elementId: stage1-head-cover
+    elementType: shape
+    bounds: [48, 306, 460, 22]
+    shapeName: rect
+    fill: {type: solid, color: "$forest"}
+  - elementId: stage1-num
+    elementType: text
+    bounds: [68, 276, 42, 40]
+    content: {fontSize: 22, bold: true, color: "#DCE7E1", wrap: false, align: [center, middle], text: "01"}
+  - elementId: stage1-title
+    elementType: text
+    bounds: [122, 276, 330, 40]
+    content: {fontSize: 21, bold: true, color: "$white", wrap: false, align: [left, middle], text: 在线签约}
+  - elementId: stage1-label1
+    elementType: text
+    bounds: [72, 350, 120, 22]
+    content: {style: "$label", wrap: false, align: [left, middle], text: 住户操作}
+  - elementId: stage1-body1
+    elementType: text
+    bounds: [72, 378, 412, 52]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: 基于同一合同 ID／版本在线确认并签署，提交后查询签署结果。
+  - elementId: stage1-label2
+    elementType: text
+    bounds: [72, 442, 120, 22]
+    content: {style: "$label", wrap: false, align: [left, middle], text: 系统校验}
+  - elementId: stage1-body2
+    elementType: text
+    bounds: [72, 470, 412, 56]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: 核对签署主体、合同版本与生效口径；保存可查询的在线签署事实。
+  - elementId: stage1-label3
+    elementType: text
+    bounds: [72, 538, 120, 22]
+    content: {style: "$label", wrap: false, align: [left, middle], text: 通过证据}
+  - elementId: stage1-body3
+    elementType: text
+    bounds: [72, 566, 412, 68]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: 目标环境显示在线已签；签署记录关联同一住户、房屋和合同，后续阶段可引用。
+  - elementId: stage1-not-box
+    elementType: shape
+    bounds: [64, 650, 428, 56]
+    shapeName: roundRect
+    adjustments: [6000]
+    fill: {type: solid, color: "$soft"}
+  - elementId: stage1-not
+    elementType: text
+    bounds: [80, 657, 396, 42]
+    content: {fontSize: 11.5, color: "$muted", lineHeight: 1.3, align: [left, middle], text: 不计通过：预览、勾选、文件生成或线下补签，不等于在线已签。}
+
+  # 阶段间箭头一
+  - elementId: gate1-label
+    elementType: text
+    bounds: [503, 438, 74, 22]
+    content: {fontSize: 11, bold: true, color: "$amber", wrap: false, align: [center, middle], text: 签约有效}
+  - elementId: gate1-arrow
+    elementType: line
+    bounds: [516, 474, 46, 8]
+    viewBox: [46, 8]
+    points: "0,4 46,4"
+    arrow: [null, stealth]
+    border: {style: solid, width: 3, color: "$amber"}
+
+  # 阶段二卡片
+  - elementId: stage2-card
+    elementType: shape
+    bounds: [570, 264, 460, 460]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 2, color: "$amber"}
+    shadow: {blur: 12, color: "#B85E2E20", offset: [0, 5]}
+  - elementId: stage2-head
+    elementType: shape
+    bounds: [570, 264, 460, 64]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$amber"}
+  - elementId: stage2-head-cover
+    elementType: shape
+    bounds: [570, 306, 460, 22]
+    shapeName: rect
+    fill: {type: solid, color: "$amber"}
+  - elementId: stage2-num
+    elementType: text
+    bounds: [590, 276, 42, 40]
+    content: {fontSize: 22, bold: true, color: "#F7E9DE", wrap: false, align: [center, middle], text: "02"}
+  - elementId: stage2-title
+    elementType: text
+    bounds: [644, 276, 340, 40]
+    content: {fontSize: 21, bold: true, color: "$white", wrap: false, align: [left, middle], text: 签约后录入人脸}
+  - elementId: stage2-label1
+    elementType: text
+    bounds: [594, 350, 120, 22]
+    content: {style: "$label", color: "$amber", wrap: false, align: [left, middle], text: 住户操作}
+  - elementId: stage2-body1
+    elementType: text
+    bounds: [594, 378, 412, 52]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: 签约完成后上传本人人脸，并关联同一房屋、合同及租期起止。
+  - elementId: stage2-label2
+    elementType: text
+    bounds: [594, 442, 120, 22]
+    content: {style: "$label", color: "$amber", wrap: false, align: [left, middle], text: 系统校验}
+  - elementId: stage2-body2
+    elementType: text
+    bounds: [594, 470, 412, 56]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: 校验身份、房屋、合同与租期；分别记录上传、设备登记和授权结果。
+  - elementId: stage2-label3
+    elementType: text
+    bounds: [594, 538, 120, 22]
+    content: {style: "$label", color: "$amber", wrap: false, align: [left, middle], text: 通过证据}
+  - elementId: stage2-body3
+    elementType: text
+    bounds: [594, 566, 412, 68]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: 人脸记录关联同一合同；目标设备登记有效，授权覆盖租期起止、每日 24 小时通行。
+  - elementId: stage2-not-box
+    elementType: shape
+    bounds: [586, 650, 428, 56]
+    shapeName: roundRect
+    adjustments: [6000]
+    fill: {type: solid, color: "$amberSoft"}
+  - elementId: stage2-not
+    elementType: text
+    bounds: [602, 657, 396, 42]
+    content: {fontSize: 11.5, color: "$amber", lineHeight: 1.3, align: [left, middle], text: 不计通过：照片上传成功，不等于设备登记或门禁授权已成功。}
+
+  # 阶段间箭头二
+  - elementId: gate2-label
+    elementType: text
+    bounds: [1018, 438, 88, 22]
+    content: {fontSize: 11, bold: true, color: "$amber", wrap: false, align: [center, middle], text: 登记＋授权}
+  - elementId: gate2-arrow
+    elementType: line
+    bounds: [1038, 474, 46, 8]
+    viewBox: [46, 8]
+    points: "0,4 46,4"
+    arrow: [null, stealth]
+    border: {style: solid, width: 3, color: "$amber"}
+
+  # 阶段三卡片
+  - elementId: stage3-card
+    elementType: shape
+    bounds: [1092, 264, 460, 460]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 1, color: "$faint"}
+    shadow: {blur: 10, color: "#173F3514", offset: [0, 4]}
+  - elementId: stage3-head
+    elementType: shape
+    bounds: [1092, 264, 460, 64]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$forest"}
+  - elementId: stage3-head-cover
+    elementType: shape
+    bounds: [1092, 306, 460, 22]
+    shapeName: rect
+    fill: {type: solid, color: "$forest"}
+  - elementId: stage3-num
+    elementType: text
+    bounds: [1112, 276, 42, 40]
+    content: {fontSize: 22, bold: true, color: "#DCE7E1", wrap: false, align: [center, middle], text: "03"}
+  - elementId: stage3-title
+    elementType: text
+    bounds: [1166, 276, 330, 40]
+    content: {fontSize: 21, bold: true, color: "$white", wrap: false, align: [left, middle], text: 授权开门}
+  - elementId: stage3-label1
+    elementType: text
+    bounds: [1116, 350, 120, 22]
+    content: {style: "$label", wrap: false, align: [left, middle], text: 现场操作}
+  - elementId: stage3-body1
+    elementType: text
+    bounds: [1116, 378, 412, 52]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: 已授权住户在目标设备现场刷脸，观察并记录实际开门结果。
+  - elementId: stage3-label2
+    elementType: text
+    bounds: [1116, 442, 120, 22]
+    content: {style: "$label", wrap: false, align: [left, middle], text: 系统校验}
+  - elementId: stage3-body2
+    elementType: text
+    bounds: [1116, 470, 412, 56]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: 核验本人、房屋、租期与设备权限；记录设备结果，失败与未知不伪成功。
+  - elementId: stage3-label3
+    elementType: text
+    bounds: [1116, 538, 120, 22]
+    content: {style: "$label", wrap: false, align: [left, middle], text: 通过证据}
+  - elementId: stage3-body3
+    elementType: text
+    bounds: [1116, 566, 412, 68]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: 目标环境门已物理打开；开门时间、设备与结果可追溯至同一住户、房屋和合同。
+  - elementId: stage3-not-box
+    elementType: shape
+    bounds: [1108, 650, 428, 56]
+    shapeName: roundRect
+    adjustments: [6000]
+    fill: {type: solid, color: "$soft"}
+  - elementId: stage3-not
+    elementType: text
+    bounds: [1124, 657, 396, 42]
+    content: {fontSize: 11.5, color: "$muted", lineHeight: 1.3, align: [left, middle], text: 不计通过：请求受理、云端任务成功或客户端成功页，不等于门已打开。}
+
+  # 全链路通过判定
+  - elementId: pass-band
+    elementType: shape
+    bounds: [48, 752, 1504, 78]
+    shapeName: roundRect
+    adjustments: [6000]
+    fill: {type: solid, color: "$forest"}
+  - elementId: pass-title
+    elementType: text
+    bounds: [72, 768, 168, 46]
+    content: {fontSize: 20, bold: true, color: "$white", wrap: false, align: [left, middle], text: 全链路通过}
+  - elementId: pass-divider
+    elementType: line
+    bounds: [246, 770, 2, 42]
+    viewBox: [2, 42]
+    points: "1,0 1,42"
+    border: {style: solid, width: 1, color: "#FFFFFF55"}
+  - elementId: pass-body
+    elementType: text
+    bounds: [272, 764, 1248, 54]
+    content:
+      fontSize: 14
+      color: "$white"
+      lineHeight: 1.4
+      align: [left, middle]
+      text: 同一住户／房屋／合同贯穿三阶段；在线签署、人脸上传、设备登记、授权与现场开门证据齐全，任何失败或未知结果均不判通过。
+
+  # 底部失败与证据清单
+  - elementId: negative-card
+    elementType: shape
+    bounds: [48, 856, 730, 172]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 1, color: "$faint"}
+  - elementId: negative-tick
+    elementType: line
+    bounds: [48, 878, 5, 28]
+    viewBox: [5, 28]
+    points: "2.5,0 2.5,28"
+    border: {style: solid, width: 5, color: "$danger"}
+  - elementId: negative-title
+    elementType: text
+    bounds: [72, 872, 480, 32]
+    content: {fontSize: 17, bold: true, color: "$danger", wrap: false, align: [left, middle], text: 失败与边界用例}
+  - elementId: negative-body
+    elementType: text
+    bounds: [72, 914, 678, 100]
+    content:
+      fontSize: 12.5
+      color: "$ink"
+      lineHeight: 1.45
+      align: [left, top]
+      text: |
+        未签／合同失效：不得进入后续授权
+        非本人／非本房／租期外／无设备权限：开门失败并留痕
+        上传成功但设备未登记：不得判定可开门
+        请求受理、结果未知或客户端成功页：不得伪造物理开门
+  - elementId: evidence-card
+    elementType: shape
+    bounds: [802, 856, 750, 172]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 1, color: "$faint"}
+  - elementId: evidence-tick
+    elementType: line
+    bounds: [802, 878, 5, 28]
+    viewBox: [5, 28]
+    points: "2.5,0 2.5,28"
+    border: {style: solid, width: 5, color: "$sage"}
+  - elementId: evidence-title
+    elementType: text
+    bounds: [826, 872, 480, 32]
+    content: {fontSize: 17, bold: true, color: "$forest", wrap: false, align: [left, middle], text: 验收证据包}
+  - elementId: evidence-body
+    elementType: text
+    bounds: [826, 914, 698, 100]
+    content:
+      fontSize: 12.5
+      color: "$ink"
+      lineHeight: 1.45
+      align: [left, top]
+      text: |
+        合同 ID／版本与在线签署记录
+        人脸上传、设备登记、授权结果分别记录
+        现场开门时间、设备、结果与目标环境版本
+        异常阻断与重试结果；不得记录真实密码等凭据
+
+  # 页脚边界
+  - elementId: footer-rule
+    elementType: line
+    bounds: [48, 1048, 1504, 2]
+    viewBox: [1504, 2]
+    points: "0,1 1504,1"
+    border: {style: solid, width: 1, color: "$faint"}
+  - elementId: footer
+    elementType: text
+    bounds: [48, 1060, 1504, 40]
+    content:
+      fontSize: 11.5
+      color: "$muted"
+      lineHeight: 1.35
+      align: [left, middle]
+      text: 边界：102 测试白名单不推广至正式流程；支付商户不是本链路前置。本图为验收设计，不代表现已实现、部署或设备验收完成。

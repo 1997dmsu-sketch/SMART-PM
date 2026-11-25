@@ -1,0 +1,453 @@
+pageType: content
+background:
+  type: solid
+  color: "$background"
+elements:
+  # 页眉
+  - elementId: title
+    elementType: text
+    bounds: [48, 24, 920, 44]
+    content: {style: "$title", wrap: false, align: [left, middle], text: SMART-PM｜项目交付路线图}
+  - elementId: subtitle
+    elementType: text
+    bounds: [48, 72, 950, 24]
+    content: {style: "$subtitle", wrap: false, align: [left, middle], text: M1 无码注册 → M2 真实房源与预约 → M3 核心签约门禁与续退租交接}
+  - elementId: status-box
+    elementType: shape
+    bounds: [1170, 28, 382, 60]
+    shapeName: roundRect
+    adjustments: [9000]
+    fill: {type: solid, color: "$dangerSoft"}
+  - elementId: status-text
+    elementType: text
+    bounds: [1188, 36, 346, 44]
+    content:
+      fontSize: 12.5
+      bold: true
+      color: "$danger"
+      lineHeight: 1.3
+      align: [left, middle]
+      text: 当前：需求与验收模板已整理；实现、部署和真实验收尚未完成
+  - elementId: header-rule
+    elementType: line
+    bounds: [48, 106, 1504, 2]
+    viewBox: [1504, 2]
+    points: "0,1 1504,1"
+    border: {style: solid, width: 1, color: "$faint"}
+
+  # 前置依赖
+  - elementId: prep-title
+    elementType: text
+    bounds: [48, 122, 170, 30]
+    content: {style: "$section", wrap: false, align: [left, middle], text: 前置依赖}
+  - elementId: prep-subtitle
+    elementType: text
+    bounds: [48, 156, 170, 44]
+    content: {style: "$small", align: [left, top], text: 已定政策不重问，只补执行条件、资料和未定细则}
+  - elementId: prep1-box
+    elementType: shape
+    bounds: [240, 120, 290, 84]
+    shapeName: roundRect
+    adjustments: [7000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 1, color: "$faint"}
+  - elementId: prep1-title
+    elementType: text
+    bounds: [256, 132, 258, 24]
+    content: {fontSize: 13.5, bold: true, color: "$forest", wrap: false, align: [left, middle], text: DEC-22｜目标环境}
+  - elementId: prep1-body
+    elementType: text
+    bounds: [256, 162, 258, 34]
+    content: {fontSize: 11.5, color: "$ink", lineHeight: 1.3, align: [left, top], text: 版本、平台权限、手机号服务与体验成员核实}
+  - elementId: prep2-box
+    elementType: shape
+    bounds: [550, 120, 290, 84]
+    shapeName: roundRect
+    adjustments: [7000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 1, color: "$faint"}
+  - elementId: prep2-title
+    elementType: text
+    bounds: [566, 132, 258, 24]
+    content: {fontSize: 13.5, bold: true, color: "$forest", wrap: false, align: [left, middle], text: DEC-18｜技术候选}
+  - elementId: prep2-body
+    elementType: text
+    bounds: [566, 162, 258, 34]
+    content: {fontSize: 11.5, color: "$ink", lineHeight: 1.3, align: [left, top], text: 形成无开户码新候选；固定代码旧码流程仍待改}
+  - elementId: prep3-box
+    elementType: shape
+    bounds: [860, 120, 290, 84]
+    shapeName: roundRect
+    adjustments: [7000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 1, color: "$faint"}
+  - elementId: prep3-title
+    elementType: text
+    bounds: [876, 132, 258, 24]
+    content: {fontSize: 13.5, bold: true, color: "$forest", wrap: false, align: [left, middle], text: DEC-19／24｜资料规则}
+  - elementId: prep3-body
+    elementType: text
+    bounds: [876, 162, 258, 34]
+    content: {fontSize: 11.5, color: "$ink", lineHeight: 1.3, align: [left, top], text: 正式房源资料、可约时段、冲突与改期取消规则}
+  - elementId: prep4-box
+    elementType: shape
+    bounds: [1170, 120, 382, 84]
+    shapeName: roundRect
+    adjustments: [7000]
+    fill: {type: solid, color: "$amberSoft"}
+    border: {style: solid, width: 1, color: "#B85E2E55"}
+  - elementId: prep4-title
+    elementType: text
+    bounds: [1186, 132, 350, 24]
+    content: {fontSize: 13.5, bold: true, color: "$amber", wrap: false, align: [left, middle], text: M3｜签署、设备与续退租细则}
+  - elementId: prep4-body
+    elementType: text
+    bounds: [1186, 160, 350, 40]
+    content: {fontSize: 11.5, color: "$ink", lineHeight: 1.3, align: [left, top], text: CORE-01 补签署／设备／现场条件；TEN-04 先确认 DEC-12 等规则}
+
+  # 主线标题
+  - elementId: flow-title
+    elementType: text
+    bounds: [48, 226, 780, 30]
+    content: {style: "$section", wrap: false, align: [left, middle], text: 实施主线｜前一阶段证据未齐，不放行后续阶段}
+  - elementId: flow-note
+    elementType: text
+    bounds: [1160, 228, 392, 26]
+    content: {fontSize: 12, color: "$muted", wrap: false, align: [right, middle], text: 全部验收默认未执行}
+
+  # M1 卡片
+  - elementId: m1-card
+    elementType: shape
+    bounds: [48, 280, 430, 450]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 1, color: "$faint"}
+    shadow: {blur: 10, color: "#173F3514", offset: [0, 4]}
+  - elementId: m1-head
+    elementType: shape
+    bounds: [48, 280, 430, 68]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$forest"}
+  - elementId: m1-head-cover
+    elementType: shape
+    bounds: [48, 324, 430, 24]
+    shapeName: rect
+    fill: {type: solid, color: "$forest"}
+  - elementId: m1-num
+    elementType: text
+    bounds: [66, 292, 42, 42]
+    content: {fontSize: 22, bold: true, color: "#DCE7E1", wrap: false, align: [center, middle], text: "01"}
+  - elementId: m1-title
+    elementType: text
+    bounds: [118, 288, 250, 30]
+    content: {fontSize: 20, bold: true, color: "$white", wrap: false, align: [left, middle], text: M1｜无码注册与账号}
+  - elementId: m1-subtitle
+    elementType: text
+    bounds: [118, 318, 250, 20]
+    content: {fontSize: 11.5, color: "#DCE7E1", wrap: false, align: [left, middle], text: 先解除真实账号可用性阻断}
+  - elementId: m1-priority
+    elementType: text
+    bounds: [388, 294, 66, 34]
+    content: {fontSize: 15, bold: true, color: "$white", wrap: false, align: [center, middle], text: P0}
+  - elementId: m1-body-label
+    elementType: text
+    bounds: [72, 366, 120, 22]
+    content: {fontSize: 12, bold: true, color: "$sage", wrap: false, align: [left, middle], text: 交付内容}
+  - elementId: m1-body
+    elementType: text
+    bounds: [72, 396, 382, 142]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: |
+        取消开户码入口、prepare 与后台消费码
+        手机号服务端核验后自动注册／复用
+        管理员为可信已注册住户关联密码，最低 8 位
+        真实创建指定测试账号，两种登录同一身份
+  - elementId: m1-dep-box
+    elementType: shape
+    bounds: [64, 548, 398, 50]
+    shapeName: roundRect
+    adjustments: [6000]
+    fill: {type: solid, color: "$soft"}
+  - elementId: m1-dep
+    elementType: text
+    bounds: [80, 555, 366, 36]
+    content: {fontSize: 11.5, color: "$muted", lineHeight: 1.3, align: [left, middle], text: 依赖：DEC-22 执行条件；DEC-18 无码新候选与真实账号证据}
+  - elementId: m1-gate-box
+    elementType: shape
+    bounds: [64, 616, 398, 92]
+    shapeName: roundRect
+    adjustments: [6000]
+    fill: {type: solid, color: "$forest"}
+  - elementId: m1-gate-title
+    elementType: text
+    bounds: [82, 626, 362, 26]
+    content: {fontSize: 15, bold: true, color: "$white", wrap: false, align: [left, middle], text: 放行 G1｜真实账号可用}
+  - elementId: m1-gate-body
+    elementType: text
+    bounds: [82, 656, 362, 42]
+    content: {fontSize: 11.5, color: "#E4EEE9", lineHeight: 1.3, align: [left, top], text: 账号实际创建＋双入口登录；无旧码旁路、无自动授房／门禁、无凭据泄露}
+
+  # G1 箭头
+  - elementId: gate1-label
+    elementType: text
+    bounds: [488, 442, 88, 24]
+    content: {fontSize: 12, bold: true, color: "$amber", wrap: false, align: [center, middle], text: G1 放行}
+  - elementId: gate1-arrow
+    elementType: line
+    bounds: [492, 480, 78, 8]
+    viewBox: [78, 8]
+    points: "0,4 78,4"
+    arrow: [null, stealth]
+    border: {style: solid, width: 3, color: "$amber"}
+
+  # M2 卡片
+  - elementId: m2-card
+    elementType: shape
+    bounds: [585, 280, 430, 450]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 1, color: "$faint"}
+    shadow: {blur: 10, color: "#173F3514", offset: [0, 4]}
+  - elementId: m2-head
+    elementType: shape
+    bounds: [585, 280, 430, 68]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$sage"}
+  - elementId: m2-head-cover
+    elementType: shape
+    bounds: [585, 324, 430, 24]
+    shapeName: rect
+    fill: {type: solid, color: "$sage"}
+  - elementId: m2-num
+    elementType: text
+    bounds: [603, 292, 42, 42]
+    content: {fontSize: 22, bold: true, color: "#E2EBE7", wrap: false, align: [center, middle], text: "02"}
+  - elementId: m2-title
+    elementType: text
+    bounds: [655, 288, 268, 30]
+    content: {fontSize: 20, bold: true, color: "$white", wrap: false, align: [left, middle], text: M2｜真实房源与预约}
+  - elementId: m2-subtitle
+    elementType: text
+    bounds: [655, 318, 250, 20]
+    content: {fontSize: 11.5, color: "#E2EBE7", wrap: false, align: [left, middle], text: 从包内样本转为真实服务记录}
+  - elementId: m2-priority
+    elementType: text
+    bounds: [925, 294, 66, 34]
+    content: {fontSize: 15, bold: true, color: "$white", wrap: false, align: [center, middle], text: P1}
+  - elementId: m2-body-label
+    elementType: text
+    bounds: [609, 366, 120, 22]
+    content: {fontSize: 12, bold: true, color: "$sage", wrap: false, align: [left, middle], text: 交付内容}
+  - elementId: m2-body
+    elementType: text
+    bounds: [609, 396, 382, 142]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: |
+        补齐真实资料；保留 242／232／10 测试边界
+        列表／分页／详情一致隐藏，未知字段不虚构
+        服务端预约返回同一受理号／状态／版本
+        全体 admin 直处理不排班；并发版本保护与审计
+  - elementId: m2-dep-box
+    elementType: shape
+    bounds: [601, 548, 398, 50]
+    shapeName: roundRect
+    adjustments: [6000]
+    fill: {type: solid, color: "$soft"}
+  - elementId: m2-dep
+    elementType: text
+    bounds: [617, 555, 366, 36]
+    content: {fontSize: 11.5, color: "$muted", lineHeight: 1.3, align: [left, middle], text: 依赖：DEC-19 正式房源资料；DEC-01／24 预约处理规则}
+  - elementId: m2-gate-box
+    elementType: shape
+    bounds: [601, 616, 398, 92]
+    shapeName: roundRect
+    adjustments: [6000]
+    fill: {type: solid, color: "$forest"}
+  - elementId: m2-gate-title
+    elementType: text
+    bounds: [619, 626, 362, 26]
+    content: {fontSize: 15, bold: true, color: "$white", wrap: false, align: [left, middle], text: 放行 G2｜房源与预约一致}
+  - elementId: m2-gate-body
+    elementType: text
+    bounds: [619, 656, 362, 42]
+    content: {fontSize: 11.5, color: "#E4EEE9", lineHeight: 1.3, align: [left, top], text: 真实云／挂牌有据；租客与后台同一记录；草稿不算受理，并发不覆盖}
+
+  # G2 箭头
+  - elementId: gate2-label
+    elementType: text
+    bounds: [1025, 442, 88, 24]
+    content: {fontSize: 12, bold: true, color: "$amber", wrap: false, align: [center, middle], text: G2 放行}
+  - elementId: gate2-arrow
+    elementType: line
+    bounds: [1029, 480, 78, 8]
+    viewBox: [78, 8]
+    points: "0,4 78,4"
+    arrow: [null, stealth]
+    border: {style: solid, width: 3, color: "$amber"}
+
+  # M3 卡片
+  - elementId: m3-card
+    elementType: shape
+    bounds: [1122, 280, 430, 450]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 2, color: "$amber"}
+    shadow: {blur: 12, color: "#B85E2E20", offset: [0, 5]}
+  - elementId: m3-head
+    elementType: shape
+    bounds: [1122, 280, 430, 68]
+    shapeName: roundRect
+    adjustments: [5000]
+    fill: {type: solid, color: "$amber"}
+  - elementId: m3-head-cover
+    elementType: shape
+    bounds: [1122, 324, 430, 24]
+    shapeName: rect
+    fill: {type: solid, color: "$amber"}
+  - elementId: m3-num
+    elementType: text
+    bounds: [1140, 292, 42, 42]
+    content: {fontSize: 22, bold: true, color: "#F7E9DE", wrap: false, align: [center, middle], text: "03"}
+  - elementId: m3-title
+    elementType: text
+    bounds: [1192, 288, 250, 30]
+    content: {fontSize: 20, bold: true, color: "$white", wrap: false, align: [left, middle], text: M3｜核心签约与交接}
+  - elementId: m3-subtitle
+    elementType: text
+    bounds: [1192, 318, 250, 20]
+    content: {fontSize: 11.5, color: "#F7E9DE", wrap: false, align: [left, middle], text: 两条 P1 工作线分别取证}
+  - elementId: m3-priority
+    elementType: text
+    bounds: [1462, 294, 66, 34]
+    content: {fontSize: 15, bold: true, color: "$white", wrap: false, align: [center, middle], text: P1}
+  - elementId: core-title
+    elementType: text
+    bounds: [1146, 362, 382, 26]
+    content: {fontSize: 15, bold: true, color: "$amber", wrap: false, align: [left, middle], text: CORE-01｜必须跑通}
+  - elementId: core-flow
+    elementType: text
+    bounds: [1146, 394, 382, 30]
+    content: {fontSize: 15, bold: true, color: "$forest", wrap: false, align: [left, middle], text: 在线签约 → 录入人脸 → 授权开门}
+  - elementId: core-body
+    elementType: text
+    bounds: [1146, 432, 382, 58]
+    content: {fontSize: 12, color: "$ink", lineHeight: 1.35, align: [left, top], text: 同一住户／房屋／合同贯穿；上传、登记、授权与现场开门分别取证}
+  - elementId: core-dep
+    elementType: text
+    bounds: [1146, 492, 382, 24]
+    content: {fontSize: 11, color: "$muted", wrap: false, align: [left, middle], text: 依赖：签署生效、设备范围与现场条件}
+  - elementId: m3-divider
+    elementType: line
+    bounds: [1146, 522, 382, 2]
+    viewBox: [382, 2]
+    points: "0,1 382,1"
+    border: {style: solid, width: 1, color: "$faint"}
+  - elementId: ten-title
+    elementType: text
+    bounds: [1146, 534, 382, 26]
+    content: {fontSize: 15, bold: true, color: "$amber", wrap: false, align: [left, middle], text: TEN-04｜P1 优先，细则待确认}
+  - elementId: ten-body
+    elementType: text
+    bounds: [1146, 568, 382, 54]
+    content: {fontSize: 12, color: "$ink", lineHeight: 1.35, align: [left, top], text: 续租、退租、验房交接、结算与权限回收分别留痕；DEC-12 未确认前不放行}
+  - elementId: m3-gate-box
+    elementType: shape
+    bounds: [1138, 632, 398, 76]
+    shapeName: roundRect
+    adjustments: [6000]
+    fill: {type: solid, color: "$forest"}
+  - elementId: m3-gate-title
+    elementType: text
+    bounds: [1156, 640, 362, 24]
+    content: {fontSize: 14.5, bold: true, color: "$white", wrap: false, align: [left, middle], text: 放行 G3｜核心链路与分项交接通过}
+  - elementId: m3-gate-body
+    elementType: text
+    bounds: [1156, 668, 362, 32]
+    content: {fontSize: 11, color: "#E4EEE9", lineHeight: 1.25, align: [left, top], text: CORE 同一对象端到端；TEN 各子项完成且证据有效，未知不办结}
+
+  # 统一交付门槛
+  - elementId: delivery-band
+    elementType: shape
+    bounds: [48, 758, 1504, 72]
+    shapeName: roundRect
+    adjustments: [6000]
+    fill: {type: solid, color: "$forest"}
+  - elementId: delivery-title
+    elementType: text
+    bounds: [72, 772, 176, 44]
+    content: {fontSize: 19, bold: true, color: "$white", wrap: false, align: [left, middle], text: 统一交付门槛}
+  - elementId: delivery-divider
+    elementType: line
+    bounds: [258, 774, 2, 40]
+    viewBox: [2, 40]
+    points: "1,0 1,40"
+    border: {style: solid, width: 1, color: "#FFFFFF55"}
+  - elementId: delivery-body
+    elementType: text
+    bounds: [284, 768, 1236, 52]
+    content: {fontSize: 14, color: "$white", lineHeight: 1.35, align: [left, middle], text: 前置已完成＋全部适用用例通过＋证据有效＋目标环境结果一致；任一失败、阻塞或未知，均不判交付通过。}
+
+  # 底部边界
+  - elementId: boundary1-tick
+    elementType: line
+    bounds: [48, 864, 5, 28]
+    viewBox: [5, 28]
+    points: "2.5,0 2.5,28"
+    border: {style: solid, width: 5, color: "$sage"}
+  - elementId: boundary1-title
+    elementType: text
+    bounds: [72, 858, 420, 30]
+    content: {fontSize: 16, bold: true, color: "$forest", wrap: false, align: [left, middle], text: 支付暂缓}
+  - elementId: boundary1-body
+    elementType: text
+    bounds: [72, 896, 430, 52]
+    content: {fontSize: 12, color: "$ink", lineHeight: 1.35, align: [left, top], text: 押金及第三方支付入口不上线；商户不阻断 M1／M2，不模拟支付或伪造到账}
+  - elementId: boundary2-tick
+    elementType: line
+    bounds: [566, 864, 5, 28]
+    viewBox: [5, 28]
+    points: "2.5,0 2.5,28"
+    border: {style: solid, width: 5, color: "$muted"}
+  - elementId: boundary2-title
+    elementType: text
+    bounds: [590, 858, 420, 30]
+    content: {fontSize: 16, bold: true, color: "$muted", wrap: false, align: [left, middle], text: 范围冻结}
+  - elementId: boundary2-body
+    elementType: text
+    bounds: [590, 896, 440, 52]
+    content: {fontSize: 12, color: "$muted", lineHeight: 1.35, align: [left, top], text: 报修保洁暂缓；MKT-01 本期不实现；OPS-05 不实现，均不进入当前交付主线}
+  - elementId: boundary3-tick
+    elementType: line
+    bounds: [1092, 864, 5, 28]
+    viewBox: [5, 28]
+    points: "2.5,0 2.5,28"
+    border: {style: solid, width: 5, color: "$amber"}
+  - elementId: boundary3-title
+    elementType: text
+    bounds: [1116, 858, 420, 30]
+    content: {fontSize: 16, bold: true, color: "$amber", wrap: false, align: [left, middle], text: 证据边界}
+  - elementId: boundary3-body
+    elementType: text
+    bounds: [1116, 896, 420, 52]
+    content: {fontSize: 12, color: "$ink", lineHeight: 1.35, align: [left, top], text: 386 项离线＋6 项归档仅属原固定包；文档、代码或离线测试不等于上线}
+
+  # 页脚
+  - elementId: footer-rule
+    elementType: line
+    bounds: [48, 956, 1504, 2]
+    viewBox: [1504, 2]
+    points: "0,1 1504,1"
+    border: {style: solid, width: 1, color: "$faint"}
+  - elementId: footer
+    elementType: text
+    bounds: [48, 964, 1504, 24]
+    content: {fontSize: 11, color: "$muted", wrap: false, align: [left, middle], text: 依据：SMART-PM 需求复核与拓展汇总｜本地提交 a9b2bef0｜配套：项目验收总控表（19 项前置、92 条用例、48 类证据）}

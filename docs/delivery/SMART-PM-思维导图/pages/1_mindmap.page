@@ -1,0 +1,448 @@
+pageType: content
+background:
+  type: solid
+  color: "$background"
+elements:
+  # 页眉与图例
+  - elementId: title
+    elementType: text
+    bounds: [48, 28, 720, 42]
+    content:
+      style: "$title"
+      wrap: false
+      align: [left, middle]
+      text: SMART-PM 需求思维导图
+  - elementId: subtitle
+    elementType: text
+    bounds: [48, 72, 780, 22]
+    content:
+      style: "$subtitle"
+      wrap: false
+      align: [left, middle]
+      text: 统一确认规则 · 核心业务流程 · 交付顺序 · 当前边界
+  - elementId: legend-core-line
+    elementType: line
+    bounds: [1110, 48, 34, 4]
+    viewBox: [34, 4]
+    points: "0,2 34,2"
+    border: {style: solid, width: 4, color: "$amber"}
+  - elementId: legend-core-text
+    elementType: text
+    bounds: [1154, 37, 140, 26]
+    content: {fontSize: 12, color: "$ink", wrap: false, align: [left, middle], text: 核心／待补证据}
+  - elementId: legend-main-line
+    elementType: line
+    bounds: [1300, 48, 34, 4]
+    viewBox: [34, 4]
+    points: "0,2 34,2"
+    border: {style: solid, width: 3, color: "$sage"}
+  - elementId: legend-main-text
+    elementType: text
+    bounds: [1344, 37, 90, 26]
+    content: {fontSize: 12, color: "$ink", wrap: false, align: [left, middle], text: 交付分支}
+  - elementId: legend-muted-line
+    elementType: line
+    bounds: [1450, 48, 34, 4]
+    viewBox: [34, 4]
+    points: "0,2 34,2"
+    border: {style: dash, width: 2, color: "$muted"}
+  - elementId: legend-muted-text
+    elementType: text
+    bounds: [1494, 37, 80, 26]
+    content: {fontSize: 12, color: "$ink", wrap: false, align: [left, middle], text: 暂缓后续}
+  - elementId: header-rule
+    elementType: line
+    bounds: [48, 105, 1504, 2]
+    viewBox: [1504, 2]
+    points: "0,1 1504,1"
+    border: {style: solid, width: 1, color: "$faint"}
+
+  # 中央根节点与各分支连接（箭头只用于 CORE-01 的先后顺序）
+  - elementId: connector-m1
+    elementType: line
+    bounds: [490, 240, 130, 160]
+    viewBox: [130, 160]
+    points: "130,160 64,80 0,0"
+    curve: smooth
+    border: {style: solid, width: 3, color: "$sage"}
+  - elementId: connector-m2
+    elementType: line
+    bounds: [490, 435, 130, 20]
+    viewBox: [130, 20]
+    points: "130,10 0,10"
+    curve: sharp
+    border: {style: solid, width: 3, color: "$sage"}
+  - elementId: connector-gap
+    elementType: line
+    bounds: [490, 470, 160, 200]
+    viewBox: [160, 200]
+    points: "160,0 80,100 0,200"
+    curve: smooth
+    border: {style: solid, width: 3, color: "$amber"}
+  - elementId: connector-core
+    elementType: line
+    bounds: [960, 162, 70, 228]
+    viewBox: [70, 228]
+    points: "0,228 34,112 70,0"
+    curve: smooth
+    border: {style: solid, width: 5, color: "$amber"}
+  - elementId: connector-bottom-trunk
+    elementType: line
+    bounds: [785, 490, 10, 260]
+    viewBox: [10, 260]
+    points: "5,0 5,260"
+    curve: sharp
+    border: {style: solid, width: 3, color: "$sage"}
+  - elementId: connector-bottom-bar
+    elementType: line
+    bounds: [660, 745, 720, 10]
+    viewBox: [720, 10]
+    points: "0,5 720,5"
+    curve: sharp
+    border: {style: solid, width: 3, color: "$sage"}
+  - elementId: connector-bottom-m3
+    elementType: line
+    bounds: [655, 750, 10, 40]
+    viewBox: [10, 40]
+    points: "5,0 5,40"
+    border: {style: solid, width: 3, color: "$sage"}
+  - elementId: connector-bottom-m4
+    elementType: line
+    bounds: [1015, 750, 10, 40]
+    viewBox: [10, 40]
+    points: "5,0 5,40"
+    border: {style: solid, width: 3, color: "$sage"}
+  - elementId: connector-bottom-m5
+    elementType: line
+    bounds: [1375, 750, 10, 40]
+    viewBox: [10, 40]
+    points: "5,0 5,40"
+    border: {style: dash, width: 2, color: "$muted"}
+
+  # 根节点
+  - elementId: root-shape
+    elementType: shape
+    bounds: [620, 350, 340, 140]
+    shapeName: ellipse
+    fill: {type: solid, color: "$forest"}
+    shadow: {blur: 12, color: "#173F3526", offset: [0, 5]}
+  - elementId: root-title
+    elementType: text
+    bounds: [660, 378, 260, 62]
+    content:
+      fontSize: 26
+      bold: true
+      color: "$white"
+      lineHeight: 1.15
+      align: [center, middle]
+      text: |
+        SMART-PM
+        需求与交付总览
+  - elementId: root-subtitle
+    elementType: text
+    bounds: [660, 445, 260, 20]
+    content:
+      fontSize: 12
+      color: "#DCE7E1"
+      wrap: false
+      align: [center, middle]
+      text: 七份分册 · 确认／实现／验收分列
+
+  # M1：账号与身份
+  - elementId: m1-tick
+    elementType: line
+    bounds: [48, 137, 5, 28]
+    viewBox: [5, 28]
+    points: "2.5,0 2.5,28"
+    border: {style: solid, width: 5, color: "$sage"}
+  - elementId: m1-title
+    elementType: text
+    bounds: [68, 132, 340, 36]
+    content:
+      style: "$branch"
+      wrap: false
+      align: [left, middle]
+      text: M1｜无码注册与账号
+  - elementId: m1-priority
+    elementType: text
+    bounds: [420, 137, 58, 24]
+    content: {fontSize: 12, bold: true, color: "$sage", align: [right, middle], text: P0 先行}
+  - elementId: m1-body
+    elementType: text
+    bounds: [68, 180, 390, 126]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: |
+        取消开户码；手机号经服务端核验后自动注册／复用
+        管理员为已注册住户开通密码；住户密码最低 8 位
+        注册不自动授房或门禁；指定测试账号尚未创建
+
+  # M2：房源与预约
+  - elementId: m2-tick
+    elementType: line
+    bounds: [48, 352, 5, 28]
+    viewBox: [5, 28]
+    points: "2.5,0 2.5,28"
+    border: {style: solid, width: 5, color: "$sage"}
+  - elementId: m2-title
+    elementType: text
+    bounds: [68, 347, 340, 36]
+    content:
+      style: "$branch"
+      wrap: false
+      align: [left, middle]
+      text: M2｜真实房源与预约
+  - elementId: m2-priority
+    elementType: text
+    bounds: [445, 352, 32, 24]
+    content: {fontSize: 12, bold: true, color: "$sage", align: [right, middle], text: P1}
+  - elementId: m2-body
+    elementType: text
+    bounds: [68, 395, 390, 154]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: |
+        栖山苑 9 层 242 间；首层 10 间隐藏，232 间公开测试单间
+        真实资料待补；未知租金／面积／地址不填 0 或虚构
+        全体 admin 直接受理／改期／取消／履约；不分配、不排班
+        本机草稿≠物业受理；支付商户不是前置
+
+  # 当前证据与缺口
+  - elementId: gap-tick
+    elementType: line
+    bounds: [48, 587, 5, 28]
+    viewBox: [5, 28]
+    points: "2.5,0 2.5,28"
+    border: {style: solid, width: 5, color: "$amber"}
+  - elementId: gap-title
+    elementType: text
+    bounds: [68, 582, 340, 36]
+    content:
+      style: "$branch"
+      color: "$amber"
+      wrap: false
+      align: [left, middle]
+      text: 当前证据与缺口
+  - elementId: gap-body
+    elementType: text
+    bounds: [68, 630, 400, 138]
+    content:
+      style: "$body"
+      align: [left, top]
+      text: |
+        固定代码仍有开户码；无开户码新候选尚未形成
+        未上传微信／部署云函数；真实登录结果未取得
+        CORE-01 只有分散片段，尚无端到端验收
+        386 项离线＋6 项归档仅属原固定包，不等于上线
+
+  # CORE-01：主重点
+  - elementId: core-head-shape
+    elementType: shape
+    bounds: [1030, 130, 510, 64]
+    shapeName: roundRect
+    adjustments: [12000]
+    fill: {type: solid, color: "$amber"}
+    shadow: {blur: 10, color: "#B85E2E24", offset: [0, 4]}
+  - elementId: core-head-text
+    elementType: text
+    bounds: [1050, 143, 470, 36]
+    content:
+      fontSize: 21
+      bold: true
+      color: "$white"
+      wrap: false
+      align: [center, middle]
+      text: CORE-01 · M3 · P1 必须跑通
+  - elementId: core-step1-circle
+    elementType: shape
+    bounds: [1040, 236, 44, 44]
+    shapeName: ellipse
+    fill: {type: solid, color: "$amberSoft"}
+    border: {style: solid, width: 2, color: "$amber"}
+  - elementId: core-step1-num
+    elementType: text
+    bounds: [1040, 236, 44, 44]
+    content: {fontSize: 15, bold: true, color: "$amber", wrap: false, align: [center, middle], text: "01"}
+  - elementId: core-step1-title
+    elementType: text
+    bounds: [1100, 230, 420, 30]
+    content: {fontSize: 20, bold: true, color: "$forest", wrap: false, align: [left, middle], text: 在线签约}
+  - elementId: core-step1-body
+    elementType: text
+    bounds: [1100, 264, 420, 44]
+    content:
+      fontSize: 13
+      color: "$ink"
+      lineHeight: 1.35
+      align: [left, top]
+      text: 同一合同 ID／版本保存确认与签署事实；预览、勾选或文件生成不等于在线已签
+  - elementId: core-arrow1
+    elementType: line
+    bounds: [1059, 286, 6, 52]
+    viewBox: [6, 52]
+    points: "3,0 3,52"
+    arrow: [null, stealth]
+    border: {style: solid, width: 3, color: "$amber"}
+  - elementId: core-step2-circle
+    elementType: shape
+    bounds: [1040, 344, 44, 44]
+    shapeName: ellipse
+    fill: {type: solid, color: "$amberSoft"}
+    border: {style: solid, width: 2, color: "$amber"}
+  - elementId: core-step2-num
+    elementType: text
+    bounds: [1040, 344, 44, 44]
+    content: {fontSize: 15, bold: true, color: "$amber", wrap: false, align: [center, middle], text: "02"}
+  - elementId: core-step2-title
+    elementType: text
+    bounds: [1100, 338, 420, 30]
+    content: {fontSize: 20, bold: true, color: "$forest", wrap: false, align: [left, middle], text: 签约后录入人脸}
+  - elementId: core-step2-body
+    elementType: text
+    bounds: [1100, 372, 420, 44]
+    content:
+      fontSize: 13
+      color: "$ink"
+      lineHeight: 1.35
+      align: [left, top]
+      text: 关联同一住户／房屋／合同与租期；人脸上传不等于设备登记或授权成功
+  - elementId: core-arrow2
+    elementType: line
+    bounds: [1059, 394, 6, 52]
+    viewBox: [6, 52]
+    points: "3,0 3,52"
+    arrow: [null, stealth]
+    border: {style: solid, width: 3, color: "$amber"}
+  - elementId: core-step3-circle
+    elementType: shape
+    bounds: [1040, 452, 44, 44]
+    shapeName: ellipse
+    fill: {type: solid, color: "$amberSoft"}
+    border: {style: solid, width: 2, color: "$amber"}
+  - elementId: core-step3-num
+    elementType: text
+    bounds: [1040, 452, 44, 44]
+    content: {fontSize: 15, bold: true, color: "$amber", wrap: false, align: [center, middle], text: "03"}
+  - elementId: core-step3-title
+    elementType: text
+    bounds: [1100, 446, 420, 30]
+    content: {fontSize: 20, bold: true, color: "$forest", wrap: false, align: [left, middle], text: 授权开门}
+  - elementId: core-step3-body
+    elementType: text
+    bounds: [1100, 480, 420, 44]
+    content:
+      fontSize: 13
+      color: "$ink"
+      lineHeight: 1.35
+      align: [left, top]
+      text: 核验本人房屋／租期／设备权限；请求受理不等于门已物理打开，未知不伪成功
+  - elementId: core-precondition-label
+    elementType: text
+    bounds: [1040, 556, 66, 26]
+    content: {fontSize: 14, bold: true, color: "$amber", wrap: false, align: [left, middle], text: 前置}
+  - elementId: core-precondition-body
+    elementType: text
+    bounds: [1110, 556, 420, 26]
+    content: {fontSize: 13.5, color: "$ink", wrap: false, align: [left, middle], text: 有效在线签约 · 本人房屋／租期 · 设备授权}
+  - elementId: core-accept-label
+    elementType: text
+    bounds: [1040, 594, 66, 26]
+    content: {fontSize: 14, bold: true, color: "$amber", wrap: false, align: [left, middle], text: 验收}
+  - elementId: core-accept-body
+    elementType: text
+    bounds: [1110, 590, 420, 48]
+    content:
+      fontSize: 13.5
+      color: "$ink"
+      lineHeight: 1.35
+      align: [left, top]
+      text: 同一住户／房屋／合同贯穿三阶段，取得目标环境端到端证据
+  - elementId: core-status-rule
+    elementType: line
+    bounds: [1040, 650, 480, 2]
+    viewBox: [480, 2]
+    points: "0,1 480,1"
+    border: {style: solid, width: 1, color: "$faint"}
+  - elementId: core-status
+    elementType: text
+    bounds: [1040, 666, 480, 42]
+    content:
+      fontSize: 14
+      bold: true
+      color: "$danger"
+      lineHeight: 1.35
+      align: [left, top]
+      text: 当前：只有分散代码片段，完整实现与验收尚未完成
+
+  # 底部 M3 配套
+  - elementId: m3-title
+    elementType: text
+    bounds: [540, 796, 300, 30]
+    content: {fontSize: 17, bold: true, color: "$forest", wrap: false, align: [left, middle], text: M3 配套｜人工运营与续退租}
+  - elementId: m3-body
+    elementType: text
+    bounds: [540, 838, 300, 112]
+    content:
+      fontSize: 13
+      color: "$ink"
+      lineHeight: 1.4
+      align: [left, top]
+      text: |
+        材料补正／房屋绑定／消息等选定子集
+        TEN-04 续租、退租、验房、结算、撤权优先
+        具体业务细则仍待 DEC-12 等确认
+
+  # 底部 M4
+  - elementId: m4-title
+    elementType: text
+    bounds: [870, 796, 300, 30]
+    content: {fontSize: 17, bold: true, color: "$forest", wrap: false, align: [left, middle], text: M4｜日常服务与平台治理}
+  - elementId: m4-body
+    elementType: text
+    bounds: [870, 838, 300, 112]
+    content:
+      fontSize: 13
+      color: "$ink"
+      lineHeight: 1.4
+      align: [left, top]
+      text: |
+        家庭／访客／通知／隐私逐项确认后拆卡
+        报修保洁暂缓；MKT-01 本期不实现
+        OPS-05 运行保障不实现，仅留历史记录
+
+  # 底部 M5
+  - elementId: m5-title
+    elementType: text
+    bounds: [1200, 796, 340, 30]
+    content: {fontSize: 17, bold: true, color: "$muted", wrap: false, align: [left, middle], text: M5｜后续资金与高级能力}
+  - elementId: m5-body
+    elementType: text
+    bounds: [1200, 838, 340, 112]
+    content:
+      fontSize: 13
+      color: "$muted"
+      lineHeight: 1.4
+      align: [left, top]
+      text: |
+        押金／第三方支付入口暂不上线
+        恢复时再核商户／退款／对账及真实端验收
+        CORE-01 开门已在 M3，不留到本阶段
+
+  # 页脚证据边界
+  - elementId: footer-rule
+    elementType: line
+    bounds: [48, 964, 1504, 2]
+    viewBox: [1504, 2]
+    points: "0,1 1504,1"
+    border: {style: solid, width: 1, color: "$faint"}
+  - elementId: footer
+    elementType: text
+    bounds: [48, 970, 1504, 20]
+    content:
+      fontSize: 11
+      color: "$muted"
+      wrap: false
+      align: [left, middle]
+      text: 依据：SMART-PM 需求复核与拓展汇总｜本地提交 a9b2bef0｜仅需求整理，不代表实现、验收或上线完成

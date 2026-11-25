@@ -1,0 +1,44 @@
+version: v2
+title: SMART-PM 项目交付路线图
+size: [1600, 1000]
+theme:
+  colors:
+    background: "#F5F2EA"
+    ink: "#24332F"
+    forest: "#173F35"
+    sage: "#42635A"
+    muted: "#68766F"
+    faint: "#D8DED8"
+    soft: "#EAEDE7"
+    amber: "#B85E2E"
+    amberSoft: "#F0DFD1"
+    danger: "#9B4A3E"
+    dangerSoft: "#F1E2DD"
+    white: "#FFFFFF"
+  textStyles:
+    title:
+      fontFamily: MiSans
+      fontSize: 30
+      bold: true
+      color: "$forest"
+    subtitle:
+      fontFamily: MiSans
+      fontSize: 13
+      color: "$muted"
+    section:
+      fontFamily: MiSans
+      fontSize: 16
+      bold: true
+      color: "$forest"
+    body:
+      fontFamily: MiSans
+      fontSize: 13
+      color: "$ink"
+      lineHeight: 1.42
+    small:
+      fontFamily: MiSans
+      fontSize: 11.5
+      color: "$muted"
+      lineHeight: 1.35
+pages:
+  - pages/1_roadmap.page

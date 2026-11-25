@@ -11,7 +11,8 @@
     </view>
     <button wx:if="{{authenticated}}" class="edit-profile" bindtap="editProfile">编辑资料 ›</button>
   </view>
-  <button wx:if="{{!authenticated && !demo}}" class="login-button" open-type="getPhoneNumber" bindgetphonenumber="login" loading="{{loggingIn}}" disabled="{{loggingIn}}">手机号快捷登录</button>
+  <button wx:if="{{!authenticated && !demo}}" class="login-button" open-type="getPhoneNumber" bindgetphonenumber="login" loading="{{loggingIn}}" disabled="{{loggingIn}}">微信手机号登录／注册</button>
+  <text wx:if="{{!authenticated && !demo}}" class="registration-hint">首次授权成功后自动注册，已注册用户直接登录并复用原账号。取消授权不会注册或登录。</text>
   <button wx:if="{{!authenticated && !demo}}" class="account-login-button" bindtap="openAccountLogin" disabled="{{loggingIn}}">账号密码登录</button>
   <view wx:if="{{error}}" class="error-panel"><text>{{error}}</text><button bindtap="loadProfile">重新加载</button></view>
   <view class="profile-stats">

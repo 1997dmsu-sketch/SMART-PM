@@ -1,0 +1,196 @@
+TAP version 13
+# Subtest: local transaction commits business and audit once; rollback is content-complete
+ok 1 - local transaction commits business and audit once; rollback is content-complete
+  ---
+  duration_ms: 53.467991
+  type: 'test'
+  ...
+# Subtest: parallel increments share the same LocalStore queue and preserve existing writes
+ok 2 - parallel increments share the same LocalStore queue and preserve existing writes
+  ---
+  duration_ms: 19.045555
+  type: 'test'
+  ...
+# Subtest: transaction forbids outer-query fallback, create-only conflicts and closed handles
+ok 3 - transaction forbids outer-query fallback, create-only conflicts and closed handles
+  ---
+  duration_ms: 6.010404
+  type: 'test'
+  ...
+# Subtest: read-only and persist failure are zero-write; audit never copies credential data
+ok 4 - read-only and persist failure are zero-write; audit never copies credential data
+  ---
+  duration_ms: 12.271994
+  type: 'test'
+  ...
+# Subtest: real local persistence supports verified registration, administrator account creation and same-user password reset
+ok 5 - real local persistence supports verified registration, administrator account creation and same-user password reset
+  ---
+  duration_ms: 406.729301
+  type: 'test'
+  ...
+# Subtest: adapter maps wx set to bare SDK data, preserves point ids and query pagination
+ok 6 - adapter maps wx set to bare SDK data, preserves point ids and query pagination
+  ---
+  duration_ms: 9.258715
+  type: 'test'
+  ...
+# Subtest: returned SDK error codes and malformed operation results fail closed
+ok 7 - returned SDK error codes and malformed operation results fail closed
+  ---
+  duration_ms: 1.793285
+  type: 'test'
+  ...
+# Subtest: public phone proof registration and admin create/reset/status/list share the original password user
+ok 8 - public phone proof registration and admin create/reset/status/list share the original password user
+  ---
+  duration_ms: 514.984009
+  type: 'test'
+  ...
+# Subtest: SDK transaction retries retain adapter context and all admin writes roll back on audit/commit failure
+ok 9 - SDK transaction retries retain adapter context and all admin writes roll back on audit/commit failure
+  ---
+  duration_ms: 256.470585
+  type: 'test'
+  ...
+# Subtest: adapter throws an SDK conflict result so the SDK owns retry and commit
+ok 10 - adapter throws an SDK conflict result so the SDK owns retry and commit
+  ---
+  duration_ms: 1.502187
+  type: 'test'
+  ...
+# Subtest: public live administrator handler wraps the strict management SDK for tenant account writes
+ok 11 - public live administrator handler wraps the strict management SDK for tenant account writes
+  ---
+  duration_ms: 147.172334
+  type: 'test'
+  ...
+# Subtest: 首次微信手机号成功后自动注册并可选，重复授权与密码登录复用同一user
+ok 12 - 首次微信手机号成功后自动注册并可选，重复授权与密码登录复用同一user
+  ---
+  duration_ms: 120.212483
+  type: 'test'
+  ...
+# Subtest: 未注册和仅自报手机号验证标记的住户不能入选或开通，逐次全库零变化
+ok 13 - 未注册和仅自报手机号验证标记的住户不能入选或开通，逐次全库零变化
+  ---
+  duration_ms: 183.466984
+  type: 'test'
+  ...
+# Subtest: 后台薄服务只按已验证住户 userId 开通，返回闭式DTO，不能把管理员账号变成租客凭据
+ok 14 - 后台薄服务只按已验证住户 userId 开通，返回闭式DTO，不能把管理员账号变成租客凭据
+  ---
+  duration_ms: 128.590469
+  type: 'test'
+  ...
+# Subtest: 开通/列表/住户列表/重置/停用均在服务层拒绝非管理员，逐次全库零变化
+ok 15 - 开通/列表/住户列表/重置/停用均在服务层拒绝非管理员，逐次全库零变化
+  ---
+  duration_ms: 69.639806
+  type: 'test'
+  ...
+# Subtest: 重置与停用保留身份绑定，推进版本；陈旧管理员修改CAS拒绝
+ok 16 - 重置与停用保留身份绑定，推进版本；陈旧管理员修改CAS拒绝
+  ---
+  duration_ms: 109.634662
+  type: 'test'
+  ...
+# Subtest: 配置没有真实事务时管理员写入失败关闭，不能回退串行非原子写
+ok 17 - 配置没有真实事务时管理员写入失败关闭，不能回退串行非原子写
+  ---
+  duration_ms: 83.850588
+  type: 'test'
+  ...
+# Subtest: 账号公共展示投影不保留身份、密码和其他服务端额外字段
+ok 18 - 账号公共展示投影不保留身份、密码和其他服务端额外字段
+  ---
+  duration_ms: 3.276234
+  type: 'test'
+  ...
+# Subtest: 住户公共展示投影不保留 openid 等私密字段
+ok 19 - 住户公共展示投影不保留 openid 等私密字段
+  ---
+  duration_ms: 0.727984
+  type: 'test'
+  ...
+# Subtest: 实际页面提交：按已选住户开通，密码在等待响应前清空，原文密码仅送同源CSRF请求且不重试
+ok 20 - 实际页面提交：按已选住户开通，密码在等待响应前清空，原文密码仅送同源CSRF请求且不重试
+  ---
+  duration_ms: 2.037863
+  type: 'test'
+  ...
+# Subtest: 未选择住户不开通；页面重置/停用使用当前列表revision，不发送任意userId或微信标识
+ok 21 - 未选择住户不开通；页面重置/停用使用当前列表revision，不发送任意userId或微信标识
+  ---
+  duration_ms: 14.168022
+  type: 'test'
+  ...
+# Subtest: 非管理员或无CSRF页面不开通操作；未知网络错误不泄露响应内容或自动重发
+ok 22 - 非管理员或无CSRF页面不开通操作；未知网络错误不泄露响应内容或自动重发
+  ---
+  duration_ms: 0.66526
+  type: 'test'
+  ...
+# Subtest: 列表容量/损坏记录失败关闭显示维护提示，不展示服务端原始错误或假装列表完整
+ok 23 - 列表容量/损坏记录失败关闭显示维护提示，不展示服务端原始错误或假装列表完整
+  ---
+  duration_ms: 0.451579
+  type: 'test'
+  ...
+# Subtest: 住户刷新失败后清空旧选择，手工恢复旧userId也不能继续发出开通请求
+ok 24 - 住户刷新失败后清空旧选择，手工恢复旧userId也不能继续发出开通请求
+  ---
+  duration_ms: 1.101024
+  type: 'test'
+  ...
+# Subtest: 后台开通表单：住户选择替代开户码；八位最低密码，七位不请求、八位及旧十二位均可提交
+ok 25 - 后台开通表单：住户选择替代开户码；八位最低密码，七位不请求、八位及旧十二位均可提交
+  ---
+  duration_ms: 1.386734
+  type: 'test'
+  ...
+# Subtest: actual admin handler enforces session, origin, CSRF and current administrator
+ok 26 - actual admin handler enforces session, origin, CSRF and current administrator
+  ---
+  duration_ms: 18.1926
+  type: 'test'
+  ...
+# Subtest: actual admin route opens an account for a verified-phone resident through real local atomic service
+ok 27 - actual admin route opens an account for a verified-phone resident through real local atomic service
+  ---
+  duration_ms: 99.353091
+  type: 'test'
+  ...
+# Subtest: unverified resident cannot be opened through the route and old codes stay rejected
+ok 28 - unverified resident cannot be opened through the route and old codes stay rejected
+  ---
+  duration_ms: 78.081503
+  type: 'test'
+  ...
+# Subtest: HEAD requests are rejected on every API path before any write branch
+ok 29 - HEAD requests are rejected on every API path before any write branch
+  ---
+  duration_ms: 3.668623
+  type: 'test'
+  ...
+# Subtest: ordinary staff cannot manage tenants or view internal rooms
+ok 30 - ordinary staff cannot manage tenants or view internal rooms
+  ---
+  duration_ms: 3.342183
+  type: 'test'
+  ...
+# Subtest: database initialization failures are redacted inside tenant route boundary
+ok 31 - database initialization failures are redacted inside tenant route boundary
+  ---
+  duration_ms: 1.191731
+  type: 'test'
+  ...
+1..31
+# tests 31
+# suites 0
+# pass 31
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3103.25519

@@ -1,8 +1,8 @@
 {
     "schema":  "checkin-face-experience-source-hashes/v1",
-    "baselineCommit":  "67051b2bacfc68363dd2c424f5b9686d6ac787b5",
-    "branch":  "release/miniprogram-experience-2026-11-25",
-    "registrationReason":  "2026-11-25 experience release candidate: remove account-opening-code flow end to end (tenant UI/prepare call, cloud prepare rejection, admin code consumption replaced by verified-phone resident selection); registration no longer auto-grants legacy owner houses; phone cross-WeChat conflict fails closed; add phoneLogin/messageSend openapi permission declarations; reject HEAD on /api (Origin/CSRF bypass fix); worker adapter rejects default unlimited validity; unlock/getLockKey deny empty identity; houseAdmin bindings write housesManaged and validate rooms.",
+    "baselineCommit":  "58609bbcfad4948cc21ea8fc06929c0f36fadef5",
+    "branch":  "fix/phone-auto-register-no-opening-code-2026-11-25",
+    "registrationReason":  "2026-11-25 verified-phone auto-registration hardening on 58609bb: no account-opening code runtime; atomic private phone proof and canonical identity; fail-closed queries; trusted resident selection and password login; late-response UI protection; management SDK database adapter. No deployment or live authorization.",
     "baselineSha256Note":  "baselineSha256 一律为 null：本清单不登记旧上游原件（旧来源校验由 docs/backend-provenance.json 承担），null 表示“无旧上游登记”，不是未检查；不虚构 originalSha256。原有 10 条条目语义保持不变（仅 sha256 按当前磁盘/契约内容复算，purpose 随实现更新）。",
     "files":  [
                   {
@@ -27,7 +27,7 @@
                       "path":  "admin-web/lib/tenant-password-accounts.mjs",
                       "purpose":  "管理后台租客密码账号门面；新增已验证手机号住户列表（listVerifiedUsers）门面，开通只按服务端验证过的住户 userId，不再使用开户码。",
                       "baselineSha256":  null,
-                      "sha256":  "39c0b96ae1d63126f1081ab526e711ff30a6e0a84137deda53ebfa256e9b8987"
+                      "sha256":  "c3442d264c11d0d3553054d92b7b91288b8cd33a62e796e729172d05c70cd3ed"
                   },
                   {
                       "path":  "admin-web/public/checkin-face-test-config.js",
@@ -63,13 +63,13 @@
                       "path":  "admin-web/public/tenant-password-accounts.html",
                       "purpose":  "租客密码账号管理页：开户码输入替换为\"已验证手机号住户\"下拉选择；提示文案改为先手机号注册再由管理员开通。",
                       "baselineSha256":  null,
-                      "sha256":  "31067d50f98d0580bd9e22bc3c59641247c3589be0c717b17840de666fdf09d4"
+                      "sha256":  "b2f8ae3c29402a321215b0d5ddce9f669c137a139f4d8edd55d22ba9a67cedd7"
                   },
                   {
                       "path":  "admin-web/public/tenant-password-accounts.js",
                       "purpose":  "租客密码账号页面脚本：提交 {userId, username, password}，加载住户列表，删除 requestCode 清空逻辑；residentView 安全投影不含 openid。",
                       "baselineSha256":  null,
-                      "sha256":  "b51a1f1904d3d53b02d30de59b859ecf59c99431c65f66baf31099d351723a05"
+                      "sha256":  "bf1e7d0b4ec6507673a6ae4511e659e31b4c273f990af38fd56579acb573ed55"
                   },
                   {
                       "path":  "admin-web/qishanyuan-demo.mjs",
@@ -79,7 +79,7 @@
                   },
                   {
                       "path":  "admin-web/server.mjs",
-                      "sha256":  "787b465bcbfd505cecbc486007c0d179aa47d9175e449c14a5e0e98d5d4c1e6e",
+                      "sha256":  "01a035c5ee40a1a5eef6dde48e084a245842c7c5c3461e7b0a0977d8d2125276",
                       "purpose":  "管理后台服务：/api/* 对 HEAD 一律 405（封堵 /api/accounts 非GET保存分支的 Origin/CSRF 绕过）；新增 GET /api/tenant-password-accounts/residents 路由；公开错误码增加 USER_NOT_VERIFIED/IDENTITY_UNVERIFIED。",
                       "baselineSha256":  null
                   },
@@ -99,7 +99,7 @@
                       "path":  "admin-web/tests/local-cloud-database.test.mjs",
                       "purpose":  "本地持久化测试按新契约：以已验证手机号住户 userId 开通租客账号（prepare 已移除）。",
                       "baselineSha256":  null,
-                      "sha256":  "78d5c3cd419246770f05d38d83c254d5d7a5ba6f4184d5831b454f97f32958a5"
+                      "sha256":  "d3b08ffeece1ca633397d82bf32dedc4ebe362ba10bd09fdd44fed55026ba864"
                   },
                   {
                       "path":  "admin-web/tests/qishanyuan-test-data.test.mjs",
@@ -111,25 +111,25 @@
                       "path":  "admin-web/tests/tenant-password-accounts.test.mjs",
                       "purpose":  "租客密码账号测试按新契约：住户选择替代开户码、residentView 投影、未选择住户不开通、旧 requestCode 输入拒绝。",
                       "baselineSha256":  null,
-                      "sha256":  "5728beaa6e0fdb44530f7c5107359daf4d51179ee235c418a0163b710d65ad22"
+                      "sha256":  "a54709069aecc310809e9840da4fa31e0d21e15a275482f70181969e73a52f5a"
                   },
                   {
                       "path":  "admin-web/tests/tenant-password-routes.test.mjs",
                       "purpose":  "路由测试按新契约：residents 路由、userId 开通、未验证住户 USER_NOT_VERIFIED、旧码 INVALID_INPUT、HEAD 一律 405 回归。",
                       "baselineSha256":  null,
-                      "sha256":  "671408216e958593d99e8118d2f350fd1f69a43dbb42fc0a03c3f48681efe085"
+                      "sha256":  "ebf39e6325079ebda950db937f224a5db03a1dd2c347c2c4c3912cdeee870526"
                   },
                   {
                       "path":  "cloudfunctions/accountLogin/README.md",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "f500fdf96b1cb531f326f422d9f7e9dff2a9a294ecc0556321dfec52ff5a0a57"
+                      "sha256":  "b5aeb5370b5fd39844f8ae18cdd2bc73e86b37a8efa1d7914ab91b5915de4374"
                   },
                   {
                       "path":  "cloudfunctions/accountLogin/index.js",
                       "purpose":  "账号密码登录云函数入口：action=prepare 显式拒绝（开户码功能取消），仅保留 login。",
                       "baselineSha256":  null,
-                      "sha256":  "7d24dce1d5ec2662a1c02d96d574bdafe0cf115568b3fc5b1713df6178f10b1b"
+                      "sha256":  "364423839a615cd4095696dc41de936a0337851f85e4437aac6a8e60eb6882b7"
                   },
                   {
                       "path":  "cloudfunctions/accountLogin/lib/credentials.js",
@@ -141,13 +141,13 @@
                       "path":  "cloudfunctions/accountLogin/lib/identity-core.js",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "533c6cb2d11f8513e79f1d195e2f15ac30080c303f5f065cb10c716f6962eca4"
+                      "sha256":  "a7a4771938ffbbc4d9056f68d08996a5383f9f79f83d40e1906eb9a346cd022e"
                   },
                   {
                       "path":  "cloudfunctions/accountLogin/lib/service.js",
                       "purpose":  "租客密码账号服务：删除 prepare/开户码生成与消费；createAccount 只接受已验证手机号住户 userId；新增 listVerifiedUsers；登录/重置/启停/限速/哈希不变。",
                       "baselineSha256":  null,
-                      "sha256":  "88a40caa5827b74be69fbf052b91a418da1c7d78df899000cd61f321a8650ad3"
+                      "sha256":  "168ed6abda508681435cb3d767747020733500533efb40b092b2bfa353353994"
                   },
                   {
                       "path":  "cloudfunctions/accountLogin/package.json",
@@ -159,7 +159,7 @@
                       "path":  "cloudfunctions/adminLogin/lib/identity-core.js",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "533c6cb2d11f8513e79f1d195e2f15ac30080c303f5f065cb10c716f6962eca4"
+                      "sha256":  "a7a4771938ffbbc4d9056f68d08996a5383f9f79f83d40e1906eb9a346cd022e"
                   },
                   {
                       "path":  "cloudfunctions/checkinFaceTest/config.json",
@@ -225,13 +225,13 @@
                       "path":  "cloudfunctions/login/lib/identity-core.js",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "533c6cb2d11f8513e79f1d195e2f15ac30080c303f5f065cb10c716f6962eca4"
+                      "sha256":  "a7a4771938ffbbc4d9056f68d08996a5383f9f79f83d40e1906eb9a346cd022e"
                   },
                   {
                       "path":  "cloudfunctions/phoneLogin/lib/identity-core.js",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "533c6cb2d11f8513e79f1d195e2f15ac30080c303f5f065cb10c716f6962eca4"
+                      "sha256":  "a7a4771938ffbbc4d9056f68d08996a5383f9f79f83d40e1906eb9a346cd022e"
                   },
                   {
                       "path":  "docs/evidence/action-login-2026-11-25/README.md",
@@ -663,13 +663,13 @@
                       "path":  "miniprogram/config/version.js",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "9923d1f9ef0d89e50490c8714c8e72192ab62247e882138d4ed4f5584bffc050"
+                      "sha256":  "145a58c695f00244e9e7a94bf6032d6eef1fc7d8618c05927ca60d3363329dc3"
                   },
                   {
                       "path":  "miniprogram/config/version.json",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "4dbdce10d40e318cbe75c72c309b3ab205b84655706051f90234ca83f0e0eb94"
+                      "sha256":  "1ab6ff056451a80c6230e19cde32751742b916da8b3d247824133a7c7acb90a5"
                   },
                   {
                       "path":  "miniprogram/data/qishanyuan-test-preset.js",
@@ -699,7 +699,7 @@
                       "path":  "miniprogram/pages/account-login/index.wxss",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "c15d4808dd0737e1ba5f4b424fcead1303aff80124d2fac69be5bf5b551c1354"
+                      "sha256":  "3db99b32e6ddd087e2303ce33b6eb865802450e7a1197a199f626479e02bd459"
                   },
                   {
                       "path":  "miniprogram/pages/chat/index.js",
@@ -783,19 +783,19 @@
                       "path":  "miniprogram/pages/profile/index.js",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "9301ef1c67db8130329bf3b52c7e59790f569068169a301914e3b94d2aa996c6"
+                      "sha256":  "4825a3da2dbcad8c66e7eec835ab530313861c84f755f85f918755da84123e9b"
                   },
                   {
                       "path":  "miniprogram/pages/profile/index.wxml",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "933bd84268aca7e7a79464d8e2a041933532fba879e7d05bd33680a827a42e2d"
+                      "sha256":  "2355a9e858258917231bd309087cc96777f3e7a55ce3b0db46fa0203da33c426"
                   },
                   {
                       "path":  "miniprogram/pages/profile/index.wxss",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "ec8f3d77244d61838d76ea0bd99e747323ebef997faa2e2d8918716fdfa3dada"
+                      "sha256":  "7666a76869596ce50a0cacf70afc16038d9059ac00a0fa4a2311fdab895fdcad"
                   },
                   {
                       "path":  "miniprogram/pages/property/index.js",
@@ -823,7 +823,7 @@
                   },
                   {
                       "path":  "miniprogram/services/api.js",
-                      "sha256":  "8cc0c4bd097e76cf72688fb266993b420f12690df7efde71eedbf87dfba3bd9f",
+                      "sha256":  "b7f4ce6af10fbbeccaf28bb8535e93385bdbeff7699e2bbc36ee9776da55fb6b",
                       "purpose":  "小程序 API 服务：删除 prepareAccountOpening 及其导出；登录门/密码登录/栖山苑预设/设备开关不变。",
                       "baselineSha256":  null
                   },
@@ -835,7 +835,7 @@
                   },
                   {
                       "path":  "package.json",
-                      "sha256":  "2eb60bb14301632badfb51c64886f48333bde4f09deaaa64c65fc6c9ffe758ce",
+                      "sha256":  "c9df7cd2767305a72aa0a1eee47eaae9087cf2b712fb7b32665425ecdebaecb4",
                       "purpose":  "根发布检查入口：check:checkin-face = 静态检查 \u0026\u0026 来源校验；新增 check:checkin-face:sources。",
                       "baselineSha256":  null
                   },
@@ -859,7 +859,7 @@
                   },
                   {
                       "path":  "scripts/verify-checkin-face-sources.mjs",
-                      "sha256":  "9b293d26644d70bdd1de6fd5d86424353ef152cb4d88eec799f2860716b49f1a",
+                      "sha256":  "6f08567312150ee47be91b8d483e2a3755f5d96d909478a3a77ddd554470b443",
                       "purpose":  "C1 新文件来源清单机器校验器：路径/哈希/云目录闭合/本地导入闭包/baseline 不伪造/旧来源隔离；接入 check:checkin-face。",
                       "baselineSha256":  null
                   },
@@ -867,19 +867,19 @@
                       "path":  "tests/account-login-api.test.cjs",
                       "purpose":  "API 测试：prepareAccountOpening 导出移除断言；密码登录边界断言保留。",
                       "baselineSha256":  null,
-                      "sha256":  "7948fee7b9dc9f06ac3527300b045567a28050cafcc0e39368b2c5c28a01f9ca"
+                      "sha256":  "1695b6f61d8e52576329d8ebf62079ad29b65dbef71152663f0298536cbe3fc0"
                   },
                   {
                       "path":  "tests/account-login-cloud.test.cjs",
                       "purpose":  "云服务测试按新契约：prepare 拒绝、createAccount 按已验证住户、listVerifiedUsers、旧码拒绝，密码/限速/并发/分页断言保留。",
                       "baselineSha256":  null,
-                      "sha256":  "04a4b8a1d4e2ce591ee41801a41be7ec58ac77ea403d7205f1096d208b852d43"
+                      "sha256":  "1ea8993a0acb2d980b43fff134e25a687fbf93c49789a1e626eb2a16833ed1b3"
                   },
                   {
                       "path":  "tests/account-login-pages.test.cjs",
                       "purpose":  "页面测试按新契约：无开户码入口断言，密码清理与提交保护断言保留。",
                       "baselineSha256":  null,
-                      "sha256":  "bb0c6e35672b4e433611142765a5934137714b113c896c78faa0b024ac09d267"
+                      "sha256":  "51c41b610fab6ef599abbbe41e2efdbf6d2abb380fafae3886e9bb820fbb86dc"
                   },
                   {
                       "path":  "tests/action-login-checkin-pages.test.cjs",
@@ -939,19 +939,19 @@
                       "path":  "tests/frontend.test.cjs",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "d71d581c2ece80479ab10231c5fe0a54f19c54fdfb2aed823f567b305babbbdc"
+                      "sha256":  "18eeddea4564fe5cbdf800625d691d93da75814d4aee560a18217aac8d5e788f"
                   },
                   {
                       "path":  "tests/identity.test.cjs",
                       "purpose":  "身份协调测试：并发用例改为 silent+phone 两入口（prepare 已移除）。",
                       "baselineSha256":  null,
-                      "sha256":  "2404c20a7b356651c86201e89d520ec87368eb553e6a7f66540f1365c44f4171"
+                      "sha256":  "67d6d164d86b3174686087292c2f6b4bcd609c1674d7c6ad7eb6f41ed3149fb7"
                   },
                   {
                       "path":  "tests/phone-login.test.cjs",
                       "purpose":  "手机号登录测试按新边界：注册不导入旧 owners 房屋、手机号跨微信冲突失败关闭、并发绑定保留、同 canonical 用户两登录。",
                       "baselineSha256":  null,
-                      "sha256":  "213f766dd96704c2345af8ed906c7a44d6fca2715862a778367669e72f02d6af"
+                      "sha256":  "fe45d4d04cd3d8ccca8217f33c769596867c2e1e2b9329588a79f456aa9d9b61"
                   },
                   {
                       "path":  "tests/qishanyuan-pages.test.cjs",
@@ -1060,6 +1060,30 @@
                       "sha256":  "47bb161933036f3d1c99d4eef403c40137bab8f064a09e4726f1fbda42783059",
                       "purpose":  "worker 运行时：配置读取、R05 设备绑定、R06 领取校验、显式 device+fixed 请求构造（R10 锚点）、R07 依赖解析边界、R09 清理结果、脱敏日志。",
                       "baselineSha256":  null
+                  },
+                  {
+                      "path": "cloudfunctions/accountLogin/lib/phone-proof.js",
+                      "sha256": "07f874ed1f60e787c205bb8cf1f21e141385462b6c12a97174d9f357a5bee954",
+                      "purpose": "管理员开户及密码登录核验当前微信手机号的私有事务证明；与phoneLogin副本逐字节一致。",
+                      "baselineSha256": null
+                  },
+                  {
+                      "path": "cloudfunctions/phoneLogin/lib/phone-proof.js",
+                      "sha256": "07f874ed1f60e787c205bb8cf1f21e141385462b6c12a97174d9f357a5bee954",
+                      "purpose": "微信服务端核验后事务绑定确定性手机号记录，阻止跨微信并发注册及任意换号。",
+                      "baselineSha256": null
+                  },
+                  {
+                      "path": "admin-web/lib/tenant-auth-cloud-database.mjs",
+                      "sha256": "5040b4925d89132c005ce025eee44385d88dc51415bd65fc672e67e5902e1b16",
+                      "purpose": "租客账号专用管理SDK适配：裸文档写入、固定ID、SDK原生事务重试和回滚。",
+                      "baselineSha256": null
+                  },
+                  {
+                      "path": "admin-web/tests/tenant-auth-cloud-database.test.mjs",
+                      "sha256": "670a21347f5eb5fd1c358e8fb92ef5df7171cc657a9c9f5299f9483d375d6800",
+                      "purpose": "严格管理SDK形状的离线契约及完整公开注册/开户/密码登录流程，不连接云服务。",
+                      "baselineSha256": null
                   }
               ]
 }

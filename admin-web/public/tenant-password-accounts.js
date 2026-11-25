@@ -3,7 +3,6 @@ const BASE = "/api/tenant-password-accounts";
 const ERROR_MESSAGES = Object.freeze({
   ADMIN_REQUIRED: "仅系统管理员可管理租客密码账号。",
   INVALID_INPUT: "提交格式无效，请检查住户选择、账号及密码要求。",
-  REQUEST_INVALID: "所选住户未完成微信手机号验证或身份无法核对，请刷新列表。",
   USER_NOT_VERIFIED: "该住户尚未完成微信手机号注册验证，不能开通账号。",
   IDENTITY_UNVERIFIED: "住户微信身份无法核对，本次未开通账号。",
   ACCOUNT_EXISTS: "该账号或本人绑定已开通，请刷新列表后核对。",
@@ -31,15 +30,17 @@ export function accountView(row) {
 
 /** Verified-phone resident projection; openid and other server fields are never retained. */
 export function residentView(row) {
+  const safeId = (value) => typeof value === "string" && value.length > 0 && value.length <= 256
+    && !/[\x00-\x20\x7f/\\]/.test(value);
   if (!row || typeof row !== "object" || Array.isArray(row)
-    || typeof row.userId !== "string" || !row.userId || row.userId.length > 256
-    || /[\x00-\x20\x7f/\\]/.test(row.userId)
-    || typeof row.phone !== "string" || !row.phone || row.phone.length > 32
-    || !Array.isArray(row.houses)) {
+    || !safeId(row.userId)
+    || typeof row.phone !== "string" || !/^[0-9]{6,15}$/.test(row.phone)
+    || !Array.isArray(row.houses) || !row.houses.every(safeId)
+    || (row.name !== undefined && (typeof row.name !== "string" || row.name.length > 128 || /[\x00-\x1f\x7f]/.test(row.name)))) {
     throw new Error("住户列表格式无效，请联系管理员核对服务端版本。");
   }
   return { userId: row.userId, phone: row.phone,
-    name: typeof row.name === "string" ? row.name.slice(0, 128) : "",
+    name: row.name || "",
     houses: row.houses.slice() };
 }
 
@@ -49,7 +50,7 @@ function validPassword(password) {
 }
 
 export function createTenantPasswordAccountsPage({ document: doc, fetch: fetcher }) {
-  const state = { csrf: "", authorized: false, busy: false, rows: new Map() };
+  const state = { csrf: "", authorized: false, busy: false, rows: new Map(), residents: new Set() };
   const $ = (id) => doc.getElementById(id);
   const message = (text) => { $("account-message").textContent = text; $("account-message").hidden = false; };
   const clearSecrets = () => {
@@ -79,6 +80,8 @@ export function createTenantPasswordAccountsPage({ document: doc, fetch: fetcher
       if (response.status === 401 || response.status === 403) {
         state.authorized = false;
         state.csrf = "";
+        state.rows.clear();
+        state.residents.clear();
         clearSecrets();
         $("account-content").hidden = true;
         $("account-login").hidden = false;
@@ -132,17 +135,26 @@ export function createTenantPasswordAccountsPage({ document: doc, fetch: fetcher
     select.value = rows.some((row) => row.userId === previous) ? previous : "";
   }
   async function reload() {
-    const payload = await request(BASE);
-    if (!Array.isArray(payload?.rows)) throw new Error("账号列表格式无效，请联系管理员核对服务端版本。");
-    const rows = payload.rows.map(accountView);
-    if (new Set(rows.map((row) => row.id)).size !== rows.length) throw new Error("账号列表存在重复记录，请联系管理员核对。");
-    state.rows = new Map(rows.map((row) => [row.id, row]));
-    renderRows(rows);
-    const residents = await request(`${BASE}/residents`);
-    if (!Array.isArray(residents?.rows)) throw new Error("住户列表格式无效，请联系管理员核对服务端版本。");
-    const residentRows = residents.rows.map(residentView);
-    if (new Set(residentRows.map((row) => row.userId)).size !== residentRows.length) throw new Error("住户列表存在重复记录，请联系管理员核对。");
-    renderResidents(residentRows);
+    try {
+      const payload = await request(BASE);
+      if (!Array.isArray(payload?.rows)) throw new Error("账号列表格式无效，请联系管理员核对服务端版本。");
+      const rows = payload.rows.map(accountView);
+      if (new Set(rows.map((row) => row.id)).size !== rows.length) throw new Error("账号列表存在重复记录，请联系管理员核对。");
+      const residents = await request(`${BASE}/residents`);
+      if (!Array.isArray(residents?.rows)) throw new Error("住户列表格式无效，请联系管理员核对服务端版本。");
+      const residentRows = residents.rows.map(residentView);
+      if (new Set(residentRows.map((row) => row.userId)).size !== residentRows.length) throw new Error("住户列表存在重复记录，请联系管理员核对。");
+      state.rows = new Map(rows.map((row) => [row.id, row]));
+      state.residents = new Set(residentRows.map((row) => row.userId));
+      renderRows(rows);
+      renderResidents(residentRows);
+    } catch (error) {
+      state.rows.clear();
+      state.residents.clear();
+      renderRows([]);
+      renderResidents([]);
+      throw error;
+    }
   }
   async function mutate(path, data, successMessage) {
     if (!state.authorized || state.busy) return;
@@ -169,7 +181,7 @@ export function createTenantPasswordAccountsPage({ document: doc, fetch: fetcher
     const data = { userId: $("resident-user").value, username: $("create-username").value,
       password: $("create-password").value };
     $("create-password").value = "";
-    if (!data.userId) { data.password = ""; message("请先选择已完成微信手机号验证的住户。"); return; }
+    if (!state.residents.has(data.userId)) { data.password = ""; message("请先选择当前列表中已完成微信手机号验证的住户。"); return; }
     if (!validPassword(data.password)) { data.password = ""; message("密码需为8–128个字符，UTF-8不超过256字节。"); return; }
     await mutate("create", data, "账号已开通，请将账号与初始密码交给本人。");
   });

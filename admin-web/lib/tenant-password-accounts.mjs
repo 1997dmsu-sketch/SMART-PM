@@ -5,7 +5,7 @@ const { TenantAccountService } = require("../../cloudfunctions/accountLogin/lib/
 
 /**
  * Administrator facade for tenant password accounts. The shared pure service
- * owns enrollment-code binding, password hashing, transactions and public DTOs.
+ * owns verified-phone identity binding, password hashing, transactions and public DTOs.
  * This does not read or write the separate administrator accounts.json file.
  * The actor must be supplied from the server's authenticated admin session.
  */

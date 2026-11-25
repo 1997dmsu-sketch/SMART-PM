@@ -5,11 +5,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
-import { createHash } from "node:crypto";
 import { createApp } from "../server.mjs";
 import { LocalStore } from "../lib/store.mjs";
 import { LocalCloudDatabase } from "../lib/local-cloud-database.mjs";
 const { TenantAccountService } = createRequire(import.meta.url)("../../cloudfunctions/accountLogin/lib/service.js");
+const { createMain: createPhoneLogin } = createRequire(import.meta.url)("../../cloudfunctions/phoneLogin");
 const guard = globalThis.__DSH_D_NETWORK_GUARD__;
 let baseline;
 test.before(() => guard.assertLoadTimeClean());
@@ -71,20 +71,23 @@ test("actual admin route opens an account for a verified-phone resident through 
   const h = await harness(t);
   await h.login();
   const openid = "synthetic-tenant", appId = "synthetic-app";
-  const bindingHash = createHash("sha256").update(`${appId}\0${openid}`).digest("hex");
-  const userId = `wxuser_${bindingHash}`;
-  const identityId = `wx_${bindingHash}`;
-  h.store.data.users = [{ _id: userId, _openid: openid, wechatAppId: appId, role: "user", houses: [],
-    points: 0, phone: "13800000000", phoneBoundAt: 1800000000000, name: "验证住户",
-    createdAt: 1800000000000, lastLoginAt: 1800000000000 }];
-  h.store.data.tenant_auth_identities = [{ _id: identityId, schemaVersion: 1, appId, openid, userId,
-    revision: 1, createdAt: 1800000000000, updatedAt: 1800000000000 }];
+  const userCountBefore = h.store.data.users.length;
+  const db = new LocalCloudDatabase(h.store);
+  const phoneLogin = createPhoneLogin({ db, now: () => 1700000000000, cloud: {
+    getWXContext: () => ({ APPID: appId, OPENID: openid }),
+    openapi: { phonenumber: { getPhoneNumber: async () => ({ phoneInfo: { purePhoneNumber: "13800000000" } }) } },
+  } });
+  assert.deepEqual((await h.request("/api/tenant-password-accounts/residents")).payload, { rows: [] });
+  const registration = await phoneLogin({ code: "synthetic-phone-authorization" });
+  assert.equal(registration.code, 0, "使用真实手机号handler和本地事务，不伪造验证时间戳");
+  const userId = registration.userInfo._id;
   const residents = await h.request("/api/tenant-password-accounts/residents");
   assert.equal(residents.status, 200);
   assert.equal(residents.payload.rows.length, 1);
   assert.equal(residents.payload.rows[0].userId, userId);
   assert.equal(residents.payload.rows[0].phone, "13800000000");
   assert.equal(JSON.stringify(residents.payload).includes(openid), false);
+  assert.deepEqual(Object.keys(residents.payload.rows[0]).sort(), ["userId", "phone", "name", "houses"].sort());
   const response = await h.request("/api/tenant-password-accounts/create", { method: "POST", data: {
     userId, username: "tenant.route", password: "synthetic-tenant-input" } });
   assert.equal(response.status, 200);
@@ -93,7 +96,12 @@ test("actual admin route opens an account for a verified-phone resident through 
   const service = new TenantAccountService({ db: new LocalCloudDatabase(h.store) });
   const result = await service.login({ APPID: appId, OPENID: openid }, { username: "tenant.route", password: "synthetic-tenant-input" });
   assert.equal(result.code, 0);
+  assert.equal(result.userInfo._id, userId);
   assert.equal(result.userInfo._id, response.payload.userId);
+  const repeated = await phoneLogin({ code: "synthetic-phone-authorization-again" });
+  assert.equal(repeated.code, 0);
+  assert.equal(repeated.userInfo._id, userId);
+  assert.equal(h.store.data.users.length, userCountBefore + 1);
   assert.equal((await h.request("/api/tenant-password-accounts")).payload.rows.length, 1);
 });
 
@@ -103,6 +111,12 @@ test("unverified resident cannot be opened through the route and old codes stay 
   h.store.data.users = [{ _id: "wxuser_nophone", _openid: "openid-nophone", wechatAppId: "synthetic-app",
     role: "user", houses: [], points: 0, createdAt: 1800000000000 }];
   const before = structuredClone(h.store.data);
+  assert.deepEqual((await h.request("/api/tenant-password-accounts/residents")).payload, { rows: [] });
+  const unregistered = await h.request("/api/tenant-password-accounts/create", { method: "POST", data: {
+    userId: "synthetic-unregistered", username: "tenant.missing", password: "synthetic-tenant-input" } });
+  assert.equal(unregistered.status, 409);
+  assert.equal(unregistered.payload.code, "USER_NOT_VERIFIED");
+  assert.deepEqual(h.store.data, before);
   const rejected = await h.request("/api/tenant-password-accounts/create", { method: "POST", data: {
     userId: "wxuser_nophone", username: "tenant.none", password: "synthetic-tenant-input" } });
   assert.equal(rejected.status, 409);

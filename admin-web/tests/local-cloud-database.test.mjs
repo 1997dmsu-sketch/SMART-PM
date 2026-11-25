@@ -4,10 +4,11 @@ import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
-import { createHash } from "node:crypto";
 import { LocalStore } from "../lib/store.mjs";
 import { LocalCloudDatabase } from "../lib/local-cloud-database.mjs";
+import { AdminTenantPasswordAccounts } from "../lib/tenant-password-accounts.mjs";
 const { TenantAccountService } = createRequire(import.meta.url)("../../cloudfunctions/accountLogin/lib/service.js");
+const { createMain: createPhoneLogin } = createRequire(import.meta.url)("../../cloudfunctions/phoneLogin");
 
 async function setup(t) {
   const directory = await mkdtemp(join(tmpdir(), "smartpm-local-tx-"));
@@ -86,24 +87,30 @@ test("read-only and persist failure are zero-write; audit never copies credentia
   assert.equal(JSON.stringify(store.data.admin_audit).includes("never-audit"), false);
 });
 
-test("real local persistence supports tenant opening, same-user login and password reset", async (t) => {
+test("real local persistence supports verified registration, administrator account creation and same-user password reset", async (t) => {
   const { db, store, directory } = await setup(t);
   const service = new TenantAccountService({ db });
   const context = { APPID: "synthetic-app", OPENID: "synthetic-tenant" };
   const actor = { id: "synthetic-admin", role: "admin" };
-  const bindingHash = createHash("sha256").update("synthetic-app\0synthetic-tenant").digest("hex");
-  const userId = `wxuser_${bindingHash}`;
-  await db.collection("users").doc(userId).set({ data: { _id: userId, _openid: "synthetic-tenant",
-    wechatAppId: "synthetic-app", role: "user", houses: [], points: 0, phone: "13800000000",
-    phoneBoundAt: 1800000000000, createdAt: 1800000000000 } });
-  await db.collection("tenant_auth_identities").doc(`wx_${bindingHash}`).set({ data: {
-    _id: `wx_${bindingHash}`, schemaVersion: 1, appId: "synthetic-app", openid: "synthetic-tenant",
-    userId, revision: 1, createdAt: 1800000000000, updatedAt: 1800000000000 } });
-  const account = await service.createAccount(actor, { userId,
+  const register = createPhoneLogin({ db, cloud: {
+    getWXContext: () => context,
+    openapi: { phonenumber: { getPhoneNumber: async () => ({ phoneInfo: { purePhoneNumber: "13800000000" } }) } },
+  } });
+  const registration = await register({ code: "synthetic-phone-authorization" });
+  assert.equal(registration.code, 0);
+  const userId = registration.userInfo._id;
+  assert.deepEqual(registration.userInfo.houses, []);
+  const admin = new AdminTenantPasswordAccounts({ database: db });
+  const residents = await admin.listVerifiedUsers(actor);
+  assert.ok(residents.some((row) => row.userId === userId));
+  const account = await admin.createAccount(actor, { userId,
     username: "tenant.test", password: "synthetic-first-value" });
   const first = await service.login(context, { username: "tenant.test", password: "synthetic-first-value" });
   assert.equal(first.code, 0);
   assert.equal(first.userInfo._id, account.userId);
+  const repeated = await register({ code: "synthetic-phone-authorization-again" });
+  assert.equal(repeated.userInfo._id, first.userInfo._id);
+  assert.equal(store.data.users.filter((row) => row._id === userId).length, 1);
   await service.resetPassword(actor, { accountId: account.id, expectedRevision: 1,
     newPassword: "synthetic-second-value" });
   assert.equal((await service.login(context, { username: "tenant.test", password: "synthetic-first-value" })).code, "AUTH_FAILED");

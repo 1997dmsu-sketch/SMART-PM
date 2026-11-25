@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { AdminTenantPasswordAccounts } from "../lib/tenant-password-accounts.mjs";
 import { accountView, residentView, createTenantPasswordAccountsPage } from "../public/tenant-password-accounts.js";
@@ -9,18 +8,25 @@ import { accountView, residentView, createTenantPasswordAccountsPage } from "../
 const require = createRequire(import.meta.url);
 const { TenantAccountService } = require("../../cloudfunctions/accountLogin/lib/service.js");
 const { MemoryDB } = require("../../tests/support/tenant-auth-memory-db.cjs");
+const { createMain: createPhoneLogin } = require("../../cloudfunctions/phoneLogin");
+const guard = globalThis.__DSH_D_NETWORK_GUARD__;
+let network;
+test.before(() => guard.assertLoadTimeClean());
+test.beforeEach(() => { network = guard.snapshot(); });
+test.afterEach(() => guard.assertNoViolations(network, "tenant password accounts"));
 const NOW = 1_800_000_000_000;
 const ADMIN = { id: "synthetic-admin", name: "合成管理员", role: "admin" };
 const PASSWORD = "  Synthetic-password-01  ";
 const PUBLIC_KEYS = ["id", "username", "userId", "status", "revision", "credentialVersion", "createdAt", "updatedAt"].sort();
 
-function seedVerifiedUser(db, { id = "wxuser_verified", openid = "synthetic-wx-user", appId = "synthetic-app", phone = "13800000000" } = {}) {
-  db._write("users", id, { _id: id, _openid: openid, wechatAppId: appId, role: "user", houses: [],
-    points: 0, phone, phoneBoundAt: NOW, name: "验证住户", createdAt: NOW, lastLoginAt: NOW });
-  const bindingId = `wx_${createHash("sha256").update(`${appId}\0${openid}`).digest("hex")}`;
-  db._write("tenant_auth_identities", bindingId, { _id: bindingId, schemaVersion: 1, appId, openid,
-    userId: id, revision: 1, createdAt: NOW, updatedAt: NOW });
-  return { userId: id, openid, appId, phone, bindingId };
+async function registerVerifiedUser(db, { openid = "synthetic-wx-user", appId = "synthetic-app", phone = "13800000000" } = {}) {
+  const main = createPhoneLogin({ db, now: () => NOW, cloud: {
+    getWXContext: () => ({ APPID: appId, OPENID: openid }),
+    openapi: { phonenumber: { getPhoneNumber: async () => ({ phoneInfo: { purePhoneNumber: phone } }) } },
+  } });
+  const result = await main({ code: "synthetic-phone-authorization" });
+  assert.equal(result.code, 0, "fixture必须通过真实手机号handler完成可信注册");
+  return { userId: result.userInfo._id, openid, appId, phone, main };
 }
 
 async function fixture() {
@@ -29,9 +35,43 @@ async function fixture() {
   const tenant = new TenantAccountService({ db, now });
   const service = new AdminTenantPasswordAccounts({ database: db, now });
   const identity = { APPID: "synthetic-app", OPENID: "synthetic-wx-user", UNIONID: "synthetic-union" };
-  const seeded = seedVerifiedUser(db, { openid: identity.OPENID, appId: identity.APPID });
-  return { db, tenant, service, identity, userId: seeded.userId };
+  const registered = await registerVerifiedUser(db, { openid: identity.OPENID, appId: identity.APPID });
+  return { db, tenant, service, identity, userId: registered.userId, phoneLogin: registered.main };
 }
+
+test("首次微信手机号成功后自动注册并可选，重复授权与密码登录复用同一user", async () => {
+  const db = new MemoryDB();
+  const service = new AdminTenantPasswordAccounts({ database: db, now: () => NOW });
+  assert.deepEqual(await service.listVerifiedUsers(ADMIN), []);
+  const registered = await registerVerifiedUser(db);
+  assert.equal(db.rows('users').length, 1);
+  const rows = await service.listVerifiedUsers(ADMIN);
+  assert.deepEqual(rows, [{ userId: registered.userId, phone: registered.phone, name: '', houses: [] }]);
+  assert.ok(!JSON.stringify(rows).includes(registered.openid));
+  const account = await service.createAccount(ADMIN, { userId: rows[0].userId, username: 'tenant.registered', password: PASSWORD });
+  const tenant = new TenantAccountService({ db, now: () => NOW });
+  const passwordLogin = await tenant.login({ APPID: registered.appId, OPENID: registered.openid }, { username: account.username, password: PASSWORD });
+  assert.equal(passwordLogin.code, 0);
+  assert.equal(passwordLogin.userInfo._id, registered.userId);
+  const repeated = await registered.main({ code: 'synthetic-phone-authorization-again' });
+  assert.equal(repeated.code, 0);
+  assert.equal(repeated.userInfo._id, passwordLogin.userInfo._id);
+  assert.equal(db.rows('users').length, 1);
+});
+
+test("未注册和仅自报手机号验证标记的住户不能入选或开通，逐次全库零变化", async () => {
+  const db = new MemoryDB();
+  const service = new AdminTenantPasswordAccounts({ database: db, now: () => NOW });
+  // Negative fixture: public fields cannot manufacture the private server proof.
+  db._write('users', 'synthetic-unverified', { _id: 'synthetic-unverified', _openid: 'synthetic-unverified-openid',
+    wechatAppId: 'synthetic-app', role: 'user', houses: [], points: 0, phone: '13800000000', phoneBoundAt: NOW });
+  assert.deepEqual(await service.listVerifiedUsers(ADMIN), []);
+  for (const userId of ['synthetic-unregistered', 'synthetic-unverified']) {
+    const before = db.snapshot();
+    await assert.rejects(() => service.createAccount(ADMIN, { userId, username: 'tenant.rejected', password: PASSWORD }));
+    assert.deepEqual(db.snapshot(), before);
+  }
+});
 
 test("后台薄服务只按已验证住户 userId 开通，返回闭式DTO，不能把管理员账号变成租客凭据", async () => {
   const ctx = await fixture();
@@ -97,11 +137,11 @@ test("重置与停用保留身份绑定，推进版本；陈旧管理员修改CA
 
 test("配置没有真实事务时管理员写入失败关闭，不能回退串行非原子写", async () => {
   const db = new MemoryDB();
+  const registered = await registerVerifiedUser(db);
   db.runTransaction = undefined;
-  seedVerifiedUser(db, {});
   const service = new AdminTenantPasswordAccounts({ database: db, now: () => NOW });
   const before = db.snapshot();
-  await assert.rejects(async () => service.createAccount(ADMIN, { userId: "wxuser_verified", username: "tenant.none", password: PASSWORD }),
+  await assert.rejects(async () => service.createAccount(ADMIN, { userId: registered.userId, username: "tenant.none", password: PASSWORD }),
     (error) => error.code === "SERVICE_UNAVAILABLE" && error.status === 503);
   assert.deepEqual(db.snapshot(), before);
 });
@@ -123,6 +163,9 @@ test("住户公共展示投影不保留 openid 等私密字段", () => {
   assert.throws(() => residentView({ userId: "bad/id", phone: "13800000000", houses: [] }));
   assert.throws(() => residentView({ userId: "wxuser_safe", phone: "", houses: [] }));
   assert.throws(() => residentView({ userId: "wxuser_safe", phone: "13800000000", houses: "not-array" }));
+  assert.throws(() => residentView({ userId: "wxuser_safe", phone: "13800000000", houses: [{ openid: 'private-openid' }] }));
+  assert.throws(() => residentView({ userId: "wxuser_safe", phone: "private-openid", houses: [] }));
+  assert.throws(() => residentView({ userId: "wxuser_safe", phone: "13800000000", name: "private\nvalue", houses: [] }));
 });
 
 class Element {
@@ -200,6 +243,10 @@ test("未选择住户不开通；页面重置/停用使用当前列表revision�
   await doc.getElementById("create-account-form").emit("submit");
   assert.equal(calls.filter((call) => call.method === "POST").length, 0, "未选择住户不得发出开通请求");
   assert.match(doc.getElementById("account-message").textContent, /请先选择/);
+  doc.getElementById("resident-user").value = 'manually-supplied-userid';
+  doc.getElementById("create-password").value = PASSWORD;
+  await doc.getElementById("create-account-form").emit("submit");
+  assert.equal(calls.filter((call) => call.method === "POST").length, 0, '页面自报userId不能替代可信住户选择');
   doc.getElementById("reset-account").value = current.id;
   doc.getElementById("reset-password").value = PASSWORD;
   const resetting = doc.getElementById("reset-password-form").emit("submit");
@@ -264,10 +311,37 @@ test("列表容量/损坏记录失败关闭显示维护提示，不展示服务�
   }
 });
 
+test("住户刷新失败后清空旧选择，手工恢复旧userId也不能继续发出开通请求", async () => {
+  const doc = documentFixture(), posts = [];
+  let failResidents = false;
+  const page = createTenantPasswordAccountsPage({ document: doc, fetch: async (path, init) => {
+    if (path === '/api/me') return response({ account: { role: 'admin' }, csrf: 'synthetic-csrf' });
+    if (path === '/api/tenant-password-accounts') return response({ rows: [uiAccount()] });
+    if (path === '/api/tenant-password-accounts/residents') return failResidents
+      ? response({ code: 'UNKNOWN', error: 'private-openid passwordHash' }, 503)
+      : response({ rows: [uiResident()] });
+    posts.push(JSON.parse(init.body));
+    return response(uiAccount());
+  } });
+  await page.start();
+  doc.getElementById('resident-user').value = 'synthetic-resident';
+  failResidents = true;
+  await doc.getElementById('reload-accounts').emit('click');
+  assert.equal(doc.getElementById('resident-user').value, '');
+  assert.ok(!doc.getElementById('account-message').textContent.includes('private-openid'));
+  doc.getElementById('resident-user').value = 'synthetic-resident';
+  doc.getElementById('create-username').value = 'tenant.safe';
+  doc.getElementById('create-password').value = PASSWORD;
+  await doc.getElementById('create-account-form').emit('submit');
+  assert.deepEqual(posts, []);
+  assert.equal(doc.getElementById('create-password').value, '');
+});
+
 test("后台开通表单：住户选择替代开户码；八位最低密码，七位不请求、八位及旧十二位均可提交", async () => {
   const html = readFileSync(new URL('../public/tenant-password-accounts.html', import.meta.url), 'utf8');
   assert.match(html, /<select[^>]+id="resident-user"[^>]+name="userId"[^>]+required/);
   assert.ok(!html.includes("enrollment-code"), "开户码输入必须已移除");
+  assert.doesNotMatch(html, /requestCode|prepareOpening|prepareAccountOpening|开户码/);
   for (const id of ['create-password', 'reset-password']) {
     assert.match(html, new RegExp('<input[^>]+id="' + id + '"[^>]+minlength="8"[^>]+maxlength="128"'));
   }

@@ -286,14 +286,17 @@ function mapProfile(user) {
 async function getProfile() { if(isDemo())return clone(demo.profile);return profile&&clone(profile); }
 async function loginWithPhone(code) {
   if(isDemo())throw new Error('演示模式无需授权手机号');
-  if(!code)throw new Error('未获得手机号授权');
+  if(typeof code !== 'string' || !/^[^\s]{1,2048}$/.test(code))throw new Error('未获得有效手机号授权');
   const generation = ++authGeneration;
+  profile = null;
   activeLogin = { generation, kind: 'phone' };
   try {
     const r = await call('phoneLogin', { code });
     if (generation !== authGeneration) throw new Error('登录已取消，请重新操作');
-    profile = mapProfile(r.userInfo || {});
+    profile = mapProfile(validateLoginProfile(r.userInfo));
     return clone(profile);
+  } catch (error) {
+    throw safeLoginError(error, generation);
   } finally {
     if (activeLogin && activeLogin.generation === generation) activeLogin = null;
   }
@@ -302,16 +305,19 @@ function passwordBytes(value) {
   try { return encodeURIComponent(value).replace(/%[0-9a-f]{2}/gi, 'x').length; }
   catch (_) { return Infinity; }
 }
-function validatePasswordProfile(user) {
+function invalidLoginProfile() {
+  return Object.assign(new Error('登录服务返回资料异常，请稍后重试'), { code: 'LOGIN_PROFILE_INVALID' });
+}
+function validateLoginProfile(user) {
   const required = ['_id', 'role', 'houses', 'points'];
   const optional = ['name', 'nickname', 'avatar', 'phone', 'community', 'house', 'propertyId', 'couponsCount', 'ordersCount'];
-  if (!user || typeof user !== 'object' || Array.isArray(user)) throw new Error('登录服务返回资料异常，请稍后重试');
+  if (!user || typeof user !== 'object' || Array.isArray(user)) throw invalidLoginProfile();
   const clean = {};
   for (const key of Reflect.ownKeys(user)) {
     const descriptor = Object.getOwnPropertyDescriptor(user, key);
     if (typeof key !== 'string' || !required.concat(optional).includes(key)
         || !descriptor || !descriptor.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
-      throw new Error('登录服务返回资料异常，请稍后重试');
+      throw invalidLoginProfile();
     }
     clean[key] = descriptor.value;
   }
@@ -322,16 +328,24 @@ function validatePasswordProfile(user) {
       || !['user', 'admin'].includes(clean.role)
       || !Array.isArray(clean.houses) || !clean.houses.every(safeId)
       || typeof clean.points !== 'number' || !Number.isFinite(clean.points) || clean.points < 0) {
-    throw new Error('登录服务返回资料异常，请稍后重试');
+    throw invalidLoginProfile();
   }
   for (const key of optional) {
     if (!Object.prototype.hasOwnProperty.call(clean, key)) continue;
     if (key === 'couponsCount' || key === 'ordersCount') {
-      if (!Number.isSafeInteger(clean[key]) || clean[key] < 0) throw new Error('登录服务返回资料异常，请稍后重试');
-    } else if (!safeText(clean[key], 512)) throw new Error('登录服务返回资料异常，请稍后重试');
+      if (!Number.isSafeInteger(clean[key]) || clean[key] < 0) throw invalidLoginProfile();
+    } else if (!safeText(clean[key], 512)) throw invalidLoginProfile();
   }
   clean.houses = clean.houses.slice();
   return clean;
+}
+function safeLoginError(error, generation) {
+  if (generation !== authGeneration) return new Error('登录已取消，请重新操作');
+  if (error && error.code === 'LOGIN_PROFILE_INVALID') return invalidLoginProfile();
+  const code = error && error.code;
+  if (code === 'AUTH_FAILED') return Object.assign(new Error('账号或密码不正确，或当前微信尚未关联该账号'), { code });
+  if (code === 'SERVICE_UNAVAILABLE') return Object.assign(new Error('登录服务暂不可用，请稍后重试'), { code });
+  return new Error('登录未完成，请稍后重试');
 }
 async function loginWithPassword(input) {
   if (isDemo()) throw new Error('演示模式不会登录真实账号');
@@ -340,17 +354,16 @@ async function loginWithPassword(input) {
   if (!/^[a-z0-9][a-z0-9._-]{3,31}$/.test(username)) throw new Error('账号需为4–32位字母、数字或._-');
   if (password.length < 8 || password.length > 128 || passwordBytes(password) > 256) throw new Error('密码需为8–128个字符，且不超过256字节');
   const generation = ++authGeneration;
+  profile = null;
   activeLogin = { generation, kind: 'password' };
   try {
     const r = await call('accountLogin', { action: 'login', username, password });
     if (generation !== authGeneration) throw new Error('登录已取消，请重新操作');
-    const user = validatePasswordProfile(r.userInfo);
+    const user = validateLoginProfile(r.userInfo);
     profile = mapProfile(user);
     return clone(profile);
   } catch (error) {
-    if (error && error.code === 'AUTH_FAILED') error.message = '账号或密码不正确，或当前微信尚未关联该账号';
-    if (error && error.code === 'SERVICE_UNAVAILABLE') error.message = '登录服务暂不可用，请稍后重试';
-    throw error;
+    throw safeLoginError(error, generation);
   } finally {
     password = '';
     if (activeLogin && activeLogin.generation === generation) activeLogin = null;
@@ -358,6 +371,12 @@ async function loginWithPassword(input) {
 }
 function cancelPasswordLogin() {
   if (activeLogin && activeLogin.kind === 'password') {
+    authGeneration += 1;
+    activeLogin = null;
+  }
+}
+function cancelPhoneLogin() {
+  if (activeLogin && activeLogin.kind === 'phone') {
     authGeneration += 1;
     activeLogin = null;
   }
@@ -371,4 +390,4 @@ async function listMeters(type){
  if(isDemo())return Promise.resolve(type==='water'?[]:[clone(demo.meter)]);
  return unsupported('旧水电表接口尚未按住户房产过滤，完成权限对接后开放');
 }
-module.exports={isDemo,isAuthenticated,getLoginEpoch,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,loginWithPassword,cancelPasswordLogin,logout,listFamily,addFamily,getProperty,listMeters,getCheckinFaceConfig,applyTestCheckin,uploadTestFace,createFaceTask,getFaceTask,isReviewChannelCode,REVIEW_CHANNEL_CODES};
+module.exports={isDemo,isAuthenticated,getLoginEpoch,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,loginWithPassword,cancelPasswordLogin,cancelPhoneLogin,logout,listFamily,addFamily,getProperty,listMeters,getCheckinFaceConfig,applyTestCheckin,uploadTestFace,createFaceTask,getFaceTask,isReviewChannelCode,REVIEW_CHANNEL_CODES};

@@ -1,0 +1,1943 @@
+TAP version 13
+# Subtest: 获取开户码入口已按最新需求取消：无 prepare 导出，登录导出保持可用
+ok 1 - 获取开户码入口已按最新需求取消：无 prepare 导出，登录导出保持可用
+  ---
+  duration_ms: 4.381235
+  type: 'test'
+  ...
+# Subtest: 账号归一但密码保留原文；成功资料与手机号共用缓存，退出清空
+ok 2 - 账号归一但密码保留原文；成功资料与手机号共用缓存，退出清空
+  ---
+  duration_ms: 1.49059
+  type: 'test'
+  ...
+# Subtest: 账号/密码边界在云调用前拒绝，UTF8字节上限不按字符数放宽
+ok 3 - 账号/密码边界在云调用前拒绝，UTF8字节上限不按字符数放宽
+  ---
+  duration_ms: 4.788046
+  type: 'test'
+  ...
+# Subtest: code0仍必须有完整闭式身份DTO；拒空资料/隐藏凭据/错误类型/取值器
+ok 4 - code0仍必须有完整闭式身份DTO；拒空资料/隐藏凭据/错误类型/取值器
+  ---
+  duration_ms: 11.126834
+  type: 'test'
+  ...
+# Subtest: 可选资料字符串按服务端512边界消费，不另缩短合法资料
+ok 5 - 可选资料字符串按服务端512边界消费，不另缩短合法资料
+  ---
+  duration_ms: 3.043214
+  type: 'test'
+  ...
+# Subtest: AUTH_FAILED统一提示、服务故障分开；不输出后端内部消息
+ok 6 - AUTH_FAILED统一提示、服务故障分开；不输出后端内部消息
+  ---
+  duration_ms: 0.922597
+  type: 'test'
+  ...
+# Subtest: 取消/退出/手机号新登录后，密码请求晚返不能重新写入资料
+ok 7 - 取消/退出/手机号新登录后，密码请求晚返不能重新写入资料
+  ---
+  duration_ms: 1.545743
+  type: 'test'
+  ...
+# Subtest: 手机号授权凭证仅传code；取消和无效凭证不调用后端、不写登录资料
+ok 8 - 手机号授权凭证仅传code；取消和无效凭证不调用后端、不写登录资料
+  ---
+  duration_ms: 1.039893
+  type: 'test'
+  ...
+# Subtest: 手机号请求在离页取消、退出或换号后晚返，不能重新写入旧账号资料
+ok 9 - 手机号请求在离页取消、退出或换号后晚返，不能重新写入旧账号资料
+  ---
+  duration_ms: 1.824151
+  type: 'test'
+  ...
+# Subtest: 失败的换号清除原登录；手机号与密码未知错误均不显示服务端消息或凭据
+ok 10 - 失败的换号清除原登录；手机号与密码未知错误均不显示服务端消息或凭据
+  ---
+  duration_ms: 1.598202
+  type: 'test'
+  ...
+# Subtest: 显式栖山苑预设232可见且所有首层别名详情拒绝，无云调用
+ok 11 - 显式栖山苑预设232可见且所有首层别名详情拒绝，无云调用
+  ---
+  duration_ms: 82.227307
+  type: 'test'
+  ...
+# Subtest: 未显式选预设时真实云失败不fallback，错误开关也不启用预设
+ok 12 - 未显式选预设时真实云失败不fallback，错误开关也不启用预设
+  ---
+  duration_ms: 0.958992
+  type: 'test'
+  ...
+# Subtest: 开户码已按最新需求停用：云入口拒绝 prepare，服务层不再生成码，零写
+ok 13 - 开户码已按最新需求停用：云入口拒绝 prepare，服务层不再生成码，零写
+  ---
+  duration_ms: 2.988943
+  type: 'test'
+  ...
+# Subtest: 旧开户码不得继续开户：createAccount 拒绝 requestCode 输入，零写
+ok 14 - 旧开户码不得继续开户：createAccount 拒绝 requestCode 输入，零写
+  ---
+  duration_ms: 4.505322
+  type: 'test'
+  ...
+# Subtest: 只为已完成可信手机号注册的住户开通：未验证/伪造 userId 拒绝且零写
+ok 15 - 只为已完成可信手机号注册的住户开通：未验证/伪造 userId 拒绝且零写
+  ---
+  duration_ms: 597.317955
+  type: 'test'
+  ...
+# Subtest: 真实 salted scrypt 验证原文密码，公开 DTO/users/audit 不泄露凭据
+ok 16 - 真实 salted scrypt 验证原文密码，公开 DTO/users/audit 不泄露凭据
+  ---
+  duration_ms: 324.51273
+  type: 'test'
+  ...
+# Subtest: 未知账号、错误密码、不同微信/APPID、停用统一失败且除限速外零写
+ok 17 - 未知账号、错误密码、不同微信/APPID、停用统一失败且除限速外零写
+  ---
+  duration_ms: 586.640363
+  type: 'test'
+  ...
+# Subtest: 登录持久每15分钟10次，成功也消耗预算
+ok 18 - 登录持久每15分钟10次，成功也消耗预算
+  ---
+  duration_ms: 760.717145
+  type: 'test'
+  ...
+# Subtest: 管理员开通/重置/状态与审计原子回滚；无事务不降级
+ok 19 - 管理员开通/重置/状态与审计原子回滚；无事务不降级
+  ---
+  duration_ms: 232.689471
+  type: 'test'
+  ...
+# Subtest: 同一住户两个创建者真实交错，仅一个账户/绑定/审计提交
+ok 20 - 同一住户两个创建者真实交错，仅一个账户/绑定/审计提交
+  ---
+  duration_ms: 72.806506
+  type: 'test'
+  ...
+# Subtest: 规范化同名账户 create-only，不能重绑给另一微信用户
+ok 21 - 规范化同名账户 create-only，不能重绑给另一微信用户
+  ---
+  duration_ms: 77.635062
+  type: 'test'
+  ...
+# Subtest: 重置换盐推进版本，旧密码/陈旧CAS拒绝；停用不改变微信用户或房产
+ok 22 - 重置换盐推进版本，旧密码/陈旧CAS拒绝；停用不改变微信用户或房产
+  ---
+  duration_ms: 173.441782
+  type: 'test'
+  ...
+# Subtest: 密码证明已捕获后重置或停用再启用，旧版本证明不能完成登录
+ok 23 - 密码证明已捕获后重置或停用再启用，旧版本证明不能完成登录
+  ---
+  duration_ms: 164.231175
+  type: 'test'
+  ...
+# Subtest: 非管理员不能列出/选择住户、开通、重置或停用租客账号，全部零写
+ok 24 - 非管理员不能列出/选择住户、开通、重置或停用租客账号，全部零写
+  ---
+  duration_ms: 36.408738
+  type: 'test'
+  ...
+# Subtest: 数据库故障只返回 SERVICE_UNAVAILABLE，不泄露异常或密码
+ok 25 - 数据库故障只返回 SERVICE_UNAVAILABLE，不泄露异常或密码
+  ---
+  duration_ms: 36.179925
+  type: 'test'
+  ...
+# Subtest: 用户名/密码冻结边界：规范化账号，保留密码原文及 UTF8 字节上限
+ok 26 - 用户名/密码冻结边界：规范化账号，保留密码原文及 UTF8 字节上限
+  ---
+  duration_ms: 307.549183
+  type: 'test'
+  ...
+# Subtest: 缺少可信APPID/OPENID或自报客户端身份拒绝，不创建用户或账户
+ok 27 - 缺少可信APPID/OPENID或自报客户端身份拒绝，不创建用户或账户
+  ---
+  duration_ms: 37.056892
+  type: 'test'
+  ...
+# Subtest: 并发争用最后一个登录预算，最多一项获得认证，记录不丢失
+ok 28 - 并发争用最后一个登录预算，最多一项获得认证，记录不丢失
+  ---
+  duration_ms: 404.613445
+  type: 'test'
+  ...
+# Subtest: 登录无真实事务失败关闭，凭据和既有用户保持不变
+ok 29 - 登录无真实事务失败关闭，凭据和既有用户保持不变
+  ---
+  duration_ms: 32.928108
+  type: 'test'
+  ...
+# Subtest: 真实云入口只信 getWXContext：prepare 拒绝、管理员动作不暴露、登录正常
+ok 30 - 真实云入口只信 getWXContext：prepare 拒绝、管理员动作不暴露、登录正常
+  ---
+  duration_ms: 99.149191
+  type: 'test'
+  ...
+# Subtest: 账号列表稳定分页覆盖101项，损坏凭据不可被静默过滤
+ok 31 - 账号列表稳定分页覆盖101项，损坏凭据不可被静默过滤
+  ---
+  duration_ms: 44.205696
+  type: 'test'
+  ...
+# Subtest: 八位最低密码：七位拒绝、八位真实scrypt可登录，十二位旧密码仍可重置使用
+ok 32 - 八位最低密码：七位拒绝、八位真实scrypt可登录，十二位旧密码仍可重置使用
+  ---
+  duration_ms: 198.103943
+  type: 'test'
+  ...
+# Subtest: 已验证住户列表：只含手机号核验完成的住户，安全投影不含 openid，分页稳定
+ok 33 - 已验证住户列表：只含手机号核验完成的住户，安全投影不含 openid，分页稳定
+  ---
+  duration_ms: 85.611584
+  type: 'test'
+  ...
+# Subtest: 仅伪造 phoneBoundAt 与微信绑定不能开户；手机号证明来自实际换号入口
+ok 34 - 仅伪造 phoneBoundAt 与微信绑定不能开户；手机号证明来自实际换号入口
+  ---
+  duration_ms: 33.806804
+  type: 'test'
+  ...
+# Subtest: 管理员开户逐项核验完整微信身份及当前手机号证明，字段篡改全部零写
+ok 35 - 管理员开户逐项核验完整微信身份及当前手机号证明，字段篡改全部零写
+  ---
+  duration_ms: 235.764487
+  type: 'test'
+  ...
+# Subtest: 审计写入本身失败时账号与身份修改原子回滚
+ok 36 - 审计写入本身失败时账号与身份修改原子回滚
+  ---
+  duration_ms: 33.673713
+  type: 'test'
+  ...
+# Subtest: 私有手机号证明任一关键字段失真，管理员开户拒绝且不写库
+ok 37 - 私有手机号证明任一关键字段失真，管理员开户拒绝且不写库
+  ---
+  duration_ms: 202.891514
+  type: 'test'
+  ...
+# Subtest: 遗留密码账号缺手机号、缺证明或手机号遭篡改时失败关闭，仅登录预算可写
+ok 38 - 遗留密码账号缺手机号、缺证明或手机号遭篡改时失败关闭，仅登录预算可写
+  ---
+  duration_ms: 199.151358
+  type: 'test'
+  ...
+# Subtest: 遗留账号同号重新微信授权补证明后恢复原用户、房屋与密码登录
+ok 39 - 遗留账号同号重新微信授权补证明后恢复原用户、房屋与密码登录
+  ---
+  duration_ms: 101.974847
+  type: 'test'
+  ...
+# Subtest: nonzero status with otherwise valid query data cannot open accounts, list trusted residents or authenticate
+ok 40 - nonzero status with otherwise valid query data cannot open accounts, list trusted residents or authenticate
+  ---
+  duration_ms: 211.872827
+  type: 'test'
+  ...
+# Subtest: 密码输入隐藏且不进storage/URL；原手机号按钮仍保留，新页已注册
+ok 41 - 密码输入隐藏且不进storage/URL；原手机号按钮仍保留，新页已注册
+  ---
+  duration_ms: 1.834778
+  type: 'test'
+  ...
+# Subtest: 提交立即清密码，busy阻重复；成功回我的，不把凭据放导航
+ok 42 - 提交立即清密码，busy阻重复；成功回我的，不把凭据放导航
+  ---
+  duration_ms: 2.759357
+  type: 'test'
+  ...
+# Subtest: 失败、隐藏和卸载均清密码；晚返不跳页、不恢复私有输入
+ok 43 - 失败、隐藏和卸载均清密码；晚返不跳页、不恢复私有输入
+  ---
+  duration_ms: 3.308132
+  type: 'test'
+  ...
+# Subtest: 页面不再提供获取开户码：无 prepareOpening 处理器与相关状态
+ok 44 - 页面不再提供获取开户码：无 prepareOpening 处理器与相关状态
+  ---
+  duration_ms: 1.205412
+  type: 'test'
+  ...
+# Subtest: 取消微信手机号授权零注册调用、零存储/拨打/发送，保留游客状态
+ok 45 - 取消微信手机号授权零注册调用、零存储/拨打/发送，保留游客状态
+  ---
+  duration_ms: 2.101268
+  type: 'test'
+  ...
+# Subtest: 手机号授权成功展示同一住户，等待时不重复提交、不自动导航或发起业务动作
+ok 46 - 手机号授权成功展示同一住户，等待时不重复提交、不自动导航或发起业务动作
+  ---
+  duration_ms: 1.320765
+  type: 'test'
+  ...
+# Subtest: 手机号授权等待中隐藏或卸载，迟到成功/失败均不渲染、不提示、不恢复登录按钮busy
+ok 47 - 手机号授权等待中隐藏或卸载，迟到成功/失败均不渲染、不提示、不恢复登录按钮busy
+  ---
+  duration_ms: 3.966602
+  type: 'test'
+  ...
+# Subtest: 资料请求等待中换号或退出，旧身份snapshot不能借新登录状态显示
+ok 48 - 资料请求等待中换号或退出，旧身份snapshot不能借新登录状态显示
+  ---
+  duration_ms: 1.489949
+  type: 'test'
+  ...
+# Subtest: 手机号登录期间刷新尚未完成，成功登录启动新资料请求且旧刷新不能清掉新住户
+ok 49 - 手机号登录期间刷新尚未完成，成功登录启动新资料请求且旧刷新不能清掉新住户
+  ---
+  duration_ms: 1.238661
+  type: 'test'
+  ...
+# Subtest: guest直接打开测试入住：先提示登录，无配置读取并清除私密状态
+ok 50 - guest直接打开测试入住：先提示登录，无配置读取并清除私密状态
+  ---
+  duration_ms: 8.36386
+  type: 'test'
+  ...
+# Subtest: guest伪造已批准/可申请视图也不能提交或进入人脸页
+ok 51 - guest伪造已批准/可申请视图也不能提交或进入人脸页
+  ---
+  duration_ms: 1.586424
+  type: 'test'
+  ...
+# Subtest: guest人脸深链不读取getApp申请快照、不查任务、不建立轮询
+ok 52 - guest人脸深链不读取getApp申请快照、不查任务、不建立轮询
+  ---
+  duration_ms: 1.506274
+  type: 'test'
+  ...
+# Subtest: guest查询/选图上传均零云调用、零选择器，清空旧cloudPath并停轮询
+ok 53 - guest查询/选图上传均零云调用、零选择器，清空旧cloudPath并停轮询
+  ---
+  duration_ms: 3.062762
+  type: 'test'
+  ...
+# Subtest: 无getProfile、伪认证、坏身份或本地身份读取异常一律失败关闭
+ok 54 - 无getProfile、伪认证、坏身份或本地身份读取异常一律失败关闭
+  ---
+  duration_ms: 3.03424
+  type: 'test'
+  ...
+# Subtest: 登录提示尚未关闭时，之前的私密视图已经清空
+ok 55 - 登录提示尚未关闭时，之前的私密视图已经清空
+  ---
+  duration_ms: 2.194678
+  type: 'test'
+  ...
+# Subtest: 已登录读配置/申请/导航保留原版本和审批门禁
+ok 56 - 已登录读配置/申请/导航保留原版本和审批门禁
+  ---
+  duration_ms: 1.176619
+  type: 'test'
+  ...
+# Subtest: 已登录人脸流程仍须用途确认且只上传/创建一次
+ok 57 - 已登录人脸流程仍须用途确认且只上传/创建一次
+  ---
+  duration_ms: 1.152242
+  type: 'test'
+  ...
+# Subtest: 配置和申请迟到响应在退出登录后均不得回填私密快照
+ok 58 - 配置和申请迟到响应在退出登录后均不得回填私密快照
+  ---
+  duration_ms: 2.110101
+  type: 'test'
+  ...
+# Subtest: 任务迟到响应遇退出或换账号均丢弃，不显示上一账号的房租/cloudPath
+ok 59 - 任务迟到响应遇退出或换账号均丢弃，不显示上一账号的房租/cloudPath
+  ---
+  duration_ms: 1.639604
+  type: 'test'
+  ...
+# Subtest: 资格读取期间退出：尚未打开照片选择器，更不会上传
+ok 60 - 资格读取期间退出：尚未打开照片选择器，更不会上传
+  ---
+  duration_ms: 1.432873
+  type: 'test'
+  ...
+# Subtest: 选图期间退出：回调文件不上传，也不创建任务
+ok 61 - 选图期间退出：回调文件不上传，也不创建任务
+  ---
+  duration_ms: 1.072302
+  type: 'test'
+  ...
+# Subtest: 上传期间退出：保留已发上传调用事实，迟到fileID不再创建任务
+ok 62 - 上传期间退出：保留已发上传调用事实，迟到fileID不再创建任务
+  ---
+  duration_ms: 1.932133
+  type: 'test'
+  ...
+# Subtest: 返回页面时已退出，onShow重新验证并清除已显示的本人数据
+ok 63 - 返回页面时已退出，onShow重新验证并清除已显示的本人数据
+  ---
+  duration_ms: 0.882997
+  type: 'test'
+  ...
+# Subtest: 最终同步门：loginGate返回与caller继续之间微任务退登阻止入住提交/导航和私密回填
+ok 64 - 最终同步门：loginGate返回与caller继续之间微任务退登阻止入住提交/导航和私密回填
+  ---
+  duration_ms: 0.959683
+  type: 'test'
+  ...
+# Subtest: 最终同步门：资格gate返回后的微任务退登不得打开选图器
+ok 65 - 最终同步门：资格gate返回后的微任务退登不得打开选图器
+  ---
+  duration_ms: 0.621384
+  type: 'test'
+  ...
+# Subtest: 最终同步门：选图/上传返回后的微任务退登阻止下一个副作用
+ok 66 - 最终同步门：选图/上传返回后的微任务退登阻止下一个副作用
+  ---
+  duration_ms: 0.950629
+  type: 'test'
+  ...
+# Subtest: 最终同步门：任务gate最后返回后的微任务退登不显示私密状态
+ok 67 - 最终同步门：任务gate最后返回后的微任务退登不显示私密状态
+  ---
+  duration_ms: 0.463176
+  type: 'test'
+  ...
+# Subtest: 同一用户退出再登录也变更epoch，旧照片选择回调不可恢复上传
+ok 68 - 同一用户退出再登录也变更epoch，旧照片选择回调不可恢复上传
+  ---
+  duration_ms: 1.189588
+  type: 'test'
+  ...
+# Subtest: 缺少同步身份或epoch能力不能由异步profile默认放行
+ok 69 - 缺少同步身份或epoch能力不能由异步profile默认放行
+  ---
+  duration_ms: 1.220484
+  type: 'test'
+  ...
+# Subtest: guest cancellation and confirmation stop the original operation and go only to login
+ok 70 - guest cancellation and confirmation stop the original operation and go only to login
+  ---
+  duration_ms: 2.114678
+  type: 'test'
+  ...
+# Subtest: missing, failed and malformed identity are never treated as logged in
+ok 71 - missing, failed and malformed identity are never treated as logged in
+  ---
+  duration_ms: 1.681687
+  type: 'test'
+  ...
+# Subtest: parallel protected actions share one prompt and never auto-resume after login
+ok 72 - parallel protected actions share one prompt and never auto-resume after login
+  ---
+  duration_ms: 7.174893
+  type: 'test'
+  ...
+# Subtest: all private API families reject guests without cloud or upload calls
+ok 73 - all private API families reject guests without cloud or upload calls
+  ---
+  duration_ms: 3.549034
+  type: 'test'
+  ...
+# Subtest: logout rejects late private data and file upload receipts
+ok 74 - logout rejects late private data and file upload receipts
+  ---
+  duration_ms: 1.318141
+  type: 'test'
+  ...
+# Subtest: private result mapping also rechecks login after the inner request promise
+ok 75 - private result mapping also rechecks login after the inner request promise
+  ---
+  duration_ms: 0.790177
+  type: 'test'
+  ...
+# Subtest: a pending replacement login cannot issue a usable epoch for the previous profile
+ok 76 - a pending replacement login cannot issue a usable epoch for the previous profile
+  ---
+  duration_ms: 1.626845
+  type: 'test'
+  ...
+# Subtest: password API accepts the new eight-character boundary and rejects seven before cloud
+ok 77 - password API accepts the new eight-character boundary and rejects seven before cloud
+  ---
+  duration_ms: 0.566131
+  type: 'test'
+  ...
+# Subtest: rental browsing remains public while guest calls, consult, favorites and appointments prompt login
+ok 78 - rental browsing remains public while guest calls, consult, favorites and appointments prompt login
+  ---
+  duration_ms: 2.789212
+  type: 'test'
+  ...
+# Subtest: authenticated rental actions retain normal behavior and logout clears personalized state
+ok 79 - authenticated rental actions retain normal behavior and logout clears personalized state
+  ---
+  duration_ms: 1.208046
+  type: 'test'
+  ...
+# Subtest: logout in the login-gate microtask gap prevents direct phone, cache and appointment effects
+ok 80 - logout in the login-gate microtask gap prevents direct phone, cache and appointment effects
+  ---
+  duration_ms: 3.904067
+  type: 'test'
+  ...
+# Subtest: guest onShow立即清除四页旧私密数据，并在真实API前拒绝
+ok 81 - guest onShow立即清除四页旧私密数据，并在真实API前拒绝
+  ---
+  duration_ms: 7.186591
+  type: 'test'
+  ...
+# Subtest: 直接URL及缺getProfile失败关闭，不把demo标签当真实登录
+ok 82 - 直接URL及缺getProfile失败关闭，不把demo标签当真实登录
+  ---
+  duration_ms: 1.854928
+  type: 'test'
+  ...
+# Subtest: guest私有入口、标记、发送、备注和家庭动作均零副作用，普通输入/关闭仍可用
+ok 83 - guest私有入口、标记、发送、备注和家庭动作均零副作用，普通输入/关闭仍可用
+  ---
+  duration_ms: 6.722133
+  type: 'test'
+  ...
+# Subtest: 明确登录后真实handler可读消息/标记/导航、读备注并保存一次
+ok 84 - 明确登录后真实handler可读消息/标记/导航、读备注并保存一次
+  ---
+  duration_ms: 1.127014
+  type: 'test'
+  ...
+# Subtest: 聊天实际读/标记/翻页与并行发送只调用一次，随后注销清旧内容
+ok 85 - 聊天实际读/标记/翻页与并行发送只调用一次，随后注销清旧内容
+  ---
+  duration_ms: 0.604879
+  type: 'test'
+  ...
+# Subtest: 旧聊天请求晚返回不复活注销后私密数据，也不再标记已读
+ok 86 - 旧聊天请求晚返回不复活注销后私密数据，也不再标记已读
+  ---
+  duration_ms: 0.338639
+  type: 'test'
+  ...
+# Subtest: 开门确认期间注销会重新门禁而零设备调用，合法假执行器正例调用一次
+ok 87 - 开门确认期间注销会重新门禁而零设备调用，合法假执行器正例调用一次
+  ---
+  duration_ms: 1.091411
+  type: 'test'
+  ...
+# Subtest: 开门确认不能跨账号或同账号的退出重登代次
+ok 88 - 开门确认不能跨账号或同账号的退出重登代次
+  ---
+  duration_ms: 0.551168
+  type: 'test'
+  ...
+# Subtest: 真实登录helper通过后微任务退出，最终同步门阻止业务/存储/导航
+ok 89 - 真实登录helper通过后微任务退出，最终同步门阻止业务/存储/导航
+  ---
+  duration_ms: 1.209849
+  type: 'test'
+  ...
+# Subtest: 已知guest触发业务时先清旧内容，不等待登录弹框被关闭
+ok 90 - 已知guest触发业务时先清旧内容，不等待登录弹框被关闭
+  ---
+  duration_ms: 0.397017
+  type: 'test'
+  ...
+# Subtest: 游客个人菜单/服务/设置先经过实际helper：取消后无存储访问、业务导航或服务占位提示
+ok 91 - 游客个人菜单/服务/设置先经过实际helper：取消后无存储访问、业务导航或服务占位提示
+  ---
+  duration_ms: 14.562106
+  type: 'test'
+  ...
+# Subtest: 游客关注写与关注tab先提示登录，取消不读写旧关注缓存或切换个人tab
+ok 92 - 游客关注写与关注tab先提示登录，取消不读写旧关注缓存或切换个人tab
+  ---
+  duration_ms: 3.768815
+  type: 'test'
+  ...
+# Subtest: 生活非公开服务：未登录先提示，不先展示尚未开通的业务提示
+ok 93 - 生活非公开服务：未登录先提示，不先展示尚未开通的业务提示
+  ---
+  duration_ms: 7.439982
+  type: 'test'
+  ...
+# Subtest: 游客确认仅去登录页；即使期间完成登录，也不自动续做原动作
+ok 94 - 游客确认仅去登录页；即使期间完成登录，也不自动续做原动作
+  ---
+  duration_ms: 3.611507
+  type: 'test'
+  ...
+# Subtest: 已登录个人动作保留原业务：房产/家庭/门禁/测试入住导航、收藏与服务占位、账号设置
+ok 95 - 已登录个人动作保留原业务：房产/家庭/门禁/测试入住导航、收藏与服务占位、账号设置
+  ---
+  duration_ms: 8.345101
+  type: 'test'
+  ...
+# Subtest: 登录后主动重试关注可写入；生活服务保持原尚未开放提示
+ok 96 - 登录后主动重试关注可写入；生活服务保持原尚未开放提示
+  ---
+  duration_ms: 2.848641
+  type: 'test'
+  ...
+# Subtest: 公开社区内容/房源/搜索/筛选/详情/VR/关于不弹登录提示，也不读取游客旧关注缓存
+ok 97 - 公开社区内容/房源/搜索/筛选/详情/VR/关于不弹登录提示，也不读取游客旧关注缓存
+  ---
+  duration_ms: 4.027213
+  type: 'test'
+  ...
+# Subtest: 退出后首页忽略旧个人关注缓存，保留公开内容且不弹窗或删除原缓存
+ok 98 - 退出后首页忽略旧个人关注缓存，保留公开内容且不弹窗或删除原缓存
+  ---
+  duration_ms: 1.44346
+  type: 'test'
+  ...
+# Subtest: 退出后个人页清除已打开的收藏视图，不向游客保留前一用户内容或删除存储
+ok 99 - 退出后个人页清除已打开的收藏视图，不向游客保留前一用户内容或删除存储
+  ---
+  duration_ms: 2.147948
+  type: 'test'
+  ...
+# Subtest: 资料页空对象/伪认证/身份失效/异常均清旧身份和收藏，不阻断重新去登录
+ok 100 - 资料页空对象/伪认证/身份失效/异常均清旧身份和收藏，不阻断重新去登录
+  ---
+  duration_ms: 4.896228
+  type: 'test'
+  ...
+# Subtest: 资料页合法live用户与明确demo模拟资料保留显示，手机号登录后仍能展示身份
+ok 101 - 资料页合法live用户与明确demo模拟资料保留显示，手机号登录后仍能展示身份
+  ---
+  duration_ms: 3.616936
+  type: 'test'
+  ...
+# Subtest: 登录门等待期间microtask退出，关注和个人菜单最终副作用边界不读写或导航
+ok 102 - 登录门等待期间microtask退出，关注和个人菜单最终副作用边界不读写或导航
+  ---
+  duration_ms: 12.184792
+  type: 'test'
+  ...
+# Subtest: 公开筛选hasLogin旧真值遇microtask退出，不读取或显示个人关注缓存
+ok 103 - 公开筛选hasLogin旧真值遇microtask退出，不读取或显示个人关注缓存
+  ---
+  duration_ms: 1.150689
+  type: 'test'
+  ...
+# Subtest: 缺少同步认证能力也不能用旧profile真值执行关注/私有导航或展示身份
+ok 104 - 缺少同步认证能力也不能用旧profile真值执行关注/私有导航或展示身份
+  ---
+  duration_ms: 4.035024
+  type: 'test'
+  ...
+# Subtest: 登录入口不受动作门禁阻挡；缺失资料API或伪authenticated不能放行个人动作
+ok 105 - 登录入口不受动作门禁阻挡；缺失资料API或伪authenticated不能放行个人动作
+  ---
+  duration_ms: 3.626531
+  type: 'test'
+  ...
+# Subtest: 五个新 API 都只下发精确白名单载荷
+ok 106 - 五个新 API 都只下发精确白名单载荷
+  ---
+  duration_ms: 4.888636
+  type: 'test'
+  ...
+# Subtest: 注入服务端字段时五个函数在云端调用前本地拒绝（调用计数不变）
+ok 107 - 注入服务端字段时五个函数在云端调用前本地拒绝（调用计数不变）
+  ---
+  duration_ms: 21.903508
+  type: 'test'
+  ...
+# Subtest: consent 必须严格等于 true，不是真值即可
+ok 108 - consent 必须严格等于 true，不是真值即可
+  ---
+  duration_ms: 1.374856
+  type: 'test'
+  ...
+# Subtest: uploadTestFace 只接受服务端下发的 test-face/ 前缀，页面不拼接路径
+ok 109 - uploadTestFace 只接受服务端下发的 test-face/ 前缀，页面不拼接路径
+  ---
+  duration_ms: 0.59183
+  type: 'test'
+  ...
+# Subtest: 云端 code!==0 一律抛错，绝不返回 data 降级
+ok 110 - 云端 code!==0 一律抛错，绝不返回 data 降级
+  ---
+  duration_ms: 1.054005
+  type: 'test'
+  ...
+# Subtest: getFaceTask 同时支持字符串与对象入参，但仍拒绝服务端字段
+ok 111 - getFaceTask 同时支持字符串与对象入参，但仍拒绝服务端字段
+  ---
+  duration_ms: 0.420922
+  type: 'test'
+  ...
+# Subtest: 非零错误码透传给页面：err.code 必须保留服务端 code（C2 分类依据）
+ok 112 - 非零错误码透传给页面：err.code 必须保留服务端 code（C2 分类依据）
+  ---
+  duration_ms: 1.378451
+  type: 'test'
+  ...
+# Subtest: 审核渠道错误码分类是闭式集合：只认申请/账号拒绝码，不吞并任务与配置码
+ok 113 - 审核渠道错误码分类是闭式集合：只认申请/账号拒绝码，不吞并任务与配置码
+  ---
+  duration_ms: 0.46572
+  type: 'test'
+  ...
+# Subtest: 演示模式不提供入住/人脸成功 fallback，一律拒绝且不调用云端与上传
+ok 114 - 演示模式不提供入住/人脸成功 fallback，一律拒绝且不调用云端与上传
+  ---
+  duration_ms: 0.610337
+  type: 'test'
+  ...
+# Subtest: 上传输出与建任务输入使用同一个 SDK 形状 fileID，原样透传不重造（R01 客户端侧）
+ok 115 - 上传输出与建任务输入使用同一个 SDK 形状 fileID，原样透传不重造（R01 客户端侧）
+  ---
+  duration_ms: 0.757319
+  type: 'test'
+  ...
+# Subtest: P0 守门：仅用后台全部公开配置能力即可完成 auto_approved + claim 成功
+ok 116 - P0 守门：仅用后台全部公开配置能力即可完成 auto_approved + claim 成功
+  ---
+  duration_ms: 16.30863
+  type: 'test'
+  ...
+# Subtest: 公开方法轮换版本后租期快照同步，云端全流程仍通过且终态为待现场刷脸
+ok 117 - 公开方法轮换版本后租期快照同步，云端全流程仍通过且终态为待现场刷脸
+  ---
+  duration_ms: 5.287277
+  type: 'test'
+  ...
+# Subtest: 名单+102+有效租期+版本一致才 auto_approved，落稳定 id 与 employeeNo
+ok 118 - 名单+102+有效租期+版本一致才 auto_approved，落稳定 id 与 employeeNo
+  ---
+  duration_ms: 2.130301
+  type: 'test'
+  ...
+# Subtest: 普通账号语义：ACCOUNT_NOT_ALLOWED 不外露，返回 pending_review 且测试集合零写入
+ok 119 - 普通账号语义：ACCOUNT_NOT_ALLOWED 不外露，返回 pending_review 且测试集合零写入
+  ---
+  duration_ms: 1.136788
+  type: 'test'
+  ...
+# Subtest: 伪造 approved/testMode/room/日期/身份字段在云函数入口被拒且不写库
+ok 120 - 伪造 approved/testMode/room/日期/身份字段在云函数入口被拒且不写库
+  ---
+  duration_ms: 11.852783
+  type: 'test'
+  ...
+# Subtest: 关闭开关、版本不符、租期未配置/过期、102 歧义分别返回指定错误码
+ok 121 - 关闭开关、版本不符、租期未配置/过期、102 歧义分别返回指定错误码
+  ---
+  duration_ms: 7.410588
+  type: 'test'
+  ...
+# Subtest: 日期边界：2026-12-01..2026-12-05 映射上海墙上时间，含首尾且无 +1/UTC/unlimited
+ok 122 - 日期边界：2026-12-01..2026-12-05 映射上海墙上时间，含首尾且无 +1/UTC/unlimited
+  ---
+  duration_ms: 0.835295
+  type: 'test'
+  ...
+# Subtest: 102 只按确定性 _id 单点读取；同号多条报 ROOM_NOT_UNIQUE，不取第一条
+ok 123 - 102 只按确定性 _id 单点读取；同号多条报 ROOM_NOT_UNIQUE，不取第一条
+  ---
+  duration_ms: 3.474622
+  type: 'test'
+  ...
+# Subtest: R01：真实 SDK fileID 从上传输出原样贯穿建任务/领取/执行前复核，不再换成裸路径
+ok 124 - R01：真实 SDK fileID 从上传输出原样贯穿建任务/领取/执行前复核，不再换成裸路径
+  ---
+  duration_ms: 2.04249
+  type: 'test'
+  ...
+# Subtest: R01：裸路径/非 cloud/跨环境/跨用户/跨申请/畸形路径全部拒绝且零写入
+ok 125 - R01：裸路径/非 cloud/跨环境/跨用户/跨申请/畸形路径全部拒绝且零写入
+  ---
+  duration_ms: 2.473718
+  type: 'test'
+  ...
+# Subtest: R01：服务端可信命名空间未配置时失败关闭，且 getConfig 如实下发布尔
+ok 126 - R01：服务端可信命名空间未配置时失败关闭，且 getConfig 如实下发布尔
+  ---
+  duration_ms: 0.77859
+  type: 'test'
+  ...
+# Subtest: 未通过申请、他人申请、失效租期均不得创建人脸任务；consent 必须严格为 true
+ok 127 - 未通过申请、他人申请、失效租期均不得创建人脸任务；consent 必须严格为 true
+  ---
+  duration_ms: 3.320721
+  type: 'test'
+  ...
+# Subtest: apply/create 幂等：重复提交返回同一 id、同一 employeeNo；重传照片不改号
+ok 128 - apply/create 幂等：重复提交返回同一 id、同一 employeeNo；重传照片不改号
+  ---
+  duration_ms: 2.481079
+  type: 'test'
+  ...
+# Subtest: getConfig 只读且不下发名单/token/设备秘密；未配置时为待配置
+ok 129 - getConfig 只读且不下发名单/token/设备秘密；未配置时为待配置
+  ---
+  duration_ms: 1.858954
+  type: 'test'
+  ...
+# Subtest: 并发 claim 只有一个成功（事务 CAS），其余不领取
+ok 130 - 并发 claim 只有一个成功（事务 CAS），其余不领取
+  ---
+  duration_ms: 2.864545
+  type: 'test'
+  ...
+# Subtest: 排队后租期/审批/配置 revision 变化 → INVALIDATED，不派发
+ok 131 - 排队后租期/审批/配置 revision 变化 → INVALIDATED，不派发
+  ---
+  duration_ms: 6.574521
+  type: 'test'
+  ...
+# Subtest: claim 超时转为 UNKNOWN_RESULT：保留编号、不重排、不删除
+ok 132 - claim 超时转为 UNKNOWN_RESULT：保留编号、不重排、不删除
+  ---
+  duration_ms: 1.589248
+  type: 'test'
+  ...
+# Subtest: report 成功逐项校验：日期/模式/全天指纹/门号/编号/关联/verify 全匹配才确认且 siteVerification 永为 PENDING
+ok 133 - report 成功逐项校验：日期/模式/全天指纹/门号/编号/关联/verify 全匹配才确认且 siteVerification 永为 PENDING
+  ---
+  duration_ms: 3.040971
+  type: 'test'
+  ...
+# Subtest: report 输出被篡改任一项 → FAILED_REVIEW（不确认、不换号、不重排）
+ok 134 - report 输出被篡改任一项 → FAILED_REVIEW（不确认、不换号、不重排）
+  ---
+  duration_ms: 24.00059
+  type: 'test'
+  ...
+# Subtest: 退出码 4/5 → FAILED_REVIEW/UNKNOWN_RESULT，无 requeue、不换号、不删除
+ok 135 - 退出码 4/5 → FAILED_REVIEW/UNKNOWN_RESULT，无 requeue、不换号、不删除
+  ---
+  duration_ms: 6.870896
+  type: 'test'
+  ...
+# Subtest: 重复 report 幂等；worker token 常量时间比对失败返回 WORKER_UNAUTHORIZED
+ok 136 - 重复 report 幂等；worker token 常量时间比对失败返回 WORKER_UNAUTHORIZED
+  ---
+  duration_ms: 6.784175
+  type: 'test'
+  ...
+# Subtest: 身份边界：小程序 action 需 OPENID，worker action 不能由小程序身份调用
+ok 137 - 身份边界：小程序 action 需 OPENID，worker action 不能由小程序身份调用
+  ---
+  duration_ms: 1.050589
+  type: 'test'
+  ...
+# Subtest: R03：base 与 tx 是不同上下文——权威读取与审计全部发生在 tx，事务内集合查询硬抛错
+ok 138 - R03：base 与 tx 是不同上下文——权威读取与审计全部发生在 tx，事务内集合查询硬抛错
+  ---
+  duration_ms: 2.164603
+  type: 'test'
+  ...
+# Subtest: R03：无 runTransaction 能力时申请与建任务失败关闭且零写入（不静默串行）
+ok 139 - R03：无 runTransaction 能力时申请与建任务失败关闭且零写入（不静默串行）
+  ---
+  duration_ms: 1.426053
+  type: 'test'
+  ...
+# Subtest: R03：提交失败时业务写与审计全回滚，不回落到外层 DB
+ok 140 - R03：提交失败时业务写与审计全回滚，不回落到外层 DB
+  ---
+  duration_ms: 1.963511
+  type: 'test'
+  ...
+# Subtest: R04：A/B 创建者受控交错——B 建并领取后，晚到 A 的提交不能重置 claim/终态/revision/employeeNo
+ok 141 - R04：A/B 创建者受控交错——B 建并领取后，晚到 A 的提交不能重置 claim/终态/revision/employeeNo
+  ---
+  duration_ms: 13.136933
+  type: 'test'
+  ...
+# Subtest: R06 正例：复核通过原子推进 DEVICE_PROCESSING、revision 恰好 +1、claim 不延长、快照一致
+ok 142 - R06 正例：复核通过原子推进 DEVICE_PROCESSING、revision 恰好 +1、claim 不延长、快照一致
+  ---
+  duration_ms: 2.983404
+  type: 'test'
+  ...
+# Subtest: R06 拒绝矩阵：错 claim/错 revision/错 worker/重复开始/未领取/不存在，零授权且状态不被破坏
+ok 143 - R06 拒绝矩阵：错 claim/错 revision/错 worker/重复开始/未领取/不存在，零授权且状态不被破坏
+  ---
+  duration_ms: 6.092216
+  type: 'test'
+  ...
+# Subtest: R06 白名单与鉴权：额外字段/自报批准被拒，worker 专用 action 生效
+ok 144 - R06 白名单与鉴权：额外字段/自报批准被拒，worker 专用 action 生效
+  ---
+  duration_ms: 6.901752
+  type: 'test'
+  ...
+# Subtest: R06 过期复核：claim 过期后 begin 拒绝并原子转 UNKNOWN_RESULT（不延长、不重授权）
+ok 145 - R06 过期复核：claim 过期后 begin 拒绝并原子转 UNKNOWN_RESULT（不延长、不重授权）
+  ---
+  duration_ms: 3.096254
+  type: 'test'
+  ...
+# Subtest: R06 失效复核：撤名单/关开关/换房/改租期后 begin 拒绝并原子转 INVALIDATED
+ok 146 - R06 失效复核：撤名单/关开关/换房/改租期后 begin 拒绝并原子转 INVALIDATED
+  ---
+  duration_ms: 10.431158
+  type: 'test'
+  ...
+# Subtest: R06：claim 后、begin 前发生的变化在复核时被拒绝（执行前复核读当前权威状态）
+ok 147 - R06：claim 后、begin 前发生的变化在复核时被拒绝（执行前复核读当前权威状态）
+  ---
+  duration_ms: 1.555819
+  type: 'test'
+  ...
+# Subtest: 丢失开始回执：DEVICE_PROCESSING 且领取过期的任务由清扫转 UNKNOWN_RESULT，不重派发
+ok 148 - 丢失开始回执：DEVICE_PROCESSING 且领取过期的任务由清扫转 UNKNOWN_RESULT，不重派发
+  ---
+  duration_ms: 1.532583
+  type: 'test'
+  ...
+# Subtest: 云函数路径无 console.log 请求体、无 unlimited 兜底
+ok 149 - 云函数路径无 console.log 请求体、无 unlimited 兜底
+  ---
+  duration_ms: 1.31769
+  type: 'test'
+  ...
+# Subtest: CF-R2-01：下载期间切换 namespace，权威事务拒绝旧文件且零任务/审计写入
+ok 150 - CF-R2-01：下载期间切换 namespace，权威事务拒绝旧文件且零任务/审计写入
+  ---
+  duration_ms: 1.569118
+  type: 'test'
+  ...
+# Subtest: CF-R2-03：CLAIMED 不能绕过 begin 报设备成功或已执行失败
+ok 151 - CF-R2-03：CLAIMED 不能绕过 begin 报设备成功或已执行失败
+  ---
+  duration_ms: 3.072388
+  type: 'test'
+  ...
+# Subtest: CF-R2-03：真实 worker 形状的 begin 前输入失败/下载未知报告仍可记账
+ok 152 - CF-R2-03：真实 worker 形状的 begin 前输入失败/下载未知报告仍可记账
+  ---
+  duration_ms: 3.351808
+  type: 'test'
+  ...
+# Subtest: CF-R2-03：终态不可翻绿，严格同报告/原请求 revision 才幂等
+ok 153 - CF-R2-03：终态不可翻绿，严格同报告/原请求 revision 才幂等
+  ---
+  duration_ms: 4.589007
+  type: 'test'
+  ...
+# Subtest: CF-R2-06：begin 截止前 1ms 可授权，等于/之后 1ms 均过期且不延长 claim
+ok 154 - CF-R2-06：begin 截止前 1ms 可授权，等于/之后 1ms 均过期且不延长 claim
+  ---
+  duration_ms: 4.166763
+  type: 'test'
+  ...
+# Subtest: CF-R2-06：report 与超时清扫都采用 now >= claimExpiresAt
+ok 155 - CF-R2-06：report 与超时清扫都采用 now >= claimExpiresAt
+  ---
+  duration_ms: 5.460916
+  type: 'test'
+  ...
+# Subtest: CF-R2-07：claim 缺失/空/非法 worker 均零写拒绝，旧空绑定 begin 也失败关闭
+ok 156 - CF-R2-07：claim 缺失/空/非法 worker 均零写拒绝，旧空绑定 begin 也失败关闭
+  ---
+  duration_ms: 8.427807
+  type: 'test'
+  ...
+# Subtest: CF-R2-10 云门：轮询旧申请不恢复上传；合法重新授权可恢复，终态事实只读保留
+ok 157 - CF-R2-10 云门：轮询旧申请不恢复上传；合法重新授权可恢复，终态事实只读保留
+  ---
+  duration_ms: 3.789926
+  type: 'test'
+  ...
+# {"at":"2026-11-25T09:18:28.743Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+# {"at":"2026-11-25T09:18:28.744Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.745Z","level":"info","message":"task reported","exitCode":2}
+# {"at":"2026-11-25T09:18:28.745Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+# {"at":"2026-11-25T09:18:28.746Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.746Z","level":"info","message":"task reported","exitCode":2}
+# {"at":"2026-11-25T09:18:28.749Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+# {"at":"2026-11-25T09:18:28.749Z","level":"info","message":"task claimed","taskId":"ch***m1","claimId":"64***46","revision":2,"doorNo":7,"employeeNo":"F6***C6","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.750Z","level":"info","message":"execution authorized","taskId":"ch***m1","claimId":"64***46","revision":3,"doorNo":7,"employeeNo":"F6***C6","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.754Z","level":"info","message":"task reported","exitCode":0}
+# {"at":"2026-11-25T09:18:28.756Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+# {"at":"2026-11-25T09:18:28.756Z","level":"info","message":"task claimed","taskId":"ch***m1","claimId":"ae***bc","revision":2,"doorNo":7,"employeeNo":"F6***C6","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.757Z","level":"info","message":"task reported","exitCode":5}
+# {"at":"2026-11-25T09:18:28.759Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+# {"at":"2026-11-25T09:18:28.759Z","level":"info","message":"task claimed","taskId":"ch***m1","claimId":"8d***60","revision":2,"doorNo":7,"employeeNo":"F6***C6","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.760Z","level":"error","message":"report delivery failed","exitCode":5,"code":"REPORT_FAILED"}
+# {"at":"2026-11-25T09:18:28.764Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+# {"at":"2026-11-25T09:18:28.764Z","level":"info","message":"task claimed","taskId":"ch***m1","claimId":"6e***6d","revision":2,"doorNo":7,"employeeNo":"F6***C6","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.765Z","level":"error","message":"report delivery failed","exitCode":5,"code":"REPORT_FAILED"}
+# {"at":"2026-11-25T09:18:28.842Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+# {"at":"2026-11-25T09:18:28.842Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.842Z","level":"info","message":"execution authorized","taskId":"ch***pp","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.843Z","level":"info","message":"task reported","exitCode":0}
+# {"at":"2026-11-25T09:18:28.843Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+# {"at":"2026-11-25T09:18:28.843Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.844Z","level":"info","message":"task reported","exitCode":2}
+# {"at":"2026-11-25T09:18:28.844Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+# {"at":"2026-11-25T09:18:28.844Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.844Z","level":"info","message":"execution authorized","taskId":"ch***pp","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.844Z","level":"info","message":"task reported","exitCode":5}
+# {"at":"2026-11-25T09:18:28.845Z","level":"info","message":"worker config loaded","workerId":"synthetic-worker-01"}
+# {"at":"2026-11-25T09:18:28.845Z","level":"info","message":"task claimed","taskId":"ch***pp","claimId":"11***55","revision":2,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.845Z","level":"info","message":"execution authorized","taskId":"ch***pp","claimId":"11***55","revision":3,"doorNo":7,"employeeNo":"F0***EF","validFrom":"2026-12-01T00:00:00","validTo":"2026-12-05T23:59:59"}
+# {"at":"2026-11-25T09:18:28.845Z","level":"info","message":"task reported","exitCode":4}
+# Subtest: S1 SDK 形状 fileID 同一值贯穿：上传透传→云端接受并持久化→worker 下载同一值
+ok 158 - S1 SDK 形状 fileID 同一值贯穿：上传透传→云端接受并持久化→worker 下载同一值
+  ---
+  duration_ms: 25.949149
+  type: 'test'
+  ...
+# [待集成] R01/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+# Subtest: S2a checkin 页 WXML：checkbox-group bindchange=onPrimaryChange 结构配套
+ok 159 - S2a checkin 页 WXML：checkbox-group bindchange=onPrimaryChange 结构配套
+  ---
+  duration_ms: 0.875476
+  type: 'test'
+  ...
+# Subtest: S2b face-enroll 页 WXML：checkbox-group bindchange=onConsentChange 结构配套
+ok 160 - S2b face-enroll 页 WXML：checkbox-group bindchange=onConsentChange 结构配套
+  ---
+  duration_ms: 0.498048
+  type: 'test'
+  ...
+# Subtest: S3a 事务内权威读取（配置/名单/房间/租期/申请）与审计不得回落外层 base
+ok 161 - S3a 事务内权威读取（配置/名单/房间/租期/申请）与审计不得回落外层 base
+  ---
+  duration_ms: 2.526177
+  type: 'test'
+  ...
+# [待集成] R03/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+# Subtest: S3b 事务提交冲突：业务写与审计整组回滚，base 全库不变
+ok 162 - S3b 事务提交冲突：业务写与审计整组回滚，base 全库不变
+  ---
+  duration_ms: 3.609835
+  type: 'test'
+  ...
+# [待集成] R03/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+# Subtest: S4 创建/领取交错：单一有效 claim、revision 不回退、employeeNo 稳定
+ok 163 - S4 创建/领取交错：单一有效 claim、revision 不回退、employeeNo 稳定
+  ---
+  duration_ms: 4.11234
+  type: 'test'
+  ...
+# [待集成] R04/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+# Subtest: S5 本地 deviceKey 缺失 → DEVICE_KEY_MISSING，执行器调用 0 次
+ok 164 - S5 本地 deviceKey 缺失 → DEVICE_KEY_MISSING，执行器调用 0 次
+  ---
+  duration_ms: 5.687639
+  type: 'test'
+  ...
+# Subtest: S5 本地 deviceKey 与任务不一致 → DEVICE_KEY_CONFLICT，执行器调用 0 次
+ok 165 - S5 本地 deviceKey 与任务不一致 → DEVICE_KEY_CONFLICT，执行器调用 0 次
+  ---
+  duration_ms: 0.765531
+  type: 'test'
+  ...
+# Subtest: S6a 实际worker编排：权威begin一次、假设备执行器一次、report使用推进revision
+ok 166 - S6a 实际worker编排：权威begin一次、假设备执行器一次、report使用推进revision
+  ---
+  duration_ms: 7.929388
+  type: 'test'
+  ...
+# [待集成] R06/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+# Subtest: S6b 实际worker下载后到期：本地或权威云门均阻断，假执行器零调用
+    # Subtest: local clock observes the exact deadline
+    ok 1 - local clock observes the exact deadline
+      ---
+      duration_ms: 3.104826
+      type: 'test'
+      ...
+    # Subtest: stale local clock still cannot bypass server deadline
+    ok 2 - stale local clock still cannot bypass server deadline
+      ---
+      duration_ms: 3.560842
+      type: 'test'
+      ...
+    1..2
+ok 167 - S6b 实际worker下载后到期：本地或权威云门均阻断，假执行器零调用
+  ---
+  duration_ms: 7.57902
+  type: 'test'
+  ...
+# Subtest: S6c 实际worker下载后撤权：begin拒绝，假设备执行器零调用且不重领/重试
+ok 168 - S6c 实际worker下载后撤权：begin拒绝，假设备执行器零调用且不重领/重试
+  ---
+  duration_ms: 4.150428
+  type: 'test'
+  ...
+# Subtest: S6d 错误 worker / 旧 revision / 重复开始：均不得返回可执行授权
+ok 169 - S6d 错误 worker / 旧 revision / 重复开始：均不得返回可执行授权
+  ---
+  duration_ms: 4.556568
+  type: 'test'
+  ...
+# [待集成] R06/A：依赖 A 路接口，当前工作树已实测通过；等待 lead 集成冻结后正式计入。
+# Subtest: S7 worker 依赖归属与锁文件明确；默认入口无需注入替身即可解析（本机未安装时的失败关闭路径）
+ok 170 - S7 worker 依赖归属与锁文件明确；默认入口无需注入替身即可解析（本机未安装时的失败关闭路径）
+  ---
+  duration_ms: 70.858402
+  type: 'test'
+  ...
+# Subtest: S8a 成功路径：照片以 Buffer 全程内存传递（不落盘），执行一次，report 用推进后 revision
+ok 171 - S8a 成功路径：照片以 Buffer 全程内存传递（不落盘），执行一次，report 用推进后 revision
+  ---
+  duration_ms: 1.513946
+  type: 'test'
+  ...
+# Subtest: S8b 照片下载失败 → invalid-input（exit 2），执行器 0 次
+ok 172 - S8b 照片下载失败 → invalid-input（exit 2），执行器 0 次
+  ---
+  duration_ms: 0.782986
+  type: 'test'
+  ...
+# Subtest: S8c 清理失败：不得误报干净成功（exit 5 / CLEANUP_FAILED），不重发设备
+ok 173 - S8c 清理失败：不得误报干净成功（exit 5 / CLEANUP_FAILED），不重发设备
+  ---
+  duration_ms: 0.995146
+  type: 'test'
+  ...
+# Subtest: S8d 设备执行失败：exit 4 / failed 上报，不重试
+ok 174 - S8d 设备执行失败：exit 4 / failed 上报，不重试
+  ---
+  duration_ms: 0.690308
+  type: 'test'
+  ...
+# Subtest: S8e R08 静态：worker 不得把照片以 POSIX 模式落盘（内存输入优先）
+ok 175 - S8e R08 静态：worker 不得把照片以 POSIX 模式落盘（内存输入优先）
+  ---
+  duration_ms: 0.378659
+  type: 'test'
+  ...
+# Subtest: S9 普通账号 pending_review：页面不得显示已受理/开放人脸入口，须提示既有审核渠道
+ok 176 - S9 普通账号 pending_review：页面不得显示已受理/开放人脸入口，须提示既有审核渠道
+  ---
+  duration_ms: 1.706224
+  type: 'test'
+  ...
+# Subtest: 测试入住 onLoad 必须真正拉取服务端配置（当前实现缺陷守门）
+ok 177 - 测试入住 onLoad 必须真正拉取服务端配置（当前实现缺陷守门）
+  ---
+  duration_ms: 7.428664
+  type: 'test'
+  ...
+# Subtest: enabled/configured/accountEligible 任一不为 true 都禁止申请
+ok 178 - enabled/configured/accountEligible 任一不为 true 都禁止申请
+  ---
+  duration_ms: 1.978834
+  type: 'test'
+  ...
+# Subtest: 租期未配置显示待配置，不提交、不生成默认日期/一年/长期/今天
+ok 179 - 租期未配置显示待配置，不提交、不生成默认日期/一年/长期/今天
+  ---
+  duration_ms: 0.935906
+  type: 'test'
+  ...
+# Subtest: 房号与租期只读来自服务端，提交载荷只有 applicationVersion；重复点击只提交一次
+ok 180 - 房号与租期只读来自服务端，提交载荷只有 applicationVersion；重复点击只提交一次
+  ---
+  duration_ms: 6.75971
+  type: 'test'
+  ...
+# Subtest: 六态文案逐项映射；ready 与 pending-site 都显示待现场刷脸验证
+ok 181 - 六态文案逐项映射；ready 与 pending-site 都显示待现场刷脸验证
+  ---
+  duration_ms: 2.778295
+  type: 'test'
+  ...
+# Subtest: 页面文件不得出现现场识别通过/已通过/已开门字样
+ok 182 - 页面文件不得出现现场识别通过/已通过/已开门字样
+  ---
+  duration_ms: 0.540052
+  type: 'test'
+  ...
+# Subtest: R02：两页为真实 checkbox-group bindchange 结构，事件归属与处理器配套
+ok 183 - R02：两页为真实 checkbox-group bindchange 结构，事件归属与处理器配套
+  ---
+  duration_ms: 0.95184
+  type: 'test'
+  ...
+# Subtest: R02：勾选/取消勾选与提交按钮状态联动（真实数组事件）
+ok 184 - R02：勾选/取消勾选与提交按钮状态联动（真实数组事件）
+  ---
+  duration_ms: 0.563587
+  type: 'test'
+  ...
+# Subtest: R02：用途确认勾选/取消与上传按钮状态联动
+ok 185 - R02：用途确认勾选/取消与上传按钮状态联动
+  ---
+  duration_ms: 0.742556
+  type: 'test'
+  ...
+# Subtest: R11：仅 auto_approved 且有效非空 applicationId 显示受理与人脸入口
+ok 186 - R11：仅 auto_approved 且有效非空 applicationId 显示受理与人脸入口
+  ---
+  duration_ms: 2.547709
+  type: 'test'
+  ...
+# Subtest: R11：受理卡片与人脸入口互斥——人脸入口只存在于 applied 卡片
+ok 187 - R11：受理卡片与人脸入口互斥——人脸入口只存在于 applied 卡片
+  ---
+  duration_ms: 0.292349
+  type: 'test'
+  ...
+# Subtest: C2：普通账号反馈不冒称人工申请已提交，并明确提示既有审核渠道
+ok 188 - C2：普通账号反馈不冒称人工申请已提交，并明确提示既有审核渠道
+  ---
+  duration_ms: 0.223846
+  type: 'test'
+  ...
+# Subtest: R11：名单在页面加载后撤销——提交得到 pending_review 不显示成功与人脸入口
+ok 189 - R11：名单在页面加载后撤销——提交得到 pending_review 不显示成功与人脸入口
+  ---
+  duration_ms: 0.371759
+  type: 'test'
+  ...
+# Subtest: face-enroll：名单撤销后上传前复核拒绝——零照片上传、零 createFaceTask、零入口
+ok 190 - face-enroll：名单撤销后上传前复核拒绝——零照片上传、零 createFaceTask、零入口
+  ---
+  duration_ms: 0.685531
+  type: 'test'
+  ...
+# Subtest: face-enroll：上传前复核发现存储命名空间未配置（§1.2）——零照片上传、零 createFaceTask
+ok 191 - face-enroll：上传前复核发现存储命名空间未配置（§1.2）——零照片上传、零 createFaceTask
+  ---
+  duration_ms: 0.438439
+  type: 'test'
+  ...
+# Subtest: face-enroll：申请被拒（APPLICATION_FORBIDDEN）时显示审核渠道、无上传卡片
+ok 192 - face-enroll：申请被拒（APPLICATION_FORBIDDEN）时显示审核渠道、无上传卡片
+  ---
+  duration_ms: 0.554594
+  type: 'test'
+  ...
+# Subtest: face-enroll：createFaceTask 被服务端以审核码拒绝时不显示成功、不保留可用入口
+ok 193 - face-enroll：createFaceTask 被服务端以审核码拒绝时不显示成功、不保留可用入口
+  ---
+  duration_ms: 0.666121
+  type: 'test'
+  ...
+# Subtest: 照片上传成功仅显示照片收件；上传 cloudPath 原样取服务端字段，不拼接
+ok 194 - 照片上传成功仅显示照片收件；上传 cloudPath 原样取服务端字段，不拼接
+  ---
+  duration_ms: 0.676887
+  type: 'test'
+  ...
+# Subtest: 上传按钮 busy 锁：并发点击只建一次任务，未勾选用途不得上传
+ok 195 - 上传按钮 busy 锁：并发点击只建一次任务，未勾选用途不得上传
+  ---
+  duration_ms: 5.399716
+  type: 'test'
+  ...
+# Subtest: 资料页入口按 runtime.checkinFaceTestEntry && authenticated 显隐
+ok 196 - 资料页入口按 runtime.checkinFaceTestEntry && authenticated 显隐
+  ---
+  duration_ms: 1.728377
+  type: 'test'
+  ...
+# Subtest: CF-R2-10：撤权锁存跨旧任务轮询，权威重授权后恢复且真实调用上传一次
+ok 197 - CF-R2-10：撤权锁存跨旧任务轮询，权威重授权后恢复且真实调用上传一次
+  ---
+  duration_ms: 1.128806
+  type: 'test'
+  ...
+# CF-R2-10 calls={"polls":6,"currentEligibility":4,"uploads":1,"creates":1}
+# Subtest: CF-R2-10：资格读取失败及非法/关闭配置保持审核态，终态历史查询也不恢复上传
+ok 198 - CF-R2-10：资格读取失败及非法/关闭配置保持审核态，终态历史查询也不恢复上传
+  ---
+  duration_ms: 1.558933
+  type: 'test'
+  ...
+# Subtest: CF-R2-10：撤权前已开始的旧任务查询晚返回，不能覆盖新的审核锁存
+ok 199 - CF-R2-10：撤权前已开始的旧任务查询晚返回，不能覆盖新的审核锁存
+  ---
+  duration_ms: 0.651339
+  type: 'test'
+  ...
+# Subtest: guard：本进程在业务模块加载前已安装命名守卫，逐槽哨兵与ESM绑定均受控
+ok 200 - guard：本进程在业务模块加载前已安装命名守卫，逐槽哨兵与ESM绑定均受控
+  ---
+  duration_ms: 4.570479
+  type: 'test'
+  ...
+# {"entries":["net.connect","net.createConnection","net.createServer","net.Socket.prototype.connect","net.Server.prototype.listen","tls.connect","tls.createServer","tls.TLSSocket.prototype.connect","tls.Server.prototype.listen","http.request","http.get","http.createServer","https.request","https.get","https.createServer","http.Server.prototype.listen","https.Server.prototype.listen","http.Agent.prototype.createConnection","https.Agent.prototype.createConnection","dgram.createSocket","dgram.Socket.prototype.send","dgram.Socket.prototype.bind","dgram.Socket.prototype.connect","dns.lookup","dns.lookupService","dns.resolve","dns.resolve4","dns.resolve6","dns.resolveAny","dns.resolveCaa","dns.resolveCname","dns.resolveMx","dns.resolveNaptr","dns.resolveNs","dns.resolvePtr","dns.resolveSoa","dns.resolveSrv","dns.resolveTlsa","dns.resolveTxt","dns.reverse","dns.promises.lookup","dns.promises.lookupService","dns.promises.resolve","dns.promises.resolve4","dns.promises.resolve6","dns.promises.resolveAny","dns.promises.resolveCaa","dns.promises.resolveCname","dns.promises.resolveMx","dns.promises.resolveNaptr","dns.promises.resolveNs","dns.promises.resolvePtr","dns.promises.resolveSoa","dns.promises.resolveSrv","dns.promises.resolveTlsa","dns.promises.resolveTxt","dns.promises.reverse","dns.Resolver.prototype.resolveAny","dns.Resolver.prototype.resolve4","dns.Resolver.prototype.resolve6","dns.Resolver.prototype.resolveCaa","dns.Resolver.prototype.resolveCname","dns.Resolver.prototype.resolveMx","dns.Resolver.prototype.resolveNs","dns.Resolver.prototype.resolveTlsa","dns.Resolver.prototype.resolveTxt","dns.Resolver.prototype.resolveSrv","dns.Resolver.prototype.resolvePtr","dns.Resolver.prototype.resolveNaptr","dns.Resolver.prototype.resolveSoa","dns.Resolver.prototype.reverse","dns.Resolver.prototype.resolve","dns.Resolver.prototype.cancel","dns.Resolver.prototype.getServers","dns.Resolver.prototype.setServers","dns.Resolver.prototype.setLocalAddress","dns.promises.Resolver.prototype.resolveAny","dns.promises.Resolver.prototype.resolve4","dns.promises.Resolver.prototype.resolve6","dns.promises.Resolver.prototype.resolveCaa","dns.promises.Resolver.prototype.resolveCname","dns.promises.Resolver.prototype.resolveMx","dns.promises.Resolver.prototype.resolveNs","dns.promises.Resolver.prototype.resolveTlsa","dns.promises.Resolver.prototype.resolveTxt","dns.promises.Resolver.prototype.resolveSrv","dns.promises.Resolver.prototype.resolvePtr","dns.promises.Resolver.prototype.resolveNaptr","dns.promises.Resolver.prototype.resolveSoa","dns.promises.Resolver.prototype.reverse","dns.promises.Resolver.prototype.resolve","dns.promises.Resolver.prototype.cancel","dns.promises.Resolver.prototype.getServers","dns.promises.Resolver.prototype.setServers","dns.promises.Resolver.prototype.setLocalAddress","dns.Resolver","dns.promises.Resolver","globalThis.fetch","globalThis.WebSocket"],"loadTime":{"blocked":0,"forwarded":0,"entries":[{"name":"net.connect","blocked":0,"forwarded":0},{"name":"net.createConnection","blocked":0,"forwarded":0},{"name":"net.createServer","blocked":0,"forwarded":0},{"name":"net.Socket.prototype.connect","blocked":0,"forwarded":0},{"name":"net.Server.prototype.listen","blocked":0,"forwarded":0},{"name":"tls.connect","blocked":0,"forwarded":0},{"name":"tls.createServer","blocked":0,"forwarded":0},{"name":"tls.TLSSocket.prototype.connect","blocked":0,"forwarded":0},{"name":"tls.Server.prototype.listen","blocked":0,"forwarded":0},{"name":"http.request","blocked":0,"forwarded":0},{"name":"http.get","blocked":0,"forwarded":0},{"name":"http.createServer","blocked":0,"forwarded":0},{"name":"https.request","blocked":0,"forwarded":0},{"name":"https.get","blocked":0,"forwarded":0},{"name":"https.createServer","blocked":0,"forwarded":0},{"name":"http.Server.prototype.listen","blocked":0,"forwarded":0},{"name":"https.Server.prototype.listen","blocked":0,"forwarded":0},{"name":"http.Agent.prototype.createConnection","blocked":0,"forwarded":0},{"name":"https.Agent.prototype.createConnection","blocked":0,"forwarded":0},{"name":"dgram.createSocket","blocked":0,"forwarded":0},{"name":"dgram.Socket.prototype.send","blocked":0,"forwarded":0},{"name":"dgram.Socket.prototype.bind","blocked":0,"forwarded":0},{"name":"dgram.Socket.prototype.connect","blocked":0,"forwarded":0},{"name":"dns.lookup","blocked":0,"forwarded":0},{"name":"dns.lookupService","blocked":0,"forwarded":0},{"name":"dns.resolve","blocked":0,"forwarded":0},{"name":"dns.resolve4","blocked":0,"forwarded":0},{"name":"dns.resolve6","blocked":0,"forwarded":0},{"name":"dns.resolveAny","blocked":0,"forwarded":0},{"name":"dns.resolveCaa","blocked":0,"forwarded":0},{"name":"dns.resolveCname","blocked":0,"forwarded":0},{"name":"dns.resolveMx","blocked":0,"forwarded":0},{"name":"dns.resolveNaptr","blocked":0,"forwarded":0},{"name":"dns.resolveNs","blocked":0,"forwarded":0},{"name":"dns.resolvePtr","blocked":0,"forwarded":0},{"name":"dns.resolveSoa","blocked":0,"forwarded":0},{"name":"dns.resolveSrv","blocked":0,"forwarded":0},{"name":"dns.resolveTlsa","blocked":0,"forwarded":0},{"name":"dns.resolveTxt","blocked":0,"forwarded":0},{"name":"dns.reverse","blocked":0,"forwarded":0},{"name":"dns.promises.lookup","blocked":0,"forwarded":0},{"name":"dns.promises.lookupService","blocked":0,"forwarded":0},{"name":"dns.promises.resolve","blocked":0,"forwarded":0},{"name":"dns.promises.resolve4","blocked":0,"forwarded":0},{"name":"dns.promises.resolve6","blocked":0,"forwarded":0},{"name":"dns.promises.resolveAny","blocked":0,"forwarded":0},{"name":"dns.promises.resolveCaa","blocked":0,"forwarded":0},{"name":"dns.promises.resolveCname","blocked":0,"forwarded":0},{"name":"dns.promises.resolveMx","blocked":0,"forwarded":0},{"name":"dns.promises.resolveNaptr","blocked":0,"forwarded":0},{"name":"dns.promises.resolveNs","blocked":0,"forwarded":0},{"name":"dns.promises.resolvePtr","blocked":0,"forwarded":0},{"name":"dns.promises.resolveSoa","blocked":0,"forwarded":0},{"name":"dns.promises.resolveSrv","blocked":0,"forwarded":0},{"name":"dns.promises.resolveTlsa","blocked":0,"forwarded":0},{"name":"dns.promises.resolveTxt","blocked":0,"forwarded":0},{"name":"dns.promises.reverse","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveAny","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolve4","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolve6","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveCaa","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveCname","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveMx","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveNs","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveTlsa","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveTxt","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveSrv","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolvePtr","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveNaptr","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolveSoa","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.reverse","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.resolve","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.cancel","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.getServers","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.setServers","blocked":0,"forwarded":0},{"name":"dns.Resolver.prototype.setLocalAddress","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveAny","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolve4","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolve6","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveCaa","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveCname","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveMx","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveNs","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveTlsa","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveTxt","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveSrv","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolvePtr","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveNaptr","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolveSoa","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.reverse","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.resolve","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.cancel","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.getServers","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.setServers","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver.prototype.setLocalAddress","blocked":0,"forwarded":0},{"name":"dns.Resolver","blocked":0,"forwarded":0},{"name":"dns.promises.Resolver","blocked":0,"forwarded":0},{"name":"globalThis.fetch","blocked":0,"forwarded":0},{"name":"globalThis.WebSocket","blocked":0,"forwarded":0}]},"selfTest":{"ok":true,"attempts":99,"caught":99,"blockedDelta":99,"forwarded":0,"entries":[{"name":"net.connect","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"net.createConnection","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"net.createServer","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"net.Socket.prototype.connect","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"net.Server.prototype.listen","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"tls.connect","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"tls.createServer","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"tls.TLSSocket.prototype.connect","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"tls.Server.prototype.listen","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"http.request","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"http.get","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"http.createServer","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"https.request","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"https.get","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"https.createServer","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"http.Server.prototype.listen","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"https.Server.prototype.listen","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"http.Agent.prototype.createConnection","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"https.Agent.prototype.createConnection","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dgram.createSocket","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dgram.Socket.prototype.send","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dgram.Socket.prototype.bind","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dgram.Socket.prototype.connect","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.lookup","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.lookupService","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolve","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolve4","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolve6","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveAny","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveCaa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveCname","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveMx","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveNaptr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveNs","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolvePtr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveSoa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveSrv","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveTlsa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.resolveTxt","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.reverse","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.lookup","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.lookupService","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolve","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolve4","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolve6","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveAny","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveCaa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveCname","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveMx","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveNaptr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveNs","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolvePtr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveSoa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveSrv","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveTlsa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.resolveTxt","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.reverse","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveAny","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolve4","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolve6","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveCaa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveCname","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveMx","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveNs","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveTlsa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveTxt","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveSrv","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolvePtr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveNaptr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolveSoa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.reverse","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.resolve","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.cancel","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.getServers","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.setServers","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver.prototype.setLocalAddress","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveAny","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolve4","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolve6","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveCaa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveCname","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveMx","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveNs","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveTlsa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveTxt","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveSrv","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolvePtr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveNaptr","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolveSoa","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.reverse","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.resolve","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.cancel","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.getServers","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.setServers","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver.prototype.setLocalAddress","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.Resolver","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"dns.promises.Resolver","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"globalThis.fetch","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true},{"name":"globalThis.WebSocket","canaryPositive":true,"blockedCode":true,"blockedDelta":1,"forwarded":0,"restored":true,"wrapperIdentity":true}]},"esm":{"ok":true,"checked":48}}
+# Subtest: guard：子进程经 --require 继承守卫（继承后同样拦截且不转发）
+ok 201 - guard：子进程经 --require 继承守卫（继承后同样拦截且不转发）
+  ---
+  duration_ms: 59.326551
+  type: 'test'
+  ...
+# Subtest: guard：未显式 --require 的子进程仍经 NODE_OPTIONS 自动继承守卫
+ok 202 - guard：未显式 --require 的子进程仍经 NODE_OPTIONS 自动继承守卫
+  ---
+  duration_ms: 56.985042
+  type: 'test'
+  ...
+# Subtest: R10：当前共享树静态检查通过（0 violations）
+ok 203 - R10：当前共享树静态检查通过（0 violations）
+  ---
+  duration_ms: 93.92907
+  type: 'test'
+  ...
+# Subtest: R10：未变更副本静态检查通过（负控基线）
+ok 204 - R10：未变更副本静态检查通过（负控基线）
+  ---
+  duration_ms: 86.090851
+  type: 'test'
+  ...
+# Subtest: R10：移除 mode=device → 只报 mode 专属消息，精确失败
+ok 205 - R10：移除 mode=device → 只报 mode 专属消息，精确失败
+  ---
+  duration_ms: 85.449391
+  type: 'test'
+  ...
+# Subtest: R10：移除 validityMode=fixed → 只报 validity 专属消息，精确失败
+ok 206 - R10：移除 validityMode=fixed → 只报 validity 专属消息，精确失败
+  ---
+  duration_ms: 85.691525
+  type: 'test'
+  ...
+# Subtest: R10：两项都移除 → 两条专属消息同时出现
+ok 207 - R10：两项都移除 → 两条专属消息同时出现
+  ---
+  duration_ms: 82.824946
+  type: 'test'
+  ...
+# Subtest: R10：把两项改成注释 → 仍双双失败（注释命中不算证据）
+ok 208 - R10：把两项改成注释 → 仍双双失败（注释命中不算证据）
+  ---
+  duration_ms: 82.829699
+  type: 'test'
+  ...
+# Subtest: R10：真实字段删除后多行块注释不能冒充请求构造
+ok 209 - R10：真实字段删除后多行块注释不能冒充请求构造
+  ---
+  duration_ms: 85.611269
+  type: 'test'
+  ...
+# Subtest: R10：分散假consent锚点、字符串及其他对象不能补齐真实request字段
+ok 210 - R10：分散假consent锚点、字符串及其他对象不能补齐真实request字段
+  ---
+  duration_ms: 82.335826
+  type: 'test'
+  ...
+# Subtest: C1：共享树冻结清单必须与磁盘一致，任何来源违规均失败关闭
+ok 211 - C1：共享树冻结清单必须与磁盘一致，任何来源违规均失败关闭
+  ---
+  duration_ms: 124.522394
+  type: 'test'
+  ...
+# Subtest: C1：未变更副本校验通过（负控基线）
+ok 212 - C1：未变更副本校验通过（负控基线）
+  ---
+  duration_ms: 320.167477
+  type: 'test'
+  ...
+# Subtest: C1：篡改任一清单哈希 → 精确失败并指出路径与实际哈希
+ok 213 - C1：篡改任一清单哈希 → 精确失败并指出路径与实际哈希
+  ---
+  duration_ms: 217.258921
+  type: 'test'
+  ...
+# Subtest: C1：清单路径重复 → 精确失败
+ok 214 - C1：清单路径重复 → 精确失败
+  ---
+  duration_ms: 216.536751
+  type: 'test'
+  ...
+# Subtest: C1：非法路径（../ 穿越）→ 精确失败
+ok 215 - C1：非法路径（../ 穿越）→ 精确失败
+  ---
+  duration_ms: 204.323135
+  type: 'test'
+  ...
+# Subtest: C1：遗漏云函数目录内文件 → 闭合缺口失败
+ok 216 - C1：遗漏云函数目录内文件 → 闭合缺口失败
+  ---
+  duration_ms: 203.007217
+  type: 'test'
+  ...
+# Subtest: C1：伪造 baselineSha256 → 拒绝（不伪造 originalSha256）
+ok 217 - C1：伪造 baselineSha256 → 拒绝（不伪造 originalSha256）
+  ---
+  duration_ms: 217.078951
+  type: 'test'
+  ...
+# Subtest: C1：登记范围外路径（旧云函数目录）→ 拒绝
+ok 218 - C1：登记范围外路径（旧云函数目录）→ 拒绝
+  ---
+  duration_ms: 275.214873
+  type: 'test'
+  ...
+# Subtest: C1：本地导入闭包未闭合（新文件导入未登记的体验版新文件）→ 失败
+ok 219 - C1：本地导入闭包未闭合（新文件导入未登记的体验版新文件）→ 失败
+  ---
+  duration_ms: 177.706244
+  type: 'test'
+  ...
+# Subtest: C1：源码漂移但不更新清单，专用校验与正式共享树用例均必须失败
+ok 220 - C1：源码漂移但不更新清单，专用校验与正式共享树用例均必须失败
+  ---
+  duration_ms: 450.709597
+  type: 'test'
+  ...
+# Subtest: live bootstrap initializes only the selected cloud environment
+ok 221 - live bootstrap initializes only the selected cloud environment
+  ---
+  duration_ms: 1.695198
+  type: 'test'
+  ...
+# Subtest: demo and incomplete configuration do not initialize a live environment
+ok 222 - demo and incomplete configuration do not initialize a live environment
+  ---
+  duration_ms: 0.995356
+  type: 'test'
+  ...
+# Subtest: demo read workflows use zero cloud calls and missing house stays missing
+ok 223 - demo read workflows use zero cloud calls and missing house stays missing
+  ---
+  duration_ms: 2.752497
+  type: 'test'
+  ...
+# Subtest: demo writes cannot unlock, send, log in, or add family
+ok 224 - demo writes cannot unlock, send, log in, or add family
+  ---
+  duration_ms: 1.638723
+  type: 'test'
+  ...
+# Subtest: demo markRead is local and does not mutate original fixtures
+ok 225 - demo markRead is local and does not mutate original fixtures
+  ---
+  duration_ms: 0.682836
+  type: 'test'
+  ...
+# Subtest: live cloud failures never silently fall back to demo
+ok 226 - live cloud failures never silently fall back to demo
+  ---
+  duration_ms: 0.642596
+  type: 'test'
+  ...
+# Subtest: live device list calls permission-filtered getDevices and maps location
+ok 227 - live device list calls permission-filtered getDevices and maps location
+  ---
+  duration_ms: 1.21812
+  type: 'test'
+  ...
+# Subtest: unlock requires opt-in and login, sends only deviceId, suppresses duplicates
+ok 228 - unlock requires opt-in and login, sends only deviceId, suppresses duplicates
+  ---
+  duration_ms: 1.456118
+  type: 'test'
+  ...
+# Subtest: missing family/property and unscoped meter operations are explicit
+ok 229 - missing family/property and unscoped meter operations are explicit
+  ---
+  duration_ms: 0.640312
+  type: 'test'
+  ...
+# Subtest: rental favorite appears in profile favorites and toggles off
+ok 230 - rental favorite appears in profile favorites and toggles off
+  ---
+  duration_ms: 4.585161
+  type: 'test'
+  ...
+# Subtest: home search produces a meaningful empty result
+ok 231 - home search produces a meaningful empty result
+  ---
+  duration_ms: 2.764465
+  type: 'test'
+  ...
+# Subtest: life rental filter reaches adapter and only matching houses display
+ok 232 - life rental filter reaches adapter and only matching houses display
+  ---
+  duration_ms: 1.718853
+  type: 'test'
+  ...
+# Subtest: chat preserves draft and displays failed send in demo
+ok 233 - chat preserves draft and displays failed send in demo
+  ---
+  duration_ms: 1.293314
+  type: 'test'
+  ...
+# Subtest: phone login cancellation never calls backend
+ok 234 - phone login cancellation never calls backend
+  ---
+  duration_ms: 0.959502
+  type: 'test'
+  ...
+# Subtest: phone login suppresses duplicates, authenticates and logs out
+ok 235 - phone login suppresses duplicates, authenticates and logs out
+  ---
+  duration_ms: 1.37142
+  type: 'test'
+  ...
+# Subtest: phone login backend rejection clears busy state and permits retry
+ok 236 - phone login backend rejection clears busy state and permits retry
+  ---
+  duration_ms: 1.063067
+  type: 'test'
+  ...
+# Subtest: rental detail rechecks visibility after a cached listing becomes public
+ok 237 - rental detail rechecks visibility after a cached listing becomes public
+  ---
+  duration_ms: 0.502365
+  type: 'test'
+  ...
+# Subtest: VR page resolves published content links by ID and rejects invalid links
+ok 238 - VR page resolves published content links by ID and rejects invalid links
+  ---
+  duration_ms: 2.277493
+  type: 'test'
+  ...
+# Subtest: identity helper bytes are identical and each cloud function is deployment self-contained
+ok 239 - identity helper bytes are identical and each cloud function is deployment self-contained
+  ---
+  duration_ms: 1.665132
+  type: 'test'
+  ...
+# Subtest: silent login and phone login concurrently create exactly one canonical user
+ok 240 - silent login and phone login concurrently create exactly one canonical user
+  ---
+  duration_ms: 5.714518
+  type: 'test'
+  ...
+# Subtest: unique legacy user keeps id and house bindings; duplicate legacy users fail closed
+ok 241 - unique legacy user keeps id and house bindings; duplicate legacy users fail closed
+  ---
+  duration_ms: 0.980313
+  type: 'test'
+  ...
+# Subtest: a raw OPENID collision under another APPID cannot claim the old user or permissions
+ok 242 - a raw OPENID collision under another APPID cannot claim the old user or permissions
+  ---
+  duration_ms: 1.007865
+  type: 'test'
+  ...
+# Subtest: missing transaction support and generic database -1 errors never create an identity
+ok 243 - missing transaction support and generic database -1 errors never create an identity
+  ---
+  duration_ms: 0.822477
+  type: 'test'
+  ...
+# Subtest: legacy admin login changes only its canonical user writer and preserves houses
+ok 244 - legacy admin login changes only its canonical user writer and preserves houses
+  ---
+  duration_ms: 86.577808
+  type: 'test'
+  ...
+# Subtest: malformed canonical identity bindings cannot be reused or repaired implicitly
+ok 245 - malformed canonical identity bindings cannot be reused or repaired implicitly
+  ---
+  duration_ms: 5.264151
+  type: 'test'
+  ...
+# Subtest: point reads honor both SDK success shapes and explicit missing rows while rejecting malformed/error responses
+ok 246 - point reads honor both SDK success shapes and explicit missing rows while rejecting malformed/error responses
+  ---
+  duration_ms: 0.66499
+  type: 'test'
+  ...
+# Subtest: real LocalCloudDatabase supports public phone registration, admin selection/creation and password login
+ok 247 - real LocalCloudDatabase supports public phone registration, admin selection/creation and password login
+  ---
+  duration_ms: 93.503776
+  type: 'test'
+  ...
+# Subtest: query status accepts only successful SDK codes and preserves explicit empty results
+ok 248 - query status accepts only successful SDK codes and preserves explicit empty results
+  ---
+  duration_ms: 0.456777
+  type: 'test'
+  ...
+# Subtest: navigation stays clear of capsule at 320px
+ok 249 - navigation stays clear of capsule at 320px
+  ---
+  duration_ms: 0.927514
+  type: 'test'
+  ...
+# Subtest: navigation stays clear of capsule at 375px
+ok 250 - navigation stays clear of capsule at 375px
+  ---
+  duration_ms: 0.208443
+  type: 'test'
+  ...
+# Subtest: navigation stays clear of capsule at 393px
+ok 251 - navigation stays clear of capsule at 393px
+  ---
+  duration_ms: 0.113591
+  type: 'test'
+  ...
+# Subtest: navigation stays clear of capsule at 430px
+ok 252 - navigation stays clear of capsule at 430px
+  ---
+  duration_ms: 0.075213
+  type: 'test'
+  ...
+# Subtest: navigation stays clear of capsule at 768px
+ok 253 - navigation stays clear of capsule at 768px
+  ---
+  duration_ms: 0.092969
+  type: 'test'
+  ...
+# Subtest: invalid capsule falls back and zero status bar remains zero
+ok 254 - invalid capsule falls back and zero status bar remains zero
+  ---
+  duration_ms: 0.131958
+  type: 'test'
+  ...
+# Subtest: older SDK and unavailable capsule do not break pages
+ok 255 - older SDK and unavailable capsule do not break pages
+  ---
+  duration_ms: 0.249174
+  type: 'test'
+  ...
+# Subtest: missing/malformed authorization and client identity fields fail before WeChat or database writes
+ok 256 - missing/malformed authorization and client identity fields fail before WeChat or database writes
+  ---
+  duration_ms: 3.332248
+  type: 'test'
+  ...
+# Subtest: invalid trusted APPID/OPENID fails before phone exchange with zero writes
+ok 257 - invalid trusted APPID/OPENID fails before phone exchange with zero writes
+  ---
+  duration_ms: 0.510647
+  type: 'test'
+  ...
+# Subtest: new WeChat phone login creates one canonical user with private proof and no houses
+ok 258 - new WeChat phone login creates one canonical user with private proof and no houses
+  ---
+  duration_ms: 2.584625
+  type: 'test'
+  ...
+# Subtest: returning legacy user reauthorizes the same number, preserves id and admin houses
+ok 259 - returning legacy user reauthorizes the same number, preserves id and admin houses
+  ---
+  duration_ms: 1.494436
+  type: 'test'
+  ...
+# Subtest: authorization refusal, exchange failure and invalid returned phone leave the entire database unchanged
+ok 260 - authorization refusal, exchange failure and invalid returned phone leave the entire database unchanged
+  ---
+  duration_ms: 0.836387
+  type: 'test'
+  ...
+# Subtest: historical OPENID or phone queries unavailable/malformed fail closed with zero writes
+ok 261 - historical OPENID or phone queries unavailable/malformed fail closed with zero writes
+  ---
+  duration_ms: 0.782887
+  type: 'test'
+  ...
+# Subtest: historical duplicate identities or phones never choose a first row or merge permissions
+ok 262 - historical duplicate identities or phones never choose a first row or merge permissions
+  ---
+  duration_ms: 0.967034
+  type: 'test'
+  ...
+# Subtest: repeated and concurrent same-WeChat registration reuse exactly one user/identity/phone proof
+ok 263 - repeated and concurrent same-WeChat registration reuse exactly one user/identity/phone proof
+  ---
+  duration_ms: 2.538314
+  type: 'test'
+  ...
+# Subtest: concurrent different WeChat identities claiming one number have only one winner and no loser records
+ok 264 - concurrent different WeChat identities claiming one number have only one winner and no loser records
+  ---
+  duration_ms: 1.230509
+  type: 'test'
+  ...
+# Subtest: verified phone changes and corrupt phone proofs fail closed without altering the existing user
+ok 265 - verified phone changes and corrupt phone proofs fail closed without altering the existing user
+  ---
+  duration_ms: 0.96488
+  type: 'test'
+  ...
+# Subtest: transaction support/commit/proof read failures roll back user, identity and proof atomically
+ok 266 - transaction support/commit/proof read failures roll back user, identity and proof atomically
+  ---
+  duration_ms: 0.621174
+  type: 'test'
+  ...
+# Subtest: phone login rechecks the user inside the transaction after concurrent admin binding
+ok 267 - phone login rechecks the user inside the transaction after concurrent admin binding
+  ---
+  duration_ms: 0.692111
+  type: 'test'
+  ...
+# Subtest: password account requires prior phone verification then shares user and houses across both login paths
+ok 268 - password account requires prior phone verification then shares user and houses across both login paths
+  ---
+  duration_ms: 118.643618
+  type: 'test'
+  ...
+# Subtest: malformed phone binding point reads never treat an unreadable existing lock as missing
+ok 269 - malformed phone binding point reads never treat an unreadable existing lock as missing
+  ---
+  duration_ms: 2.152785
+  type: 'test'
+  ...
+# Subtest: an existing proof whose user timestamp was altered is not silently repaired by phone login
+ok 270 - an existing proof whose user timestamp was altered is not silently repaired by phone login
+  ---
+  duration_ms: 0.724819
+  type: 'test'
+  ...
+# Subtest: nonzero query status with an apparently empty result cannot register a user or phone proof
+ok 271 - nonzero query status with an apparently empty result cannot register a user or phone proof
+  ---
+  duration_ms: 0.741986
+  type: 'test'
+  ...
+# Subtest: customer rental query excludes public rooms before pagination and count, preserving legacy rooms
+ok 272 - customer rental query excludes public rooms before pagination and count, preserving legacy rooms
+  ---
+  duration_ms: 2.457043
+  type: 'test'
+  ...
+# Subtest: life consumes the real preset API and displays all 232 public single rooms
+ok 273 - life consumes the real preset API and displays all 232 public single rooms
+  ---
+  duration_ms: 21.498029
+  type: 'test'
+  ...
+# Subtest: life search uses the actual preset rows; 929 is visible and 102 is absent
+ok 274 - life search uses the actual preset rows; 929 is visible and 102 is absent
+  ---
+  duration_ms: 12.362069
+  type: 'test'
+  ...
+# Subtest: unknown rent is not treated as zero by the list price filter
+ok 275 - unknown rent is not treated as zero by the list price filter
+  ---
+  duration_ms: 5.732425
+  type: 'test'
+  ...
+# Subtest: rental consumes real getHouse/recommendation data with unknown values intact
+ok 276 - rental consumes real getHouse/recommendation data with unknown values intact
+  ---
+  duration_ms: 11.033593
+  type: 'test'
+  ...
+# Subtest: last-floor last room resolves through the actual page/API path
+ok 277 - last-floor last room resolves through the actual page/API path
+  ---
+  duration_ms: 6.016162
+  type: 'test'
+  ...
+# Subtest: all first-floor rooms reject all supported public identifier forms
+ok 278 - all first-floor rooms reject all supported public identifier forms
+  ---
+  duration_ms: 19.551774
+  type: 'test'
+  ...
+# Subtest: 102 direct navigation clears previously visible details and cannot book
+ok 279 - 102 direct navigation clears previously visible details and cannot book
+  ---
+  duration_ms: 8.311942
+  type: 'test'
+  ...
+# Subtest: anonymous preset browsing stays public but identity actions uniformly prompt before business rules
+ok 280 - anonymous preset browsing stays public but identity actions uniformly prompt before business rules
+  ---
+  duration_ms: 10.554933
+  type: 'test'
+  ...
+# Subtest: authenticated preset appointment and direct-submit handlers still cannot persist or send bookings
+ok 281 - authenticated preset appointment and direct-submit handlers still cannot persist or send bookings
+  ---
+  duration_ms: 6.203803
+  type: 'test'
+  ...
+# Subtest: actual list/detail WXML bindings hide currency units for pending values
+ok 282 - actual list/detail WXML bindings hide currency units for pending values
+  ---
+  duration_ms: 18.216377
+  type: 'test'
+  ...
+# Subtest: without the explicit flag live failures remain errors, never preset fallback
+ok 283 - without the explicit flag live failures remain errors, never preset fallback
+  ---
+  duration_ms: 2.695091
+  type: 'test'
+  ...
+# Subtest: turning the preset off cannot revive cached preset cards after a live failure
+ok 284 - turning the preset off cannot revive cached preset cards after a live failure
+  ---
+  duration_ms: 26.028708
+  type: 'test'
+  ...
+# Subtest: a similar but unapproved flag cannot activate the preset UI
+ok 285 - a similar but unapproved flag cannot activate the preset UI
+  ---
+  duration_ms: 1.059713
+  type: 'test'
+  ...
+# Subtest: demo protection remains separate even when the test flag is present
+ok 286 - demo protection remains separate even when the test flag is present
+  ---
+  duration_ms: 1.095627
+  type: 'test'
+  ...
+# Subtest: ordinary live room prices, area and appointment availability keep their behaviour
+ok 287 - ordinary live room prices, area and appointment availability keep their behaviour
+  ---
+  duration_ms: 1.648458
+  type: 'test'
+  ...
+# Subtest: 栖山苑单一内置源提供9层242间，编号及层级稳定且唯一
+ok 288 - 栖山苑单一内置源提供9层242间，编号及层级稳定且唯一
+  ---
+  duration_ms: 13.677496
+  type: 'test'
+  ...
+# Subtest: 公开测试列表仅232个单间；首层10间保持隐藏、草稿、未知户型
+ok 289 - 公开测试列表仅232个单间；首层10间保持隐藏、草稿、未知户型
+  ---
+  duration_ms: 8.505183
+  type: 'test'
+  ...
+# Subtest: 公开列表筛选和逐条查询均不能泄露首层，102内部测试房保留
+ok 290 - 公开列表筛选和逐条查询均不能泄露首层，102内部测试房保留
+  ---
+  duration_ms: 8.785303
+  type: 'test'
+  ...
+# Subtest: 租金、面积及真实地址未知，全部显式null＋待配置，不制造0元或可签约事实
+ok 291 - 租金、面积及真实地址未知，全部显式null＋待配置，不制造0元或可签约事实
+  ---
+  duration_ms: 3.883186
+  type: 'test'
+  ...
+# Subtest: 生成、过滤和查询均返回深副本，不修改调用参数或污染内置源
+ok 292 - 生成、过滤和查询均返回深副本，不修改调用参数或污染内置源
+  ---
+  duration_ms: 9.470353
+  type: 'test'
+  ...
+# Subtest: tenant password input exception still rejects embedded device secrets in every scope
+ok 293 - tenant password input exception still rejects embedded device secrets in every scope
+  ---
+  duration_ms: 715.77435
+  type: 'test'
+  ...
+# Subtest: WeChat JS-only loader registers pages/home/index
+ok 294 - WeChat JS-only loader registers pages/home/index
+  ---
+  duration_ms: 3.859691
+  type: 'test'
+  ...
+# Subtest: WeChat JS-only loader registers pages/life/index
+ok 295 - WeChat JS-only loader registers pages/life/index
+  ---
+  duration_ms: 2.168499
+  type: 'test'
+  ...
+# Subtest: WeChat JS-only loader registers pages/unlock/index
+ok 296 - WeChat JS-only loader registers pages/unlock/index
+  ---
+  duration_ms: 1.303348
+  type: 'test'
+  ...
+# Subtest: WeChat JS-only loader registers pages/messages/index
+ok 297 - WeChat JS-only loader registers pages/messages/index
+  ---
+  duration_ms: 1.262437
+  type: 'test'
+  ...
+# Subtest: WeChat JS-only loader registers pages/profile/index
+ok 298 - WeChat JS-only loader registers pages/profile/index
+  ---
+  duration_ms: 1.628527
+  type: 'test'
+  ...
+# Subtest: WeChat JS-only loader registers pages/rental/index
+ok 299 - WeChat JS-only loader registers pages/rental/index
+  ---
+  duration_ms: 2.386947
+  type: 'test'
+  ...
+# Subtest: WeChat JS-only loader registers pages/property/index
+ok 300 - WeChat JS-only loader registers pages/property/index
+  ---
+  duration_ms: 1.159973
+  type: 'test'
+  ...
+# Subtest: WeChat JS-only loader registers pages/chat/index
+ok 301 - WeChat JS-only loader registers pages/chat/index
+  ---
+  duration_ms: 1.134716
+  type: 'test'
+  ...
+# Subtest: WeChat JS-only loader registers pages/vr/index
+ok 302 - WeChat JS-only loader registers pages/vr/index
+  ---
+  duration_ms: 1.063458
+  type: 'test'
+  ...
+# Subtest: WeChat JS-only loader registers pages/checkin/index
+ok 303 - WeChat JS-only loader registers pages/checkin/index
+  ---
+  duration_ms: 1.675769
+  type: 'test'
+  ...
+# Subtest: WeChat JS-only loader registers pages/face-enroll/index
+ok 304 - WeChat JS-only loader registers pages/face-enroll/index
+  ---
+  duration_ms: 1.367666
+  type: 'test'
+  ...
+# Subtest: WeChat JS-only loader registers pages/account-login/index
+ok 305 - WeChat JS-only loader registers pages/account-login/index
+  ---
+  duration_ms: 0.883838
+  type: 'test'
+  ...
+# Subtest: WeChat JS-only loader registers app and custom tab bar
+ok 306 - WeChat JS-only loader registers app and custom tab bar
+  ---
+  duration_ms: 0.758239
+  type: 'test'
+  ...
+# Subtest: Node-compatible JSON import reproduces the reported WeChat incompatibility
+ok 307 - Node-compatible JSON import reproduces the reported WeChat incompatibility
+  ---
+  duration_ms: 2.163682
+  type: 'test'
+  ...
+# Subtest: rejects the reported wx:else/wx:for combination
+ok 308 - rejects the reported wx:else/wx:for combination
+  ---
+  duration_ms: 1.888799
+  type: 'test'
+  ...
+# Subtest: accepts separate conditional and loop blocks for record rendering
+ok 309 - accepts separate conditional and loop blocks for record rendering
+  ---
+  duration_ms: 0.22588
+  type: 'test'
+  ...
+# Subtest: rejects the reported entity-escaped filter expression
+ok 310 - rejects the reported entity-escaped filter expression
+  ---
+  duration_ms: 0.249685
+  type: 'test'
+  ...
+# Subtest: accepts literal operators inside bindings and entities in ordinary text
+ok 311 - accepts literal operators inside bindings and entities in ordinary text
+  ---
+  duration_ms: 0.227792
+  type: 'test'
+  ...
+# Subtest: rejects orphaned branches and malformed binding syntax
+ok 312 - rejects orphaned branches and malformed binding syntax
+  ---
+  duration_ms: 0.35983
+  type: 'test'
+  ...
+# Subtest: else branches cannot cross loop scope
+ok 313 - else branches cannot cross loop scope
+  ---
+  duration_ms: 0.218478
+  type: 'test'
+  ...
+1..313
+# tests 315
+# suites 0
+# pass 315
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 12639.912471

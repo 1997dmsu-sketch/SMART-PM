@@ -9,6 +9,11 @@ const filename = path.resolve(__dirname, '../miniprogram/services/api.js');
 const localRequire = createRequire(filename);
 const VALID_USER = { _id: 'synthetic-user', role: 'user', houses: [], points: 0, name: '合成住户' };
 const PASSWORD = 'Synthetic-passphrase-2026!';
+const guard = globalThis.__DSH_D_NETWORK_GUARD__;
+let network;
+test.before(() => guard.assertLoadTimeClean());
+test.beforeEach(() => { network = guard.snapshot(); });
+test.afterEach(() => guard.assertNoViolations(network, 'account login API'));
 
 function fixture({ respond, runtime = {} } = {}) {
   const config = { mode: 'live', cloudEnv: 'synthetic-env', allowDeviceOperations: false, ...runtime };
@@ -63,9 +68,12 @@ test('code0仍必须有完整闭式身份DTO；拒空资料/隐藏凭据/错误�
   Object.defineProperty(hidden, 'passwordHash', { value: 'synthetic-only' });
   const invalid = [undefined, {}, { ...VALID_USER, _id: '' }, { ...VALID_USER, role: 'owner' }, { ...VALID_USER, houses: '102' }, { ...VALID_USER, points: -1 }, { ...VALID_USER, passwordHash: 'synthetic-only' }, getter, hidden];
   for (const userInfo of invalid) {
-    const f = fixture({ respond: () => ({ code: 0, userInfo }) });
-    await assert.rejects(f.api.loginWithPassword({ username: 'user01', password: PASSWORD }), /资料异常/);
-    assert.equal(await f.api.getProfile(), null);
+    for (const method of ['phone', 'password']) {
+      const f = fixture({ respond: () => ({ code: 0, userInfo }) });
+      await assert.rejects(method === 'phone' ? f.api.loginWithPhone('synthetic-phone-code')
+        : f.api.loginWithPassword({ username: 'user01', password: PASSWORD }), /资料异常/);
+      assert.equal(await f.api.getProfile(), null);
+    }
   }
   assert.equal(getterReads, 0);
 });
@@ -94,7 +102,7 @@ test('取消/退出/手机号新登录后，密码请求晚返不能重新写入
   for (const action of ['cancel', 'logout', 'phone']) {
     let finish;
     const f = fixture({ respond: input => input.name === 'phoneLogin'
-      ? { code: 0, userInfo: { name: '手机号资料' } }
+      ? { code: 0, userInfo: { ...VALID_USER, name: '手机号资料' } }
       : new Promise(resolve => { finish = resolve; }) });
     const pending = f.api.loginWithPassword({ username: 'user01', password: PASSWORD });
     if (action === 'cancel') f.api.cancelPasswordLogin();
@@ -104,6 +112,51 @@ test('取消/退出/手机号新登录后，密码请求晚返不能重新写入
     await assert.rejects(pending, /登录已取消/);
     const current = await f.api.getProfile();
     assert.equal(current ? current.name : null, action === 'phone' ? '手机号资料' : null);
+  }
+});
+
+test('手机号授权凭证仅传code；取消和无效凭证不调用后端、不写登录资料', async () => {
+  const f = fixture();
+  for (const code of [undefined, '', 'invalid code', { phone: '13800000000' }]) {
+    await assert.rejects(f.api.loginWithPhone(code), /授权/);
+    assert.equal(await f.api.getProfile(), null);
+  }
+  assert.equal(f.calls.length, 0);
+  await f.api.loginWithPhone('synthetic-wechat-credential');
+  assert.deepEqual(f.calls[0].data, { code: 'synthetic-wechat-credential' });
+  assert.equal(f.calls[0].name, 'phoneLogin');
+  assert.equal(f.api.isAuthenticated(), true);
+});
+
+test('手机号请求在离页取消、退出或换号后晚返，不能重新写入旧账号资料', async () => {
+  for (const action of ['cancel', 'logout', 'replace']) {
+    let finish;
+    let invocation = 0;
+    const f = fixture({ respond: () => ++invocation === 1
+      ? new Promise(resolve => { finish = resolve; })
+      : { code: 0, userInfo: { ...VALID_USER, _id: 'synthetic-replacement', name: '新用户' } } });
+    const pending = f.api.loginWithPhone('synthetic-first-code');
+    if (action === 'cancel') f.api.cancelPhoneLogin();
+    if (action === 'logout') f.api.logout();
+    if (action === 'replace') await f.api.loginWithPhone('synthetic-next-code');
+    finish({ code: 0, userInfo: VALID_USER });
+    await assert.rejects(pending, /登录已取消/);
+    assert.equal((await f.api.getProfile())?._id || null, action === 'replace' ? 'synthetic-replacement' : null);
+  }
+});
+
+test('失败的换号清除原登录；手机号与密码未知错误均不显示服务端消息或凭据', async () => {
+  for (const method of ['phone', 'password']) {
+    let succeed = true;
+    const f = fixture({ respond: () => succeed ? { code: 0, userInfo: VALID_USER }
+      : { code: 'SYNTHETIC_UNKNOWN', msg: 'private-openid private-hash synthetic-password' } });
+    await f.api.loginWithPhone('synthetic-initial-code');
+    succeed = false;
+    await assert.rejects(method === 'phone' ? f.api.loginWithPhone('synthetic-next-code')
+      : f.api.loginWithPassword({ username: 'user01', password: PASSWORD }), error => /登录未完成/.test(error.message)
+      && !/private|synthetic-password/.test(error.message));
+    assert.equal(await f.api.getProfile(), null);
+    assert.equal(f.api.isAuthenticated(), false);
   }
 });
 

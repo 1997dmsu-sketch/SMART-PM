@@ -71,7 +71,7 @@ test('phone login suppresses duplicates, authenticates and logs out',async()=>{
  await api.logout();await p.loadProfile();assert.equal(p.data.authenticated,false);
 });
 test('phone login backend rejection clears busy state and permits retry',async()=>{
- config.mode='live';config.cloudEnv='test-env';wx.cloud.callFunction=async()=>({result:{code:500,msg:'授权已过期'}});const p=page('profile');await p.login({detail:{code:'expired'}});assert.equal(p.data.authenticated,false);assert.equal(p.data.loggingIn,false);assert.equal(calls[0][1].title,'授权已过期');
+ config.mode='live';config.cloudEnv='test-env';wx.cloud.callFunction=async()=>({result:{code:500,msg:'SYNTHETIC_PRIVATE_BACKEND_DETAIL'}});const p=page('profile');await p.login({detail:{code:'expired'}});assert.equal(p.data.authenticated,false);assert.equal(p.data.loggingIn,false);assert.equal(calls[0][1].title,'登录未完成，请稍后重试');assert.equal(JSON.stringify(calls).includes('SYNTHETIC_PRIVATE_BACKEND_DETAIL'),false);
 });
 test('rental detail rechecks visibility after a cached listing becomes public',async()=>{
  config.mode='live';config.cloudEnv='test-env';let hidden=false;

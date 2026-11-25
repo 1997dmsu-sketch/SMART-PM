@@ -8,6 +8,7 @@ import { join, resolve, extname } from "node:path";
 import { PropertyService } from "./lib/property.mjs";
 import { LocalStore, CloudStore } from "./lib/store.mjs";
 import { LocalCloudDatabase } from "./lib/local-cloud-database.mjs";
+import { TenantAuthCloudDatabase } from "./lib/tenant-auth-cloud-database.mjs";
 import { AdminTenantPasswordAccounts } from "./lib/tenant-password-accounts.mjs";
 import { resolvePublicFile } from "./lib/static-path.mjs";
 import { Accounts, publicAccount } from "./lib/auth.mjs";
@@ -266,7 +267,7 @@ export async function createApp({
           if (account.role !== "admin") fail("仅系统管理员可管理租客密码账号", 403);
           try {
             const database = mode === "live"
-              ? store.app?.database?.()
+              ? new TenantAuthCloudDatabase(store.app?.database?.())
               : new LocalCloudDatabase(store, audit("租客密码账号管理"));
             if (!database) fail("账号服务未配置", 503);
             const service = new AdminTenantPasswordAccounts({ database });

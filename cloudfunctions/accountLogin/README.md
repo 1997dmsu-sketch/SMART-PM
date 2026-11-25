@@ -12,14 +12,14 @@
 ## 流程与接口
 
 1. 租客调用 `phoneLogin({code})`，服务端向微信核验手机号凭证成功后自动创建或复用
-   canonical 用户，写入 `users.phone` 与 `users.phoneBoundAt` 作为可信注册标记；
-   注册本身不授予房屋或门禁权限。
+   canonical 用户，同一事务写入手机号、验证时间及私有手机号证明。
+   不能仅凭 `users.phone` 或 `phoneBoundAt` 判断可信注册；注册本身不授予房屋或门禁权限。
 2. 管理员在已有后台会话内从“已验证手机号住户”列表选择住户，提交用户名和初始密码。
-   服务端只接受已核验手机号的住户 `userId`，不接受页面提交 openid/userId 替换目标，
+   服务端按所选 `userId` 重新读取并核验手机号证明及微信身份，不接受页面自报的手机号或 openid，
    也不接受旧 requestCode。账号首次创建、身份索引及审计同事务提交；不能用重复开户
    隐式重置已有密码。
 3. 租客调用 `{action:'login',username,password}`。成功顶层返回 `{code:0,userInfo}`；
-   用户不存在、密码错误、微信不匹配、停用或限速统一为 `AUTH_FAILED`，数据库／
+   用户不存在、密码错误、微信不匹配、手机号证明缺失、停用或限速统一为 `AUTH_FAILED`，数据库／
    身份状态无法确认则为 `SERVICE_UNAVAILABLE`。不回显输入、密码、哈希、盐或内部错误。
 
 用户名 trim 后转小写，必须符合 `^[a-z0-9][a-z0-9._-]{3,31}$`。密码保留原文，
@@ -37,8 +37,8 @@
 - `listAccounts(actor)`：只返回公开账号 DTO，按 `_id` 升序100条/页读取至短页，
   上限10000。不会静默丢掉第101条以后的账号；超过上限或遇损坏记录失败关闭，
   分别为 `ACCOUNT_LIST_LIMIT` / `ACCOUNT_DATA_UNVERIFIED`。多页读取不承诺同一时点快照。
-- `listVerifiedUsers(actor)`：只返回已完成可信手机号注册的住户（`users.phone` 与
-  `users.phoneBoundAt` 均为有效值），投影仅 `userId/phone/name/houses`，不含 openid；
+- `listVerifiedUsers(actor)`：只返回手机号、验证时间、完整微信身份和私有手机号证明
+  一致的住户，投影仅 `userId/phone/name/houses`，不含 openid；
   上限5000，超限失败关闭。
 - `createAccount(actor,{userId,username,password})`：只为已验证手机号住户开通，
   未验证为 `USER_NOT_VERIFIED`；身份索引与用户不一致为 `IDENTITY_UNVERIFIED`；
@@ -53,14 +53,21 @@ actor 的 id/role 必须来自后台已验证会话，不能透传请求体；�
 `id/username/userId/status/revision/credentialVersion/createdAt/updatedAt`。
 管理员授权、会话吊销、Origin 和 CSRF 继续由既有后台前置处理。
 
+管理后台 live 模式通过 `TenantAuthCloudDatabase` 将共享服务的微信 SDK 写入封装
+转换为 `@cloudbase/database@2.0.0` 接受的裸文档；移除写入体的 `_id`，保留文档路径。
+事务提交、回滚和冲突重试仍由管理 SDK 负责。此适配不改变微信云函数的 SDK 协议。
+当前仅核对已安装 SDK 源码并通过严格假 SDK 契约测试，未验证实际云环境。
+
 密码计算在事务外进行，最终登录事务重新读取当前账号 revision、credentialVersion、
-状态、微信索引及用户绑定，因此重置或“停用后重新启用”的 ABA 不能放行旧验证结果。
+状态、微信索引、用户绑定和当前手机号证明，因此重置或“停用后重新启用”的 ABA
+不能放行旧验证结果。历史账号缺少证明时先完成当前微信的手机号授权，不删除账号或房屋绑定。
 
 ## 身份与兼容
 
 `login/phoneLogin/adminLogin/accountLogin` 各自部署目录包含同字节的
 `lib/identity-core.js`，不能运行时跨兄弟云函数目录 require。发布校验应核对四份
 字节哈希一致，并将四个云函数作为同一兼容发布批次。
+`phoneLogin/accountLogin` 的 `lib/phone-proof.js` 两份也必须逐字节一致。
 
 身份索引以可信 APPID+OPENID 派生确定性 ID，新用户也使用确定性 ID；历史唯一用户
 保留原 userId、角色和房产。`users.wechatAppId` 是服务端绑定标记，不接受客户端修改。
@@ -68,9 +75,12 @@ actor 的 id/role 必须来自后台已验证会话，不能透传请求体；�
 合并房产或修复历史记录。事务外有限查询只发现旧记录，事务内按固定 ID 重新读取绑定。
 所有受支持用户创建入口共享索引，但不承诺检测管理员绕过接口直接注入的任意重复记录。
 
-手机号登录核验微信提供的手机号 code，再更新同一 canonical user；同一手机号跨微信
-身份冲突失败关闭（409）。注册本身不自动授予房产；开户码（已停用）和密码登录
-不授予任何新房产。
+手机号登录仅接受微信手机号授权的临时 `code`，不会接受客户端自报的手机号或身份。
+该微信凭证不是已取消的开户码。私有 `tenant_auth_phone_bindings` 的记录 ID 由
+APPID 和手机号确定性派生，同一事务绑定 canonical user，防止不同微信并发占用同一手机号。
+同一微信重复授权复用住户；同一手机号跨微信、历史重复、已有不同手机号等冲突返回409，
+不自动换号、转移账号或合并房产。旧住户可重新授权同一手机号补证明，已有合法绑定保留。
+查询或验证失败不写入用户及证明。注册和密码登录不导入 `owners`，不新增房屋或门禁权限。
 
 ## 持久限速
 
@@ -84,7 +94,7 @@ actor 的 id/role 必须来自后台已验证会话，不能透传请求体；�
 本文件没有部署或改变任何真实权限。下列集合必须设置为**客户端拒绝读写、
 仅受信云函数/后台服务端 SDK 访问**：
 
-`tenant_auth_identities`、`tenant_auth_accounts`、
+`tenant_auth_identities`、`tenant_auth_phone_bindings`、`tenant_auth_accounts`、
 `tenant_auth_rate_limits`、`tenant_auth_audit`。另外，涉及权限的 `users` 字段只能由
 受信服务端写入，不能由租客客户端修改。历史 `tenant_auth_enrollments` 数据保留
 （不擅删），但新流程不再生成或消费开户码。
@@ -97,11 +107,11 @@ actor 的 id/role 必须来自后台已验证会话，不能透传请求体；�
 
 这是逐集合的客户端权限意图，须核对目标 CloudBase 环境当前支持的规则语法，
 不是已部署配置导出，也不是可直接写进云函数 config.json 的批量导入文件。
-users 至少拒绝客户端修改 `_openid/wechatAppId/role/houses/housesManaged`；现有
+users 至少拒绝客户端修改 `_openid/wechatAppId/phone/phoneBoundAt/role/houses/housesManaged`；现有
 资料编辑若需保留，应经已有受控服务端白名单，不开放整文档写入。
 
 部署前还需在目标环境核对/创建索引：`users.phone`（手机号跨微信冲突检查依赖，
-缺失时检查静默降级为 fail-open）、`rooms.houseId`（houseAdmin 绑定校验依赖）。
+查询失败时登录失败关闭）、`rooms.houseId`（houseAdmin 绑定校验依赖）。
 索引由平台控制台维护，仓库无自动建索引脚本。
 
 上线前应验证：客户端直接读取哈希/限速记录或篡改索引／角色／房产均被拒；

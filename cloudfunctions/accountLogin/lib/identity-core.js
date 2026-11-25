@@ -46,6 +46,15 @@ function identityIdFor(context) {
   return `wx_${sha256(`${value.appId}\0${value.openid}`)}`;
 }
 function userIdFor(context) { return `wxuser_${identityIdFor(context).slice(3)}`; }
+function validIdentityBinding(binding, user, trusted) {
+  return !!binding && !!user && binding._id === identityIdFor({ APPID: trusted.appId, OPENID: trusted.openid })
+    && binding.schemaVersion === 1 && binding.appId === trusted.appId && binding.openid === trusted.openid
+    && validId(binding.userId) && binding.userId === user._id
+    && user._openid === trusted.openid && user.wechatAppId === trusted.appId
+    && Number.isSafeInteger(binding.revision) && binding.revision > 0
+    && Number.isSafeInteger(binding.createdAt) && binding.createdAt > 0
+    && Number.isSafeInteger(binding.updatedAt) && binding.updatedAt >= binding.createdAt;
+}
 function nowMs(now = Date.now) {
   const value = typeof now === 'function' ? now() : now;
   const result = value instanceof Date ? value.getTime() : value;
@@ -55,7 +64,18 @@ function nowMs(now = Date.now) {
 async function readDoc(db, collection, id) {
   try {
     const response = await db.collection(collection).doc(id).get();
-    return response && response.data && !Array.isArray(response.data) ? response.data : null;
+    if (!response || typeof response !== 'object' || !Object.hasOwn(response, 'data')
+      || ['code', 'errCode'].some((key) => response[key] !== undefined && response[key] !== 0 && response[key] !== '0')) fail();
+    // wx-server-sdk returns an object; the management SDK can return an array.
+    // Explicit null/empty-array results are the adapters' documented missing row.
+    let value = response.data;
+    if (value === null || (Array.isArray(value) && value.length === 0)) return null;
+    if (Array.isArray(value)) {
+      if (value.length !== 1) fail();
+      [value] = value;
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value) || value._id !== id) fail();
+    return value;
   } catch (error) {
     const codes = error && [error.code, error.errCode];
     if (codes && codes.some((code) => code === 'DOCUMENT_NOT_EXISTS' || code === 'NOT_FOUND')) return null;
@@ -63,6 +83,11 @@ async function readDoc(db, collection, id) {
       && /(?:DOCUMENT_NOT_EXISTS|document[^\n]*(?:not exist|not found|does not exist))/i.test(error.message)) return null;
     throw error;
   }
+}
+function checkedQuery(response) {
+  if (!response || typeof response !== 'object' || !Object.hasOwn(response, 'data') || !Array.isArray(response.data)
+    || ['code', 'errCode'].some((key) => response[key] !== undefined && response[key] !== 0 && response[key] !== '0')) fail();
+  return response;
 }
 async function putDoc(db, collection, id, value) {
   await db.collection(collection).doc(id).set({ data: { ...value, _id: id } });
@@ -85,19 +110,19 @@ async function withIdentity({ db, context, now = Date.now, create = true }, work
   const trusted = validateContext(context);
   const id = identityIdFor(context);
   const query = db.collection('users').where({ _openid: trusted.openid }).limit(2);
-  const response = await query.get();
-  if (!response || !Array.isArray(response.data) || response.data.length > 1) fail('IDENTITY_UNVERIFIED');
-  const legacy = response.data[0] || null;
-  if (legacy && (!validId(legacy._id) || legacy._openid !== trusted.openid)) fail('IDENTITY_UNVERIFIED');
+  const response = checkedQuery(await query.get());
+  if (response.data.length > 1) fail('IDENTITY_UNVERIFIED');
+  const legacy = response.data.length ? response.data[0] : null;
+  if (response.data.length && (!legacy || !validId(legacy._id) || legacy._openid !== trusted.openid)) fail('IDENTITY_UNVERIFIED');
   return withTransaction(db, async (tx) => {
     const timestamp = nowMs(now);
     let identity = await readDoc(tx, IDENTITIES, id);
     let user;
     let isNew = false;
     if (identity) {
-      if (identity.appId !== trusted.appId || identity.openid !== trusted.openid || !validId(identity.userId)) fail('IDENTITY_UNVERIFIED');
+      if (!validId(identity.userId)) fail('IDENTITY_UNVERIFIED');
       user = await readDoc(tx, 'users', identity.userId);
-      if (!user || user._openid !== trusted.openid || user.wechatAppId !== trusted.appId
+      if (!validIdentityBinding(identity, user, trusted)
         || (legacy && legacy._id !== user._id)) fail('IDENTITY_UNVERIFIED');
     } else {
       if (!create) return null;
@@ -137,4 +162,4 @@ function publicUser(user) {
 }
 
 module.exports = { IDENTITIES, TenantAuthError, fail, sha256, closedInput, validId,
-  validateContext, identityIdFor, userIdFor, nowMs, readDoc, putDoc, withTransaction, withIdentity, publicUser };
+  validateContext, identityIdFor, userIdFor, validIdentityBinding, nowMs, readDoc, checkedQuery, putDoc, withTransaction, withIdentity, publicUser };

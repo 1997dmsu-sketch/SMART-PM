@@ -3,10 +3,11 @@ const { randomUUID } = require('node:crypto');
 const identity = require('./identity-core');
 const credentials = require('./credentials');
 const { fail, sha256, closedInput, validId, validateContext, identityIdFor,
-  nowMs, readDoc, putDoc, withTransaction, publicUser } = identity;
+  nowMs, readDoc, checkedQuery, putDoc, withTransaction, publicUser, validIdentityBinding } = identity;
+const { PHONE_BINDINGS, validPhone, hasPhoneProof } = require('./phone-proof');
 
 const COLLECTIONS = Object.freeze({ USERS: 'users', IDENTITIES: 'tenant_auth_identities',
-  ACCOUNTS: 'tenant_auth_accounts',
+  ACCOUNTS: 'tenant_auth_accounts', PHONE_BINDINGS,
   RATE_LIMITS: 'tenant_auth_rate_limits', AUDIT: 'tenant_auth_audit' });
 const AUTH_FAILURE = Object.freeze({ code: 'AUTH_FAILED', msg: '账号或密码错误，或账号暂不可用' });
 const SERVICE_FAILURE = Object.freeze({ code: 'SERVICE_UNAVAILABLE', msg: '登录服务暂不可用' });
@@ -82,8 +83,8 @@ class TenantAccountService {
       const matches = await credentials.verifyPassword(password, eligible ? account.password : null);
       if (!eligible || !matches) return { ...AUTH_FAILURE };
       // Outside-query preflight only detects historical duplicates; no first-row selection.
-      const users = await this.db.collection(COLLECTIONS.USERS).where({ _openid: trusted.openid }).limit(2).get();
-      if (!users || !Array.isArray(users.data) || users.data.length !== 1 || users.data[0]._id !== account.userId) fail('IDENTITY_UNVERIFIED');
+      const users = checkedQuery(await this.db.collection(COLLECTIONS.USERS).where({ _openid: trusted.openid }).limit(2).get());
+      if (users.data.length !== 1 || users.data[0]._id !== account.userId) fail('IDENTITY_UNVERIFIED');
       return await withTransaction(this.db, async (tx) => {
         const current = await readDoc(tx, COLLECTIONS.ACCOUNTS, id);
         const binding = await readDoc(tx, COLLECTIONS.IDENTITIES, bindingId);
@@ -92,9 +93,8 @@ class TenantAccountService {
           || current.credentialVersion !== account.credentialVersion
           || current.password.saltHex !== account.password.saltHex || current.password.hashHex !== account.password.hashHex
           || current.identityId !== bindingId || current.userId !== account.userId || current.openid !== trusted.openid
-          || !binding || binding.appId !== trusted.appId || binding.openid !== trusted.openid
-          || binding.userId !== account.userId || binding.accountId !== id
-          || !user || user._openid !== trusted.openid || user.wechatAppId !== trusted.appId) fail('AUTH_FAILED', 401);
+          || !validIdentityBinding(binding, user, trusted) || binding.accountId !== id) fail('AUTH_FAILED', 401);
+        if (!await hasPhoneProof(tx, { trusted, identity: binding, user })) fail('AUTH_FAILED', 401);
         const patch = { ...user, lastLoginAt: nowMs(this.now) };
         if (trusted.unionid) patch.unionid = trusted.unionid;
         await putDoc(tx, COLLECTIONS.USERS, user._id, patch);
@@ -110,9 +110,8 @@ class TenantAccountService {
     try {
       const accounts = [];
       for (let offset = 0; offset <= 10000; offset += 100) {
-        const result = await this.db.collection(COLLECTIONS.ACCOUNTS)
-          .orderBy('_id', 'asc').skip(offset).limit(100).get();
-        if (!result || !Array.isArray(result.data)) fail();
+        const result = checkedQuery(await this.db.collection(COLLECTIONS.ACCOUNTS)
+          .orderBy('_id', 'asc').skip(offset).limit(100).get());
         if (result.data.some((account) => !validAccount(account))) fail('ACCOUNT_DATA_UNVERIFIED', 503);
         let lastId = accounts.length ? accounts[accounts.length - 1].id : '';
         for (const account of result.data) {
@@ -134,18 +133,28 @@ class TenantAccountService {
     const password = await credentials.hashPassword(data.password);
     if (!validId(data.userId)) fail('INVALID_INPUT', 400);
     try {
+      // Read-only historical checks never select the first ambiguous user.
+      const candidate = await readDoc(this.db, COLLECTIONS.USERS, data.userId);
+      if (!candidate || !validPhone(candidate.phone)) fail('USER_NOT_VERIFIED', 409);
+      const trustedCandidate = validateContext({ APPID: candidate.wechatAppId, OPENID: candidate._openid });
+      for (const filter of [{ _openid: trustedCandidate.openid }, { phone: candidate.phone }]) {
+        const rows = checkedQuery(await this.db.collection(COLLECTIONS.USERS).where(filter).limit(2).get());
+        if (rows.data.length !== 1 || rows.data[0]._id !== data.userId) fail('IDENTITY_UNVERIFIED');
+      }
       return await withTransaction(this.db, async (tx) => {
         const timestamp = nowMs(this.now);
         // 只允许为已完成可信手机号注册的住户开通；未验证身份零写入。
         const user = await readDoc(tx, COLLECTIONS.USERS, data.userId);
-        if (!user || typeof user.phone !== 'string' || !user.phone || user.phone.length > 32
-          || /[\x00-\x1f\x7f]/.test(user.phone)
+        if (!user || user.phone !== candidate.phone || user._openid !== candidate._openid
+          || user.wechatAppId !== candidate.wechatAppId || !validPhone(user.phone)
           || !Number.isSafeInteger(user.phoneBoundAt) || user.phoneBoundAt <= 0) fail('USER_NOT_VERIFIED', 409);
         if (!validId(user._openid) || typeof user.wechatAppId !== 'string'
           || !/^[A-Za-z0-9_-]{1,128}$/.test(user.wechatAppId)) fail('IDENTITY_UNVERIFIED');
         const bindingId = identityIdFor({ APPID: user.wechatAppId, OPENID: user._openid });
         const binding = await readDoc(tx, COLLECTIONS.IDENTITIES, bindingId);
-        if (!binding || binding.userId !== user._id) fail('IDENTITY_UNVERIFIED');
+        const trusted = { appId: user.wechatAppId, openid: user._openid };
+        if (!validIdentityBinding(binding, user, trusted)) fail('IDENTITY_UNVERIFIED');
+        if (!await hasPhoneProof(tx, { trusted, identity: binding, user })) fail('USER_NOT_VERIFIED', 409);
         const id = accountIdFor(username);
         const existing = await readDoc(tx, COLLECTIONS.ACCOUNTS, id);
         if (existing || binding.accountId) fail('ACCOUNT_EXISTS', 409);
@@ -154,7 +163,7 @@ class TenantAccountService {
           credentialVersion: 1, password, createdAt: timestamp, updatedAt: timestamp };
         await putDoc(tx, COLLECTIONS.ACCOUNTS, id, account);
         await putDoc(tx, COLLECTIONS.IDENTITIES, binding._id, { ...binding, accountId: id,
-          pendingEnrollmentHash: null, revision: nextRevision(binding.revision), updatedAt: timestamp });
+          revision: nextRevision(binding.revision), updatedAt: timestamp });
         await this._audit(tx, actor, 'TENANT_ACCOUNT_CREATE', account);
         return publicAccount(account);
       });
@@ -166,15 +175,20 @@ class TenantAccountService {
     try {
       const users = [];
       for (let offset = 0; offset <= 5000; offset += 100) {
-        const result = await this.db.collection(COLLECTIONS.USERS)
-          .orderBy('_id', 'asc').skip(offset).limit(100).get();
-        if (!result || !Array.isArray(result.data)) fail();
+        const result = checkedQuery(await this.db.collection(COLLECTIONS.USERS)
+          .orderBy('_id', 'asc').skip(offset).limit(100).get());
         if (users.length + result.data.length > 5000) fail('ACCOUNT_LIST_LIMIT', 503);
         for (const user of result.data) {
-          // 已完成可信手机号注册（phoneLogin 服务端核验后写入 phone+phoneBoundAt）才可被选择。
-          if (validId(user._id) && typeof user.phone === 'string' && user.phone.length > 0
-            && user.phone.length <= 32 && !/[\x00-\x1f\x7f]/.test(user.phone)
-            && Number.isSafeInteger(user.phoneBoundAt) && user.phoneBoundAt > 0) {
+          // The public timestamp alone is not evidence of server verification.
+          if (validId(user._id) && validPhone(user.phone) && Number.isSafeInteger(user.phoneBoundAt)
+            && user.phoneBoundAt > 0 && typeof user.wechatAppId === 'string'
+            && /^[A-Za-z0-9_-]{1,128}$/.test(user.wechatAppId) && typeof user._openid === 'string'
+            && /^[A-Za-z0-9_-]{1,128}$/.test(user._openid)) {
+            const trusted = { appId: user.wechatAppId, openid: user._openid };
+            const binding = await readDoc(this.db, COLLECTIONS.IDENTITIES,
+              identityIdFor({ APPID: trusted.appId, OPENID: trusted.openid }));
+            if (!validIdentityBinding(binding, user, trusted)
+              || !await hasPhoneProof(this.db, { trusted, identity: binding, user })) continue;
             users.push({ userId: user._id, phone: user.phone,
               name: typeof user.name === 'string' && user.name.length <= 128 && !/[\x00-\x1f\x7f]/.test(user.name) ? user.name : '',
               houses: Array.isArray(user.houses) ? user.houses.filter(validId) : [] });

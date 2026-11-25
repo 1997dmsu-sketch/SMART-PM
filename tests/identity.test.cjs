@@ -15,7 +15,7 @@ const CONTEXT = { APPID: 'wx-synthetic-app', OPENID: 'synthetic-user-01', UNIONI
 const NOW = 1795564800000;
 function cloud(db, context = CONTEXT) {
   return { init() {}, database: () => db, getWXContext: () => context,
-    openapi: { phonenumber: { getPhoneNumber: async () => ({ phoneInfo: { purePhoneNumber: 'synthetic-phone' } }) } } };
+    openapi: { phonenumber: { getPhoneNumber: async () => ({ phoneInfo: { purePhoneNumber: '13800000001' } }) } } };
 }
 
 test('identity helper bytes are identical and each cloud function is deployment self-contained', () => {
@@ -24,6 +24,9 @@ test('identity helper bytes are identical and each cloud function is deployment 
   const hashes = files.map((file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex'));
   assert.equal(new Set(hashes).size, 1);
   for (const file of files) assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /require\(['"]\.\.\//);
+  const proofs = ['accountLogin', 'phoneLogin'].map((name) => path.join(ROOT, 'cloudfunctions', name, 'lib/phone-proof.js'));
+  assert.equal(new Set(proofs.map((file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex'))).size, 1);
+  for (const file of proofs) assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /require\(['"]\.\.\//);
 });
 
 test('silent login and phone login concurrently create exactly one canonical user', async () => {
@@ -46,7 +49,7 @@ test('silent login and phone login concurrently create exactly one canonical use
 test('unique legacy user keeps id and house bindings; duplicate legacy users fail closed', async () => {
   const db = new TenantAuthMemoryDB();
   db._write('users', 'legacy-user', { _id: 'legacy-user', _openid: CONTEXT.OPENID,
-    houses: ['admin-house'], housesManaged: true, points: 8, role: 'user', phone: 'synthetic-phone' });
+    houses: ['admin-house'], housesManaged: true, points: 8, role: 'user', phone: '13800000001' });
   const result = await silentMain({ cloud: cloud(db), db, now: () => NOW })();
   assert.equal(result.code, 0);
   assert.equal(result.userInfo._id, 'legacy-user');
@@ -112,4 +115,82 @@ test('legacy admin login changes only its canonical user writer and preserves ho
   assert.deepEqual(result.userInfo.houses, ['admin-house']);
   assert.equal(db.rows('users').length, 1);
   assert.equal(db.rows('tenant_auth_identities').length, 1);
+});
+
+test('malformed canonical identity bindings cannot be reused or repaired implicitly', async () => {
+  for (const patch of [{ schemaVersion: 0 }, { appId: 'other-app' }, { openid: 'other-openid' },
+    { userId: 'missing-user' }, { revision: 0 }, { createdAt: 0 }, { updatedAt: NOW - 1 }]) {
+    const db = new TenantAuthMemoryDB();
+    await identity.withIdentity({ db, context: CONTEXT, now: () => NOW });
+    const original = db.rows('tenant_auth_identities')[0];
+    db._write('tenant_auth_identities', original._id, { ...original, ...patch });
+    const before = structuredClone(db.snapshot());
+    const result = await phoneMain({ cloud: cloud(db), db, now: () => NOW })({ code: 'synthetic-code' });
+    assert.equal(result.code, 'SERVICE_UNAVAILABLE');
+    assert.deepEqual(structuredClone(db.snapshot()), before);
+  }
+});
+
+test('point reads honor both SDK success shapes and explicit missing rows while rejecting malformed/error responses', async () => {
+  const doc = { _id: 'synthetic-doc', value: 1 };
+  for (const response of [{ data: doc }, { data: [doc] }, { code: 0, data: [doc] }]) {
+    assert.deepEqual(await identity.readDoc({ collection: () => ({ doc: () => ({ get: async () => response }) }) }, 'synthetic', doc._id), doc);
+  }
+  for (const response of [{ data: null }, { data: [] }]) {
+    assert.equal(await identity.readDoc({ collection: () => ({ doc: () => ({ get: async () => response }) }) }, 'synthetic', doc._id), null);
+  }
+  for (const response of [undefined, {}, { data: undefined }, { data: {} }, { data: [doc, doc] },
+    { data: { ...doc, _id: 'other' } }, { code: 500, data: null }, { errCode: -1, data: [] }]) {
+    await assert.rejects(() => identity.readDoc({ collection: () => ({ doc: () => ({ get: async () => response }) }) }, 'synthetic', doc._id),
+      (error) => error.code === 'SERVICE_UNAVAILABLE');
+  }
+});
+
+test('real LocalCloudDatabase supports public phone registration, admin selection/creation and password login', async () => {
+  const { tmpdir } = require('node:os');
+  const { pathToFileURL } = require('node:url');
+  const directory = await fs.promises.mkdtemp(path.join(tmpdir(), 'synthetic-tenant-phone-'));
+  try {
+    const { LocalStore } = await import(pathToFileURL(path.join(ROOT, 'admin-web/lib/store.mjs')));
+    const { LocalCloudDatabase } = await import(pathToFileURL(path.join(ROOT, 'admin-web/lib/local-cloud-database.mjs')));
+    const { AdminTenantPasswordAccounts } = await import(pathToFileURL(path.join(ROOT, 'admin-web/lib/tenant-password-accounts.mjs')));
+    const { createMain: accountMain } = require('../cloudfunctions/accountLogin');
+    const store = await new LocalStore(directory).init();
+    const db = new LocalCloudDatabase(store);
+    const sdk = cloud(db);
+    const phone = await phoneMain({ cloud: sdk, db, now: () => NOW })({ code: 'synthetic-code' });
+    assert.equal(phone.code, 0);
+    assert.deepEqual(phone.userInfo.houses, []);
+    const userId = phone.userInfo._id;
+    await db.collection('users').doc(userId).update({ data: { houses: ['synthetic-admin-house'] } });
+    const actor = { id: 'synthetic-local-admin', role: 'admin' };
+    const admin = new AdminTenantPasswordAccounts({ database: db, now: () => NOW });
+    const verified = await admin.listVerifiedUsers(actor);
+    assert.equal(verified.length, 1);
+    assert.equal(verified[0].userId, userId);
+    assert.deepEqual(verified[0].houses, ['synthetic-admin-house']);
+    const account = await admin.createAccount(actor, { userId, username: 'tenant.local', password: 'synthetic-password-123' });
+    const rows = await admin.listAccounts(actor);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, account.id);
+    const password = await accountMain({ cloud: sdk, db, now: () => NOW })({ action: 'login', username: 'tenant.local', password: 'synthetic-password-123' });
+    assert.equal(password.code, 0);
+    assert.equal(password.userInfo._id, userId);
+    assert.deepEqual(password.userInfo.houses, ['synthetic-admin-house']);
+    assert.equal(store.data.tenant_auth_phone_bindings.length, 1);
+    assert.equal(store.data.tenant_auth_accounts.length, 1);
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('query status accepts only successful SDK codes and preserves explicit empty results', () => {
+  for (const code of [undefined, 0, '0']) {
+    const response = { code, errCode: code, data: [] };
+    assert.equal(identity.checkedQuery(response), response);
+  }
+  for (const response of [{ code: 'SYNTHETIC_QUERY_FAILURE', data: [] }, { errCode: 7, data: [] },
+    undefined, {}, { data: null }, { data: {} }]) {
+    assert.throws(() => identity.checkedQuery(response), (error) => error.code === 'SERVICE_UNAVAILABLE');
+  }
 });

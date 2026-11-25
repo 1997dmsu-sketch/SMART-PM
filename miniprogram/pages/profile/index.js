@@ -26,39 +26,70 @@ Page({
     showFavorites: false, favorites: [],
   },
   onLoad() {
+    this._visible = true;
     this.setData({ ...getNavigationLayout(), demo: api.isDemo(), checkinFaceEntry: runtime.checkinFaceTestEntry === true });
   },
   onResize() { this.setData(getNavigationLayout()); },
   onShow() {
+    this._visible = true;
     this.setData(getNavigationLayout());
     if (this.getTabBar && this.getTabBar()) this.getTabBar().setData({ selected: 'profile' });
     return this.loadProfile();
   },
+  onHide() { this.cancelPendingLogin(); },
+  onUnload() { this.cancelPendingLogin(); },
+  cancelPendingLogin() {
+    this._visible = false;
+    this._loginAttempt = (this._loginAttempt || 0) + 1;
+    this._profileAttempt = (this._profileAttempt || 0) + 1;
+    if (typeof api.cancelPhoneLogin === 'function') api.cancelPhoneLogin();
+    this.setData({ loggingIn: false, loading: false });
+  },
   async onPullDownRefresh() { await this.loadProfile(); wx.stopPullDownRefresh(); },
   async loadProfile() {
-    if (this.data.loading) return;
+    if (this._visible === false || this.data.loading) return;
+    const attempt = this._profileAttempt = (this._profileAttempt || 0) + 1;
+    const epoch = typeof api.getLoginEpoch === 'function' ? api.getLoginEpoch() : undefined;
+    const current = () => this._visible !== false && attempt === this._profileAttempt;
+    const sameLogin = () => typeof api.getLoginEpoch !== 'function' || epoch === api.getLoginEpoch();
     this.setData({ loading: true, error: '' });
     try {
       const data = await api.getProfile();
+      if (!current()) return;
       // Validate the exact snapshot to be displayed with the shared login
       // rules, while retaining the API's current authentication capability.
       const source = { getProfile: async () => data, isDemo: () => typeof api.isDemo === 'function' && api.isDemo() === true };
       if (typeof api.isAuthenticated === 'function') source.isAuthenticated = () => api.isAuthenticated();
       const authenticated = (await hasLogin(source)) && canActNow(api);
+      if (!current()) return;
+      if (!sameLogin()) {
+        this.setData({ profile: EMPTY_PROFILE, authenticated: false, showFavorites: false, favorites: [] });
+        return;
+      }
       this.setData({ profile: authenticated ? { ...EMPTY_PROFILE, ...data, avatar: data.avatar || EMPTY_PROFILE.avatar } : EMPTY_PROFILE,
         authenticated, ...(!authenticated ? { showFavorites: false, favorites: [] } : {}) });
-    } catch (err) { this.setData({ profile: EMPTY_PROFILE, authenticated: false, showFavorites: false, favorites: [], error: (err && err.message) || '资料加载失败，请重试' }); }
-    finally { this.setData({ loading: false }); }
+    } catch (err) { if (current()) this.setData({ profile: EMPTY_PROFILE, authenticated: false, showFavorites: false, favorites: [], error: '资料加载失败，请重试' }); }
+    finally { if (current()) this.setData({ loading: false }); }
   },
   async login(event) {
-    if (this.data.loggingIn) return;
+    if (this._visible === false || this.data.loggingIn) return;
     if (this.data.demo) { wx.showToast({ title: '演示模式无需真实授权', icon: 'none' }); return; }
     const code = event.detail && event.detail.code;
-    if (!code) { wx.showToast({ title: '未获取手机号授权', icon: 'none' }); return; }
-    this.setData({ loggingIn: true });
-    try { await api.loginWithPhone(code); await this.loadProfile(); }
-    catch (err) { wx.showToast({ title: err.message || '登录失败，请重试', icon: 'none' }); }
-    finally { this.setData({ loggingIn: false }); }
+    if (!code) { wx.showToast({ title: '已取消授权，未注册或登录', icon: 'none' }); return; }
+    const attempt = this._loginAttempt = (this._loginAttempt || 0) + 1;
+    this._profileAttempt = (this._profileAttempt || 0) + 1;
+    const current = () => this._visible !== false && attempt === this._loginAttempt;
+    this.setData({ loggingIn: true, loading: false, error: '' });
+    try {
+      await api.loginWithPhone(code);
+      if (current()) {
+        this._profileAttempt = (this._profileAttempt || 0) + 1;
+        this.setData({ loading: false });
+        await this.loadProfile();
+      }
+    }
+    catch (err) { if (current()) wx.showToast({ title: err.message || '登录失败，请重试', icon: 'none' }); }
+    finally { if (current()) this.setData({ loggingIn: false }); }
   },
   openAccountLogin() {
     if (this.data.loggingIn || this.data.authenticated || this.data.demo) return;

@@ -71,7 +71,7 @@ function extractFilePath(response) {
 }
 
 // 归一化照片：转 JPEG 并压到 ≤200KiB（云端/下游设备仅接受该规格）。
-// 已是合规小 JPEG 时直接用原文件，避免无谓重编码；压缩失败退回原文件，由服务端如实拒绝。
+// 用 canvas 重绘以兼容任意格式（含 HEIC/PNG/大图），并逐步降低尺寸/质量直到达标。
 const PHOTO_LIMIT_BYTES = 200 * 1024;
 function fileSize(filePath) {
   return new Promise((resolve) => {
@@ -79,21 +79,51 @@ function fileSize(filePath) {
     wx.getFileInfo({ filePath, success: (r) => resolve(r.size), fail: () => resolve(-1) });
   });
 }
-function compressPhoto(filePath, quality) {
+function imageInfo(filePath) {
   return new Promise((resolve) => {
-    if (!wx.compressImage) return resolve(filePath);
-    wx.compressImage({ src: filePath, quality, success: (r) => resolve(r.tempFilePath), fail: () => resolve(filePath) });
+    if (!wx.getImageInfo) return resolve(null);
+    wx.getImageInfo({ src: filePath, success: (r) => resolve(r), fail: () => resolve(null) });
+  });
+}
+function canvasToJpeg(filePath, info, maxWidth, quality) {
+  return new Promise((resolve) => {
+    if (!wx.createSelectorQuery || !wx.canvasToTempFilePath) return resolve(filePath);
+    wx.createSelectorQuery().select('#photoCanvas').fields({ node: true, size: true }).exec((res) => {
+      const canvas = res && res[0] && res[0].node;
+      if (!canvas) return resolve(filePath);
+      const scale = Math.min(1, maxWidth / Math.max(1, info.width || 1));
+      canvas.width = Math.max(1, Math.round((info.width || 1) * scale));
+      canvas.height = Math.max(1, Math.round((info.height || 1) * scale));
+      const ctx = canvas.getContext('2d');
+      const img = canvas.createImage();
+      img.onload = () => {
+        try {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          wx.canvasToTempFilePath({ canvas, fileType: 'jpg', quality, success: (r) => resolve(r && r.tempFilePath ? r.tempFilePath : filePath), fail: () => resolve(filePath) });
+        } catch (_) { resolve(filePath); }
+      };
+      img.onerror = () => resolve(filePath);
+      img.src = filePath;
+    });
   });
 }
 async function normalizePhoto(filePath) {
   if (!filePath) return '';
-  const size = await fileSize(filePath);
-  if (size >= 0 && size <= PHOTO_LIMIT_BYTES) return filePath;
-  for (const quality of [60, 40, 20]) {
-    const next = await compressPhoto(filePath, quality);
-    const nextSize = await fileSize(next);
-    if (nextSize >= 0 && nextSize <= PHOTO_LIMIT_BYTES) return next;
-    filePath = next;
+  // 测试/降级环境缺少这些 API 时原样传递，由服务端如实拒绝。
+  if (!wx.getImageInfo || !wx.createSelectorQuery || !wx.canvasToTempFilePath) return filePath;
+  const info = await imageInfo(filePath);
+  if (!info) return filePath;
+  // 已是合规小 JPEG 直接用，避免无谓重编码。
+  if (info.type === 'jpg' || info.type === 'jpeg') {
+    const size = await fileSize(filePath);
+    if (size >= 0 && size <= PHOTO_LIMIT_BYTES) return filePath;
+  }
+  for (const [maxWidth, quality] of [[900, 0.85], [640, 0.7], [480, 0.55]]) {
+    const out = await canvasToJpeg(filePath, info, maxWidth, quality);
+    if (!out || out === filePath) continue;
+    const size = await fileSize(out);
+    if (size >= 0 && size <= PHOTO_LIMIT_BYTES) return out;
   }
   return filePath;
 }

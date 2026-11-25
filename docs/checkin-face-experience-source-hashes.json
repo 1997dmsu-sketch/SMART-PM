@@ -663,13 +663,13 @@
                       "path":  "miniprogram/config/version.js",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "3488c5976862da0869403bbae89b2fe3d9dff0d3c023adaa780bd2012bef493a"
+                      "sha256":  "bc55da1b8fe4153132691d560ccd2d3ed0f44954d6472cc41660a8e720f4cacd"
                   },
                   {
                       "path":  "miniprogram/config/version.json",
                       "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
                       "baselineSha256":  null,
-                      "sha256":  "78a3b0dc08323c4f1bb7a63ddd780b910da64f6e19253259798fec1a5a8dc929"
+                      "sha256":  "445bfacb2f51f4b173eee1a550475366fca3e50004d9fed037bbc8c23e2c766e"
                   },
                   {
                       "path":  "miniprogram/data/qishanyuan-test-preset.js",
@@ -733,7 +733,7 @@
                   },
                   {
                       "path":  "miniprogram/pages/face-enroll/index.js",
-                      "sha256":  "ed046f748224317285be90f54a8cff261c742287a0eb9bbc6614d12a764252e2",
+                      "sha256":  "aeb33a3f2a30374d76ddc1c618911eed35e0e3e486c8b81fda101f3c40bd7270",
                       "purpose":  "人脸登记页逻辑：六态文案、服务端下发上传路径、上传后建任务、不显示现场识别结论。",
                       "baselineSha256":  null
                   },
@@ -745,13 +745,13 @@
                   },
                   {
                       "path":  "miniprogram/pages/face-enroll/index.wxml",
-                      "sha256":  "f1d5b95ee6f3de5f3fe1d6c0a9ea5e6b76d7cc9f0b8bd3c7135e5ebf94961f9b",
+                      "sha256":  "b4f1f2e405cfb6d7445630260ddaf5d88cfcba937245d4cc684dbf4d970d094b",
                       "purpose":  "人脸登记页结构：checkbox-group bindchange 真实接线。",
                       "baselineSha256":  null
                   },
                   {
                       "path":  "miniprogram/pages/face-enroll/index.wxss",
-                      "sha256":  "f50afe50c1c46a47687c153226cd1c9c0c8e34668fdc010249546fc232bd9e70",
+                      "sha256":  "c41ea091c3728ae5c8b1503946a8c23730052ade0ac8bc3920f507a9f250bb09",
                       "purpose":  "人脸登记页样式。",
                       "baselineSha256":  null
                   },
@@ -835,7 +835,7 @@
                   },
                   {
                       "path":  "package.json",
-                      "sha256":  "70bc2784cbada40ec14f3873c2c0b1b8b64df648886650254e011fd8400d4f01",
+                      "sha256":  "d222da1db2252ccbecb84cbf35df851d8671fc3550f31555619a9178aca41061",
                       "purpose":  "根发布检查入口：check:checkin-face = 静态检查 \u0026\u0026 来源校验；新增 check:checkin-face:sources。",
                       "baselineSha256":  null
                   },

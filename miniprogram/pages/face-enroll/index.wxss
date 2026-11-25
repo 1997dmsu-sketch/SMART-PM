@@ -26,3 +26,6 @@
 .upload-card .pending-config{margin-bottom:16rpx}
 .uploaded-card .upload-note{margin-top:0}
 .safety-note{display:block;margin:24rpx 40rpx;font-size:21rpx;line-height:1.7;color:#999}
+
+/* 隐藏转码 canvas：移出可视区域，仅用于照片转 JPEG 压缩 */
+.photo-canvas{position:fixed;left:-9999px;top:0;width:320px;height:320px;}

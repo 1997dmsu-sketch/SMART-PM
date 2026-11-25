@@ -49,4 +49,7 @@
 
     <text class="safety-note">本页不展示现场识别结果；现场刷脸由本人到门禁设备完成。失败或结果待核不会自动重发，也不会扩大通行范围。</text>
   </block>
+
+  <!-- 隐藏 canvas：仅用于把所选照片转码为 JPEG 并压缩到合规尺寸，不参与渲染。 -->
+  <canvas type="2d" id="photoCanvas" class="photo-canvas"></canvas>
 </view>

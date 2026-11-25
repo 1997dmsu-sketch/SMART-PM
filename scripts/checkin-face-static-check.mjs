@@ -229,8 +229,34 @@ function requireRequestConstruction(file, pairs) {
       && HARD_KEY_AT(k + 1) && tokens[k + 2]?.value === ']') return true;
     return false;
   };
+  // CF-R2-11 第五轮：序列表达式基对象——( <exprs>, request ) 中 request 为
+  // 序列末值时的 .key / ["key"] 成员（多层括号/嵌套序列均归一化）。'(' 必须是
+  // 分组括号而非调用括号（其前不是被调用者）；只读上下文不会进入本函数
+  // （isHardMember 仅用于赋值左值收集范围）。
+  const isHardMemberViaSequence = (at) => {
+    if (tokens[at]?.type !== 'identifier' || tokens[at].value !== 'request') return false;
+    if (tokens[at - 1]?.value !== ',') return false;
+    let depth = 0;
+    let openIdx = -1;
+    for (let j = at - 1; j >= 0; j--) {
+      const t = tokens[j];
+      if (CLOSERS.has(t.value)) { depth += 1; continue; }
+      if (OPENERS.has(t.value)) { depth -= 1; if (depth < 0) { openIdx = j; break; } continue; }
+      if (depth === 0 && STATEMENT_BOUNDARY.has(t.value)) break;
+      if (depth === 0 && LHS_KEYWORDS.has(t.value) && t.value !== ',') break;
+    }
+    if (openIdx < 0) return false;
+    const before = tokens[openIdx - 1];
+    if (before && (before.type === 'identifier' || before.type === 'string' || [')', ']'].includes(before.value))) return false;
+    let k = at + 1;
+    while (tokens[k]?.value === ')') k += 1;
+    if (tokens[k]?.value === '.' && HARD_KEY_AT(k + 1)) return true;
+    if (tokens[k]?.value === '[' && tokens[k + 1]?.type === 'string'
+      && HARD_KEY_AT(k + 1) && tokens[k + 2]?.value === ']') return true;
+    return false;
+  };
   const containsHardMember = (from, to) => {
-    for (let i = from; i <= to; i++) if (isHardMember(i)) return true;
+    for (let i = from; i <= to; i++) if (isHardMember(i) || isHardMemberViaSequence(i)) return true;
     return false;
   };
   const collectBackward = (start) => {

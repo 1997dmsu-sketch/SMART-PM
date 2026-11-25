@@ -643,6 +643,78 @@ test('CF-R2-11 第四轮：合法括号基对象字段（photoPath/planTemplateN
   }
 });
 
+// ---------------------------------------------------------------------------
+// CF-R2-11 第五轮：逗号/序列表达式基对象（(0, request).mode 等）
+// ---------------------------------------------------------------------------
+
+const CF_R2_11_ROUND5_MUTATIONS = [
+  ['seq-base-dot', '  (0, request).mode = "simulation";'],
+  ['seq-base-bracket', '  ((0, request))["mode"] = "simulation";'],
+  ['seq-base-in-array', '  [(0, request).mode, request.photoPath] = ["simulation", "x"];'],
+  ['seq-nested', '  ((a, (b, request))).mode = "simulation";'],
+  ['seq-logical', '  ((0, request)).mode ||= "simulation";'],
+  ['seq-update', '  ((0, request))["mode"]++;'],
+  ['seq-nested-destructure', '  [ { a: (0, request).mode } ] = [ { a: "simulation" } ];'],
+];
+for (const [label, injected] of CF_R2_11_ROUND5_MUTATIONS) {
+  test(`CF-R2-11 第五轮：构造后 ${label} 序列基对象覆盖 → node --check 合法且门禁精确失败（绕过负例）`, () => {
+    const dir = buildStaticTree(`cfr5-${label}`);
+    const file = path.join(dir, 'tools', 'checkin-face-worker', 'worker-runtime.mjs');
+    const mutated = realWorkerSource.replace(
+      /(\r?\n)  return request;(\r?\n)/,
+      (m, nl1, nl2) => `${nl1}${injected}${nl1}  return request;${nl2}`,
+    );
+    assert.notEqual(mutated, realWorkerSource, `负控必须实际注入 ${label}`);
+    fs.writeFileSync(file, mutated);
+    const syntax = runNode(['--check', file], dir);
+    assert.equal(syntax.status, 0, `注入必须语法合法：${syntax.stderr}`);
+    const result = runNode([path.join(dir, 'scripts', 'checkin-face-static-check.mjs')], dir);
+    assert.equal(result.status, 1, `${label} 序列基对象覆盖必须被门禁拒绝`);
+    assert.match(result.stderr, CF_R2_11_POST_MSG, `stderr: ${result.stderr}`);
+  });
+}
+
+test('CF-R2-11 第五轮：复审三例的纯内存行为证明（mode 实际 device→simulation，无业务/网络）', () => {
+  const cases = [
+    '(0, request).mode = "simulation";',
+    '((0, request))["mode"] = "simulation";',
+    '[(0, request).mode, request.photoPath] = ["simulation", "x"];',
+  ];
+  for (const injected of cases) {
+    const code = `'use strict';\nconst request = { mode: "device", validityMode: "fixed", consent: true, photoPath: "" };\n${injected}\nprocess.stdout.write(String(request.mode === "simulation"));`;
+    const env = { ...process.env };
+    const opts = String(env.NODE_OPTIONS || '').replace(/--require="?[^"\s]*d-network-guard\.cjs"?/g, '').replace(/\s{2,}/g, ' ').trim();
+    if (opts) env.NODE_OPTIONS = opts;
+    else delete env.NODE_OPTIONS;
+    const probe = spawnSync(process.execPath, ['-e', code], { cwd: ROOT, env, encoding: 'utf8' });
+    assert.equal(probe.status, 0, `纯内存探针必须可运行：${probe.stderr}`);
+    assert.equal(probe.stdout, 'true', `${injected} 必须实际把 mode 覆盖为 simulation`);
+  }
+});
+
+test('CF-R2-11 第五轮：合法序列基对象字段（photoPath/planTemplateNo 与仅合法字段解构）对照（正例）→ 门禁通过', () => {
+  const cases = [
+    ['seq-photopath', '  (0, request).photoPath = "C:\\\\tmp\\\\p.jpg";'],
+    ['seq-planno', '  ((0, request))["planTemplateNo"] = "T-1";'],
+    ['seq-legal-destructure', '  [(0, request).photoPath, request.planTemplateNo] = ["C:\\\\tmp\\\\p.jpg", "T-1"];'],
+  ];
+  for (const [label, injected] of cases) {
+    const dir = buildStaticTree(`cfr5-${label}`);
+    const file = path.join(dir, 'tools', 'checkin-face-worker', 'worker-runtime.mjs');
+    const mutated = realWorkerSource.replace(
+      /(\r?\n)  return request;(\r?\n)/,
+      (m, nl1, nl2) => `${nl1}${injected}${nl1}  return request;${nl2}`,
+    );
+    assert.notEqual(mutated, realWorkerSource, `正例必须实际注入 ${label}`);
+    fs.writeFileSync(file, mutated);
+    const syntax = runNode(['--check', file], dir);
+    assert.equal(syntax.status, 0, `注入必须语法合法：${syntax.stderr}`);
+    const result = runNode([path.join(dir, 'scripts', 'checkin-face-static-check.mjs')], dir);
+    assert.equal(result.status, 0, `${label} 不得误伤：${result.stderr}`);
+    assert.match(result.stdout, /0 violations/);
+  }
+});
+
 test('CF-R2-11：同名 getter 覆盖 mode → 门禁精确失败（绕过负例）', () => {
   const dir = buildStaticTree('cfr2-getter');
   const file = path.join(dir, 'tools', 'checkin-face-worker', 'worker-runtime.mjs');

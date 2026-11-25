@@ -116,7 +116,10 @@ Page({
     const session = await this.loginGate('查看人脸登记');
     if (!session || !this.canContinue(session)) return;
     const app = getApp();
-    const applicationId = (options && options.applicationId) || (app && app.globalData && app.globalData.checkinApplicationId) || '';
+    // 微信 navigateTo 不自动解码查询参数：checkin 页用 encodeURIComponent 传递 applicationId，
+    // 这里需 decodeURIComponent 还原（含 | 的编码值），否则校验失败。
+    let applicationId = (options && options.applicationId) || (app && app.globalData && app.globalData.checkinApplicationId) || '';
+    try { applicationId = decodeURIComponent(applicationId); } catch (_) { /* 非编码值保持原样 */ }
     this._applicationId = String(applicationId);
     if (!this._applicationId) {
       this.setData({ loading: false, error: '缺少入住申请标识，请先完成测试入住。' });

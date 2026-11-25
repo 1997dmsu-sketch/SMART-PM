@@ -39,7 +39,7 @@
       }
     },
     {
-      "path": "static-checks.log",
+      "path": "static-checks.txt",
       "bytes": 258,
       "sha256": "b191e19c02a9478077eeab8c22dd5ea67bb344e8d805730fea22c90b9ad513e4",
       "command": "node --require ./tests/support/d-network-guard.cjs scripts/check-miniprogram.mjs && node --require ./tests/support/d-network-guard.cjs scripts/checkin-face-static-check.mjs",
@@ -52,7 +52,7 @@
       }
     },
     {
-      "path": "source-check.log",
+      "path": "source-check.txt",
       "bytes": 28645,
       "sha256": "f8573fb8420249a4ba958ae5315818193108b2d0bc457f664fceeaa2005b0b8f",
       "command": "node --require ./tests/support/d-network-guard.cjs scripts/verify-checkin-face-sources.mjs",

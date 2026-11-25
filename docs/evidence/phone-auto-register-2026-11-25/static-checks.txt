@@ -1,0 +1,3 @@
+Checked 12 pages, custom tab bar, handlers, literal asset references, JSON, JS syntax; package 959 KiB.
+This is a static check, not a WeChat Developer Tools compilation or visual test.
+[PASS] checkin-face static check: 184 source files scanned, 0 violations

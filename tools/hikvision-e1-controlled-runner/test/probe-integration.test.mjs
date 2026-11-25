@@ -830,4 +830,115 @@ describe("CR-2 synthetic probe wiring: fixed runProbe + non-forwarding transport
     assert.equal(errorToCode(vendorError), "INTERNAL_ERROR", "vendor-only codes never enter the public DTO");
     guard.assertNoViolations(baseline, "DTO redaction");
   });
+
+  test("R2 report seal: real receipt, same-session binding and event ordering on success", async () => {
+    const input = fixture();
+    const script = scenario(successSteps());
+    await unchanged(input, async () => {
+      const controller = await armed(input);
+      const envelope = await controller.invokeScenario(script);
+      assertEnvelopeShape(envelope);
+      assert.equal(envelope.result.status, "COMPLETED");
+      const snapshot = controller.snapshot();
+      assert.equal(snapshot.reportSealed, true, "the original report was really received and sealed");
+      assert.equal(Object.hasOwn(snapshot, "report"), false, "no raw report slot is exposed");
+      assert.equal(Object.hasOwn(envelope, "report"), false);
+      const types = envelope.trace.map((entry) => entry.type);
+      const sealIndex = types.indexOf("REPORT_SEALED");
+      const sessionSealIndex = types.indexOf("SESSION_SEALED");
+      const closeIndex = types.indexOf("SESSION_CLOSED");
+      const completedIndex = types.indexOf("COMPLETED");
+      assert.ok(sealIndex >= 0 && sessionSealIndex >= 0 && closeIndex >= 0 && completedIndex >= 0);
+      assert.ok(sealIndex < sessionSealIndex, "report receipt precedes the session seal event");
+      assert.ok(sessionSealIndex < closeIndex, "session seal precedes close");
+      assert.ok(closeIndex < completedIndex, "close precedes COMPLETED");
+      const json = JSON.stringify({ envelope, snapshot });
+      for (const field of ["generatedAt", "aborted", "hostFingerprint", "capabilities", "blockers"]) {
+        assert.equal(json.includes(`"${field}"`), false, `raw report field ${field} never enters the safe summary`);
+      }
+    }, "R2 success receipt");
+  });
+
+  test("R2 no fake REPORT_SEALED/SESSION_SEALED/SESSION_CLOSED after latches or unknown", async (t) => {
+    const cases = [
+      ["G1-non-200", scenario([responseStep("deviceInfo", 1, 403, { body: "<error>synthetic-forbidden</error>" }), ...successSteps().slice(1)])],
+      ["write-fault", scenario(successSteps()), "WRITE"],
+      ["read-fault", scenario(successSteps()), "READ"],
+      ["between-responses-revoke", scenario(successSteps(), { events: [{ afterResponse: 2, kind: "CONTROL", control: { ...control(), revoked: true } }] })],
+      ["in-flight-invalidate", scenario(successSteps()), undefined, "invalidate"],
+      ["submission-NOT_SUBMITTED", scenario([responseStep("deviceInfo", 1, 200), faultStep("acsCapabilities", 1, "NETWORK", "NOT_SUBMITTED")])],
+      ["submission-CONFIRMED_TIMEOUT", scenario([responseStep("deviceInfo", 1, 200), faultStep("acsCapabilities", 1, "TIMEOUT", "CONFIRMED_SUBMITTED")])],
+      ["submission-UNKNOWN", scenario([responseStep("deviceInfo", 1, 200), faultStep("acsCapabilities", 1, "FINGERPRINT_MISMATCH", "UNKNOWN")])],
+      ["report-seal-fault", scenario(successSteps()), "REPORT_SEAL"],
+    ];
+    for (const [name, script, fault, mode] of cases) {
+      await t.test(name, async () => {
+        const input = fixture();
+        await unchanged(input, async () => {
+          const controller = createSyntheticProbeController(input);
+          controller.check(control());
+          assert.equal((await controller.prepare({ fault: fault ?? "NONE" })).ok, true);
+          assert.equal(controller.arm({ ...control(), confirmed: true }).ok, true);
+          let envelope;
+          if (mode === "invalidate") {
+            const pending = controller.invokeScenario(script);
+            controller.invalidate();
+            envelope = await pending;
+          } else {
+            envelope = await controller.invokeScenario(script);
+          }
+          assertEnvelopeShape(envelope);
+          assert.notEqual(envelope.result.status, "COMPLETED");
+          const types = envelope.trace.map((entry) => entry.type);
+          assert.equal(types.includes("REPORT_SEALED"), false, `${name}: no fake REPORT_SEALED`);
+          assert.equal(types.includes("SESSION_SEALED"), false, `${name}: no fake SESSION_SEALED`);
+          assert.equal(types.includes("SESSION_CLOSED"), false, `${name}: no fake SESSION_CLOSED`);
+          assert.equal(controller.snapshot().reportSealed, false, `${name}: no sealed receipt fact`);
+        }, `R2 ${name}`);
+      });
+    }
+  });
+
+  test("R1 REPORT_SEAL combined with earlier terminal causes keeps first cause and sticky unknown", async (t) => {
+    const cases = [
+      ["after-G1-failure", scenario([responseStep("deviceInfo", 1, 403, { body: "<error>synthetic-forbidden</error>" }), ...successSteps().slice(1)]),
+        "FAILED", "PROBE_FAILED", false,
+        { logicalEndpointsAttempted: 1, wrapperAttemptCount: 6, transportInvocationCount: 1, confirmedResponses: 1 }],
+      ["after-between-response-revoke", scenario(successSteps(), { events: [{ afterResponse: 2, kind: "CONTROL", control: { ...control(), revoked: true } }] }),
+        "FAILED", "AUTHORIZATION_INVALID", false,
+        { logicalEndpointsAttempted: 2, wrapperAttemptCount: 6, transportInvocationCount: 2, confirmedResponses: 2 }],
+      ["after-CONFIRMED_SUBMITTED-TIMEOUT", scenario([responseStep("deviceInfo", 1, 200), faultStep("acsCapabilities", 1, "TIMEOUT", "CONFIRMED_SUBMITTED")]),
+        "UNKNOWN", "REQUEST_OUTCOME_UNKNOWN", true,
+        { logicalEndpointsAttempted: 2, wrapperAttemptCount: 2, transportInvocationCount: 2, confirmedResponses: 1 }],
+      ["after-CONFIRMED_SUBMITTED-RESPONSE_ERROR", scenario([responseStep("deviceInfo", 1, 200), faultStep("acsCapabilities", 1, "RESPONSE_ERROR", "CONFIRMED_SUBMITTED")]),
+        "UNKNOWN", "REQUEST_OUTCOME_UNKNOWN", true,
+        { logicalEndpointsAttempted: 2, wrapperAttemptCount: 2, transportInvocationCount: 2, confirmedResponses: 1 }],
+      ["after-UNKNOWN", scenario([responseStep("deviceInfo", 1, 200), faultStep("acsCapabilities", 1, "FINGERPRINT_MISMATCH", "UNKNOWN")]),
+        "UNKNOWN", "REQUEST_OUTCOME_UNKNOWN", true,
+        { logicalEndpointsAttempted: 2, wrapperAttemptCount: 2, transportInvocationCount: 2, confirmedResponses: 1 }],
+    ];
+    for (const [name, script, expectedStatus, expectedCode, expectedUnknown, expectedCounts] of cases) {
+      await t.test(name, async () => {
+        const input = fixture();
+        await unchanged(input, async () => {
+          const controller = createSyntheticProbeController(input);
+          controller.check(control());
+          assert.deepEqual(await controller.prepare({ fault: "REPORT_SEAL" }),
+            { ok: true, code: "OK", state: "EVIDENCE_READY" });
+          assert.equal(controller.arm({ ...control(), confirmed: true }).ok, true);
+          const envelope = await controller.invokeScenario(script);
+          assertEnvelopeShape(envelope);
+          assert.equal(envelope.result.status, expectedStatus, `${name}: status keeps the recorded facts`);
+          assert.equal(envelope.result.code, expectedCode, `${name}: code keeps the first cause`);
+          assert.equal(envelope.result.requestOutcomeUnknown, expectedUnknown, `${name}: sticky unknown preserved`);
+          assertCounts(envelope.result.counts, expectedCounts, "already-counted calls are never zeroed or extended");
+          const types = envelope.trace.map((entry) => entry.type);
+          assert.equal(types.includes("REPORT_SEALED"), false, `${name}: the seal fault never fakes a receipt`);
+          assert.equal(types.includes("SESSION_CLOSED"), false);
+          assert.equal(controller.snapshot().reportSealed, false);
+          assert.equal(envelope.result.checks.evidenceGateVerified, false);
+        }, `R1 ${name}`);
+      });
+    }
+  });
 });

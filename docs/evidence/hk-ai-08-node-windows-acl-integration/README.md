@@ -193,3 +193,15 @@ N1/N2 是 before 正控失败使测试正文取消，正式套件的 cancelled �
 BLOCKED（不用 skip/todo/deferred 冒充）：真实 Node writer、Windows 原生 ACL/对象身份、真实文件 I/O、真实设备/TLS/网络、真实审批材料——继续 BLOCKED，等各自阶段与授权。合成 COMPLETED/checks 不是真实审批、ACL 或设备证据，不进入 `executeControlledE1` 返回值。
 
 **Stop-CR2：本轮只到固定探针合成接线及离线验证。** 最终 HEAD/父链、文件范围、vendor 哈希、远端核对与派单回报见交付消息；独立验收归 Codex，实施方不自批。
+
+## 8. CR-2 复审修复轮（2026-11-25 追加，前 151 行 CR-1 原字节保留）
+
+状态：**Stop-CR2 独立复审的 3 项 P2 已在本轮修复并离线验证，仍停在 Stop-CR2 交 Codex 独立复审；未宣称验收，未进入 CR-3/E1/E2。** 固定起点 72d654a847d10d75b0fc479586a1c97647e28a9c（直接父 6343ebe4ebb137bfc2b420afe85ae352f5cc95c8），裁定/基线/冻结 probe 同前。
+
+- **R1 闭合**：REPORT_SEAL 分支仅在无更早终态/未知时作为首因触发；已有首因与黏性未知保留（code 不变，status 按 unknown 定 UNKNOWN），不执行覆盖已 latch 事实的封存 fault。回归：REPORT_SEAL 与 G1 失败/响应间撤销/CONFIRMED_SUBMITTED TIMEOUT/RESPONSE_ERROR/UNKNOWN 五组合，精确断言 code/status/未知标志/计数与零新增下游、零伪封存事件；负控 NC-R1（副本回退为无条件封存 fault）退出 1，五个组合子例精确失败。
+- **R2 闭合**：原 report 经 `receiveReport` 真实接收并私有封存于 owner 私有 WeakMap（同 session 绑定 `{sealed,report}`），封存成功后才发 REPORT_SEALED；随后 model.seal→SESSION_SEALED→model.close→SESSION_CLOSED；latch/未知终态只把迟到 report 留作私有终态诊断（sealed:false），不伪造事件。`snapshot.reportSealed` 由封存事实派生（布尔，无 raw getter/无 DTO 协议变化）。回归：成功路径封存与事件顺序、G1/写读故障/撤销/在途/三种 submission/REPORT_SEAL 故障后零伪 REPORT_SEALED/SESSION_SEALED/SESSION_CLOSED；负控 NC-R2（副本禁用真实封存）退出 1，成功回归因 reportSealed=false 精确失败。
+- **R3 闭合**：冻结 testkit 原字节未改。新增 `test/guard-isolation.test.mjs`：guard 安装前在全部实际捕获位置注入纯内存可计数 fake，用未改 guard 验证捕获身份、正控 +1、捕获原目标零增长、覆盖集合与四文件实测 232 槽（92 network+8 process+132 fs）精确相等、累计基线不清零、finally 精确恢复及 ESM 绑定重同步；安全 fake 不启动任何真实进程/网络/监听/DNS/凭据/业务文件；子进程槽仅进程内验证，不声明跨进程继承。负控 NC-R3（guard 副本注入“先调 record.original 再抛拦截错误”）退出 1，因外部原目标计数增长（`captured original zero growth: http.request`）精确失败，非加载/语法错。
+
+本轮实测（Windows 10 19042，Node v24.19.0=裁定“其他版本”口径，未安装/切换/改隔离参数）：批准四文件命令 **356/356 通过，退出 0**（原 262 + integration 94，其中新增 17 节点）；五文件定向套件（四文件+guard-isolation）**360/360 通过，退出 0**；0 fail/cancelled/skipped/todo。三套负控均为工件副本单点变异（副本变异前与源树全文件哈希一致、变异器逐次恰好一处替换），源树零修改；原始输出、退出码、字节数/SHA-256 存 `_harness-cr2-fix-72d654a/_fix-artifacts/`。
+
+真实 Node writer、Windows 原生 ACL/对象身份、真实文件 I/O、真实设备/TLS/网络与真实审批继续 **BLOCKED**（未用 skip/todo/deferred 冒充）。**停手交 Codex 独立复审（Stop-CR2）；不批准 CR-3、真实 TLS、E1/E2、CORE-01、上传/部署/发布或任何业务执行。**

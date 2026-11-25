@@ -918,6 +918,11 @@ export function createSyntheticProbeController(input) {
   const trace = [];
   const endpointProgress = new Map(IDS.map((id) => [id, { touched: false, confirmed200: false, unknown: false }]));
   const perEndpointAttempts = new Map(IDS.map((id) => [id, 0]));
+  // Owner-private report receipts bound to the same session. A sealed entry
+  // exists only after a real receipt succeeded; latched/unknown terminals may
+  // keep the late vendor report as a private diagnostic (sealed:false) that is
+  // never exposed. No getter ever returns the stored report.
+  const privateReports = new WeakMap();
 
   function pushEvent(type, endpointId = null, attempt = 0) {
     trace.push(simEvent(type, endpointId, attempt));
@@ -940,6 +945,7 @@ export function createSyntheticProbeController(input) {
       invokeClaimed: false, invokeCount: 0, identityConfirmed: false,
       wrapperAttemptCount: 0, transportInvocationCount: 0, logicalEndpointsAttempted: 0,
       confirmedResponses: 0, requestOutcomeUnknown: false, recordCount: 0, bytesWritten: 0,
+      reportSealed: false,
       trace: Object.freeze([]),
     });
     const state = stateFor(plan);
@@ -951,6 +957,7 @@ export function createSyntheticProbeController(input) {
       invokeClaimed, invokeCount, identityConfirmed,
       wrapperAttemptCount, transportInvocationCount, logicalEndpointsAttempted, confirmedResponses,
       requestOutcomeUnknown, recordCount: facts.recordCount, bytesWritten: facts.bytesWritten,
+      reportSealed: session ? privateReports.get(session)?.sealed === true : false,
       trace: Object.freeze(trace.map((entry) => Object.freeze({ ...entry }))),
     });
   }
@@ -1409,13 +1416,63 @@ export function createSyntheticProbeController(input) {
     }
   }
 
+  function receiveReport(probe) {
+    // The real original report from the fixed vendor must be received before
+    // any seal event; a missing or malformed report is a real seal failure.
+    const report = probe && typeof probe === "object" && !Array.isArray(probe)
+      ? probe.report : null;
+    if (report === null || typeof report !== "object" || Array.isArray(report)) {
+      throw fault("EVIDENCE_WRITE_FAILED");
+    }
+    // Private receipt bound to the same session; never exposed by any getter.
+    privateReports.set(session, Object.freeze({ sealed: true, report: Object.freeze(report) }));
+  }
+
+  function keepTerminalDiagnostics(probe) {
+    // Ruling §4.2: late vendor results after a latch/unknown may only remain
+    // owner-private terminal diagnostics; they are never sealed and never
+    // produce REPORT_SEALED/SESSION_SEALED/SESSION_CLOSED events.
+    if (!session) return;
+    const report = probe && typeof probe === "object" && !Array.isArray(probe)
+      ? probe.report : null;
+    if (report === null || typeof report !== "object" || Array.isArray(report)) return;
+    privateReports.set(session, Object.freeze({ sealed: false, report: Object.freeze(report) }));
+  }
+
   function finalizeProbe(probe) {
     if (profileFault === "REPORT_SEAL") {
-      stop("EVIDENCE_WRITE_FAILED", "FAILED");
-      return resultEnvelope("FAILED", "EVIDENCE_WRITE_FAILED", false);
+      // The REPORT_SEAL fault may only fire as the first terminal cause. An
+      // earlier latch (G1 rejection, revocation, writer failure) or sticky
+      // unknown keeps its own cause and status; the seal fault must never
+      // overwrite recorded facts or downgrade UNKNOWN to FAILED.
+      if (!firstTerminalCode && !requestOutcomeUnknown) {
+        stop("EVIDENCE_WRITE_FAILED", "FAILED");
+        return resultEnvelope("FAILED", "EVIDENCE_WRITE_FAILED", false);
+      }
+      keepTerminalDiagnostics(probe);
+      const status = requestOutcomeUnknown ? "UNKNOWN" : "FAILED";
+      const code = firstTerminalCode ?? (requestOutcomeUnknown ? "REQUEST_OUTCOME_UNKNOWN" : "PROBE_FAILED");
+      const wasLatched = stateFor(plan).stopLatched;
+      stopPlan(plan, code, status);
+      if (!wasLatched) pushEvent(status);
+      return resultEnvelope(status, code, false);
     }
+    // A latched/unknown terminal never fakes report receipt or seal events;
+    // the late vendor result may only be kept as a private diagnostic.
+    if (firstTerminalCode || requestOutcomeUnknown) {
+      keepTerminalDiagnostics(probe);
+      const status = requestOutcomeUnknown ? "UNKNOWN" : "FAILED";
+      const code = firstTerminalCode ?? (requestOutcomeUnknown ? "REQUEST_OUTCOME_UNKNOWN" : "PROBE_FAILED");
+      const wasLatched = stateFor(plan).stopLatched;
+      stopPlan(plan, code, status);
+      if (!wasLatched) pushEvent(status);
+      return resultEnvelope(status, code, false);
+    }
+    // Success path only: receive the original report and really seal it into
+    // the same private session before any completion event is emitted.
     let gateVerified = false;
     try {
+      receiveReport(probe);
       pushEvent("REPORT_SEALED");
       model.seal(session, plan);
       pushEvent("SESSION_SEALED");
@@ -1441,7 +1498,7 @@ export function createSyntheticProbeController(input) {
       const code = firstTerminalCode ?? "EVIDENCE_WRITE_FAILED";
       return resultEnvelope(status, code, false);
     }
-    const success = gateVerified && !requestOutcomeUnknown && !firstTerminalCode && identityConfirmed &&
+    const success = gateVerified && identityConfirmed &&
       IDS.every((id) => endpointProgress.get(id).confirmed200);
     if (success) {
       advancePlan(plan, "COMPLETED");

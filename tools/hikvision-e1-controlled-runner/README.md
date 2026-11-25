@@ -113,3 +113,32 @@ UNKNOWN＋黏性），NOT_SUBMITTED 不清零已发生调用。全部结果均�
 最终验证命令只显式列原三份测试加 `test/probe-integration.test.mjs`
 （`--test --test-isolation=none --test-reporter=spec`）；真实 Node/native/
 Windows ACL/文件 I/O 与真实设备部分继续 BLOCKED，不进入 CR-3/E1/E2。
+
+## CR-2 复审修复轮（2026-11-25 追加）
+
+按 Stop-CR2 独立复审的 3 项 P2 修复（固定起点 72d654a，本段只追加）：
+
+- **R1**：`finalizeProbe` 的 REPORT_SEAL 分支不再无条件
+  `stop(EVIDENCE_WRITE_FAILED)`——封存故障只在没有更早终态/黏性未知时才能作为
+  首因触发；已有首因保留其 code，黏性未知保持 `UNKNOWN`＋
+  `requestOutcomeUnknown=true`，不被降级为 FAILED，也不执行会覆盖已 latch
+  事实的封存 fault。
+- **R2**：原 report 现在被真实接收并私有封存：owner 私有 WeakMap 按同 session
+  绑定 `{sealed, report}`，`receiveReport` 先校验并封存、成功后才发
+  `REPORT_SEALED`，随后 `model.seal`→`SESSION_SEALED`→`model.close`→
+  `SESSION_CLOSED`；已 latch/未知终态只把迟到 report 留作私有终态诊断
+  （sealed:false），不伪造任何封存/关闭事件。`snapshot` 新增
+  `reportSealed` 布尔（由私有封存事实派生），不新增 raw getter、不改变公开
+  DTO/envelope 协议、不重读另一份配置恢复执行视图。
+- **R3**：新增 `test/guard-isolation.test.mjs`（冻结 testkit 未修改）——在 guard
+  安装前于全部实际捕获位置注入纯内存可计数 fake，用未改 guard 逐槽验证捕获
+  身份、经 wrapper 的正控 +1、捕获原目标零增长、覆盖集合与四文件实测 232 槽
+  精确相等、累计基线不清零与 finally 精确恢复；安全 fake 不启动任何真实
+  进程/网络/监听/DNS/凭据/业务文件，子进程槽仅在进程内验证、不声明跨进程
+  继承。三套负控（工件副本单点变异）分别回退 R1 缺陷、禁用真实封存、给 guard
+  副本注入“先转原目标再抛拦截错误”缺陷，均退出 1 且精确命中对应回归。
+
+本修复轮实测（Windows 10 19042 / Node v24.19.0，其他版本口径不变）：
+批准四文件命令 356/356 通过（新增 17 节点）；五文件定向套件（含
+guard-isolation）360/360 通过；guard 槽集合与四文件实测 232（92+8+132）精确
+相等。真实 Node/native/ACL/文件 I/O 与设备部分继续 BLOCKED。

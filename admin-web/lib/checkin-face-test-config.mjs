@@ -122,9 +122,11 @@ export class AdminCheckinFaceTestConfig {
   }
 
   async #set(collection, id, value) {
-    const data = { ...value, _id: id, environment: this.environment, updatedAt: this.time() };
+    // 真实云端 SDK 禁止在 set 的 data 中携带 _id（-501007），_id 由 doc(id) 路径决定。
+    const { _id, ...rest } = value;
+    const data = { ...rest, environment: this.environment, updatedAt: this.time() };
     await this.db.collection(collection).doc(id).set({ data });
-    return data;
+    return { ...data, _id: id };
   }
 
   async #audit(action, targetId, before, after, reason, revision, operator = this.operator) {

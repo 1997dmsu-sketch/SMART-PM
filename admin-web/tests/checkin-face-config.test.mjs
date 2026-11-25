@@ -17,6 +17,7 @@ import { AdminCheckinFaceTestConfig } from '../lib/checkin-face-test-config.mjs'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const require = createRequire(import.meta.url);
 const cloudValidate = require('../../cloudfunctions/checkinFaceTest/lib/validate.js');
+const { COLLECTIONS, ids } = require('../../cloudfunctions/checkinFaceTest/lib/store.js');
 const CLOUD_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const ENV = 'checkin-face-test';
 const TOKEN = 'SyntheticWorkerToken-0123456789abcdef';
@@ -25,7 +26,9 @@ const TOKEN_HASH = createHash('sha256').update(TOKEN, 'utf8').digest('hex');
 const clone = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 
 class MemoryDB {
-  constructor() {
+  constructor(options = {}) {
+    // strictId=true 时 doc().set 的 data 载荷携带 _id 即抛错（复现真实云端 SDK -501007）。
+    this.strictId = !!options.strictId;
     this.collections = new Map();
     this.buckets = this.collections;
     this.writes = 0;              // 仅统计已提交（含 base 直接）写入
@@ -77,6 +80,7 @@ class MemoryDB {
         },
         set: async ({ data }) => {
           db._log('set', name, id, 'base');
+          if (db.strictId && data && Object.hasOwn(data, '_id')) throw Object.assign(new Error('STRICT_SET_ID'), { code: 'STRICT_SET_ID' });
           db.writes += 1;
           store.set(id, clone({ ...data, _id: id }));
           db._commitKey(name, id);
@@ -142,6 +146,7 @@ class MemoryDB {
               },
               set: async ({ data }) => {
                 db._log('set', name, id, 'tx');
+                if (db.strictId && data && Object.hasOwn(data, '_id')) throw Object.assign(new Error('STRICT_SET_ID'), { code: 'STRICT_SET_ID' });
                 const key = `${name}::${id}`;
                 stage.set(key, { collection: name, id, data: { ...data, _id: id } });
                 writeKeys.add(key);
@@ -689,4 +694,12 @@ test('CF-R2-02：无真实事务不降级，外部 constructor transaction=true 
   await assert.rejects(() => config.setDispatchEnabled(true), (error) => error.code === 'TRANSACTION_UNAVAILABLE');
   const after = fullSnapshot(db);
   assert.deepEqual(after, before);
+});
+
+test("admin config #set payload never carries _id (real cloud SDK rejects -501007)", async () => {
+  const db = new MemoryDB({ strictId: true });
+  const service = new AdminCheckinFaceTestConfig(db, { operator: "synthetic-admin" });
+  const result = await service.setApplicationVersion("v1", { reason: "严格模式回归" });
+  assert.equal(result.applicationVersion, "v1");
+  assert.equal(db.row(COLLECTIONS.CONFIG, ids.configId(ENV)).applicationVersion, "v1");
 });

@@ -142,3 +142,30 @@ Windows ACL/文件 I/O 与真实设备部分继续 BLOCKED，不进入 CR-3/E1/E
 批准四文件命令 356/356 通过（新增 17 节点）；五文件定向套件（含
 guard-isolation）360/360 通过；guard 槽集合与四文件实测 232（92+8+132）精确
 相等。真实 Node/native/ACL/文件 I/O 与设备部分继续 BLOCKED。
+
+## CR-2 复审修复第二轮（2026-11-25 追加）
+
+按 f94b9a7 复审剩余两项 P2 修复（固定起点 f94b9a7，本段只追加）：
+
+- **R2-CLOSE**：成功 `model.close` 后立即把私有 WeakMap 条目改写为
+  `{sealed:true, report:null}`——按 §4.2 volatile 策略释放原 report 引用，
+  封存布尔事实保留（`snapshot.reportSealed` 语义不变）；seal/close 故障路径
+  对已封存条目尽力释放 raw（首因与黏性未知事实不动）；latch/未知终态诊断
+  仍按 §4.2 保留（`snapshot.reportRetained` 为新增安全布尔事实，无 raw
+  getter、无 DTO/adapter 扩展、无磁盘持久化）。回归：成功 close 后
+  reportSealed=true/reportRetained=false、CLEANUP 故障后事实保留且 raw 尽力
+  释放、G1 latch 后终态诊断保留、REPORT_SEAL 首因无条目；负控 NC-R2C（副本
+  移除 close 后释放）退出 1，`success` 子例因 reportRetained 精确失败。
+- **R3-RESTORE**：`guard-isolation.test.mjs` 的 after 改为嵌套 try/逐项收集
+  强保证——累计断言、`guard.restore()`、身份/计数校验任一处抛错都仍尝试
+  恢复全部真实内置函数、原描述符与 ESM 命名绑定；单错原样重抛、多错
+  AggregateError，清理失败同时可见，不吞错、不把失败改 PASS。新增
+  `test/guard-isolation-restore-failure.test.mjs`（三类失败注入：累计断言
+  失败/guard.restore 失败/身份验证失败，注入原因可见且最终恢复验证器通过）
+  与 `test/restore-verifier.test.mjs`（纯检查无泄漏 fake）；负控 NC-R3R
+  （副本移除嵌套保证 + 注入额外调用）退出 1，验证器以
+  `http.request is not a leaked synthetic fake` 精确失败。冻结 testkit 未改。
+
+本第二轮实测：批准四文件 **361/361**、五文件 **365/365**（新增 5 节点），
+退出 0；失败注入定向套件按设计退出 1 且恢复验证器通过。真实
+Node/native/ACL/文件 I/O 与设备部分继续 BLOCKED。

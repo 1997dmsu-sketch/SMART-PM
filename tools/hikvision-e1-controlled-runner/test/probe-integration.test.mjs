@@ -941,4 +941,75 @@ describe("CR-2 synthetic probe wiring: fixed runProbe + non-forwarding transport
       });
     }
   });
+
+  test("R2-CLOSE volatile release: successful close drops the raw report while the sealed fact survives", async (t) => {
+    await t.test("success", async () => {
+      const input = fixture();
+      const script = scenario(successSteps());
+      await unchanged(input, async () => {
+        const controller = await armed(input);
+        const envelope = await controller.invokeScenario(script);
+        assertEnvelopeShape(envelope);
+        assert.equal(envelope.result.status, "COMPLETED");
+        const snapshot = controller.snapshot();
+        assert.equal(snapshot.reportSealed, true, "the sealed receipt fact survives close");
+        assert.equal(snapshot.reportRetained, false, "the raw report reference is released after close");
+        assert.equal(Object.hasOwn(snapshot, "report"), false, "no raw report slot is exposed");
+        assertRedacted(snapshot, "post-close snapshot");
+      }, "R2-CLOSE success");
+    });
+    await t.test("cleanup-fault", async () => {
+      const input = fixture();
+      const script = scenario(successSteps());
+      await unchanged(input, async () => {
+        const controller = createSyntheticProbeController(input);
+        controller.check(control());
+        assert.deepEqual(await controller.prepare({ fault: "CLEANUP" }),
+          { ok: true, code: "OK", state: "EVIDENCE_READY" });
+        assert.equal(controller.arm({ ...control(), confirmed: true }).ok, true);
+        const envelope = await controller.invokeScenario(script);
+        assertEnvelopeShape(envelope);
+        assert.equal(envelope.result.status, "FAILED");
+        assert.equal(envelope.result.code, "EVIDENCE_WRITE_FAILED");
+        const snapshot = controller.snapshot();
+        assert.equal(snapshot.reportSealed, true, "the receipt fact that happened before the close fault is preserved");
+        assert.equal(snapshot.reportRetained, false, "best-effort volatile release also drops the raw on close failure");
+        assert.equal(snapshot.recordCount, 6, "known response facts are untouched");
+      }, "R2-CLOSE cleanup fault");
+    });
+    await t.test("terminal-diagnostics-kept", async () => {
+      const input = fixture();
+      const script = scenario([responseStep("deviceInfo", 1, 403, { body: "<error>synthetic-forbidden</error>" }), ...successSteps().slice(1)]);
+      await unchanged(input, async () => {
+        const controller = await armed(input);
+        const envelope = await controller.invokeScenario(script);
+        assertEnvelopeShape(envelope);
+        assert.equal(envelope.result.status, "FAILED");
+        assert.equal(envelope.result.code, "PROBE_FAILED");
+        const snapshot = controller.snapshot();
+        assert.equal(snapshot.reportSealed, false, "no sealed fact on a latched terminal");
+        assert.equal(snapshot.reportRetained, true, "the late vendor report stays an owner-private terminal diagnostic per §4.2");
+        const types = envelope.trace.map((entry) => entry.type);
+        assert.equal(types.includes("SESSION_CLOSED"), false);
+      }, "R2-CLOSE terminal diagnostics");
+    });
+    await t.test("report-seal-fault-first-cause", async () => {
+      const input = fixture();
+      const script = scenario(successSteps());
+      await unchanged(input, async () => {
+        const controller = createSyntheticProbeController(input);
+        controller.check(control());
+        assert.deepEqual(await controller.prepare({ fault: "REPORT_SEAL" }),
+          { ok: true, code: "OK", state: "EVIDENCE_READY" });
+        assert.equal(controller.arm({ ...control(), confirmed: true }).ok, true);
+        const envelope = await controller.invokeScenario(script);
+        assertEnvelopeShape(envelope);
+        assert.equal(envelope.result.status, "FAILED");
+        assert.equal(envelope.result.code, "EVIDENCE_WRITE_FAILED");
+        const snapshot = controller.snapshot();
+        assert.equal(snapshot.reportSealed, false);
+        assert.equal(snapshot.reportRetained, false, "no receipt entry exists when the seal fault is the first cause");
+      }, "R2-CLOSE seal fault");
+    });
+  });
 });

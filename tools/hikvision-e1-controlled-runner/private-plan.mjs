@@ -945,7 +945,7 @@ export function createSyntheticProbeController(input) {
       invokeClaimed: false, invokeCount: 0, identityConfirmed: false,
       wrapperAttemptCount: 0, transportInvocationCount: 0, logicalEndpointsAttempted: 0,
       confirmedResponses: 0, requestOutcomeUnknown: false, recordCount: 0, bytesWritten: 0,
-      reportSealed: false,
+      reportSealed: false, reportRetained: false,
       trace: Object.freeze([]),
     });
     const state = stateFor(plan);
@@ -958,6 +958,7 @@ export function createSyntheticProbeController(input) {
       wrapperAttemptCount, transportInvocationCount, logicalEndpointsAttempted, confirmedResponses,
       requestOutcomeUnknown, recordCount: facts.recordCount, bytesWritten: facts.bytesWritten,
       reportSealed: session ? privateReports.get(session)?.sealed === true : false,
+      reportRetained: session ? privateReports.get(session)?.report != null : false,
       trace: Object.freeze(trace.map((entry) => Object.freeze({ ...entry }))),
     });
   }
@@ -1478,6 +1479,10 @@ export function createSyntheticProbeController(input) {
       pushEvent("SESSION_SEALED");
       model.close(session, plan);
       pushEvent("SESSION_CLOSED");
+      // Ruling §4.2 volatile strategy: a successful close releases the private
+      // raw report reference. The sealed boolean fact survives so
+      // snapshot.reportSealed keeps its meaning; no raw getter is added.
+      privateReports.set(session, Object.freeze({ sealed: true, report: null }));
       gateVerified = true;
     } catch {
       if (!firstTerminalCode) {
@@ -1485,6 +1490,12 @@ export function createSyntheticProbeController(input) {
         // public code after the memory model latched with an internal one.
         firstTerminalCode = "EVIDENCE_WRITE_FAILED";
         recordTerminalCode(plan, "EVIDENCE_WRITE_FAILED");
+      }
+      // Best-effort volatile release on failure (ruling §4.2): drop the raw
+      // report reference while keeping the recorded receipt fact intact; the
+      // first cause and sticky-unknown facts are never touched.
+      if (session && privateReports.get(session)?.sealed === true) {
+        privateReports.set(session, Object.freeze({ sealed: true, report: null }));
       }
       if (session) {
         try { model.fail(session, plan); } catch { /* fixed failure is retained */ }

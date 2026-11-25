@@ -226,42 +226,83 @@ describe("CR-2 guard isolation: countable synthetic originals at the real captur
       restoreRealBuiltins();
       return;
     }
+    // Strong restore guarantee (R3-RESTORE): every failure path still attempts
+    // the full real-builtin restore; each phase error is collected so one
+    // failing check never skips the remaining slots or the ESM re-sync, and
+    // every collected failure stays visible (re-thrown, never turned into PASS).
+    const failures = [];
     try {
       // Every slot received exactly one extra +1 from the per-slot positive
       // control below; the cumulative baseline is preserved, never cleared.
       const expectedFinal = Object.fromEntries(Object.entries(baseline).map(([key, value]) => [key, value + 1]));
       guard.assertNoViolations(expectedFinal, "isolation suite cumulative window");
-    } finally {
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
       guard.restore();
+    } catch (error) {
+      failures.push(error);
     }
-    // The guard restored the captured synthetic originals (our fakes)...
-    for (const entry of injected) {
-      assert.equal(entry.object[entry.key], entry.fake, `restored captured identity: ${entry.label}`);
-      assert.equal(fakeCounters[entry.label], 0, `captured original never forwarded: ${entry.label}`);
+    try {
+      // The guard restored the captured synthetic originals (our fakes)...
+      for (const entry of injected) {
+        assert.equal(entry.object[entry.key], entry.fake, `restored captured identity: ${entry.label}`);
+        assert.equal(fakeCounters[entry.label], 0, `captured original never forwarded: ${entry.label}`);
+      }
+    } catch (error) {
+      failures.push(error);
     }
-    // ...and now the real builtins are restored byte-precisely in reverse order.
-    restoreRealBuiltins();
+    try {
+      // ...and the real builtins are restored byte-precisely in reverse order,
+      // attempting every slot even when an earlier one fails.
+      restoreRealBuiltins();
+    } catch (error) {
+      failures.push(error);
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, "guard-isolation after() failures; every slot restore was still attempted");
   });
 
   function restoreRealBuiltins() {
+    const failures = [];
     for (const entry of [...injected].reverse()) {
-      if (entry.descriptor) Object.defineProperty(entry.object, entry.key, entry.descriptor);
-      else delete entry.object[entry.key];
+      try {
+        if (entry.descriptor) Object.defineProperty(entry.object, entry.key, entry.descriptor);
+        else delete entry.object[entry.key];
+      } catch (error) {
+        failures.push(error);
+      }
     }
-    syncBuiltinESMExports();
+    try {
+      syncBuiltinESMExports();
+    } catch (error) {
+      failures.push(error);
+    }
     for (const entry of injected) {
-      assert.equal(entry.object[entry.key], entry.original, `real builtin restored: ${entry.label}`);
+      try {
+        assert.equal(entry.object[entry.key], entry.original, `real builtin restored: ${entry.label}`);
+      } catch (error) {
+        failures.push(error);
+      }
     }
-    assert.equal(httpNamed.request, http.request, "http ESM binding re-synced to the real function");
-    assert.equal(httpsNamed.get, https.get, "https ESM binding re-synced to the real function");
-    assert.equal(netNamed.connect, net.connect, "net ESM binding re-synced to the real function");
-    assert.equal(tlsNamed.connect, tls.connect, "tls ESM binding re-synced to the real function");
-    assert.equal(dgramNamed.createSocket, dgram.createSocket, "dgram ESM binding re-synced to the real function");
-    assert.equal(dnsNamed.resolve4, dns.resolve4, "dns ESM binding re-synced to the real function");
-    assert.equal(dnsPromisesNamed.resolve4, dnsPromises.resolve4, "dns.promises ESM binding re-synced to the real function");
-    assert.equal(childNamed.spawn, childProcess.spawn, "child_process ESM binding re-synced to the real function");
-    assert.equal(fsNamed.realpathSync, fs.realpathSync, "fs ESM binding re-synced to the real function");
-    assert.equal(fsPromisesNamed.readFile, fsPromises.readFile, "fs.promises ESM binding re-synced to the real function");
+    const bindingChecks = [
+      () => assert.equal(httpNamed.request, http.request, "http ESM binding re-synced to the real function"),
+      () => assert.equal(httpsNamed.get, https.get, "https ESM binding re-synced to the real function"),
+      () => assert.equal(netNamed.connect, net.connect, "net ESM binding re-synced to the real function"),
+      () => assert.equal(tlsNamed.connect, tls.connect, "tls ESM binding re-synced to the real function"),
+      () => assert.equal(dgramNamed.createSocket, dgram.createSocket, "dgram ESM binding re-synced to the real function"),
+      () => assert.equal(dnsNamed.resolve4, dns.resolve4, "dns ESM binding re-synced to the real function"),
+      () => assert.equal(dnsPromisesNamed.resolve4, dnsPromises.resolve4, "dns.promises ESM binding re-synced to the real function"),
+      () => assert.equal(childNamed.spawn, childProcess.spawn, "child_process ESM binding re-synced to the real function"),
+      () => assert.equal(fsNamed.realpathSync, fs.realpathSync, "fs ESM binding re-synced to the real function"),
+      () => assert.equal(fsPromisesNamed.readFile, fsPromises.readFile, "fs.promises ESM binding re-synced to the real function"),
+    ];
+    for (const check of bindingChecks) {
+      try { check(); } catch (error) { failures.push(error); }
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, "guard-isolation real-builtin restore failures");
   }
 
   test("coverage set exact equality: the guard wrapped exactly our injected capture positions", (t) => {

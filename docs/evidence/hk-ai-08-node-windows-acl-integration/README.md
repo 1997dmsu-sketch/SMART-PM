@@ -205,3 +205,14 @@ BLOCKED（不用 skip/todo/deferred 冒充）：真实 Node writer、Windows 原
 本轮实测（Windows 10 19042，Node v24.19.0=裁定“其他版本”口径，未安装/切换/改隔离参数）：批准四文件命令 **356/356 通过，退出 0**（原 262 + integration 94，其中新增 17 节点）；五文件定向套件（四文件+guard-isolation）**360/360 通过，退出 0**；0 fail/cancelled/skipped/todo。三套负控均为工件副本单点变异（副本变异前与源树全文件哈希一致、变异器逐次恰好一处替换），源树零修改；原始输出、退出码、字节数/SHA-256 存 `_harness-cr2-fix-72d654a/_fix-artifacts/`。
 
 真实 Node writer、Windows 原生 ACL/对象身份、真实文件 I/O、真实设备/TLS/网络与真实审批继续 **BLOCKED**（未用 skip/todo/deferred 冒充）。**停手交 Codex 独立复审（Stop-CR2）；不批准 CR-3、真实 TLS、E1/E2、CORE-01、上传/部署/发布或任何业务执行。**
+
+## 9. CR-2 复审修复第二轮（2026-11-25 追加，前 151 行 CR-1 原字节保留）
+
+状态：**f94b9a7 复审剩余两项 P2（R2-CLOSE、R3-RESTORE）已修复并离线验证，仍停在 Stop-CR2 交 Codex 独立复审；未宣称验收，未进入 CR-3/E1/E2。** 固定起点 f94b9a7483f4e6a43f75a031a4ef265f7c9fdb4a（直接父 72d654a847d10d75b0fc479586a1c97647e28a9c）。
+
+- **R2-CLOSE 闭合**：成功 close 后私有 WeakMap 条目改写为 `{sealed:true, report:null}`（§4.2 volatile 策略释放 raw；封存布尔事实保留，reportSealed 语义不变）；seal/close 故障对已封存条目尽力释放 raw，首因/黏性未知事实不动；latch/未知终态诊断按 §4.2 保留。`snapshot.reportRetained` 为新增安全布尔事实（无 raw getter、无 DTO/adapter 扩展、无磁盘）。回归 4 子场景（成功/CLEANUP 故障/G1 latch 诊断保留/REPORT_SEAL 首因无条目）精确断言 reportSealed/reportRetained/计数与事件；负控 NC-R2C（副本移除 close 后释放）退出 1，`success` 子例精确失败。
+- **R3-RESTORE 闭合**：guard-isolation 的 after 改为嵌套 try/逐项收集强保证，任一校验或 guard.restore 失败仍尝试恢复全部真实内置/描述符/ESM 绑定；单错重抛、多错 AggregateError，清理失败同时可见。新增 `test/guard-isolation-restore-failure.test.mjs`（三类失败注入：累计断言/guard.restore/身份计数，注入原因可见且最终恢复验证器通过）与 `test/restore-verifier.test.mjs`（纯检查 fake 泄漏）；负控 NC-R3R（副本移除保证+注入额外调用）退出 1，验证器以 `http.request is not a leaked synthetic fake` 精确失败。冻结 testkit 原字节未改。
+
+本轮实测（Windows 10 19042，Node v24.19.0=裁定“其他版本”口径）：批准四文件 **361/361、退出 0**；五文件（+guard-isolation）**365/365、退出 0**；0 fail/cancelled/skipped/todo。失败注入定向套件按设计退出 1（三套件注入原因可见，恢复验证器通过）。两套负控均为工件副本单片段/双片段变异（变异前副本与源树全文件哈希一致、变异器逐次恰好一处替换），源树零修改；原始输出、退出码、字节/SHA-256 存 `_harness-cr2-fix-72d654a/_fix-artifacts/`。
+
+真实 Node writer、Windows 原生 ACL/对象身份、真实文件 I/O、真实设备/TLS/网络与真实审批继续 **BLOCKED**。**停手交 Codex 独立复审（Stop-CR2）；不批准 CR-3、真实 TLS、E1/E2、CORE-01、上传/部署/发布或任何业务执行。**

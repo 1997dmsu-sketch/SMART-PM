@@ -136,11 +136,14 @@ function requireEachText(file, pairs) {
 }
 
 /**
- * Inspect the actual `const request = { ... }` constructor, rather than tokens
- * near any consent anchor. Only direct literal fields in that same object are
- * facts; comments, strings, nested/fake objects, duplicates and spreads cannot
- * supply or override the mandatory mode/validity/consent contract.
+ * Inspect the actual `const request = { ... }` constructor and any later writes
+ * to its hard-requirement members. Only direct literal fields in that same
+ * object are facts; comments, strings, nested/fake objects, duplicate keys,
+ * same-name accessors/methods and post-construction assignments to
+ * request.mode / request.validityMode / request.consent cannot supply or
+ * override the mandatory contract (CF-R2-11).
  */
+const HARD_REQUEST_KEYS = ['mode', 'validityMode', 'consent'];
 function requireRequestConstruction(file, pairs) {
   const rel = relative(ROOT, file).replaceAll('\\', '/');
   const { tokens } = lexSource(readFileSync(file, 'utf8'));
@@ -149,28 +152,65 @@ function requireRequestConstruction(file, pairs) {
     if (!['const', 'let'].includes(tokens[at].value) || tokens[at + 1].value !== 'request'
       || tokens[at + 2].value !== '=' || tokens[at + 3].value !== '{') continue;
     const fields = new Map();
+    const seen = new Set();
     let depth = 1;
     let unsafe = false;
+    let closedAt = -1;
     for (let item = at + 4; item < tokens.length && depth > 0; item++) {
       const current = tokens[item];
-      if (depth === 1 && current.type === 'punctuation' && ['...', '['].includes(current.value)) unsafe = true;
-      if (depth === 1 && ['mode', 'validityMode', 'consent'].includes(current.value)
-        && tokens[item + 1]?.value === ':') {
-        const value = tokens[item + 2];
-        const ended = [',', '}'].includes(tokens[item + 3]?.value);
-        if (fields.has(current.value) || !ended) unsafe = true;
-        fields.set(current.value, { type: value?.type, value: value?.value });
+      if (depth === 1) {
+        if (current.type === 'punctuation' && ['...', '['].includes(current.value)) unsafe = true;
+        if (HARD_REQUEST_KEYS.includes(current.value)) {
+          const next = tokens[item + 1]?.value;
+          if (next === ':') {
+            const value = tokens[item + 2];
+            const ended = [',', '}'].includes(tokens[item + 3]?.value);
+            if (seen.has(current.value) || !ended) unsafe = true;
+            seen.add(current.value);
+            fields.set(current.value, { type: value?.type, value: value?.value });
+          } else if (next === '(') {
+            // 同名 method 简写会覆盖字面量（CF-R2-11）
+            if (seen.has(current.value)) unsafe = true;
+          }
+        }
+        if ((current.value === 'get' || current.value === 'set')
+          && HARD_REQUEST_KEYS.includes(tokens[item + 1]?.value) && tokens[item + 2]?.value === '(') {
+          // 同名 getter/setter 会覆盖字面量（CF-R2-11）
+          if (seen.has(tokens[item + 1].value)) unsafe = true;
+        }
       }
       if (['{', '[', '('].includes(current.value)) depth += 1;
-      if (['}', ']', ')'].includes(current.value)) depth -= 1;
+      if (['}', ']', ')'].includes(current.value)) {
+        depth -= 1;
+        if (depth === 0) { closedAt = item; break; }
+      }
     }
-    constructors.push({ fields, unsafe: unsafe || depth !== 0 });
+    constructors.push({ fields, unsafe: unsafe || depth !== 0, closedAt });
   }
   if (constructors.length !== 1) {
     issues.push(`${rel}:1: 找不到唯一实际 request 对象构造，不能以其他 consent 锚点或字符串替代`);
     return;
   }
-  const { fields, unsafe } = constructors[0];
+  const { fields, unsafe, closedAt } = constructors[0];
+  // CF-R2-11：构造后对硬要求成员的赋值覆盖（点访问与下标访问两种形态）。
+  let postAssigned = false;
+  for (let item = Math.max(0, closedAt); item < tokens.length - 4; item++) {
+    if (tokens[item].type !== 'identifier' || tokens[item].value !== 'request') continue;
+    const dotKey = tokens[item + 1]?.value === '.' ? tokens[item + 2]?.value : null;
+    const dotAssign = dotKey !== null && HARD_REQUEST_KEYS.includes(dotKey)
+      && ['=', '+=', '-=', '++', '--'].includes(tokens[item + 3]?.value);
+    const bracketKey = tokens[item + 1]?.value === '[' && tokens[item + 2]?.type === 'string'
+      && HARD_REQUEST_KEYS.includes(tokens[item + 2]?.value) && tokens[item + 3]?.value === ']'
+      ? tokens[item + 2].value : null;
+    const bracketAssign = bracketKey !== null && ['=', '+=', '-='].includes(tokens[item + 4]?.value);
+    if (dotAssign || bracketAssign) postAssigned = true;
+  }
+  if (postAssigned) {
+    issues.push(`${rel}:1: request 构造后不得再赋值覆盖 mode/validityMode/consent（CF-R2-11）`);
+  }
+  if (unsafe) {
+    issues.push(`${rel}:1: request 硬要求字段不得被同名 getter/method/重复字段覆盖或扩展（CF-R2-11）`);
+  }
   if (fields.get('consent')?.type !== 'identifier' || fields.get('consent')?.value !== 'true' || unsafe) {
     issues.push(`${rel}:1: 实际 request 构造必须直接 consent:true 且无重复、扩展或动态覆盖`);
   }

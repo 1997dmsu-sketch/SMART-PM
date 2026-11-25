@@ -9,6 +9,7 @@ import { PropertyService } from "./lib/property.mjs";
 import { LocalStore, CloudStore } from "./lib/store.mjs";
 import { LocalCloudDatabase } from "./lib/local-cloud-database.mjs";
 import { AdminTenantPasswordAccounts } from "./lib/tenant-password-accounts.mjs";
+import { adaptDatabase } from "./lib/sdk-database-adapter.mjs";
 import { resolvePublicFile } from "./lib/static-path.mjs";
 import { Accounts, publicAccount } from "./lib/auth.mjs";
 import { FaceEnrollmentService } from "./lib/face-enrollment.mjs";
@@ -265,8 +266,9 @@ export async function createApp({
         if (path === "/api/tenant-password-accounts" || path.startsWith("/api/tenant-password-accounts/")) {
           if (account.role !== "admin") fail("仅系统管理员可管理租客密码账号", 403);
           try {
-            const database = mode === "live"
-              ? store.app?.database?.()
+            const rawDb = mode === "live" ? store.app?.database?.() : null;
+            const database = rawDb
+              ? adaptDatabase(rawDb)
               : new LocalCloudDatabase(store, audit("租客密码账号管理"));
             if (!database) fail("账号服务未配置", 503);
             const service = new AdminTenantPasswordAccounts({ database });
@@ -312,8 +314,11 @@ export async function createApp({
             const module = await import("./lib/checkin-face-test-config.mjs");
             const Service = module.AdminCheckinFaceTestConfig || module.default;
             if (typeof Service !== "function") throw Error("Admin config service export is invalid");
-            const database = mode === "live" && store.app && typeof store.app.database === "function"
+            const rawDb = mode === "live" && store.app && typeof store.app.database === "function"
               ? store.app.database()
+              : null;
+            const database = rawDb
+              ? adaptDatabase(rawDb)
               : new LocalCloudDatabase(store, audit("入住人脸测试配置写入"));
             return new Service(null, { database, operator: account.username });
           };

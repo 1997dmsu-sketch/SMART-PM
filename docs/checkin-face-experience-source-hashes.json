@@ -79,7 +79,7 @@
                   },
                   {
                       "path":  "admin-web/server.mjs",
-                      "sha256":  "787b465bcbfd505cecbc486007c0d179aa47d9175e449c14a5e0e98d5d4c1e6e",
+                      "sha256":  "d74ab81ad5fb8c85f47b0d9fc10b6a369ccc08f224e347cdc65e8ad85e6029a5",
                       "purpose":  "管理后台服务：/api/* 对 HEAD 一律 405（封堵 /api/accounts 非GET保存分支的 Origin/CSRF 绕过）；新增 GET /api/tenant-password-accounts/residents 路由；公开错误码增加 USER_NOT_VERIFIED/IDENTITY_UNVERIFIED。",
                       "baselineSha256":  null
                   },

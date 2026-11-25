@@ -141,7 +141,7 @@
                       "path":  "cloudfunctions/accountLogin/lib/identity-core.js",
                       "purpose":  "租客认证身份协调核心（四函数逐字节一致副本）：putDoc 剔除 set 载荷中的 _id（真实云端 SDK -501007 拒绝更新_id），_id 由 doc(id) 路径决定。",
                       "baselineSha256":  null,
-                      "sha256":  "b3f1e1af42434cd0dd44e69fbeb4ec4777350546344ff19531538ae48369dc27"
+                      "sha256":  "3aad088c69b270ae1088e7f6ef36f0394fd85eb4118441a97db8c29acca60c5c"
                   },
                   {
                       "path":  "cloudfunctions/accountLogin/lib/service.js",
@@ -159,7 +159,7 @@
                       "path":  "cloudfunctions/adminLogin/lib/identity-core.js",
                       "purpose":  "租客认证身份协调核心（四函数逐字节一致副本）：putDoc 剔除 set 载荷中的 _id（真实云端 SDK -501007 拒绝更新_id）。",
                       "baselineSha256":  null,
-                      "sha256":  "b3f1e1af42434cd0dd44e69fbeb4ec4777350546344ff19531538ae48369dc27"
+                      "sha256":  "3aad088c69b270ae1088e7f6ef36f0394fd85eb4118441a97db8c29acca60c5c"
                   },
                   {
                       "path":  "cloudfunctions/checkinFaceTest/config.json",
@@ -205,7 +205,7 @@
                   },
                   {
                       "path":  "cloudfunctions/checkinFaceTest/lib/validate.js",
-                      "sha256":  "bca4da60a833133e49456d3b75c601ae9d1c245a33138cef84ddc2079adec2e9",
+                      "sha256":  "e44fec58bdcbdfadaaa51d0736d5e66ec230c550ef64063a73f392bcfa6f1cdd",
                       "purpose":  "严格入参白名单与未知字段拒绝（R06 beginTaskExecution 白名单）、SDK fileID 归属校验（R01：命名空间/对象路径/文件名三级）、device 输出逐项对齐服务端快照；STORAGE_NAMESPACE_PATTERN 唯一定义。",
                       "baselineSha256":  null
                   },
@@ -225,13 +225,13 @@
                       "path":  "cloudfunctions/login/lib/identity-core.js",
                       "purpose":  "租客认证身份协调核心（四函数逐字节一致副本）：putDoc 剔除 set 载荷中的 _id（真实云端 SDK -501007 拒绝更新_id）。",
                       "baselineSha256":  null,
-                      "sha256":  "b3f1e1af42434cd0dd44e69fbeb4ec4777350546344ff19531538ae48369dc27"
+                      "sha256":  "3aad088c69b270ae1088e7f6ef36f0394fd85eb4118441a97db8c29acca60c5c"
                   },
                   {
                       "path":  "cloudfunctions/phoneLogin/lib/identity-core.js",
                       "purpose":  "租客认证身份协调核心（四函数逐字节一致副本）：putDoc 剔除 set 载荷中的 _id（真实云端 SDK -501007 拒绝更新_id）。",
                       "baselineSha256":  null,
-                      "sha256":  "b3f1e1af42434cd0dd44e69fbeb4ec4777350546344ff19531538ae48369dc27"
+                      "sha256":  "3aad088c69b270ae1088e7f6ef36f0394fd85eb4118441a97db8c29acca60c5c"
                   },
                   {
                       "path":  "docs/evidence/action-login-2026-11-25/README.md",
@@ -913,7 +913,7 @@
                   },
                   {
                       "path":  "tests/checkin-face-cloud-workflow.test.cjs",
-                      "sha256":  "8803b53f50551506649538d7b7b7fc4f787371b1950ed775e32d12ec89e38366",
+                      "sha256":  "aa9d649c84d7ecad4c69df84d51f2e1dbc1612eacb68462e692b97096408ef9e",
                       "purpose":  "checkin-face 工作流测试：mock 新增 strictId 严格模式；新增 setById 载荷不含 _id 回归。",
                       "baselineSha256":  null
                   },
@@ -945,7 +945,7 @@
                       "path":  "tests/identity.test.cjs",
                       "purpose":  "身份协调测试：新增严格模式回归——set 载荷绝不携带 _id。",
                       "baselineSha256":  null,
-                      "sha256":  "9ea4e1ec083b1db3fccd6b7b6d138819b1bc30c8ed1f7c47f638358455a9acc4"
+                      "sha256":  "3f184f8c7c3ecc3850df4da61754e5c8a9c172ee2b2a2d703d8efec7e8a72cdd"
                   },
                   {
                       "path":  "tests/phone-login.test.cjs",

@@ -16,12 +16,18 @@ class TenantAuthError extends Error {
 }
 function fail(code = 'SERVICE_UNAVAILABLE', status = 503) { throw new TenantAuthError(code, status); }
 function sha256(value) { return createHash('sha256').update(value, 'utf8').digest('hex'); }
+// 微信平台在真机 callFunction 时注入的保留字段：显式放行、忽略其内容、绝不读取。
+const PLATFORM_EVENT_FIELDS = Object.freeze(['tcbContext']);
 function closedInput(value, allowed) {
   if (!value || typeof value !== 'object' || types.isProxy(value) || Array.isArray(value)) fail('INVALID_INPUT', 400);
   const descriptors = Object.getOwnPropertyDescriptors(value);
   const copy = {};
   for (const key of Reflect.ownKeys(descriptors)) {
     const descriptor = descriptors[key];
+    if (typeof key === 'string' && PLATFORM_EVENT_FIELDS.includes(key)) {
+      if (!descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) fail('INVALID_INPUT', 400);
+      continue;
+    }
     if (typeof key !== 'string' || !allowed.includes(key) || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) fail('INVALID_INPUT', 400);
     copy[key] = descriptor.value;
   }

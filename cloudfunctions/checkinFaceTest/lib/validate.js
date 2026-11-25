@@ -64,6 +64,9 @@ function assertAllowedFields(input, allowedFields, label, checkForbidden = true)
   return input;
 }
 
+// 微信平台在真机 callFunction 时注入的保留字段：显式放行、忽略其内容、绝不读取。
+const PLATFORM_EVENT_FIELDS = Object.freeze(['tcbContext']);
+
 /** @param {'miniprogram'|'worker'} group */
 function validateEvent(event, group) {
   if (!isPlainObject(event) || typeof event.action !== 'string') {
@@ -75,7 +78,7 @@ function validateEvent(event, group) {
   const workerOwned = action === 'claimTask' || action === 'beginTaskExecution' || action === 'reportTask';
   if (group === 'worker' && !workerOwned) throw new ValidationError('ACTION_FORBIDDEN', '该操作不允许 worker 调用');
   if (group === 'miniprogram' && workerOwned) throw new ValidationError('ACTION_FORBIDDEN', '该操作不允许小程序调用');
-  return assertAllowedFields(event, fields, '请求');
+  return assertAllowedFields(event, [...fields, ...PLATFORM_EVENT_FIELDS], '请求');
 }
 
 function validateText(value, pattern, code, maxLength = 128) {

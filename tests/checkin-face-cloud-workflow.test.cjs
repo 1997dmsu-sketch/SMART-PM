@@ -1351,3 +1351,9 @@ test('setById 载荷绝不携带 _id（真实云端 SDK 拒绝 -501007 不能更
   });
   assert.equal(db.row(COLLECTIONS.LEASE, ids.leaseId(ENVIRONMENT)).validFrom, '2026-12-01');
 });
+
+test('validateEvent 放行平台注入的 tcbContext 字段，其余未知字段仍拒绝', () => {
+  const ok = validate.validateEvent({ action: 'getConfig', tcbContext: { envId: 'x' } }, 'miniprogram');
+  assert.equal(ok.action, 'getConfig');
+  assert.throws(() => validate.validateEvent({ action: 'getConfig', bogus: 1 }, 'miniprogram'), (error) => error.code === 'UNKNOWN_FIELD');
+});

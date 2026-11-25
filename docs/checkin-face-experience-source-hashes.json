@@ -163,8 +163,8 @@
                   },
                   {
                       "path":  "cloudfunctions/checkinFaceTest/config.json",
-                      "sha256":  "615d688df21f279280a3935ffe98ca79359e4ebb1354550be834f350a75d860c",
-                      "purpose":  "新测试云函数权限声明，openapi 列表为空。",
+                      "sha256":  "3fec999bf07b5b9dd18adcdb532345c9a0ef3c79b19aadff782700c0e7ac4b3e",
+                      "purpose":  "checkin-face 云函数配置：无 openapi 权限声明，超时 20s（真实云端工作流事务超过默认 3s）。",
                       "baselineSha256":  null
                   },
                   {
@@ -1060,6 +1060,12 @@
                       "sha256":  "47bb161933036f3d1c99d4eef403c40137bab8f064a09e4726f1fbda42783059",
                       "purpose":  "worker 运行时：配置读取、R05 设备绑定、R06 领取校验、显式 device+fixed 请求构造（R10 锚点）、R07 依赖解析边界、R09 清理结果、脱敏日志。",
                       "baselineSha256":  null
+                  },
+                  {
+                      "path":  "cloudfunctions/accountLogin/config.json",
+                      "purpose":  "账号密码登录云函数配置：无 openapi 权限声明，超时 20s（注册/登录事务在真实云端超过默认 3s）。",
+                      "baselineSha256":  null,
+                      "sha256":  "3fec999bf07b5b9dd18adcdb532345c9a0ef3c79b19aadff782700c0e7ac4b3e"
                   }
               ]
 }

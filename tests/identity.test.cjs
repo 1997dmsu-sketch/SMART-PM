@@ -125,10 +125,11 @@ test('set 载荷绝不携带 _id（真实云端 SDK 拒绝 -501007 不能更新_
   assert.equal(db.rows('tenant_auth_identities').length, 1);
 });
 
-test('closedInput 放行平台注入的 tcbContext 字段，其余未知字段仍拒绝', () => {
-  const allowed = identity.closedInput({ action: 'login', username: 'u', password: 'p', tcbContext: { envId: 'x' } }, ['action', 'username', 'password']);
+test('closedInput 放行平台注入的 tcbContext/userInfo 字段，其余未知字段仍拒绝', () => {
+  const allowed = identity.closedInput({ action: 'login', username: 'u', password: 'p', tcbContext: { envId: 'x' }, userInfo: { nickName: 'y' } }, ['action', 'username', 'password']);
   assert.deepEqual(allowed, { action: 'login', username: 'u', password: 'p' });
   assert.equal(Object.hasOwn(allowed, 'tcbContext'), false, '平台字段只放行不读取');
+  assert.equal(Object.hasOwn(allowed, 'userInfo'), false, '平台字段只放行不读取');
   assert.throws(() => identity.closedInput({ action: 'login', bogus: 1 }, ['action']), (error) => error.code === 'INVALID_INPUT');
   const protoObj = JSON.parse('{"action":"login","__proto__":1}');
   assert.throws(() => identity.closedInput(protoObj, ['action']), (error) => error.code === 'INVALID_INPUT');

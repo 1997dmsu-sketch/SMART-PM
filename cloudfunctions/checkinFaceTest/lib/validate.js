@@ -54,18 +54,20 @@ function isPlainObject(value) {
 function assertAllowedFields(input, allowedFields, label, checkForbidden = true) {
   if (!isPlainObject(input)) throw new ValidationError('INVALID_PAYLOAD', `${label}格式无效`);
   const allowed = new Set(allowedFields);
+  const unknown = [];
   for (const key of Object.keys(input)) {
-    if (!allowed.has(key)) {
-      const code = checkForbidden && CLIENT_FORBIDDEN_FIELDS.includes(key)
-        ? 'CLIENT_FIELD_FORBIDDEN' : 'UNKNOWN_FIELD';
-      throw new ValidationError(code, `${label}不允许字段 ${key}`);
-    }
+    if (!allowed.has(key)) unknown.push(key);
+  }
+  if (unknown.length) {
+    const code = checkForbidden && unknown.some((key) => CLIENT_FORBIDDEN_FIELDS.includes(key))
+      ? 'CLIENT_FIELD_FORBIDDEN' : 'UNKNOWN_FIELD';
+    throw new ValidationError(code, `${label}不允许字段 ${unknown.join('、')}`);
   }
   return input;
 }
 
 // 微信平台在真机 callFunction 时注入的保留字段：显式放行、忽略其内容、绝不读取。
-const PLATFORM_EVENT_FIELDS = Object.freeze(['tcbContext']);
+const PLATFORM_EVENT_FIELDS = Object.freeze(['tcbContext', 'userInfo']);
 
 /** @param {'miniprogram'|'worker'} group */
 function validateEvent(event, group) {

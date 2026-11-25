@@ -114,13 +114,15 @@ function createStore(db, options = {}) {
 
   /** Point write — supported in both base and transaction contexts. */
   async function setById(collection, id, value) {
-    const data = stamp({ ...value, _id: id });
+    // 真实云端 SDK 禁止在 set 的 data 中携带 _id（-501007），必须剔除；_id 由 doc(id) 路径决定。
+    const { _id, ...rest } = value;
+    const data = stamp(rest);
     const docRef = db.collection(collection).doc(id);
     if (!docRef || typeof docRef.set !== 'function') {
       throw storeError('INVALID_DATABASE_CONTEXT', '数据库上下文缺少点写能力');
     }
     await docRef.set({ data });
-    return data;
+    return { ...data, _id: id };
   }
 
   /** Insert — supported in both base and transaction contexts. */

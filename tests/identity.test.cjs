@@ -113,3 +113,14 @@ test('legacy admin login changes only its canonical user writer and preserves ho
   assert.equal(db.rows('users').length, 1);
   assert.equal(db.rows('tenant_auth_identities').length, 1);
 });
+
+test('set 载荷绝不携带 _id（真实云端 SDK 拒绝 -501007 不能更新_id）', async () => {
+  const db = new TenantAuthMemoryDB({ strictId: true });
+  const sdk = cloud(db);
+  const silent = await silentMain({ cloud: sdk, db, now: () => NOW })();
+  assert.equal(silent.code, 0, JSON.stringify(silent));
+  const phone = await phoneMain({ cloud: sdk, db, now: () => NOW })({ code: 'synthetic-phone-code' });
+  assert.equal(phone.code, 0, JSON.stringify(phone));
+  assert.equal(db.rows('users').length, 1);
+  assert.equal(db.rows('tenant_auth_identities').length, 1);
+});

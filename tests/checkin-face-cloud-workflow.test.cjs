@@ -51,7 +51,9 @@ const clone = (value) => value === undefined ? undefined : JSON.parse(JSON.strin
  * contextLog 记录每次读写的实际上下文（base/tx），用于 R03 证据。
  */
 class MemoryDB {
-  constructor() {
+  constructor(options = {}) {
+    // strictId=true 时 doc().set 的 data 载荷携带 _id 即抛错（复现真实云端 SDK -501007）。
+    this.strictId = !!options.strictId;
     this.collections = new Map();
     this.writes = 0;              // 仅统计已提交（含 base 直接）写入
     this.whereGets = [];
@@ -102,6 +104,7 @@ class MemoryDB {
         },
         set: async ({ data }) => {
           db._log('set', name, id, 'base');
+          if (db.strictId && data && Object.hasOwn(data, '_id')) throw Object.assign(new Error('STRICT_SET_ID'), { code: 'STRICT_SET_ID' });
           db.writes += 1;
           store.set(id, clone({ ...data, _id: id }));
           db._commitKey(name, id);
@@ -167,6 +170,7 @@ class MemoryDB {
               },
               set: async ({ data }) => {
                 db._log('set', name, id, 'tx');
+                if (db.strictId && data && Object.hasOwn(data, '_id')) throw Object.assign(new Error('STRICT_SET_ID'), { code: 'STRICT_SET_ID' });
                 const key = `${name}::${id}`;
                 stage.set(key, { collection: name, id, data: { ...data, _id: id } });
                 writeKeys.add(key);
@@ -1331,4 +1335,19 @@ test('CF-R2-10 云门：轮询旧申请不恢复上传；合法重新授权可�
   assert.equal(terminalView.data.status, STATUS.PENDING_SITE_VERIFICATION);
   assert.equal(terminalView.data.uploadEligible, false);
   assert.deepEqual(after, before);
+});
+
+test('setById 载荷绝不携带 _id（真实云端 SDK 拒绝 -501007 不能更新_id）', async () => {
+  const db = new MemoryDB({ strictId: true });
+  const store = createStore(db, { environment: ENVIRONMENT, now: () => 1800000000000 });
+  const configId = ids.configId(ENVIRONMENT);
+  const saved = await store.setById(COLLECTIONS.CONFIG, configId, { applicationVersion: 1, revision: 1 });
+  assert.equal(saved._id, configId);
+  assert.equal(db.row(COLLECTIONS.CONFIG, configId).applicationVersion, 1);
+  await store.withTransaction(async (tx) => {
+    await tx.setById(COLLECTIONS.LEASE, ids.leaseId(ENVIRONMENT), {
+      validFrom: '2026-12-01', validTo: '2026-12-31', revision: 1,
+    });
+  });
+  assert.equal(db.row(COLLECTIONS.LEASE, ids.leaseId(ENVIRONMENT)).validFrom, '2026-12-01');
 });

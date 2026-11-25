@@ -85,8 +85,8 @@
                   },
                   {
                       "path":  "admin-web/tests/checkin-face-config.test.mjs",
-                      "sha256":  "27f7a8e9122e26d34294c5d81e9631d431a4eac63012e6bcdb4acf74b6654036",
-                      "purpose":  "A 路配置服务与 storage 路由合成测试。",
+                      "sha256":  "99803dd1b9899bc28f5f109de2f4e5a9202c8e9b07570b8321131b02c3680ff5",
+                      "purpose":  "checkin-face 配置测试：修正种子写法（set 载荷不含 _id，与真实 SDK 契约一致）。",
                       "baselineSha256":  null
                   },
                   {
@@ -139,9 +139,9 @@
                   },
                   {
                       "path":  "cloudfunctions/accountLogin/lib/identity-core.js",
-                      "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+                      "purpose":  "租客认证身份协调核心（四函数逐字节一致副本）：putDoc 剔除 set 载荷中的 _id（真实云端 SDK -501007 拒绝更新_id），_id 由 doc(id) 路径决定。",
                       "baselineSha256":  null,
-                      "sha256":  "533c6cb2d11f8513e79f1d195e2f15ac30080c303f5f065cb10c716f6962eca4"
+                      "sha256":  "b3f1e1af42434cd0dd44e69fbeb4ec4777350546344ff19531538ae48369dc27"
                   },
                   {
                       "path":  "cloudfunctions/accountLogin/lib/service.js",
@@ -157,9 +157,9 @@
                   },
                   {
                       "path":  "cloudfunctions/adminLogin/lib/identity-core.js",
-                      "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+                      "purpose":  "租客认证身份协调核心（四函数逐字节一致副本）：putDoc 剔除 set 载荷中的 _id（真实云端 SDK -501007 拒绝更新_id）。",
                       "baselineSha256":  null,
-                      "sha256":  "533c6cb2d11f8513e79f1d195e2f15ac30080c303f5f065cb10c716f6962eca4"
+                      "sha256":  "b3f1e1af42434cd0dd44e69fbeb4ec4777350546344ff19531538ae48369dc27"
                   },
                   {
                       "path":  "cloudfunctions/checkinFaceTest/config.json",
@@ -199,8 +199,8 @@
                   },
                   {
                       "path":  "cloudfunctions/checkinFaceTest/lib/store.js",
-                      "sha256":  "40b16c57368cd93edcc07ca8ee0d6363ed04a91f94105b284529969504f67721",
-                      "purpose":  "独立命名空间集合名、确定性 _id、revision CAS、上下文绑定的事务 store（R03：tx 内只点读写，集合查询抛 TX_UNSUPPORTED_QUERY，无事务失败关闭）。",
+                      "sha256":  "f0d7c0e0a894b2c3931e7e144b599cbd967d4df64e8eaa382a816aef30f25b16",
+                      "purpose":  "checkin-face 数据门面：setById 剔除 set 载荷中的 _id（真实云端 SDK -501007），事务/非事务同规则。",
                       "baselineSha256":  null
                   },
                   {
@@ -223,15 +223,15 @@
                   },
                   {
                       "path":  "cloudfunctions/login/lib/identity-core.js",
-                      "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+                      "purpose":  "租客认证身份协调核心（四函数逐字节一致副本）：putDoc 剔除 set 载荷中的 _id（真实云端 SDK -501007 拒绝更新_id）。",
                       "baselineSha256":  null,
-                      "sha256":  "533c6cb2d11f8513e79f1d195e2f15ac30080c303f5f065cb10c716f6962eca4"
+                      "sha256":  "b3f1e1af42434cd0dd44e69fbeb4ec4777350546344ff19531538ae48369dc27"
                   },
                   {
                       "path":  "cloudfunctions/phoneLogin/lib/identity-core.js",
-                      "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+                      "purpose":  "租客认证身份协调核心（四函数逐字节一致副本）：putDoc 剔除 set 载荷中的 _id（真实云端 SDK -501007 拒绝更新_id）。",
                       "baselineSha256":  null,
-                      "sha256":  "533c6cb2d11f8513e79f1d195e2f15ac30080c303f5f065cb10c716f6962eca4"
+                      "sha256":  "b3f1e1af42434cd0dd44e69fbeb4ec4777350546344ff19531538ae48369dc27"
                   },
                   {
                       "path":  "docs/evidence/action-login-2026-11-25/README.md",
@@ -913,8 +913,8 @@
                   },
                   {
                       "path":  "tests/checkin-face-cloud-workflow.test.cjs",
-                      "sha256":  "73149aec4e155925f9ac0072a8ca8c920248946e44752d89013cff2d57aece57",
-                      "purpose":  "A 路云函数合成测试（R01/R03/R04/R06 正反例，内存 DB 替身）。",
+                      "sha256":  "8803b53f50551506649538d7b7b7fc4f787371b1950ed775e32d12ec89e38366",
+                      "purpose":  "checkin-face 工作流测试：mock 新增 strictId 严格模式；新增 setById 载荷不含 _id 回归。",
                       "baselineSha256":  null
                   },
                   {
@@ -943,9 +943,9 @@
                   },
                   {
                       "path":  "tests/identity.test.cjs",
-                      "purpose":  "身份协调测试：并发用例改为 silent+phone 两入口（prepare 已移除）。",
+                      "purpose":  "身份协调测试：新增严格模式回归——set 载荷绝不携带 _id。",
                       "baselineSha256":  null,
-                      "sha256":  "2404c20a7b356651c86201e89d520ec87368eb553e6a7f66540f1365c44f4171"
+                      "sha256":  "9ea4e1ec083b1db3fccd6b7b6d138819b1bc30c8ed1f7c47f638358455a9acc4"
                   },
                   {
                       "path":  "tests/phone-login.test.cjs",
@@ -973,9 +973,9 @@
                   },
                   {
                       "path":  "tests/support/tenant-auth-memory-db.cjs",
-                      "purpose":  "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
+                      "purpose":  "租客认证合成数据库：新增 strictId 严格模式（set 载荷含 _id 即抛错，复现真实云端 -501007），默认保持宽容。",
                       "baselineSha256":  null,
-                      "sha256":  "36810f1ef5d0d92219a54656118c7b7251386ffaab157a65840d42bda85ab0e2"
+                      "sha256":  "2322f194530f374115ac122b790965ebec4d581f08809be77303d60ce8d784d0"
                   },
                   {
                       "path":  "tests/tenant-password-gates.test.cjs",

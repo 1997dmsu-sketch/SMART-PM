@@ -331,7 +331,7 @@ test('upsertRoomBinding：102 唯一确定性 id、名称可选持久化、同�
   const names = await minimal.getConfig();
   assert.equal(names.room.projectName, undefined, '未填写名称时不伪造');
 
-  await db.collection('test_room_binding_102').doc(`${ENV}|duplicate`).set({ data: { ...ROOM_INPUT, environment: ENV, _id: `${ENV}|duplicate` } });
+  await db.collection('test_room_binding_102').doc(`${ENV}|duplicate`).set({ data: { ...ROOM_INPUT, environment: ENV } });
   const before = db.writes;
   await assert.rejects(() => config.upsertRoomBinding(ROOM_INPUT), (error) => error.code === 'ROOM_NOT_UNIQUE');
   assert.equal(db.writes, before, '歧义绑定时零写入');

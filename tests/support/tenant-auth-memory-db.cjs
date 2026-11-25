@@ -7,7 +7,10 @@ const copy = (value) => value === undefined ? undefined : structuredClone(value)
 const missing = () => Object.assign(new Error('DOCUMENT_NOT_EXISTS'), { code: 'DOCUMENT_NOT_EXISTS', errCode: -1 });
 
 class TenantAuthMemoryDB {
-  constructor() {
+  constructor(options = {}) {
+    // strictId=true 时 doc().set 的 data 载荷携带 _id 即抛错，
+    // 复现真实云端 SDK 的 -501007（不能更新_id的值）语义；默认关闭保持旧宽容行为。
+    this.strictId = !!options.strictId;
     this.collections = new Map();
     this.versions = new Map();
     this.sequence = 0;
@@ -80,7 +83,9 @@ class TenantAuthMemoryDB {
             if (!value) throw missing();
             return { data: value };
           },
-          async set({ data }) { db.contextLog.push({ op: 'set', collection, id, context: 'base' }); db._write(collection, id, data); return {}; },
+          async set({ data }) { db.contextLog.push({ op: 'set', collection, id, context: 'base' });
+            if (db.strictId && data && Object.hasOwn(data, '_id')) throw Object.assign(new Error('STRICT_SET_ID'), { code: 'STRICT_SET_ID' });
+            db._write(collection, id, data); return {}; },
           async update({ data }) {
             const value = db.row(collection, id);
             if (!value) throw missing();
@@ -129,7 +134,10 @@ class TenantAuthMemoryDB {
           where: unsupported, get: unsupported, count: unsupported, limit: unsupported, orderBy: unsupported,
           doc: (id) => ({
             get: () => read(collection, id),
-            set: ({ data }) => set(collection, id, { ...data, _id: id }),
+            set: ({ data }) => {
+              if (this.strictId && data && Object.hasOwn(data, '_id')) throw Object.assign(new Error('STRICT_SET_ID'), { code: 'STRICT_SET_ID' });
+              return set(collection, id, { ...data, _id: id });
+            },
             update: async ({ data }) => { const current = (await read(collection, id)).data; return set(collection, id, { ...current, ...data }); },
             remove: () => set(collection, id, null),
           }),

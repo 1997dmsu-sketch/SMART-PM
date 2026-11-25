@@ -65,7 +65,10 @@ async function readDoc(db, collection, id) {
   }
 }
 async function putDoc(db, collection, id, value) {
-  await db.collection(collection).doc(id).set({ data: { ...value, _id: id } });
+  // 真实云端 SDK 禁止在 set 的 data 中携带 _id（-501007 不能更新_id的值），
+  // 必须剔除后再写入；_id 由 doc(id) 路径本身决定。
+  const { _id, ...data } = value;
+  await db.collection(collection).doc(id).set({ data });
   return { ...value, _id: id };
 }
 async function withTransaction(db, work) {

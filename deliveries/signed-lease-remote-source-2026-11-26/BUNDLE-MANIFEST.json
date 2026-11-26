@@ -1,0 +1,7 @@
+{
+  "file": "SMART-PM-signed-lease-remote-source-2026-11-26.zip",
+  "bytes": 10159083,
+  "sha256": "46df3e03a42fec3b2509ff98cca3597f7afea4f0c0dcbe77317f314d69991e8b",
+  "sourceCommit": "66e0395c105cda21244d375ef6d01682bc6cfe1e",
+  "scope": "source and offline evidence; not uploaded/deployed/device tested"
+}

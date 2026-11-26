@@ -1101,7 +1101,7 @@
       "path": "tests/signed-remote-worker.test.cjs",
       "baselineSha256": null,
       "purpose": "2026-11-26 已确认签约租期自动生成海康远程资格、受控派发、后台/小程序接线及纯合成验证；不表示真实设备或部署验收。",
-      "sha256": "56c499375361103a5fedbbdf1c6941eb49b452dfb6ce684112413b7328937985"
+      "sha256": "10b776e481faa8ffddf04773f00b94cb2665ae12de08f11c34358ef65283a23b"
     },
     {
       "path": "tests/support/d-network-fakes.cjs",

@@ -630,4 +630,3 @@ test('cleanup failure after a lost begin receipt retains its cause and invents n
   assert.equal(run.calls.filter(([name]) => name === 'reportOpen').length, 0);
   assert.equal(run.calls.filter(([name]) => name === 'close').length, 1);
 });
-

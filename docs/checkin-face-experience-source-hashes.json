@@ -2,7 +2,7 @@
   "schema": "checkin-face-experience-source-hashes/v1",
   "baselineCommit": "9ddc92488f97b2585d5034d7a2fb9f5b8587907b",
   "branch": "test/phone-checkin-source-candidate-2026-11-26",
-  "registrationReason": "2026-11-26 source-regression candidate: retain reviewed phone-registration code; reuse 750809c static/network guards while preserving reviewed tenant-password exceptions; adapt VM-only preload cleanup to both --require syntaxes; add management SDK adapter to extracted-source validation. Signed-contract automatic Hikvision remote opening is NOT implemented; no deployment, platform upload, device operations or full-flow acceptance.",
+  "registrationReason": "2026-11-26 source-regression candidate: retain reviewed phone-registration code; reuse 750809c static/network guards; tighten tenant-password transient-input/clear exceptions to complete approved lines with real-checker negative controls; adapt VM-only preload cleanup to both --require syntaxes; add management SDK adapter to extracted-source validation. Signed-contract automatic Hikvision remote opening is NOT implemented; no deployment, platform upload, device operations or full-flow acceptance.",
   "baselineSha256Note": "baselineSha256 一律为 null：本清单不登记旧上游原件（旧来源校验由 docs/backend-provenance.json 承担），null 表示“无旧上游登记”，不是未检查；不虚构 originalSha256。原有 10 条条目语义保持不变（仅 sha256 按当前磁盘/契约内容复算，purpose 随实现更新）。",
   "files": [
     {
@@ -841,7 +841,7 @@
     },
     {
       "path": "scripts/checkin-face-static-check.mjs",
-      "sha256": "975b2b469d25c0dfe000be6acf0f8ac4edec1e676e05973a9da1733d9e01af82",
+      "sha256": "d14359c5f04d46576d79fd2f5459638ed69b667ae63de38365e852a3c689d597",
       "purpose": "静态检查：账户登录页密码输入行白名单随 preparing 状态移除同步更新。",
       "baselineSha256": null
     },
@@ -981,7 +981,7 @@
       "path": "tests/tenant-password-gates.test.cjs",
       "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
       "baselineSha256": null,
-      "sha256": "b8c133a084446b057932c787c7b80df661f3df8c55ebfc8e8f07fe77f2512585"
+      "sha256": "7faaf3df38ff1760e636e8865cf7b8ff297f51c5dd7cd77cff7670597cb409c8"
     },
     {
       "path": "tools/checkin-face-worker/README.md",

@@ -338,6 +338,15 @@ const CLIENT_FILES = [
   ...sourceFiles('miniprogram', ['.js', '.json', '.wxml', '.wxss']),
   ...sourceFiles('cloudfunctions/checkinFaceTest', ['.js', '.json']),
 ];
+const TENANT_PASSWORD_PAGE_LINES = new Set([
+  "username: '', password: '', submitting: false,",
+  "this.setData({ password: '', submitting: false });",
+  "if (!this.data.submitting) this.setData({ password: String(event.detail.value || '') });",
+  'let password = this.data.password;',
+  "this.setData({ password: '', submitting: true, error: '' });",
+  "password = '';",
+  "if (this._visible && attempt === this._attempt) this.setData({ password: '', submitting: false });",
+]);
 for (const file of CLIENT_FILES) {
   checkLines(file, DEVICE_SECRET_CHECKS);
   const rel = relative(ROOT, file).replaceAll('\\', '/');
@@ -351,10 +360,7 @@ for (const file of CLIENT_FILES) {
     }
     if (rel === 'miniprogram/services/api.js') return /^\s*let password = input && typeof input\.password === 'string' \? input\.password : '';\s*$/.test(line)
       || /^\s*password = '';\s*$/.test(line);
-    if (rel === 'miniprogram/pages/account-login/index.js') return /^\s*let password = this\.data\.password;\s*$/.test(line)
-      || /^\s*password = '';\s*$/.test(line)
-      || /^\s*if \(!this\.data\.submitting\) this\.setData\(\{ password: String\(event\.detail\.value \|\| ''\) \}\);\s*$/.test(line)
-      || (/password:\s*''/.test(line) && !/password\s*:\s*(?!'')\S/.test(line));
+    if (rel === 'miniprogram/pages/account-login/index.js') return TENANT_PASSWORD_PAGE_LINES.has(line.trim());
     return false;
   };
   checkLines(file, [[(line) => /\bpassword\s*[:=]/i.test(line) && !tenantInput(line),

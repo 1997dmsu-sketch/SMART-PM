@@ -69,6 +69,7 @@ def validation_commands(checkout, checkin_face=False):
             'admin-web/tests/checkin-face-config.test.mjs',
             'admin-web/tests/checkin-face-worker.test.mjs',
             'admin-web/tests/tenant-password-accounts.test.mjs',
+            'admin-web/tests/tenant-auth-cloud-database.test.mjs',
             'admin-web/tests/local-cloud-database.test.mjs',
             'admin-web/tests/tenant-password-routes.test.mjs',
             'admin-web/tests/qishanyuan-test-data.test.mjs',

@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0-beta.20-phone-register.2",
-  "channel": "体验版候选（取消开户码／手机号注册后管理员开通密码）",
-  "releaseDate": "2026-11-25"
+  "version": "0.1.0-beta.21-registration-checkin-source.1",
+  "channel": "源码回归候选：注册及测试入住人脸；签约自动远程开门未实现",
+  "releaseDate": "2026-11-26"
 }

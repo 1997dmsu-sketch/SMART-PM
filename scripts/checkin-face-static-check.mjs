@@ -88,7 +88,8 @@ function lexSource(source) {
       continue;
     }
     const previous = tokens.at(-1);
-    const regexPosition = !previous || ['=', '(', '[', '{', ',', ':', ';', '!', '&&', '||', '?', 'return', 'throw', '=>'].includes(previous.value);
+    const regexPosition = !previous || ['=', '(', '[', '{', ',', ':', ';', '!', '&&', '||', '?', 'return', 'throw', '=>',
+      '===', '!==', '==', '!=', '<=', '>=', '??', '++', '--', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<', '>>', '>>>'].includes(previous.value);
     if (char === '/' && regexPosition) {
       let inClass = false;
       index += 1;
@@ -109,7 +110,13 @@ function lexSource(source) {
       continue;
     }
     if (source.startsWith('...', index)) index += 3;
-    else index += 1;
+    else {
+      // 统一运算符词法：复合/逻辑/更新/位/移位赋值与比较符按完整 token 产出，
+      // 与识别器（ASSIGN_OPS/UPDATE_OPS）同源一致（CF-R2-11 第二轮）。
+      const opRun = /^(>>>=|<<=|>>=|>>>|===|!==|=>|&&=|\|\|=|\?\?=|\+=|-=|\*=|\/=|%=|\*\*=|&=|\|=|\^=|==|!=|<=|>=|\+\+|--|&&|\|\||\?\?|\*\*|<<|>>)/.exec(source.slice(index));
+      if (opRun) index += opRun[0].length;
+      else index += 1;
+    }
     token('punctuation', source.slice(start, index), start, index);
   }
   return { tokens, code: masked.join('') };
@@ -136,11 +143,14 @@ function requireEachText(file, pairs) {
 }
 
 /**
- * Inspect the actual `const request = { ... }` constructor, rather than tokens
- * near any consent anchor. Only direct literal fields in that same object are
- * facts; comments, strings, nested/fake objects, duplicates and spreads cannot
- * supply or override the mandatory mode/validity/consent contract.
+ * Inspect the actual `const request = { ... }` constructor and any later writes
+ * to its hard-requirement members. Only direct literal fields in that same
+ * object are facts; comments, strings, nested/fake objects, duplicate keys,
+ * same-name accessors/methods and post-construction assignments to
+ * request.mode / request.validityMode / request.consent cannot supply or
+ * override the mandatory contract (CF-R2-11).
  */
+const HARD_REQUEST_KEYS = ['mode', 'validityMode', 'consent'];
 function requireRequestConstruction(file, pairs) {
   const rel = relative(ROOT, file).replaceAll('\\', '/');
   const { tokens } = lexSource(readFileSync(file, 'utf8'));
@@ -149,28 +159,163 @@ function requireRequestConstruction(file, pairs) {
     if (!['const', 'let'].includes(tokens[at].value) || tokens[at + 1].value !== 'request'
       || tokens[at + 2].value !== '=' || tokens[at + 3].value !== '{') continue;
     const fields = new Map();
+    const seen = new Set();
     let depth = 1;
     let unsafe = false;
+    let closedAt = -1;
     for (let item = at + 4; item < tokens.length && depth > 0; item++) {
       const current = tokens[item];
-      if (depth === 1 && current.type === 'punctuation' && ['...', '['].includes(current.value)) unsafe = true;
-      if (depth === 1 && ['mode', 'validityMode', 'consent'].includes(current.value)
-        && tokens[item + 1]?.value === ':') {
-        const value = tokens[item + 2];
-        const ended = [',', '}'].includes(tokens[item + 3]?.value);
-        if (fields.has(current.value) || !ended) unsafe = true;
-        fields.set(current.value, { type: value?.type, value: value?.value });
+      if (depth === 1) {
+        if (current.type === 'punctuation' && ['...', '['].includes(current.value)) unsafe = true;
+        if (HARD_REQUEST_KEYS.includes(current.value)) {
+          const next = tokens[item + 1]?.value;
+          if (next === ':') {
+            const value = tokens[item + 2];
+            const ended = [',', '}'].includes(tokens[item + 3]?.value);
+            if (seen.has(current.value) || !ended) unsafe = true;
+            seen.add(current.value);
+            fields.set(current.value, { type: value?.type, value: value?.value });
+          } else if (next === '(') {
+            // 同名 method 简写会覆盖字面量（CF-R2-11）
+            if (seen.has(current.value)) unsafe = true;
+          }
+        }
+        if ((current.value === 'get' || current.value === 'set')
+          && HARD_REQUEST_KEYS.includes(tokens[item + 1]?.value) && tokens[item + 2]?.value === '(') {
+          // 同名 getter/setter 会覆盖字面量（CF-R2-11）
+          if (seen.has(tokens[item + 1].value)) unsafe = true;
+        }
       }
       if (['{', '[', '('].includes(current.value)) depth += 1;
-      if (['}', ']', ')'].includes(current.value)) depth -= 1;
+      if (['}', ']', ')'].includes(current.value)) {
+        depth -= 1;
+        if (depth === 0) { closedAt = item; break; }
+      }
     }
-    constructors.push({ fields, unsafe: unsafe || depth !== 0 });
+    constructors.push({ fields, unsafe: unsafe || depth !== 0, closedAt });
   }
   if (constructors.length !== 1) {
     issues.push(`${rel}:1: 找不到唯一实际 request 对象构造，不能以其他 consent 锚点或字符串替代`);
     return;
   }
-  const { fields, unsafe } = constructors[0];
+  const { fields, unsafe, closedAt } = constructors[0];
+  // CF-R2-11 第三轮：识别完整赋值左值/解构目标（而非固定相邻 token）——
+  // 覆盖括号赋值目标（含多层）、数组/对象多目标与嵌套解构中的硬字段；
+  // 点访问与静态字符串下标一致；受限语法无法证明安全时失败关闭。
+  const ASSIGN_OPS = ['=', '&&=', '||=', '??=', '+=', '-=', '*=', '/=', '%=', '**=', '&=', '|=', '^=', '<<=', '>>=', '>>>='];
+  const UPDATE_OPS = ['++', '--'];
+  const OPENERS = new Set(['{', '[', '(']);
+  const CLOSERS = new Set(['}', ']', ')']);
+  const STATEMENT_BOUNDARY = new Set([';', '{', '}']);
+  const LHS_KEYWORDS = new Set(['const', 'let', 'var', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'function', '=>', ':', ',']);
+  const HARD_KEY_AT = (k) => HARD_REQUEST_KEYS.includes(tokens[k]?.value);
+  const isHardMember = (at) => {
+    if (tokens[at]?.type !== 'identifier' || tokens[at].value !== 'request') return false;
+    // 经典直连：request.key / request["key"]
+    if (tokens[at + 1]?.value === '.' && HARD_KEY_AT(at + 2)) return true;
+    if (tokens[at + 1]?.value === '[' && tokens[at + 2]?.type === 'string'
+      && HARD_KEY_AT(at + 2) && tokens[at + 3]?.value === ']') return true;
+    // CF-R2-11 第四轮：括号基对象（语义透明）——(...((request))...).key / ["key"]。
+    // 基对象外侧可有多层括号（含成员整体再被括号包裹的情形）；紧邻基对象前
+    // 的 '(' 数至少 1 且其后为 ')' 串 + 成员操作符即归一化为 request 成员。
+    let openers = 0;
+    let back = at - 1;
+    while (back >= 0 && tokens[back]?.value === '(') { openers += 1; back -= 1; }
+    if (openers === 0) return false;
+    let k = at + 1;
+    while (tokens[k]?.value === ')') k += 1;
+    if (tokens[k]?.value === '.' && HARD_KEY_AT(k + 1)) return true;
+    if (tokens[k]?.value === '[' && tokens[k + 1]?.type === 'string'
+      && HARD_KEY_AT(k + 1) && tokens[k + 2]?.value === ']') return true;
+    return false;
+  };
+  // CF-R2-11 第五轮：序列表达式基对象——( <exprs>, request ) 中 request 为
+  // 序列末值时的 .key / ["key"] 成员（多层括号/嵌套序列均归一化）。'(' 必须是
+  // 分组括号而非调用括号（其前不是被调用者）；只读上下文不会进入本函数
+  // （isHardMember 仅用于赋值左值收集范围）。
+  // 第六轮：按匹配分隔符确定完整序列基对象分组——前项允许 `:`、`=>`、`?`
+  // 及其他合法表达式 token（三元条件、箭头函数等不改变末值为 request），
+  // 只有语句边界（; { }）或走到词法开头才终止扫描；受限形态无法证明时
+  // 由左值收集整体失败关闭，不在此处枚举 token 提前放行。
+  const isHardMemberViaSequence = (at) => {
+    if (tokens[at]?.type !== 'identifier' || tokens[at].value !== 'request') return false;
+    if (tokens[at - 1]?.value !== ',') return false;
+    let depth = 0;
+    let openIdx = -1;
+    for (let j = at - 1; j >= 0; j--) {
+      const t = tokens[j];
+      if (CLOSERS.has(t.value)) { depth += 1; continue; }
+      if (OPENERS.has(t.value)) { depth -= 1; if (depth < 0) { openIdx = j; break; } continue; }
+      if (depth === 0 && STATEMENT_BOUNDARY.has(t.value)) break;
+    }
+    if (openIdx < 0) return false;
+    const before = tokens[openIdx - 1];
+    if (before && (before.type === 'identifier' || before.type === 'string' || [')', ']'].includes(before.value))) return false;
+    let k = at + 1;
+    while (tokens[k]?.value === ')') k += 1;
+    if (tokens[k]?.value === '.' && HARD_KEY_AT(k + 1)) return true;
+    if (tokens[k]?.value === '[' && tokens[k + 1]?.type === 'string'
+      && HARD_KEY_AT(k + 1) && tokens[k + 2]?.value === ']') return true;
+    return false;
+  };
+  const containsHardMember = (from, to) => {
+    for (let i = from; i <= to; i++) if (isHardMember(i) || isHardMemberViaSequence(i)) return true;
+    return false;
+  };
+  const collectBackward = (start) => {
+    let local = 0;
+    const indexes = [];
+    for (let j = start; j >= 0; j--) {
+      const t = tokens[j];
+      if (CLOSERS.has(t.value)) { local += 1; indexes.unshift(j); continue; }
+      if (OPENERS.has(t.value)) { local -= 1; if (local < 0) break; indexes.unshift(j); continue; }
+      if (local === 0 && (STATEMENT_BOUNDARY.has(t.value) || LHS_KEYWORDS.has(t.value))) break;
+      indexes.unshift(j);
+    }
+    return indexes;
+  };
+  const collectForward = (start) => {
+    let local = 0;
+    const indexes = [];
+    for (let j = start; j < tokens.length; j++) {
+      const t = tokens[j];
+      if (OPENERS.has(t.value)) { local += 1; indexes.push(j); continue; }
+      if (CLOSERS.has(t.value)) { local -= 1; if (local < 0) break; indexes.push(j); continue; }
+      if (local === 0 && (STATEMENT_BOUNDARY.has(t.value) || [',', ':'].includes(t.value))) break;
+      indexes.push(j);
+    }
+    return indexes;
+  };
+  let postAssigned = false;
+  for (let item = Math.max(0, closedAt); item < tokens.length; item++) {
+    const current = tokens[item];
+    if (current.type !== 'punctuation') continue;
+    if (ASSIGN_OPS.includes(current.value)) {
+      const lhs = collectBackward(item - 1);
+      if (lhs.length && containsHardMember(lhs[0], lhs[lhs.length - 1])) postAssigned = true;
+    } else if (UPDATE_OPS.includes(current.value)) {
+      const lhs = collectBackward(item - 1);
+      if (lhs.length && containsHardMember(lhs[0], lhs[lhs.length - 1])) { postAssigned = true; continue; }
+      const operand = collectForward(item + 1);
+      if (operand.length && containsHardMember(operand[0], operand[operand.length - 1])) postAssigned = true;
+    }
+  }
+  // Object.assign(request, …) / Object.defineProperty(request, …) 同样失败关闭。
+  for (let item = Math.max(0, closedAt); item < tokens.length - 3; item++) {
+    if (tokens[item].type === 'identifier' && tokens[item].value === 'Object'
+      && tokens[item + 1]?.value === '.'
+      && ['assign', 'defineProperty'].includes(tokens[item + 2]?.value)
+      && tokens[item + 3]?.value === '('
+      && tokens[item + 4]?.type === 'identifier' && tokens[item + 4]?.value === 'request') {
+      postAssigned = true;
+    }
+  }
+  if (postAssigned) {
+    issues.push(`${rel}:1: request 构造后不得再赋值/更新覆盖 mode/validityMode/consent（CF-R2-11）`);
+  }
+  if (unsafe) {
+    issues.push(`${rel}:1: request 硬要求字段不得被同名 getter/method/重复字段覆盖或扩展（CF-R2-11）`);
+  }
   if (fields.get('consent')?.type !== 'identifier' || fields.get('consent')?.value !== 'true' || unsafe) {
     issues.push(`${rel}:1: 实际 request 构造必须直接 consent:true 且无重复、扩展或动态覆盖`);
   }

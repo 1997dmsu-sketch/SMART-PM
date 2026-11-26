@@ -48,7 +48,7 @@ def validate_archive(archive, destination):
         if ((entry.external_attr >> 16) & 0o170000) == 0o120000:
             raise SystemExit(f'Symlink is not a release input: {name}')
         if any(p.casefold() in ('node_modules', '.git', 'dist', 'deliveries', '.env', 'project.private.config.json', 'secrets.local.md')
-               or p.casefold().startswith('.env.') for p in parts):
+               or p.casefold().startswith('.env.') or p.casefold().endswith('.local.json') for p in parts):
             raise SystemExit(f'Forbidden delivery file: {name}')
 
 def validation_commands(checkout, checkin_face=False):
@@ -70,6 +70,7 @@ def validation_commands(checkout, checkin_face=False):
             'admin-web/tests/checkin-face-worker.test.mjs',
             'admin-web/tests/tenant-password-accounts.test.mjs',
             'admin-web/tests/tenant-auth-cloud-database.test.mjs',
+            'admin-web/tests/signed-lease-administration.test.mjs',
             'admin-web/tests/local-cloud-database.test.mjs',
             'admin-web/tests/tenant-password-routes.test.mjs',
             'admin-web/tests/qishanyuan-test-data.test.mjs',

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>已签合同与远程开门 · 管理工作台</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/signed-lease-access.js"></script>
+  </head>
+  <body>
+    <div class="main-wrap">
+      <header class="topbar"><div class="breadcrumb">管理控制台 <span>/ <b>已签合同与远程开门</b></span></div><a class="link" href="/">返回管理工作台</a></header>
+      <main class="workspace">
+        <div class="page-head"><div><h1>已签合同与远程开门</h1><p>录入已经完成签约的事实，自动建立本人在合同租期内的远程开门资格。</p></div></div>
+        <div class="notice">这里记录外部已确认的合同签署事实及其证据引用，不生成合同或代替法律签字。确认后无需租客再次申请或二次审批，人脸可之后补录，照片和支付状态不是资格前置条件。<br />建立资格不会发送开门命令。实际开门仍由服务端逐次核验当前合同、租期、房门绑定和配置；租期按北京时间起始日零点至末日结束计算。</div>
+        <section id="lease-login" class="panel" hidden><div class="panel-head"><h2>需要系统管理员登录</h2></div><p id="lease-login-message">请先在管理工作台登录。</p><a class="link" href="/">前往管理工作台</a></section>
+        <div id="lease-content" hidden>
+          <section class="panel"><div class="panel-head"><h2>读取当前记录与版本</h2></div>
+            <p class="muted">按类型和编号读取当前脱敏记录。核对后可手动复制版本与所需字段到下方原表单；读取不会自动填表、提交或启用开关。合同签署证据和 worker 凭据哈希不会显示。</p>
+            <form id="lease-record-form" autocomplete="off"><div class="form-grid">
+              <label class="field">记录类型<select id="lease-record-kind" required><option value="">请选择类型</option><option value="contract">合同</option><option value="binding">房门绑定</option><option value="worker">worker 身份</option><option value="program">服务配置</option><option value="task">开门任务</option></select></label>
+              <label class="field">记录编号<input id="lease-record-id" maxlength="256" /><small>服务配置为单一记录，编号可留空；其他类型须填对应编号。</small></label>
+            </div><div class="actions"><button class="btn" type="submit">读取当前记录</button></div></form>
+            <pre id="lease-record-result" aria-live="polite">尚未读取记录。</pre>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h2>录入已签合同</h2><button id="lease-reload" class="btn" type="button">刷新住户与房产</button></div>
+            <p class="muted">仅选择已完成本人微信手机号验证的住户。新合同版本填 0；更正已有合同须填写当前版本并再次核对签署证据，不能变更原住户或房产。</p>
+            <form id="lease-confirm" data-operation="confirm" autocomplete="off"><div class="form-grid">
+              <label class="field">合同编号<input name="contractId" maxlength="128" required /></label>
+              <label class="field">当前版本<input name="expectedRevision" type="number" min="0" step="1" required /></label>
+              <label class="field">已验证手机号住户<select name="userId" id="lease-resident" required><option value="">请选择住户</option></select></label>
+              <label class="field">合同房产<select name="houseId" id="lease-house" data-house-options required><option value="">请选择房产</option></select></label>
+              <label class="field">已配置的房门绑定编号<input name="doorBindingId" maxlength="128" required /></label>
+              <label class="field">租期开始日<input name="startDate" type="date" required /></label>
+              <label class="field">租期最后一日<input name="endDate" type="date" required /></label>
+              <label class="field full">已签署证据引用<input name="signedEvidenceRef" maxlength="256" required /><small>填写内部留存的已签合同证据编号或引用，不上传合同正文。</small></label>
+            </div><div class="actions"><button class="btn primary" type="submit">记录已签合同并建立租期资格</button></div></form>
+          </section>
+          <section class="panel"><div class="panel-head"><h2>撤销合同资格</h2></div>
+            <p class="muted">阻止新的开门授权及尚未执行的任务；已经发送到设备的指令不能承诺被物理撤回。</p>
+            <form id="lease-revoke" data-operation="revoke" autocomplete="off"><div class="form-grid">
+              <label class="field">合同编号<input name="contractId" maxlength="128" required /></label>
+              <label class="field">当前版本<input name="expectedRevision" type="number" min="1" step="1" required /></label>
+              <label class="field full">撤销原因<input name="reason" maxlength="256" required /></label>
+            </div><div class="actions"><button class="btn danger" type="submit">撤销租期资格</button></div></form>
+          </section>
+          <section class="panel"><div class="panel-head"><h2>本次服务端回执</h2></div><p class="muted">下方仅保留本页本次操作的确认回执，不是合同总表。请保存编号和版本以便核对；未收到回执时不要自动重试。</p><pre id="lease-receipt" aria-live="polite">尚无本次操作回执。</pre></section>
+          <details class="panel"><summary>远程开门服务配置（仅管理员）</summary>
+            <p class="notice">必须核对真实房产、设备型号、门号和本地受控 worker 后再启用。下方没有默认设备、租期或测试账号；操作只保存服务端配置，不连接设备。</p>
+            <form id="lease-program" data-operation="program" autocomplete="off"><h3>服务与派发开关</h3><div class="form-grid">
+              <label class="field">当前配置版本<input name="expectedRevision" type="number" min="0" step="1" required /></label>
+              <label class="field">远程开门服务<select name="enabled" required><option value="">请选择</option><option value="false">关闭</option><option value="true">开启</option></select></label>
+              <label class="field">worker 领取任务<select name="dispatchEnabled" required><option value="">请选择</option><option value="false">关闭派发</option><option value="true">开启派发</option></select></label>
+            </div><div class="actions"><button class="btn" type="submit">保存服务配置</button></div></form>
+            <form id="lease-binding" data-operation="binding" autocomplete="off"><h3>房产与海康房门绑定</h3><div class="form-grid">
+              <label class="field">绑定编号<input name="bindingId" maxlength="128" required /></label>
+              <label class="field">当前绑定版本<input name="expectedRevision" type="number" min="0" step="1" required /></label>
+              <label class="field">房产<select name="houseId" data-house-options required><option value="">请选择房产</option></select></label>
+              <label class="field">住户可见门名<input name="displayName" maxlength="128" required /></label>
+              <label class="field">服务端设备标识<input name="deviceKey" maxlength="128" required /></label>
+              <label class="field">设备门号<input name="doorNo" type="number" min="1" max="65535" step="1" required /></label>
+              <label class="field">已核验设备型号<input name="expectedModel" maxlength="128" required /></label>
+              <label class="field">绑定状态<select name="enabled" required><option value="">请选择</option><option value="false">停用</option><option value="true">启用</option></select></label>
+            </div><div class="actions"><button class="btn" type="submit">保存房门绑定</button></div></form>
+            <form id="lease-worker" data-operation="worker" autocomplete="off"><h3>受控 worker 身份</h3><div class="form-grid">
+              <label class="field">worker 编号<input name="workerId" maxlength="128" required /></label>
+              <label class="field">当前 worker 版本<input name="expectedRevision" type="number" min="0" step="1" required /></label>
+              <label class="field">服务端设备标识<input name="deviceKey" maxlength="128" required /></label>
+              <label class="field">凭据 SHA256<input name="tokenHash" id="lease-worker-hash" pattern="[a-f0-9]{64}" maxlength="64" autocomplete="off" required /><small>仅填写已另行设置的凭据哈希，不填写明文 token、设备密码或地址。</small></label>
+              <label class="field">worker 状态<select name="enabled" required><option value="">请选择</option><option value="false">停用</option><option value="true">启用</option></select></label>
+            </div><div class="actions"><button class="btn" type="submit">保存 worker 身份</button></div></form>
+          </details>
+          <section class="panel"><div class="panel-head"><h2>未知开门结果人工处置</h2></div><p class="muted">仅在人工核查后释放未知或执行超时任务的占用。本操作不会重发指令，也不表示现场已经开门。</p>
+            <form id="lease-resolve" data-operation="resolve-unknown" autocomplete="off"><div class="form-grid">
+              <label class="field">任务编号<input name="taskId" maxlength="256" required /></label>
+              <label class="field">当前任务版本<input name="expectedRevision" type="number" min="1" step="1" required /></label>
+              <label class="field full">人工核查与处置原因<input name="reason" maxlength="256" required /></label>
+            </div><div class="actions"><button class="btn" type="submit">记录人工处置（不重发）</button></div></form>
+          </section>
+        </div>
+        <p id="lease-message" class="notice" role="status" aria-live="polite" hidden></p>
+      </main>
+    </div>
+  </body>
+</html>

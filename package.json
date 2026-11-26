@@ -1,6 +1,6 @@
 {
   "name": "smart-pm",
-  "version": "0.1.0-beta.21-registration-checkin-source.1",
+  "version": "0.1.0-beta.22-signed-lease-remote-source.1",
   "private": true,
   "description": "宇宙物业智联小程序",
   "scripts": {
@@ -17,7 +17,9 @@
     "test:admin": "npm --prefix admin-web test",
     "worker:checkin-face": "node tools/checkin-face-worker/claim-and-enroll.mjs",
     "release:checkin-face": "python scripts/package-release.py --live --checkin-face",
-    "admin:qishanyuan": "node admin-web/qishanyuan-demo.mjs"
+    "admin:qishanyuan": "node admin-web/qishanyuan-demo.mjs",
+    "test:signed-remote": "node --require ./tests/support/d-network-guard.cjs --test tests/signed-lease-*.test.cjs tests/signed-remote-*.test.cjs admin-web/tests/signed-lease-administration.test.mjs",
+    "worker:signed-remote": "node tools/signed-remote-worker/claim-and-open.mjs"
   },
   "engines": {
     "node": ">=20"

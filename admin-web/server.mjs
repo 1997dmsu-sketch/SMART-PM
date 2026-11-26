@@ -10,6 +10,7 @@ import { LocalStore, CloudStore } from "./lib/store.mjs";
 import { LocalCloudDatabase } from "./lib/local-cloud-database.mjs";
 import { TenantAuthCloudDatabase } from "./lib/tenant-auth-cloud-database.mjs";
 import { AdminTenantPasswordAccounts } from "./lib/tenant-password-accounts.mjs";
+import { AdminSignedLeaseAccess } from "./lib/signed-lease-administration.mjs";
 import { resolvePublicFile } from "./lib/static-path.mjs";
 import { Accounts, publicAccount } from "./lib/auth.mjs";
 import { FaceEnrollmentService } from "./lib/face-enrollment.mjs";
@@ -92,6 +93,7 @@ export async function createApp({
   secure = false,
   faceServiceFactory = () => new FaceEnrollmentService(),
   checkinFaceTestConfigFactory = null,
+  signedLeaseAdministrationFactory = (options) => new AdminSignedLeaseAccess(options),
   serverFactory = http.createServer,
 } = {}) {
   if (!["demo", "live"].includes(mode))
@@ -292,6 +294,56 @@ export async function createApp({
             const code = publicCodes.has(error.code) ? error.code : "SERVICE_UNAVAILABLE";
             const status = code === "SERVICE_UNAVAILABLE" ? 503 : error.status || 400;
             return send({ code, error: "账号操作未获确认，请刷新列表核对" }, status);
+          }
+        }
+
+        if (path === "/api/signed-lease-access" || path.startsWith("/api/signed-lease-access/")) {
+          if (account.role !== "admin") fail("仅系统管理员可确认已签合同及维护远程开门资格", 403);
+          const operations = {
+            "/api/signed-lease-access/confirm": "confirmSignedLease",
+            "/api/signed-lease-access/revoke": "revokeLease",
+            "/api/signed-lease-access/program": "configureProgram",
+            "/api/signed-lease-access/binding": "setDoorBinding",
+            "/api/signed-lease-access/worker": "setWorker",
+            "/api/signed-lease-access/resolve-unknown": "resolveUnknown",
+          };
+          const readOptions = path === "/api/signed-lease-access/options" && method === "GET";
+          const readRecord = path === "/api/signed-lease-access/record" && method === "GET";
+          if (!readOptions && !readRecord && (method !== "POST" || !Object.hasOwn(operations, path))) fail("接口不存在", 404);
+          try {
+            const database = mode === "live"
+              ? new TenantAuthCloudDatabase(store.app?.database?.())
+              : new LocalCloudDatabase(store, audit("已签合同远程开门管理"));
+            if (readOptions) {
+              const residents = await new AdminTenantPasswordAccounts({ database })
+                .listVerifiedUsers({ id: account._id, role: "admin" });
+              const rooms = (await store.list("rooms")).map((room) => ({
+                houseId: room.houseId,
+                displayName: typeof room.name === "string" ? room.name : room.houseId,
+              }));
+              return send({ residents, rooms });
+            }
+            const service = signedLeaseAdministrationFactory({ database });
+            if (readRecord) {
+              if ([...url.searchParams.keys()].some((key) => !["kind", "id"].includes(key))
+                || url.searchParams.getAll("kind").length !== 1 || url.searchParams.getAll("id").length > 1) {
+                throw Object.assign(new Error("Invalid record query"), { code: "INVALID_INPUT", status: 400 });
+              }
+              return send(await service.getAdminRecord({ kind: "admin", id: account._id }, {
+                kind: url.searchParams.get("kind"),
+                ...(url.searchParams.has("id") ? { id: url.searchParams.get("id") } : {}),
+              }));
+            }
+            return send(await service[operations[path]]({ kind: "admin", id: account._id }, await body(req, 8192)));
+          } catch (error) {
+            const publicCodes = new Set(["ADMIN_REQUIRED", "INVALID_INPUT", "REQUEST_INVALID", "USER_NOT_VERIFIED",
+              "IDENTITY_UNVERIFIED", "REVISION_CONFLICT", "CONTRACT_NOT_FOUND", "CONTRACT_CONFLICT", "BINDING_NOT_FOUND",
+              "HOUSE_NOT_FOUND", "HOUSE_UNVERIFIED", "ROOM_NOT_FOUND", "ROOM_NOT_UNIQUE", "WORKER_NOT_FOUND", "TASK_NOT_FOUND",
+              "TASK_NOT_UNKNOWN", "ACCESS_UNVERIFIED", "ACCESS_LIMIT", "INVALID_STATE"]);
+            const code = publicCodes.has(error.code) ? error.code : "SERVICE_UNAVAILABLE";
+            const status = code === "SERVICE_UNAVAILABLE" ? 503
+              : [400, 403, 404, 409, 429].includes(error.status) ? error.status : 400;
+            return send({ code, error: "操作未获确认，请核对当前记录和版本；不会自动重试或发送开门命令" }, status);
           }
         }
 

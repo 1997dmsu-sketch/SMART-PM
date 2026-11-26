@@ -235,7 +235,12 @@ exports.main = async (event) => {
     // 2. 根据平台路由开门
     let result;
     const startTime = Date.now();
-    const platform = device.platform || 'ttlock';
+    const platform = device.platform === undefined ? 'ttlock' : device.platform;
+    // Hikvision has a separate signed-lease authorization and one-shot worker.
+    // Never let an unknown platform inherit legacy houses/public/admin access.
+    if (platform !== 'tuya' && platform !== 'ttlock') {
+      return { code: 403, msg: '该门禁必须通过已签租期的专用通道操作' };
+    }
 
     if (platform === 'tuya') {
       result = await tuyaUnlock(device);

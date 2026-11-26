@@ -1,0 +1,13 @@
+{
+  "description": "Per-collection client security rules to apply only under separately authorized deployment. Not applied by this change. Server SDK operations remain protected by service authorization.",
+  "collections": {
+    "signed_lease_contracts": { "read": false, "write": false },
+    "signed_lease_grants": { "read": false, "write": false },
+    "signed_lease_user_access": { "read": false, "write": false },
+    "remote_door_bindings": { "read": false, "write": false },
+    "remote_unlock_program": { "read": false, "write": false },
+    "remote_unlock_workers": { "read": false, "write": false },
+    "remote_unlock_tasks": { "read": false, "write": false },
+    "remote_unlock_audits": { "read": false, "write": false }
+  }
+}

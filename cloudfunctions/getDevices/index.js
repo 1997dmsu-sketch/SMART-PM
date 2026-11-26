@@ -47,7 +47,9 @@ exports.main = async (event) => {
     }
 
     // 格式化设备列表
-    const devices = devicesRes.data.map(dev => ({
+    // Signed-lease Hikvision doors are listed only by signedLeaseAccess.
+    const devices = devicesRes.data.filter(dev => dev.platform === undefined
+      || dev.platform === 'ttlock' || dev.platform === 'tuya').map(dev => ({
       deviceId: dev.deviceId,
       name: dev.deviceName,
       location: dev.location || '',

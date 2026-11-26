@@ -6,6 +6,7 @@ let profile = null;
 let authGeneration = 0;
 let activeLogin = null;
 const pendingUnlocks = new Set();
+const pendingSignedOpens = new Set();
 let demoConversations = clone(demo.conversations);
 function unsupported(message) { return Promise.reject(new Error(message)); }
 function loginRequired() {
@@ -239,17 +240,120 @@ async function listLocks() {
   const stamp=requireAuthenticated();
   const r=await privateCall('getDevices');
   assertSameLogin(stamp);
-  return (r.data.devices||[]).map(d=>Object.assign({},d,{id:d.deviceId,address:d.location,status:d.status}));
+  const legacy = (r.data.devices||[])
+    .filter(d => String(d.platform || '').toLowerCase() !== 'hikvision')
+    .map(d=>Object.assign({},d,{id:d.deviceId,address:d.location,status:d.status}));
+  if (!isSignedLeaseRemoteEnabled()) return legacy;
+  const signed = await listDoors();
+  assertSameLogin(stamp);
+  return legacy.concat(signed.doors.map(door => ({
+    ...door, id: `signed:${door.contractId}:${door.doorBindingId}`,
+    platform: 'hikvision', authorizationSource: 'signed_lease',
+    name: door.displayName, address: `租期 ${door.startDate} 至 ${door.endDate}`,
+    status: door.canOpen ? '租期内可用' : signedDoorReason(door.reason),
+  })));
 }
 async function unlockDevice(device) {
   if(isDemo())throw new Error('当前为设计演示，不会操作真实门锁');
   if(!config.allowDeviceOperations)throw new Error('真实开门尚未启用，请完成设备联调后开启');
   requireAuthenticated();
+  if (device && (String(device.platform || '').toLowerCase() === 'hikvision' || device.authorizationSource === 'signed_lease')) {
+    throw new Error('签约海康门禁须使用专属开门接口');
+  }
   const id=device&&device.deviceId;
   if(!id||String(id).startsWith('demo-'))throw new Error('无效门锁');
   if(pendingUnlocks.has(id))throw new Error('正在开门，请勿重复操作');
   pendingUnlocks.add(id);
   try {return await privateCall('unlock',{deviceId:id,method:'remote'});} finally {pendingUnlocks.delete(id);}
+}
+function isSignedLeaseRemoteEnabled() { return !isDemo() && config.signedLeaseRemoteEnabled === true; }
+function signedCalendarDate(value) {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  return year >= 1970 && month >= 1 && month <= 12 && day >= 1
+    && day <= [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+}
+function signedDoorReason(reason) {
+  const reasons = { READY: '租期内可用', PROGRAM_DISABLED: '服务暂未启用', LEASE_NOT_STARTED: '租期尚未开始',
+    LEASE_EXPIRED: '租期已结束', BINDING_DISABLED: '门禁暂不可用', ACCESS_REVOKED: '资格已撤销', ACCESS_UNVERIFIED: '资格待核验' };
+  return reasons[reason] || '门禁暂不可用';
+}
+function signedInput(name, input, fields) {
+  if (input === undefined) input = {};
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error(`[${name}] 入参必须是对象`);
+  const clean = {};
+  for (const key of Reflect.ownKeys(input)) {
+    const descriptor = Object.getOwnPropertyDescriptor(input, key);
+    if (typeof key !== 'string' || !fields.includes(key) || !descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      throw new Error(`[${name}] 不支持的字段`);
+    }
+    clean[key] = descriptor.value;
+  }
+  return clean;
+}
+function signedId(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 256 && !/[\s\x00-\x1f\x7f/\\]/.test(value);
+}
+function signedUnavailable() {
+  return Object.assign(new Error('签约门禁返回异常，请勿重复提交开门'), { code: 'SIGNED_REMOTE_RESPONSE_INVALID' });
+}
+function signedFeature() {
+  if (!isSignedLeaseRemoteEnabled()) throw Object.assign(new Error('签约门禁入口尚未启用'), { code: 'SIGNED_REMOTE_DISABLED' });
+}
+async function listDoors(input) {
+  signedInput('listDoors', input, []);
+  const stamp = requireAuthenticated();
+  if (!isSignedLeaseRemoteEnabled()) return { enabled: false, doors: [] };
+  const result = await privateCall('signedLeaseAccess', { action: 'listDoors' });
+  assertSameLogin(stamp);
+  const data = result.data;
+  if (!data || typeof data.enabled !== 'boolean' || !Array.isArray(data.doors)) throw signedUnavailable();
+  const doors = data.doors.map(door => {
+    if (!door || !signedId(door.contractId) || !signedId(door.doorBindingId) || !signedId(door.houseId)
+      || typeof door.displayName !== 'string' || !door.displayName || door.displayName.length > 200
+      || !signedCalendarDate(door.startDate) || !signedCalendarDate(door.endDate) || door.endDate < door.startDate
+      || !Number.isSafeInteger(door.validFrom) || !Number.isSafeInteger(door.validUntil) || door.validUntil <= door.validFrom
+      || typeof door.canOpen !== 'boolean' || typeof door.reason !== 'string') throw signedUnavailable();
+    const knownReason = ['READY', 'PROGRAM_DISABLED', 'LEASE_NOT_STARTED', 'LEASE_EXPIRED', 'BINDING_DISABLED', 'ACCESS_REVOKED', 'ACCESS_UNVERIFIED'].includes(door.reason);
+    return { contractId: door.contractId, doorBindingId: door.doorBindingId, displayName: door.displayName,
+      houseId: door.houseId, startDate: door.startDate, endDate: door.endDate, validFrom: door.validFrom, validUntil: door.validUntil,
+      canOpen: data.enabled && door.canOpen && knownReason && door.reason === 'READY', reason: knownReason ? door.reason : 'ACCESS_UNVERIFIED' };
+  });
+  return { enabled: data.enabled, doors };
+}
+const SIGNED_OPEN_STATUSES = ['queued', 'claimed', 'executing', 'unknown', 'failed', 'expired', 'denied', 'device_confirmed'];
+function signedOpenReceipt(data) {
+  if (!data || typeof data.taskId !== 'string' || !/^open_[a-f0-9]{64}$/.test(data.taskId)
+    || !SIGNED_OPEN_STATUSES.includes(data.status) || !Number.isSafeInteger(data.expiresAt)) throw signedUnavailable();
+  return { taskId: data.taskId, status: data.status, expiresAt: data.expiresAt };
+}
+async function requestOpen(input) {
+  const payload = signedInput('requestOpen', input, ['contractId', 'requestId']);
+  const stamp = requireAuthenticated();
+  signedFeature();
+  if (config.allowDeviceOperations !== true) throw Object.assign(new Error('真实开门尚未启用，请完成设备联调后开启'), { code: 'DEVICE_OPERATIONS_DISABLED' });
+  if (!signedId(payload.contractId) || typeof payload.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(payload.requestId)) throw new Error('[requestOpen] 请求标识无效');
+  if (pendingSignedOpens.has(payload.contractId)) throw Object.assign(new Error('正在提交，请勿重复操作'), { code: 'SIGNED_OPEN_PENDING' });
+  pendingSignedOpens.add(payload.contractId);
+  try {
+    const result = await privateCall('signedLeaseAccess', { action: 'requestOpen', contractId: payload.contractId, requestId: payload.requestId });
+    assertSameLogin(stamp);
+    return signedOpenReceipt(result.data);
+  } finally { pendingSignedOpens.delete(payload.contractId); }
+}
+async function getOpenResult(input) {
+  const payload = signedInput('getOpenResult', input, ['taskId']);
+  const stamp = requireAuthenticated();
+  signedFeature();
+  if (typeof payload.taskId !== 'string' || !/^open_[a-f0-9]{64}$/.test(payload.taskId)) throw new Error('[getOpenResult] 请求标识无效');
+  const result = await privateCall('signedLeaseAccess', { action: 'getOpenResult', taskId: payload.taskId });
+  assertSameLogin(stamp);
+  const receipt = signedOpenReceipt(result.data);
+  if (typeof result.data.message !== 'string' || result.data.message.length > 512 || typeof result.data.resolved !== 'boolean') throw signedUnavailable();
+  return { ...receipt, message: result.data.message, resolved: result.data.resolved };
 }
 async function listUnlockRecords() {
   if(isDemo())return clone(demo.records);
@@ -390,4 +494,4 @@ async function listMeters(type){
  if(isDemo())return Promise.resolve(type==='water'?[]:[clone(demo.meter)]);
  return unsupported('旧水电表接口尚未按住户房产过滤，完成权限对接后开放');
 }
-module.exports={isDemo,isAuthenticated,getLoginEpoch,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,loginWithPassword,cancelPasswordLogin,cancelPhoneLogin,logout,listFamily,addFamily,getProperty,listMeters,getCheckinFaceConfig,applyTestCheckin,uploadTestFace,createFaceTask,getFaceTask,isReviewChannelCode,REVIEW_CHANNEL_CODES};
+module.exports={isDemo,isAuthenticated,getLoginEpoch,listContent,listHouses,getHouse,listLocks,unlockDevice,listUnlockRecords,listDoors,requestOpen,getOpenResult,isSignedLeaseRemoteEnabled,listConversations,markRead,getMessages,sendMessage,getProfile,loginWithPhone,loginWithPassword,cancelPasswordLogin,cancelPhoneLogin,logout,listFamily,addFamily,getProperty,listMeters,getCheckinFaceConfig,applyTestCheckin,uploadTestFace,createFaceTask,getFaceTask,isReviewChannelCode,REVIEW_CHANNEL_CODES};

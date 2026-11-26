@@ -66,7 +66,7 @@ if (!Array.isArray(manifest?.files) || manifest.files.length === 0) {
 // ---------------------------------------------------------------------------
 // 2. 登记范围声明（C1：范围必须明确，范围外路径一律失败关闭）
 // ---------------------------------------------------------------------------
-const CLOUD_DIRS = ['cloudfunctions/checkinFaceTest', 'cloudfunctions/accountLogin'];
+const CLOUD_DIRS = ['cloudfunctions/checkinFaceTest', 'cloudfunctions/accountLogin', 'cloudfunctions/signedLeaseAccess'];
 const ALLOWED_LOCAL = [
   'package.json',
   'miniprogram/pages/checkin/',
@@ -122,6 +122,18 @@ const ALLOWED_LOCAL = [
   'tests/phone-login.test.cjs',
   'tests/frontend.test.cjs',
   'tools/checkin-face-worker/',
+  'tools/signed-remote-worker/',
+  'admin-web/lib/hikvision-door.mjs',
+  'admin-web/lib/signed-lease-administration.mjs',
+  'admin-web/public/signed-lease-access.html',
+  'admin-web/public/signed-lease-access.js',
+  'admin-web/tests/signed-lease-administration.test.mjs',
+  'tests/signed-lease-access-core.test.cjs',
+  'tests/signed-lease-frontend.test.cjs',
+  'tests/signed-lease-integration.test.cjs',
+  'tests/signed-remote-legacy-boundary.test.cjs',
+  'tests/signed-remote-worker.test.cjs',
+  'tests/signed-remote-deadline.test.cjs',
   'admin-web/lib/checkin-face-test-config.mjs',
   'admin-web/public/checkin-face-test.html',
   'admin-web/public/checkin-face-test-config.js',
@@ -242,11 +254,13 @@ for (const dir of CLOUD_DIRS) {
 // Cloud functions deploy independently. They must ship the same reviewed
 // identity coordinator locally, never require a sibling function at runtime.
 const authCore = readFileSync(join(ROOT, 'cloudfunctions/accountLogin/lib/identity-core.js'));
-for (const fn of ['login', 'phoneLogin', 'adminLogin']) {
+for (const fn of ['login', 'phoneLogin', 'adminLogin', 'signedLeaseAccess']) {
   const rel = `cloudfunctions/${fn}/lib/identity-core.js`;
   if (!existsAsAuthCore(rel) || !authCore.equals(readFileSync(join(ROOT, rel)))) fail(`${rel}: 登录身份协调器必须与 accountLogin 逐字节一致`);
 }
 function existsAsAuthCore(rel) { return existsSync(join(ROOT, rel)) && statSync(join(ROOT, rel)).isFile(); }
+const remoteProof = 'cloudfunctions/signedLeaseAccess/lib/phone-proof.js';
+if (!existsAsAuthCore(remoteProof) || !readFileSync(join(ROOT, remoteProof)).equals(readFileSync(join(ROOT, 'cloudfunctions/phoneLogin/lib/phone-proof.js')))) fail(`${remoteProof}: 独立部署的手机号证明helper必须与注册服务逐字节一致`);
 
 // ---------------------------------------------------------------------------
 // 4. 本地导入闭包：相对导入必须可解析；范围内的目标必须登记

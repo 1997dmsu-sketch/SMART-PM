@@ -21,8 +21,8 @@
   },
   "cloudfunctions/unlock/index.js": {
     "originalSha256": "9b4ca266b2472119d0765b8aa0624ad7955836805aadb34d95b601bd9cb707c0",
-    "sha256": "3b8e2623fbdf230e29e2a8f26bb119bcf8a9c8233b0bfb13c49122467b609cb3",
-    "reason": "2026-11-25 安全修正：空 OPENID 不再进入测试模式放行，身份缺失一律拒绝；权限判定与开门逻辑不变。"
+    "sha256": "bb456e051e2754b75da3f19354201a5f9ef98872088b0a9f0d28f3c8cc13814a",
+    "reason": "2026-11-26 保留既有空OPENID拒绝；明确只路由TTLock/Tuya，海康及未知平台禁止通过旧houses/public/admin路径回落开门，转由独立签约租期服务。"
   },
   "cloudfunctions/getLockKey/index.js": {
     "originalSha256": "7bba3a7bea597eb796455ba2b50b0227b39f6ba46734eaa09ac6c13c4ac77e40",
@@ -38,5 +38,10 @@
     "originalSha256": "25a22cf8a47d1601184a4ceaccab5e32ea9083c6d786643276d0d0e1c55885ac",
     "sha256": "4824216442eb3f2ddac75b072d37846b043e8edd61d9a1bb8e528700d51b0080",
     "reason": "2026-11-25 修正手机号注册功能说明：不再声称自动回填房产；依赖及版本保持不变。"
+  },
+  "cloudfunctions/getDevices/index.js": {
+    "originalSha256": "20f50a1e83a383ea56705131fa00cb7fc2da5c6a021910a9a31fe4ac12e4bb20",
+    "sha256": "c3467c2e0c22f224ab46a98246ed08bf3f1c10f415fcce17223d65f83fccfb21",
+    "reason": "2026-11-26 旧房屋/public/admin列表排除海康及未知平台；海康只由独立signedLeaseAccess可信合同租期资格列出，注册不额外授权。"
   }
 }

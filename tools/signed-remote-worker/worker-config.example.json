@@ -1,0 +1,19 @@
+{
+  "workerId": "",
+  "workerTokenEnv": "SIGNED_REMOTE_WORKER_TOKEN",
+  "cloudEnv": "",
+  "functionName": "signedLeaseAccess",
+  "deviceKey": "",
+  "expectedModel": "",
+  "allowedDoorNos": [],
+  "sdkModulePath": "",
+  "cloudSecretIdEnv": "TENCENTCLOUD_SECRETID",
+  "cloudSecretKeyEnv": "TENCENTCLOUD_SECRETKEY",
+  "device": {
+    "origin": "",
+    "usernameEnv": "SIGNED_REMOTE_DEVICE_USERNAME",
+    "passwordEnv": "SIGNED_REMOTE_DEVICE_PASSWORD",
+    "certificatePath": "",
+    "developmentTls": false
+  }
+}

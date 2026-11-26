@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0-beta.21-registration-checkin-source.1",
-  "channel": "源码回归候选：注册及测试入住人脸；签约自动远程开门未实现",
+  "version": "0.1.0-beta.22-signed-lease-remote-source.1",
+  "channel": "签约租期海康远程开门源码候选；未部署或设备验收",
   "releaseDate": "2026-11-26"
 }

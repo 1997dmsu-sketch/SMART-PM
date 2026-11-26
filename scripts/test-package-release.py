@@ -43,6 +43,7 @@ class ArchiveSafety(unittest.TestCase):
                      'SMART-PM/.ENV', 'SMART-PM/.ENV.PRODUCTION',
                      'SMART-PM/project.private.config.json', 'SMART-PM/node_modules/sdk/index.js',
                      'SMART-PM/dist/old.zip', 'SMART-PM/deliveries/old.zip',
+                     'SMART-PM/tools/signed-remote-worker/worker.local.json',
                      'SMART-PM/.git/config', 'SMART-PM/secrets.local.md'):
             with self.subTest(name=name), self.assertRaises(SystemExit):
                 self.check_entry(name)

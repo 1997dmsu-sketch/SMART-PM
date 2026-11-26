@@ -16,3 +16,8 @@ admin-web/test-results/
 tools/checkin-face-worker/*.local.json
 tools/checkin-face-worker/.data/
 tools/checkin-face-worker/.cache/
+
+# Signed-lease remote worker: local-only device/cloud material, never deliver.
+tools/signed-remote-worker/*.local.json
+tools/signed-remote-worker/.data/
+tools/signed-remote-worker/.cache/

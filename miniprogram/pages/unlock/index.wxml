@@ -19,15 +19,21 @@
   </view>
 
   <view class="unlock-content">
+    <view wx:if="{{signedRemoteEnabled}}" class="status-card signed-lease-note">管理员确认已签合同后，系统按合同房屋和租期自动开通远程开门资格；无需另行申请，人脸照片可后补。</view>
+    <view wx:if="{{signedOpen}}" class="status-card signed-open-result" role="status">
+      <text class="signed-result-title">{{signedOpen.label}}</text>
+      <text>{{signedOpen.hint}}</text>
+      <button wx:if="{{signedOpen.taskId}}" class="retry-button" bindtap="querySignedOpen" loading="{{signedResultLoading}}" disabled="{{signedResultLoading}}">查询本次开门结果</button>
+    </view>
     <view class="section-heading"><text>我的门锁</text><text class="connection-state"><text class="connection-dot">•</text>{{demo ? '演示设备' : '远程开门'}}</text></view>
     <view wx:if="{{loading && !locks.length}}" class="status-card">正在加载门锁…</view>
     <view wx:elif="{{error}}" class="status-card"><text>{{error}}</text><button class="retry-button" bindtap="refresh">重新加载</button></view>
-    <view wx:elif="{{!locks.length}}" class="status-card">暂无已授权门锁，请联系物业绑定房屋。</view>
+    <view wx:elif="{{!locks.length}}" class="status-card">{{signedRemoteEnabled ? '暂无可用合同门禁，请联系物业核对已签合同与租期。' : '暂无已授权门锁，请联系物业绑定房屋。'}}</view>
     <view wx:else class="lock-card">
       <view class="lock-row" wx:for="{{locks}}" wx:key="id">
         <image class="lock-icon" src="/assets/unlock-lock.png" />
-        <view class="lock-info"><view class="lock-name"><text>{{item.name}}</text><text wx:if="{{item.nfc}}" class="lock-tag">NFC</text></view><text class="lock-address">{{item.address || '房屋地址待完善'}}</text></view>
-        <button class="open-button" bindtap="onUnlock" data-id="{{item.id}}" loading="{{pendingId === '' + item.id}}" disabled="{{!!pendingId || confirming}}">{{pendingId === '' + item.id ? '' : '开门'}}</button>
+        <view class="lock-info"><view class="lock-name"><text>{{item.name}}</text><text wx:if="{{item.nfc}}" class="lock-tag">NFC</text><text wx:if="{{item.authorizationSource === 'signed_lease'}}" class="lock-tag">签约门禁</text></view><text class="lock-address">{{item.address || '房屋地址待完善'}}</text><text wx:if="{{item.authorizationSource === 'signed_lease'}}" class="lock-address">{{item.status}}</text></view>
+        <button class="open-button" bindtap="onUnlock" data-id="{{item.id}}" loading="{{pendingId === '' + item.id}}" disabled="{{!!pendingId || confirming || (item.authorizationSource === 'signed_lease' && !item.canOpen)}}">{{pendingId === '' + item.id ? '' : '开门'}}</button>
       </view>
     </view>
 

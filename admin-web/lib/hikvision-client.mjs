@@ -34,15 +34,17 @@ class PinnedAgent extends https.Agent {
   #port;
   #pin;
   #developmentTls;
+  #absoluteDeadline;
   #sockets = new Set();
   #closed = false;
 
-  constructor({ hostname, port, pin, developmentTls }) {
+  constructor({ hostname, port, pin, developmentTls, absoluteDeadline }) {
     super({ keepAlive: false, maxSockets: 1 });
     this.#hostname = hostname;
     this.#port = port;
     this.#pin = pin;
     this.#developmentTls = developmentTls;
+    this.#absoluteDeadline = absoluteDeadline;
   }
 
   createConnection(_options, callback) {
@@ -50,6 +52,12 @@ class PinnedAgent extends https.Agent {
     let socket;
     const finish = (error) => {
       if (completed) return;
+      // Relative timers can run late while the event loop is occupied. Even a
+      // correctly pinned socket must not release queued HTTP bytes after this
+      // task's absolute authorization deadline.
+      if (!error && this.#absoluteDeadline !== undefined && Date.now() >= this.#absoluteDeadline) {
+        error = failure('HIKVISION_TIMEOUT', 'Hikvision request timed out.');
+      }
       completed = true;
       if (error) {
         socket?.destroy();
@@ -60,6 +68,10 @@ class PinnedAgent extends https.Agent {
     };
     if (this.#closed) {
       finish(transportError());
+      return;
+    }
+    if (this.#absoluteDeadline !== undefined && Date.now() >= this.#absoluteDeadline) {
+      finish(failure('HIKVISION_TIMEOUT', 'Hikvision request timed out.'));
       return;
     }
     try {
@@ -205,15 +217,17 @@ export class HikvisionClient {
   #agent;
   #timeoutMs;
   #maxResponseBytes;
+  #absoluteDeadline;
   #requests = new Set();
   #closed = false;
 
   constructor(config) {
     try {
       if (!config || typeof config !== 'object') throw configurationError();
-      const { origin, username, password, certificate, certificateBase64, developmentTls = false, timeoutMs = 5000, maxResponseBytes = 1048576 } = config;
+      const { origin, username, password, certificate, certificateBase64, developmentTls = false, timeoutMs = 5000, maxResponseBytes = 1048576, absoluteDeadline } = config;
       if (typeof origin !== 'string' || typeof username !== 'string' || !username || /[:\x00-\x1f\x7f]/.test(username) || typeof password !== 'string' || typeof developmentTls !== 'boolean') throw configurationError();
       if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2147483647 || !Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1) throw configurationError();
+      if (absoluteDeadline !== undefined && (!Number.isSafeInteger(absoluteDeadline) || absoluteDeadline <= 0)) throw configurationError();
       const parsed = new URL(origin);
       if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) throw configurationError();
       if ((certificate !== undefined) === (certificateBase64 !== undefined)) throw configurationError();
@@ -231,7 +245,8 @@ export class HikvisionClient {
       this.#password = password;
       this.#timeoutMs = timeoutMs;
       this.#maxResponseBytes = maxResponseBytes;
-      this.#agent = new PinnedAgent({ hostname: parsed.hostname.replace(/^\[|\]$/g, ''), port: Number(parsed.port || 443), pin, developmentTls });
+      this.#absoluteDeadline = absoluteDeadline;
+      this.#agent = new PinnedAgent({ hostname: parsed.hostname.replace(/^\[|\]$/g, ''), port: Number(parsed.port || 443), pin, developmentTls, absoluteDeadline });
     } catch {
       throw configurationError();
     }
@@ -244,7 +259,8 @@ export class HikvisionClient {
     if (contentType !== undefined && (typeof contentType !== 'string' || !contentType || /[\x00-\x1f\x7f-\uffff]/.test(contentType))) throw failure('HIKVISION_REQUEST', 'Invalid Hikvision content type.');
     const bytes = body === undefined ? undefined : Buffer.from(body);
     const verb = method.toUpperCase();
-    const deadline = Date.now() + this.#timeoutMs;
+    const relativeDeadline = Date.now() + this.#timeoutMs;
+    const deadline = this.#absoluteDeadline === undefined ? relativeDeadline : Math.min(relativeDeadline, this.#absoluteDeadline);
     const initial = await this.#send({ method: verb, path, body: bytes, contentType, deadline });
     if (initial.status !== 401) return initial;
     const challenge = parseChallenge(initial.headers['www-authenticate']);
@@ -270,8 +286,9 @@ export class HikvisionClient {
           reject(error);
         } else resolve(result);
       };
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
+      const currentTime = Date.now();
+      const remaining = deadline - currentTime;
+      if (remaining <= 0 || (this.#absoluteDeadline !== undefined && currentTime >= this.#absoluteDeadline)) {
         finish(failure('HIKVISION_TIMEOUT', 'Hikvision request timed out.'));
         return;
       }
@@ -314,7 +331,12 @@ export class HikvisionClient {
           else if (error?.code === 'HIKVISION_TIMEOUT') finish(failure('HIKVISION_TIMEOUT', 'Hikvision request timed out.'));
           else finish(transportError());
         });
-        timer = setTimeout(() => finish(failure('HIKVISION_TIMEOUT', 'Hikvision request timed out.')), remaining);
+        const writeRemaining = this.#absoluteDeadline === undefined ? remaining : Math.min(remaining, this.#absoluteDeadline - Date.now());
+        if (writeRemaining <= 0) {
+          finish(failure('HIKVISION_TIMEOUT', 'Hikvision request timed out.'));
+          return;
+        }
+        timer = setTimeout(() => finish(failure('HIKVISION_TIMEOUT', 'Hikvision request timed out.')), writeRemaining);
         request.end(body);
       } catch {
         finish(transportError());

@@ -1,0 +1,7 @@
+{
+  "description": "Deployment proposal only; no live index was created. Verify limits and index definitions in the selected CloudBase environment before enabling dispatch.",
+  "indexes": [
+    { "collection": "remote_unlock_tasks", "fields": [ { "name": "deviceKey", "direction": "asc" }, { "name": "status", "direction": "asc" }, { "name": "createdAt", "direction": "asc" } ], "unique": false },
+    { "collection": "rooms", "fields": [ { "name": "houseId", "direction": "asc" } ], "unique": false }
+  ]
+}

@@ -2,7 +2,7 @@
   "schema": "checkin-face-experience-source-hashes/v1",
   "baselineCommit": "9ddc92488f97b2585d5034d7a2fb9f5b8587907b",
   "branch": "test/phone-checkin-source-candidate-2026-11-26",
-  "registrationReason": "2026-11-26 source-regression candidate: retain reviewed phone-registration code; reuse 750809c static/network guards; tighten tenant-password transient-input/clear exceptions to complete approved lines with real-checker negative controls; adapt VM-only preload cleanup to both --require syntaxes; add management SDK adapter to extracted-source validation. Signed-contract automatic Hikvision remote opening is NOT implemented; no deployment, platform upload, device operations or full-flow acceptance.",
+  "registrationReason": "2026-11-26 source-regression candidate: retain reviewed phone-registration code; reuse 750809c static/network guards; tighten tenant-password transient-input/clear exceptions to complete approved lines with real-checker negative controls; adapt VM-only preload cleanup to both --require syntaxes; add management SDK adapter to extracted-source validation. Exclude historical deliveries from the new source archive, retaining original Git history. Signed-contract automatic Hikvision remote opening is NOT implemented; no deployment, platform upload, device operations or full-flow acceptance.",
   "baselineSha256Note": "baselineSha256 一律为 null：本清单不登记旧上游原件（旧来源校验由 docs/backend-provenance.json 承担），null 表示“无旧上游登记”，不是未检查；不虚构 originalSha256。原有 10 条条目语义保持不变（仅 sha256 按当前磁盘/契约内容复算，purpose 随实现更新）。",
   "files": [
     {
@@ -847,13 +847,13 @@
     },
     {
       "path": "scripts/package-release.py",
-      "sha256": "3dbf37c946a77becef0799889e1fdcc257f316fd95da3d18e8e342684c32d703",
+      "sha256": "b994d44a8aa7839439a273581d32412e2da30c6a619220ec6ea683ff2ce8f44f",
       "purpose": "Codex R2: explicit release gates, safe offline packaging, or immutable archive correction; see CODEX-R2-PACKAGE-NOTES-2026-11-24.md.",
       "baselineSha256": null
     },
     {
       "path": "scripts/test-package-release.py",
-      "sha256": "21f7ef205f865bc219f5db6ce5c6d506d18a26ccb7248157a938f3cfc447eb0b",
+      "sha256": "476f8021fdcc1aaa42f17d83443630eefa54700117095d1d8c28251654aa45ae",
       "purpose": "Codex R2: explicit release gates, safe offline packaging, or immutable archive correction; see CODEX-R2-PACKAGE-NOTES-2026-11-24.md.",
       "baselineSha256": null
     },

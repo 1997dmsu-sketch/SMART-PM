@@ -42,7 +42,8 @@ class ArchiveSafety(unittest.TestCase):
         for name in ('SMART-PM/.env', 'SMART-PM/.env.production', 'SMART-PM/.env.example',
                      'SMART-PM/.ENV', 'SMART-PM/.ENV.PRODUCTION',
                      'SMART-PM/project.private.config.json', 'SMART-PM/node_modules/sdk/index.js',
-                     'SMART-PM/dist/old.zip', 'SMART-PM/.git/config', 'SMART-PM/secrets.local.md'):
+                     'SMART-PM/dist/old.zip', 'SMART-PM/deliveries/old.zip',
+                     'SMART-PM/.git/config', 'SMART-PM/secrets.local.md'):
             with self.subTest(name=name), self.assertRaises(SystemExit):
                 self.check_entry(name)
         with self.assertRaises(SystemExit):
@@ -78,7 +79,10 @@ class ArchiveSafety(unittest.TestCase):
                     status = 0 if command[1] == 'scripts/checkin-face-static-check.mjs' else 1
                     return release.subprocess.CompletedProcess(command, status, stdout='synthetic gate result\n')
                 def output(command, **kwargs):
-                    return payload.getvalue() if command[:2] == ['git', 'archive'] else runtime
+                    if command[:2] == ['git', 'archive']:
+                        self.assertEqual(command[-3:], ['--', '.', ':(exclude)deliveries'])
+                        return payload.getvalue()
+                    return runtime
                 argv = ['package-release.py', '--live'] + (['--checkin-face'] if scoped else [])
                 with self.subTest(scoped=scoped), \
                         patch.object(release, 'ROOT', checkout), \

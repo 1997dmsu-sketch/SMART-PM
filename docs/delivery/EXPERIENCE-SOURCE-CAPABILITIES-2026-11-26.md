@@ -10,6 +10,7 @@
 - 从已接受的 `750809c545f4b83a0ab12193310314efff8fcc9e` 复用以下五个静态/网络验证文件：`scripts/checkin-face-static-check.mjs`、`tests/checkin-face-qa-gates.test.cjs`、`tests/support/d-network-guard.cjs`、`tests/support/d-network-fakes.cjs`、`tests/support/r2-vm-scenario.cjs`。其中守卫、fake注入器、VM场景三个文件保持该对象原字节。QA用例只补正独立子进程的 preload 环境清理，同时兼容 `--require="path"` 与打包器使用的 `--require "path"`，之后仍先装安全 fake 再装守卫；不删除或放宽正负控断言。静态检查器保留 750809c 的 request 构造硬门禁，并保留 9dd 的租客密码瞬态输入/清空边界，进一步收紧为完整已审查源码行白名单，避免把空字符串前缀后的非空表达式误放行，也不把正常租客密码输入误判为设备凭据。该组合需本次重新验证，不冒充已有组合验收；不使接收分支成为该提交的后代，也不重开已关闭的 CF11/CF12。
 - 密码静态门禁新增五项调用真实检查器的变异负控，覆盖空字符串拼接、方法调用、逻辑表达式、同一行追加赋值及直接函数调用。修正前实测漏检四项并使回归失败；修正后定向 7/7 通过。该证据限静态规则，不宣称完整秘密扫描。
 - 解压源码验证 profile 补入 `admin-web/tests/tenant-auth-cloud-database.test.mjs`；该文件已存在于起点，只是以前未被打包 profile 列入。
+- 新归档排除仓库内历史 `deliveries/`（含旧ZIP、旧清单及已失效的开户码操作说明）；Git历史原件保留，不嵌套到本候选。归档校验同时拒绝该目录，manifest明确记录排除范围。其余保留的历史文档不替代本范围说明及最新需求决策。
 - 不混用后续分叉发布头 `6a72cbe0a83bc7d6122aa6c5a0282974eca5eb8d`。该对象与注册验收对象不是包含关系，其新改动未因本次打包得到内容验收。
 - 本次不修改手机号/账号、入住云函数、worker、门禁 provider 等生产业务实现。仅更新版本、验证来源、打包测试清单和本范围说明。
 

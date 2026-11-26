@@ -47,7 +47,7 @@ def validate_archive(archive, destination):
             raise SystemExit(f'Unsafe archive path: {name}')
         if ((entry.external_attr >> 16) & 0o170000) == 0o120000:
             raise SystemExit(f'Symlink is not a release input: {name}')
-        if any(p.casefold() in ('node_modules', '.git', 'dist', '.env', 'project.private.config.json', 'secrets.local.md')
+        if any(p.casefold() in ('node_modules', '.git', 'dist', 'deliveries', '.env', 'project.private.config.json', 'secrets.local.md')
                or p.casefold().startswith('.env.') for p in parts):
             raise SystemExit(f'Forbidden delivery file: {name}')
 
@@ -112,7 +112,9 @@ def main():
     name = f'SMART-PM-v{version}'
     if args.checkin_face:
         name += f'-{commit[:8]}-checkin-face-test'
-    payload = subprocess.check_output(['git', 'archive', '--format=zip', '--prefix=SMART-PM/', 'HEAD'], cwd=ROOT)
+    # Historical delivery ZIPs/reports stay in Git, never nest them into a new candidate.
+    payload = subprocess.check_output(['git', 'archive', '--format=zip', '--prefix=SMART-PM/',
+                                       'HEAD', '--', '.', ':(exclude)deliveries'], cwd=ROOT)
     report = []
     with zipfile.ZipFile(io.BytesIO(payload)) as archive, tempfile.TemporaryDirectory(prefix='smart-pm-release-') as tmp:
         validate_archive(archive, tmp)
@@ -158,6 +160,7 @@ def main():
         'platform_upload': 'not_performed',
         'cloud_deployment': 'not_performed',
         'artifact': archive_path.name, 'bytes': len(payload), 'sha256': checksum,
+        'excluded_source_paths': ['deliveries/'],
         'validated': (['extracted-source root synthetic tests', 'focused check-in/cloud/worker synthetic tests',
                        'static miniprogram checks', 'mandatory check-in source and request gates', 'archive safety tests']
                       if args.checkin_face else

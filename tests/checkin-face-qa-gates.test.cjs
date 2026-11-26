@@ -944,7 +944,10 @@ const R2_EXPECTED_LABELS = [
 function r2CleanedEnv() {
   const env = { ...process.env };
   const opts = String(env.NODE_OPTIONS || '')
-    .replace(/--require="?[^"\s]*(?:d-network-guard|d-network-fakes)\.cjs"?/g, '')
+    // The packager uses --require "path", while the guard also appends
+    // --require="path". Remove only these known guard/fake preloads before
+    // installing the safe fake targets FIRST in this isolated child.
+    .replace(/(?:^|\s)--require(?:=|\s+)(?:"[^"\n]*(?:d-network-guard|d-network-fakes)\.cjs"|[^\s"]*(?:d-network-guard|d-network-fakes)\.cjs)(?=\s|$)/g, ' ')
     .replace(/\s{2,}/g, ' ')
     .trim();
   if (opts) env.NODE_OPTIONS = opts;

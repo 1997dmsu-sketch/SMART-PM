@@ -7,7 +7,7 @@
 ## 本次源码组成
 
 - 生产功能代码起点：`9ddc92488f97b2585d5034d7a2fb9f5b8587907b`，保留其手机号可信注册、身份关联及管理 SDK adapter 修复。
-- 从已接受的 `750809c545f4b83a0ab12193310314efff8fcc9e` 复用以下五个静态/网络验证文件：`scripts/checkin-face-static-check.mjs`、`tests/checkin-face-qa-gates.test.cjs`、`tests/support/d-network-guard.cjs`、`tests/support/d-network-fakes.cjs`、`tests/support/r2-vm-scenario.cjs`。其中四个测试/守卫文件保持该对象原字节；静态检查器保留 750809c 的 request 构造硬门禁，并接入 9dd 已复审的租客密码瞬态输入/清空精确白名单，避免把租客密码输入误判为设备凭据。该组合需本次重新验证，不冒充已有组合验收；不使接收分支成为该提交的后代，也不重开已关闭的 CF11/CF12。
+- 从已接受的 `750809c545f4b83a0ab12193310314efff8fcc9e` 复用以下五个静态/网络验证文件：`scripts/checkin-face-static-check.mjs`、`tests/checkin-face-qa-gates.test.cjs`、`tests/support/d-network-guard.cjs`、`tests/support/d-network-fakes.cjs`、`tests/support/r2-vm-scenario.cjs`。其中守卫、fake注入器、VM场景三个文件保持该对象原字节。QA用例只补正独立子进程的 preload 环境清理，同时兼容 `--require="path"` 与打包器使用的 `--require "path"`，之后仍先装安全 fake 再装守卫；不删除或放宽正负控断言。静态检查器保留 750809c 的 request 构造硬门禁，并接入 9dd 已复审的租客密码瞬态输入/清空精确白名单，避免把租客密码输入误判为设备凭据。该组合需本次重新验证，不冒充已有组合验收；不使接收分支成为该提交的后代，也不重开已关闭的 CF11/CF12。
 - 解压源码验证 profile 补入 `admin-web/tests/tenant-auth-cloud-database.test.mjs`；该文件已存在于起点，只是以前未被打包 profile 列入。
 - 不混用后续分叉发布头 `6a72cbe0a83bc7d6122aa6c5a0282974eca5eb8d`。该对象与注册验收对象不是包含关系，其新改动未因本次打包得到内容验收。
 - 本次不修改手机号/账号、入住云函数、worker、门禁 provider 等生产业务实现。仅更新版本、验证来源、打包测试清单和本范围说明。

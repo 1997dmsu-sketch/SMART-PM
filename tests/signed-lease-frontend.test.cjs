@@ -294,3 +294,158 @@ test('cancelled modal callbacks cannot release or execute a newer confirmation o
   await second.success({ confirm: true });
   assert.equal(f.calls.request.length, 1); assert.equal(f.page.data.signedOpen.taskId, TASK_ID);
 });
+
+function deferredReceipt() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+async function accountSwitchFixture(source, phase) {
+  const cloud = actualAPI();
+  let account = 'A';
+  const events = { opens: [], queries: [] };
+  const oldReceipt = deferredReceipt(), oldStarted = deferredReceipt();
+  const newReceipt = deferredReceipt(), newStarted = deferredReceipt();
+  const newQueryReceipt = deferredReceipt(), newQueryStarted = deferredReceipt();
+  const newViewReceipt = deferredReceipt(), newViewStarted = deferredReceipt(), newRecordsReceipt = deferredReceipt();
+  const taskIds = { A: TASK_ID, B: 'open_' + 'b'.repeat(64) };
+  const receipt = (owner, status = 'queued') => ({ taskId: taskIds[owner], status, expiresAt: 123456, resolved: false, message: `Synthetic ${owner} result` });
+  const door = owner => ({ ...DOOR, contractId: `synthetic-contract-${owner}`, doorBindingId: `synthetic-binding-${owner}`,
+    houseId: `synthetic-house-${owner}`, displayName: `Synthetic ${owner} door` });
+  cloud.reply(async request => {
+    const owner = account;
+    let data;
+    if (request.name === 'phoneLogin') return { result: { code: 0, userInfo: { ...USER, _id: `synthetic-user-${owner}` } } };
+    if (request.name === 'getDevices') data = { devices: [] };
+    else if (request.name === 'unlockRecords') {
+      if (owner === 'B' && phase === 'refreshing') return newRecordsReceipt.promise;
+      data = { records: [{ id: `record-${owner}`, doorName: `Synthetic ${owner} door`, success: false, time: 'synthetic' }] };
+    } else if (request.data.action === 'listDoors') {
+      if (owner === 'B' && phase === 'refreshing') { newViewStarted.resolve(); return newViewReceipt.promise; }
+      data = { enabled: true, doors: [door(owner)] };
+    }
+    else if (request.data.action === 'requestOpen') {
+      events.opens.push({ owner, data: plain(request.data) });
+      if (owner === 'A' && source === 'request') { oldStarted.resolve(); return oldReceipt.promise; }
+      if (owner === 'B' && phase === 'requesting') { newStarted.resolve(); return newReceipt.promise; }
+      data = receipt(owner);
+    } else if (request.data.action === 'getOpenResult') {
+      events.queries.push({ owner, data: plain(request.data) });
+      if (owner === 'A') { oldStarted.resolve(); return oldReceipt.promise; }
+      newQueryStarted.resolve(); return newQueryReceipt.promise;
+    } else throw new Error('unexpected synthetic cloud action');
+    return { result: { code: 0, data } };
+  });
+  const f = pageFixture({ ...cloud.api });
+  const login = async (owner) => { account = owner; await cloud.api.loginWithPhone(`synthetic-authorization-${owner}`); };
+  const modal = async () => {
+    await f.page.requestUnlock(f.page.data.locks[0]);
+    return f.calls.modals.filter(item => item.title === '确认远程开门').at(-1);
+  };
+  await login('A'); await f.page.onLoad({});
+  const first = await modal();
+  let oldWork = first.success({ confirm: true });
+  if (source === 'query') { await oldWork; oldWork = f.page.querySignedOpen(); }
+  await oldStarted.promise;
+  return { ...f, cloud, events, login, modal, oldWork, oldReceipt, taskIds, receipt, door,
+    newReceipt, newStarted, newQueryReceipt, newQueryStarted, newViewReceipt, newViewStarted, newRecordsReceipt };
+}
+
+for (const source of ['request', 'query']) {
+  for (const outcome of ['success', 'failure']) {
+    for (const phase of ['confirming', 'requesting']) {
+      test(`C-01 stale A ${source} ${outcome} cannot clear B ${phase} owner or private view`, async () => {
+        const f = await accountSwitchFixture(source, phase);
+        f.cloud.api.logout(); await f.login('B'); await f.page.onShow();
+        const confirmation = await f.modal();
+        let newWork;
+        if (phase === 'requesting') { newWork = confirmation.success({ confirm: true }); await f.newStarted.promise; }
+        const owner = f.page._unlockOperation, version = f.page._viewVersion;
+        const before = plain({ locks: f.page.data.locks, records: f.page.data.records, signedOpen: f.page.data.signedOpen,
+          pendingId: f.page.data.pendingId, confirming: f.page.data.confirming });
+        try {
+          if (outcome === 'success') f.oldReceipt.resolve({ result: { code: 0, data: f.receipt('A', 'device_confirmed') } });
+          else f.oldReceipt.reject(new Error('synthetic old A transport rejection'));
+          await f.oldWork;
+          assert.equal(f.page._unlockOperation, owner, 'late A callback must preserve B operation identity');
+          assert.equal(f.page._viewVersion, version, 'late A callback must not advance B view generation');
+          assert.deepEqual(plain({ locks: f.page.data.locks, records: f.page.data.records, signedOpen: f.page.data.signedOpen,
+            pendingId: f.page.data.pendingId, confirming: f.page.data.confirming }), before);
+          if (phase === 'confirming') newWork = confirmation.success({ confirm: true });
+        } finally {
+          f.newReceipt.resolve({ result: { code: 0, data: f.receipt('B') } });
+          if (newWork) await newWork;
+        }
+        assert.equal(f.events.opens.filter(event => event.owner === 'B').length, 1, 'one explicit B confirmation sends once');
+        assert.equal(f.page.data.signedOpen.taskId, f.taskIds.B);
+        assert.equal(f.page.data.signedOpen.contractId, 'synthetic-contract-B');
+        assert.equal(JSON.stringify(f.page.data).includes('synthetic-contract-A'), false);
+      });
+    }
+  }
+}
+
+for (const source of ['request', 'query']) {
+  test(`C-01 B refresh clears old A data before claiming the view while ${source} receipt is pending`, async () => {
+    const f = await accountSwitchFixture(source, 'refreshing');
+    f.cloud.api.logout(); await f.login('B');
+    const refreshing = f.page.refresh(); await f.newViewStarted.promise;
+    try {
+      assert.deepEqual(plain(f.page.data.locks), [], 'new login must remove old locks before awaiting its own list');
+      assert.deepEqual(plain(f.page.data.records), [], 'new login must remove old records before awaiting its own list');
+      assert.equal(f.page.data.signedOpen, null); assert.equal(f.page.data.loading, true);
+      const version = f.page._viewVersion;
+      f.oldReceipt.resolve({ result: { code: 0, data: f.receipt('A', 'device_confirmed') } }); await f.oldWork;
+      assert.equal(f.page._viewVersion, version); assert.equal(f.page.data.loading, true);
+      assert.deepEqual(plain(f.page.data.locks), []); assert.deepEqual(plain(f.page.data.records), []);
+    } finally {
+      f.oldReceipt.resolve({ result: { code: 0, data: f.receipt('A', 'device_confirmed') } }); await f.oldWork;
+      f.newViewReceipt.resolve({ result: { code: 0, data: { enabled: true, doors: [f.door('B')] } } });
+      f.newRecordsReceipt.resolve({ result: { code: 0, data: { records: [] } } }); await refreshing;
+    }
+    assert.equal(f.page.data.locks[0].contractId, 'synthetic-contract-B');
+    assert.equal(f.page.data.loading, false); assert.equal(f.events.opens.filter(event => event.owner === 'B').length, 0);
+  });
+}
+
+for (const outcome of ['success', 'failure']) {
+  test(`C-01 stale A query ${outcome} and finally preserve B active query and task`, async () => {
+    const f = await accountSwitchFixture('query', 'querying');
+    f.cloud.api.logout(); await f.login('B'); await f.page.onShow();
+    const confirmation = await f.modal(); await confirmation.success({ confirm: true });
+    const newQuery = f.page.querySignedOpen(); await f.newQueryStarted.promise;
+    const current = plain(f.page.data.signedOpen), version = f.page._viewVersion;
+    try {
+      if (outcome === 'success') f.oldReceipt.resolve({ result: { code: 0, data: f.receipt('A', 'device_confirmed') } });
+      else f.oldReceipt.reject(new Error('synthetic old A query rejection'));
+      await f.oldWork;
+      assert.equal(f.page.data.signedResultLoading, true, 'old query finally must not clear B query lock');
+      assert.equal(f.page._viewVersion, version);
+      assert.deepEqual(plain(f.page.data.signedOpen), current);
+      assert.equal(f.page.data.locks[0].contractId, 'synthetic-contract-B');
+    } finally {
+      f.newQueryReceipt.resolve({ result: { code: 0, data: f.receipt('B', 'device_confirmed') } });
+      await newQuery;
+    }
+    assert.equal(f.page.data.signedOpen.taskId, f.taskIds.B);
+    assert.equal(f.events.opens.filter(event => event.owner === 'B').length, 1);
+  });
+}
+
+for (const source of ['request', 'query']) {
+  for (const scenario of ['logout', 'view-still-owned-by-A']) {
+    test(`C-01 ${source} completion still clears private A view after ${scenario}`, async () => {
+      const f = await accountSwitchFixture(source, 'confirming');
+      assert.equal(f.page.data.locks[0].contractId, 'synthetic-contract-A');
+      f.cloud.api.logout();
+      if (scenario === 'view-still-owned-by-A') await f.login('B');
+      f.oldReceipt.resolve({ result: { code: 0, data: f.receipt('A', 'device_confirmed') } });
+      await f.oldWork;
+      assert.deepEqual(plain(f.page.data.locks), []); assert.deepEqual(plain(f.page.data.records), []);
+      assert.equal(f.page.data.signedOpen, null); assert.equal(f.page.data.confirming, false);
+      assert.equal(f.page._unlockOperation, null);
+      assert.equal(f.events.opens.filter(event => event.owner === 'B').length, 0, 'cleanup never submits for B');
+    });
+  }
+}

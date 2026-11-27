@@ -74,7 +74,8 @@ Page({
   clearPrivate() {
     this.releaseUnlockOperation(this._unlockOperation);
     this._viewVersion = (this._viewVersion || 0) + 1;
-    const epoch = typeof api.getLoginEpoch === 'function' ? api.getLoginEpoch() : null;
+    const epoch = this.currentPrivateEpoch();
+    this._privateViewEpoch = epoch;
     if (epoch === null || epoch !== this._signedOpenEpoch) this._signedOpenState = null;
     this.setData({ locks: [], records: [], family: [], address: '', community: '我的房屋',
       loading: false, familyLoading: false, familyError: '', error: '', recordsError: '', pendingId: '', confirming: false, showAllRecords: false,
@@ -92,8 +93,19 @@ Page({
   },
   canUsePrivate(expectedEpoch) {
     const allowed = arguments.length ? canActNow(api, expectedEpoch) : canActNow(api);
-    if (!allowed) this.clearPrivate();
+    if (!allowed) {
+      const currentEpoch = this.currentPrivateEpoch();
+      // A stale callback may not clear a newer login's already-owned view.
+      // Logout and a view still owned by the invalidated login must be cleared.
+      if (currentEpoch === null || this._privateViewEpoch !== currentEpoch) this.clearPrivate();
+    }
     return allowed;
+  },
+  currentPrivateEpoch() {
+    try {
+      const epoch = typeof api.getLoginEpoch === 'function' ? api.getLoginEpoch() : null;
+      return Number.isSafeInteger(epoch) && canActNow(api, epoch) ? epoch : null;
+    } catch (_) { return null; }
   },
   canShowSigned(epoch) {
     return this._signedVisible === true && !this._destroyed && this._signedOpenEpoch === epoch && canActNow(api, epoch);
@@ -111,11 +123,15 @@ Page({
     if (!this._destroyed) this.setData({ confirming: false, pendingId: '' });
   },
   async load() {
+    const epoch = this.currentPrivateEpoch();
+    if (this._privateViewEpoch !== undefined && this._privateViewEpoch !== epoch) this.clearPrivate();
     if (this.data.loading) return;
     const version = this._viewVersion || 0;
     this.setData({ loading: true, error: '', recordsError: '' });
     if (!await this.requirePrivate('查看门锁与开门记录') || !this.canUsePrivate()) { wx.stopPullDownRefresh(); return; }
     if (version !== (this._viewVersion || 0) || this._destroyed) return;
+    if (this.currentPrivateEpoch() !== epoch) { this.clearPrivate(); return; }
+    this._privateViewEpoch = epoch;
     await Promise.all([
       api.listLocks().then(async locks => {
         if (version !== (this._viewVersion || 0) || this._destroyed) return;

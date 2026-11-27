@@ -97,11 +97,35 @@ bookkeeping without making an expired claim eligible. The cloud's one-shot
 begin and terminal states provide cross-process exclusion; the local Map alone
 does not.
 
-The secured client receives the task's absolute `expiresAt` (which never
-exceeds the exclusive lease end). Both each HTTP send and the TLS pin-success
-socket handoff recheck that same absolute deadline, including Digest 401's
-authenticated send. A late timer or a slow TLS handshake cannot extend it.
-Already transmitted bytes cannot be recalled or used to prove physical release.
+At the claim's first validation the worker samples `performance.now()` and the
+epoch clock once to anchor the original remaining task budget. The same
+process-local `monotonicDeadline` survives certificate preparation, model GET,
+fresh begin and open; none of those stages may build a longer budget. This
+value is not a cloud TASK field, local configuration setting or transferable
+clock reading. Initial host/cloud clock trust still requires deployment checks.
+
+The secured client receives both that monotonic deadline and the task's epoch
+`expiresAt` (which never exceeds the exclusive lease end). Every check takes
+the smaller remaining budget. Initial/401 sends, TLS pin-success handoff,
+Node's later request `socket` event before `_flush`, and the final application
+`socket.write` into TLS all check both clocks. The socket event is registered
+before `request.end`; expired requests and sockets are destroyed before their
+queued bytes can flush. A delayed timer, asynchronous socket handoff or wall
+clock rollback cannot extend the original budget. Direct client callers that
+provide only an epoch deadline receive one constructor-time monotonic anchor;
+legacy calls without an absolute deadline keep their prior behavior.
+
+This boundary is the application's last controlled handoff of HTTP bytes to
+TLS. It does not retract bytes already accepted by TLS or the kernel and does
+not promise the timing of delivery, device execution or physical lock release.
+
+JSON syntax accepts only RFC 8259 SP, HTAB, CR and LF whitespace; unsupported
+Unicode/other syntax whitespace is never trimmed into a valid response. XML
+boundaries use the same explicit syntax whitespace restriction. Status codes
+must be numeric or string scalars and normalize to closed strings; arrays and
+objects become unknown. The worker independently checks the provider's result
+type before reporting, so malformed provider codes produce one legal
+`unknown`/null report rather than an invalid cloud payload.
 
 HTTP 200 alone is not success. A complete supported XML/JSON ResponseStatus
 must contain statusCode 1, statusString `OK` and subStatusCode `ok`, without
@@ -116,8 +140,11 @@ An earlier preparation/begin failure keeps its own safe code and adds the
 cleanup failure flag. Cleanup never rewrites a known device outcome, creates a
 device report without a valid begin, or causes another open attempt.
 
-Offline tests: `node --require ./tests/support/d-network-fakes.cjs --require
-./tests/support/d-network-guard.cjs --test tests/signed-remote-worker.test.cjs`.
-The fake and guard must precede business import in that order. When an outer
-test runner has already installed the guard, this suite keeps that guard in
-place and does not install fakes over it.
+Offline tests: `node --require ./tests/support/d-network-guard.cjs --test
+tests/signed-remote-worker.test.cjs tests/signed-remote-deadline.test.cjs`.
+Both test files also support plain `node --test`: inside the isolated test
+process they install safe fakes followed by the guard before business import.
+When a runner has already installed the guard, they keep it in place and do
+not install fakes over it. Do not preload the socket-constructor fakes into
+Node's parent test-runner bootstrap; they are intended for the isolated test
+process, and can interfere with the runner's own child-process setup.

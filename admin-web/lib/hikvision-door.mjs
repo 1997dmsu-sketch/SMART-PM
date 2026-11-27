@@ -7,33 +7,36 @@ const unknown = () => ({ status: "unknown", deviceStatusCode: null });
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const label = value => typeof value === "string" && value.length > 0 && value.length <= 128 && !/[\x00-\x1f\x7f<>]/.test(value);
 const door = value => Number.isSafeInteger(value) && value >= 1 && value <= 65535;
+// JSON and XML syntax whitespace is only SP, HTAB, CR and LF. Generic trim/\s
+// would erase unsupported response bytes before the grammar can reject them.
+const syntaxTrim = value => value.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, "");
 
 // Small bounded XML reader: no DTD, entity expansion, comments, CDATA or mixed
 // content. It consumes the entire document and checks every closing tag. Device
 // responses use ordinary element/text nodes; unsupported XML fails closed.
 function xmlDocument(text) {
   if (typeof text !== "string" || text.length > 65536 || /<!|&|[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text)) throw new DoorError("DEVICE_XML_INVALID");
-  let source = text.trim().replace(/^<\?xml\s+version=["']1\.0["'](?:\s+encoding=["']UTF-8["'])?\s*\?>\s*/i, "");
+  const source = syntaxTrim(text).replace(/^<\?xml[ \t\r\n]+version=["']1\.0["'](?:[ \t\r\n]+encoding=["']UTF-8["'])?[ \t\r\n]*\?>[ \t\r\n]*/i, "");
   const stack = []; let root = null, index = 0, nodes = 0;
   const name = "[A-Za-z_][A-Za-z0-9_.:-]*";
-  const opening = new RegExp(`^<(${name})((?:\\s+${name}\\s*=\\s*(?:\"[^\"<>]*\"|'[^'<>]*'))*)\\s*(/?)>`);
+  const opening = new RegExp(`^<(${name})((?:[ \\t\\r\\n]+${name}[ \\t\\r\\n]*=[ \\t\\r\\n]*(?:\"[^\"<>]*\"|'[^'<>]*'))*)[ \\t\\r\\n]*(/?)>`);
   while (index < source.length) {
     if (source[index] !== "<") {
       const next = source.indexOf("<", index), end = next < 0 ? source.length : next;
       const value = source.slice(index, end);
-      if (!stack.length) { if (value.trim()) throw new DoorError("DEVICE_XML_INVALID"); }
+      if (!stack.length) { if (syntaxTrim(value)) throw new DoorError("DEVICE_XML_INVALID"); }
       else stack.at(-1).text += value;
       index = end; continue;
     }
-    const close = new RegExp(`^</(${name})\\s*>`).exec(source.slice(index));
+    const close = new RegExp(`^</(${name})[ \\t\\r\\n]*>`).exec(source.slice(index));
     if (close) {
       const node = stack.pop();
-      if (!node || node.qualifiedName !== close[1] || (node.children.length && node.text.trim())) throw new DoorError("DEVICE_XML_INVALID");
+      if (!node || node.qualifiedName !== close[1] || (node.children.length && syntaxTrim(node.text))) throw new DoorError("DEVICE_XML_INVALID");
       index += close[0].length; continue;
     }
     const match = opening.exec(source.slice(index));
     if (!match || ++nodes > 256 || stack.length > 16) throw new DoorError("DEVICE_XML_INVALID");
-    const attributes = [...match[2].matchAll(/\s+([A-Za-z_][A-Za-z0-9_.:-]*)\s*=/g)].map(value => value[1]);
+    const attributes = [...match[2].matchAll(/[ \t\r\n]+([A-Za-z_][A-Za-z0-9_.:-]*)[ \t\r\n]*=/g)].map(value => value[1]);
     if (new Set(attributes).size !== attributes.length) throw new DoorError("DEVICE_XML_INVALID");
     const node = { qualifiedName: match[1], name: match[1].split(":").at(-1), text: "", children: [] };
     if (stack.length) stack.at(-1).children.push(node);
@@ -48,14 +51,14 @@ function xmlDocument(text) {
 function directText(root, key) {
   const nodes = root.children.filter(node => node.name === key);
   if (nodes.length !== 1 || nodes[0].children.length) throw new DoorError("DEVICE_RESPONSE_INVALID");
-  return nodes[0].text.trim();
+  return syntaxTrim(nodes[0].text);
 }
 
 // JSON.parse alone silently accepts duplicate keys. The response schema is
 // small: reject duplicates in every object with a complete, bounded reader.
 function strictJson(text) {
   let position = 0, count = 0;
-  const whitespace = () => { while (/\s/.test(text[position] || "") && position < text.length) position++; };
+  const whitespace = () => { while (position < text.length && /[ \t\r\n]/.test(text[position])) position++; };
   function string() {
     const match = /^"(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/.exec(text.slice(position));
     if (!match) throw new DoorError("DEVICE_JSON_INVALID");
@@ -90,14 +93,14 @@ function responseText(response) {
   // Round-trip rejects invalid UTF-8 instead of parsing replacement characters.
   const text = response.body.toString("utf8");
   if (!Buffer.from(text, "utf8").equals(response.body)) throw new DoorError("DEVICE_RESPONSE_INVALID");
-  return text.trim();
+  return text;
 }
 
 export function parseDoorResponse(response) {
   try {
     if (response.status !== 200) return unknown();
     const text = responseText(response); let fields;
-    if (text.startsWith("{")) {
+    if (syntaxTrim(text).startsWith("{")) {
       const value = strictJson(text);
       if (!object(value)) return unknown();
       if (Object.hasOwn(value, "ResponseStatus")) {
@@ -109,11 +112,12 @@ export function parseDoorResponse(response) {
       fields = Object.create(null);
       for (const node of root.children) {
         if (Object.hasOwn(fields, node.name) || node.children.length) return unknown();
-        fields[node.name] = node.text.trim();
+        fields[node.name] = syntaxTrim(node.text);
       }
     }
     if (Object.keys(fields).some(key => !["requestURL", "statusCode", "statusString", "subStatusCode", "errorCode", "errorMsg"].includes(key))) return unknown();
-    const code = typeof fields.statusCode === "number" ? String(fields.statusCode) : fields.statusCode;
+    if (typeof fields.statusCode !== "number" && typeof fields.statusCode !== "string") return unknown();
+    const code = String(fields.statusCode);
     if (!/^[1-7]$/.test(code) || !label(fields.statusString) || !label(fields.subStatusCode)) return unknown();
     const successText = fields.statusString === "OK", successSub = fields.subStatusCode === "ok";
     if (code === "1") {
@@ -137,7 +141,7 @@ export class HikvisionDoorProvider {
     const response = await this.#client.request({ method: "GET", path: "/ISAPI/System/deviceInfo" });
     if (response.status !== 200) throw new DoorError("DEVICE_MODEL_UNCONFIRMED");
     const text = responseText(response); let actualModel;
-    if (text.startsWith("{")) {
+    if (syntaxTrim(text).startsWith("{")) {
       const body = strictJson(text);
       if (!object(body) || Object.keys(body).length !== 1 || !object(body.DeviceInfo)) throw new DoorError("DEVICE_MODEL_UNCONFIRMED");
       actualModel = body.DeviceInfo.model;

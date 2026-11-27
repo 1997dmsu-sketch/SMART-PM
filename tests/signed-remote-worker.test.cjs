@@ -132,6 +132,112 @@ test('only consistent protocol acknowledgements confirm a device command', () =>
   assert.notEqual(door.parseDoorResponse(reply(xmlStatus(), 302)).status, 'device_confirmed');
 });
 
+test('B-03 response syntax accepts only RFC8259/XML ASCII whitespace without erasing invalid boundaries', () => {
+  const json = '{"statusCode":1,"statusString":"OK","subStatusCode":"ok"}';
+  const unknown = { status: 'unknown', deviceStatusCode: null };
+  const unsupported = ['\u00a0', '\u000b', '\u000c', '\ufeff', '\u1680', '\u2000', '\u2007', '\u2028', '\u2029', '\u202f', '\u205f', '\u3000'];
+  const cases = [];
+  for (const whitespace of unsupported) {
+    cases.push(`${whitespace}${json}`, `${json}${whitespace}`, json.replace(',', `,${whitespace}`));
+    cases.push(`${whitespace}${xmlStatus()}`, `${xmlStatus()}${whitespace}`,
+      xmlStatus().replace('><statusCode>', `>${whitespace}<statusCode>`));
+  }
+  assert.deepEqual(cases.map(body => door.parseDoorResponse(reply(body))), cases.map(() => unknown));
+  for (const whitespace of [' ', '\t', '\r', '\n']) {
+    const body = `${whitespace}${json.replaceAll(',', `,${whitespace}`)}${whitespace}`;
+    assert.doesNotThrow(() => JSON.parse(body));
+    assert.deepEqual(door.parseDoorResponse(reply(body)), { status: 'device_confirmed', deviceStatusCode: '1' });
+    assert.deepEqual(door.parseDoorResponse(reply(`${whitespace}${xmlStatus()}${whitespace}`)), { status: 'device_confirmed', deviceStatusCode: '1' });
+  }
+  assert.deepEqual(door.parseDoorResponse(reply('{"statusCode":1,"statusCode":1,"statusString":"OK","subStatusCode":"ok"}')), unknown);
+});
+
+test('B-04 parser admits only explicit numeric/string scalar status codes and returns closed strings', () => {
+  const values = [[2], [[2]], ['2'], {}, { value: 2 }, true, false, null, 2.5];
+  assert.deepEqual(values.map(statusCode => door.parseDoorResponse(reply({ statusCode, statusString: 'Invalid Operation', subStatusCode: 'notSupport' }))),
+    values.map(() => ({ status: 'unknown', deviceStatusCode: null })));
+  for (const statusCode of [2, '2', 7, '7']) {
+    assert.deepEqual(door.parseDoorResponse(reply({ statusCode, statusString: 'Invalid Operation', subStatusCode: 'notSupport' })),
+      { status: 'failed', deviceStatusCode: String(statusCode) });
+  }
+  for (const statusCode of [1, '1']) {
+    assert.deepEqual(door.parseDoorResponse(reply({ statusCode, statusString: 'OK', subStatusCode: 'ok' })),
+      { status: 'device_confirmed', deviceStatusCode: '1' });
+  }
+});
+
+test('B-04 worker independently turns non-string provider rejection codes into one legal unknown report', async () => {
+  const values = [[2], [[2]], ['2'], {}, { value: 2 }, true, false, 2];
+  for (const deviceStatusCode of values) {
+    const run = harness(task(), { provider: { async openOnce(value) {
+      run.calls.push(['openOnce', value]);
+      return { status: 'failed', deviceStatusCode };
+    } } });
+    const result = await run.execute();
+    const reports = run.calls.filter(([name]) => name === 'reportOpen');
+    assert.equal(run.calls.filter(([name]) => name === 'openOnce').length, 1);
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0][1].status, 'unknown');
+    assert.equal(reports[0][1].deviceStatusCode, null);
+    assert.equal(result.status, 'unknown');
+    assert.equal(result.reportDelivered, true);
+    assert.notEqual(result.stopLoop, true);
+    await run.execute();
+    assert.equal(run.calls.filter(([name]) => name === 'openOnce').length, 1);
+    assert.equal(run.calls.filter(([name]) => name === 'reportOpen').length, 1);
+  }
+  for (const deviceStatusCode of [null, '2', '7']) {
+    const run = harness(task(), { provider: { async openOnce() { return { status: 'failed', deviceStatusCode }; } } });
+    const result = await run.execute();
+    const reports = run.calls.filter(([name]) => name === 'reportOpen');
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0][1].status, 'failed');
+    assert.equal(reports[0][1].deviceStatusCode, deviceStatusCode);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.reportDelivered, true);
+  }
+});
+
+test('B-02 a single claim monotonic budget cannot be extended by wall rollback during preparation or begin', async () => {
+  const observations = [];
+  const budgets = [], statuses = [];
+  for (const phase of ['certificate', 'model', 'begin']) {
+    let wall = NOW, mono = 5000;
+    const claimed = task({ expiresAt: NOW + 100 });
+    const movePastBudget = () => { wall = NOW - 200; mono = 5100; };
+    const run = harness(claimed, {
+      provider: { async verifyTarget(value) { run.calls.push(['verifyTarget', value]); if (phase === 'model') movePastBudget(); } },
+      cloud: { async callFunction(action, payload) {
+        run.calls.push([action, payload]);
+        if (action === 'claimOpen') return { task: claimed };
+        if (action === 'beginOpen') { if (phase === 'begin') movePastBudget(); return { ...claimed, revision: claimed.revision + 1 }; }
+        if (action === 'reportOpen') return {};
+        throw new Error('unexpected action');
+      } },
+    });
+    let transportOptions;
+    const result = await run.execute({
+      nowMs: () => wall, monotonicNow: () => mono,
+      readCertificate: async () => { if (phase === 'certificate') movePastBudget(); return Buffer.from('synthetic-certificate-bytes'); },
+      createProvider: async options => { transportOptions = options; return run.provider; },
+    });
+    observations.push({ phase, opens: run.openCount(), begins: run.calls.filter(([name]) => name === 'beginOpen').length,
+      reports: run.calls.filter(([name]) => name === 'reportOpen').length });
+    if (transportOptions) budgets.push(transportOptions.monotonicDeadline);
+    statuses.push(result.status);
+  }
+  assert.deepEqual(observations, [
+    { phase: 'certificate', opens: 0, begins: 0, reports: 0 },
+    { phase: 'model', opens: 0, begins: 0, reports: 0 },
+    { phase: 'begin', opens: 0, begins: 1, reports: 1 },
+  ]);
+  assert.ok(budgets.every(value => value === 5100), 'the transport must receive the original process-local budget, never a later recomputation');
+  assert.ok(statuses.every(status => status !== 'device_confirmed'));
+  const injected = harness(task({ monotonicDeadline: 999999999 }));
+  await injected.execute();
+  assert.equal(injected.calls.filter(([name]) => name === 'beginOpen').length, 0, 'monotonic metadata is never accepted from a cloud TASK');
+});
+
 test('ordinary-open provider verifies the observed model, fixes its command and consumes the instance once', async () => {
   const requests = [];
   const provider = new door.HikvisionDoorProvider({

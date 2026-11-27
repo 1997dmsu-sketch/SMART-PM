@@ -1,8 +1,8 @@
 {
   "schema": "checkin-face-experience-source-hashes/v1",
-  "baselineCommit": "d798be60b2968a46cac22b6a5cdb25acc5e7b467",
-  "branch": "feat/signed-lease-hikvision-remote-unlock-2026-11-26",
-  "registrationReason": "2026-11-26: implement trusted confirmed-signing facts with automatic lease-bound remote eligibility, separate outbound one-shot/serial polling Hikvision worker, absolute send deadline, explicit tenant UI and authenticated administrator setup/lookup. Face, deposit and payment are not prerequisites. Real device flags remain false; no deployment, upload, cloud/device access or live acceptance. Historical deliveries excluded from source archive.",
+  "baselineCommit": "66e0395c105cda21244d375ef6d01682bc6cfe1e",
+  "branch": "fix/signed-remote-independent-review-2026-11-27",
+  "registrationReason": "2026-11-27 independent B/C review remediation: guard asynchronous socket handoff and final TLS application write with epoch plus non-extending monotonic budget; anchor budget at claim before setup and Digest; strict RFC JSON whitespace and scalar status types; retain new login owner against stale callbacks. Default real-device/feature flags remain false. Original candidate, reports and evidence are preserved; no deployment/upload/real cloud/device/payment operations.",
   "baselineSha256Note": "baselineSha256 一律为 null：本清单不登记旧上游原件（旧来源校验由 docs/backend-provenance.json 承担），null 表示“无旧上游登记”，不是未检查；不虚构 originalSha256。原有 10 条条目语义保持不变（仅 sha256 按当前磁盘/契约内容复算，purpose 随实现更新）。",
   "files": [
     {
@@ -15,7 +15,7 @@
       "path": "admin-web/lib/hikvision-door.mjs",
       "baselineSha256": null,
       "purpose": "2026-11-26 已确认签约租期自动生成海康远程资格、受控派发、后台/小程序接线及纯合成验证；不表示真实设备或部署验收。",
-      "sha256": "28899e2143854afd3ff26a59034edbaaf07acdd96099ee95801107f958e53c7f"
+      "sha256": "401b5dc29a24d2e5e2ed9b5b816cb538d1490ea7ece7584b7785331fbfc4ddd8"
     },
     {
       "path": "admin-web/lib/local-cloud-database.mjs",
@@ -765,13 +765,13 @@
       "path": "miniprogram/config/version.js",
       "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
       "baselineSha256": null,
-      "sha256": "71135558b3948f927d841caaee9db513f5ac27d3def88c51554a9c952c33cb81"
+      "sha256": "1568c965af6ebebf775bfa6086972902b6db613620d2cfd39b2aaada3e9b3a1e"
     },
     {
       "path": "miniprogram/config/version.json",
       "purpose": "2026-11-25账号密码与栖山苑隔离测试基准的实现、页面、部署契约或可执行离线验证。",
       "baselineSha256": null,
-      "sha256": "1151279692136d319d65f8b93c1f9823dcdd0e319ecba5d99f9d98963ca77847"
+      "sha256": "abaaadb6ce4cec36e9fdd457d46c2dcd878c45023151ad00b652d709ab33dba1"
     },
     {
       "path": "miniprogram/data/qishanyuan-test-preset.js",
@@ -921,7 +921,7 @@
       "path": "miniprogram/pages/unlock/index.js",
       "purpose": "统一业务登录门、8位密码规则及独立离线回归。",
       "baselineSha256": null,
-      "sha256": "f1f88c6b12e9e8c5e03f87b43bcf5539953e2dae1b910105479e3ca146c52cd7"
+      "sha256": "fad4800734d62e87e8fabeca1b242bc0bcbb02d86489d9a208593d36fa836907"
     },
     {
       "path": "miniprogram/services/api.js",
@@ -937,7 +937,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "760fc1293a413d0c75c48b02ae6b070d17b5fb816fa2b155e58a106ea7143353",
+      "sha256": "b92d2c9057ee8fc3496b6db47e42172deac1551432a35dd695f9fd8cd65e72c4",
       "purpose": "根发布检查入口：check:checkin-face = 静态检查 && 来源校验；新增 check:checkin-face:sources。",
       "baselineSha256": null
     },
@@ -1077,7 +1077,7 @@
       "path": "tests/signed-lease-frontend.test.cjs",
       "baselineSha256": null,
       "purpose": "2026-11-26 已确认签约租期自动生成海康远程资格、受控派发、后台/小程序接线及纯合成验证；不表示真实设备或部署验收。",
-      "sha256": "005e537b547e7da5721d627696289014e985cde2ea1c9a1482eb643f0bab52c2"
+      "sha256": "b9f11933043513b37476a109010a1cc7b03aff37e3483f25f07377bc73405d79"
     },
     {
       "path": "tests/signed-lease-integration.test.cjs",
@@ -1089,7 +1089,7 @@
       "path": "tests/signed-remote-deadline.test.cjs",
       "baselineSha256": null,
       "purpose": "2026-11-26 已确认签约租期自动生成海康远程资格、受控派发、后台/小程序接线及纯合成验证；不表示真实设备或部署验收。",
-      "sha256": "06b100df448b6c49b9ed05a9e459db85ab9b829d800dc12e53b1216d187a9e14"
+      "sha256": "fa2277e9a8b5d07eb90d7b2eb9ef4192526d56bf573952d8ddbc66c511e35815"
     },
     {
       "path": "tests/signed-remote-legacy-boundary.test.cjs",
@@ -1101,7 +1101,7 @@
       "path": "tests/signed-remote-worker.test.cjs",
       "baselineSha256": null,
       "purpose": "2026-11-26 已确认签约租期自动生成海康远程资格、受控派发、后台/小程序接线及纯合成验证；不表示真实设备或部署验收。",
-      "sha256": "10b776e481faa8ffddf04773f00b94cb2665ae12de08f11c34358ef65283a23b"
+      "sha256": "18e09230bd7607c8d6a16cbcf9c81336ce1adade1dcb505946e8945173ac5005"
     },
     {
       "path": "tests/support/d-network-fakes.cjs",
@@ -1215,7 +1215,7 @@
       "path": "tools/signed-remote-worker/README.md",
       "baselineSha256": null,
       "purpose": "2026-11-26 已确认签约租期自动生成海康远程资格、受控派发、后台/小程序接线及纯合成验证；不表示真实设备或部署验收。",
-      "sha256": "eb303c3219c6c0c78f336006a26e9426e993bf72ff445382e6e848d34aaa6208"
+      "sha256": "9097cc7c1c5b0410aec41e5d14966081a0dc8cd29f8ca86c5d56745fbd5b2f01"
     },
     {
       "path": "tools/signed-remote-worker/claim-and-open.mjs",
@@ -1245,7 +1245,7 @@
       "path": "tools/signed-remote-worker/worker-runtime.mjs",
       "baselineSha256": null,
       "purpose": "2026-11-26 已确认签约租期自动生成海康远程资格、受控派发、后台/小程序接线及纯合成验证；不表示真实设备或部署验收。",
-      "sha256": "b8c6fbda048503c7314ce4a5ccfd0501e91dc1f86a17a2331c2256236d8b1d55"
+      "sha256": "da8fba4a98d2d1a25c04f7744e46789f8c18eaaa5d97cdf32160d294da6e00e3"
     }
   ]
 }

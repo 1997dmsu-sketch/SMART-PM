@@ -3,6 +3,7 @@ import { open, readFile, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { performance } from "node:perf_hooks";
 import { HikvisionClient } from "../../admin-web/lib/hikvision-client.mjs";
 import { HikvisionDoorProvider } from "../../admin-web/lib/hikvision-door.mjs";
 
@@ -115,7 +116,7 @@ function forgetExpiredClaims(now) {
 function stopForCloudError(error) { return error?.stopLoop === true || STOP_CLOUD_CODES.has(error?.code) || STOP_CLOUD_CODES.has(error?.cloudCode); }
 
 /** One claim, one begin, at most one ordinary open, at most one report. No retry. */
-export async function processOnce({ config, cloud, nowMs = () => Date.now(), createProvider = options => new HikvisionDoorProvider(new HikvisionClient(options)), readCertificate = readPublicCertificate, signal } = {}) {
+export async function processOnce({ config, cloud, nowMs = () => Date.now(), monotonicNow = () => performance.now(), createProvider = options => new HikvisionDoorProvider(new HikvisionClient(options)), readCertificate = readPublicCertificate, signal } = {}) {
   validateLocalTarget(config);
   if (!cloud || typeof cloud.callFunction !== "function" || !/^[A-Za-z0-9_-]{1,64}$/.test(config.workerId || "") || typeof config.token !== "string" || !config.token) fail("WORKER_CONFIGURATION_INVALID");
   if (signal?.aborted) return notExecuted("CANCELLED");
@@ -124,7 +125,23 @@ export async function processOnce({ config, cloud, nowMs = () => Date.now(), cre
   try { claimed = (await cloud.callFunction("claimOpen", { workerId: config.workerId, token: config.token }))?.task; }
   catch (error) { return notExecuted("CLAIM_UNAVAILABLE", stopForCloudError(error)); }
   if (claimed === null) return { status: "idle", reportAttempted: false };
-  try { validateTask(claimed, config, nowMs()); } catch { return notExecuted("CLAIM_INVALID", true); }
+  let budget;
+  try {
+    // Anchor once, before preparation. Taking the monotonic sample first is
+    // conservative about time spent sampling/validating the epoch snapshot.
+    const started = monotonicNow(), wall = nowMs();
+    validateTask(claimed, config, wall);
+    if (!Number.isFinite(started) || started < 0) fail("TASK_TIME_INVALID");
+    const deadline = started + (claimed.expiresAt - wall);
+    if (!Number.isFinite(deadline)) fail("TASK_TIME_INVALID");
+    budget = { started, deadline };
+  } catch { return notExecuted("CLAIM_INVALID", true); }
+  const remainingBudget = () => {
+    const wall = nowMs(), monotonic = monotonicNow();
+    if (!epoch(wall) || !Number.isFinite(monotonic) || monotonic < budget.started) return 0;
+    return Math.min(claimed.expiresAt - wall, budget.deadline - monotonic);
+  };
+  const checkBudget = () => { const remaining = remainingBudget(); if (remaining <= 0) fail("TASK_EXPIRED"); return remaining; };
   if (signal?.aborted) return notExecuted("CANCELLED");
   const claimKey = JSON.stringify([claimed.taskId, claimed.claimId]);
   if (consumedClaims.has(claimKey)) return notExecuted("DUPLICATE_CLAIM");
@@ -145,21 +162,25 @@ export async function processOnce({ config, cloud, nowMs = () => Date.now(), cre
     // transaction rather than leaving an old authorization across the GET.
     certificate = await readCertificate(config.device.certificatePath);
     if (!Buffer.isBuffer(certificate) || !certificate.length || certificate.length > 65536) fail("CERTIFICATE_INVALID");
+    const remaining = checkBudget();
     provider = await createProvider({
       origin: config.device.origin, username: config.device.username, password: config.device.password,
-      certificate, developmentTls: false, absoluteDeadline: claimed.expiresAt,
-      timeoutMs: Math.max(1, Math.min(5000, claimed.expiresAt - nowMs())), maxResponseBytes: 65536,
+      certificate, developmentTls: false, absoluteDeadline: claimed.expiresAt, monotonicDeadline: budget.deadline,
+      timeoutMs: Math.max(1, Math.floor(Math.min(5000, remaining))), maxResponseBytes: 65536,
     });
     certificate.fill(0); certificate = null;
     if (!provider || typeof provider.verifyTarget !== "function" || typeof provider.openOnce !== "function" || typeof provider.close !== "function") fail("DEVICE_PROVIDER_INVALID");
+    checkBudget();
     await provider.verifyTarget({ expectedModel: claimed.expectedModel, doorNo: claimed.doorNo });
     validateTask(claimed, config, nowMs());
+    checkBudget();
     if (signal?.aborted) return early(notExecuted("CANCELLED"));
     try { begun = await cloud.callFunction("beginOpen", { workerId: config.workerId, token: config.token, taskId: claimed.taskId, claimId: claimed.claimId, revision: claimed.revision }); }
     catch (error) { return early(notExecuted("BEGIN_AUTH_UNAVAILABLE", stopForCloudError(error))); }
     if (!correlated(claimed, begun)) return early(notExecuted("BEGIN_SNAPSHOT_INVALID", true));
     try {
       verifyBeginSnapshot(claimed, begun, config, nowMs());
+      checkBudget();
       if (signal?.aborted) fail("CANCELLED");
       // No setup or await between this last proof and the one logical open.
       code = "DEVICE_RESULT_UNKNOWN";
@@ -168,7 +189,7 @@ export async function processOnce({ config, cloud, nowMs = () => Date.now(), cre
       if (!isObject(result) || !["device_confirmed", "failed", "unknown"].includes(result.status)
         || (result.status === "device_confirmed" && result.deviceStatusCode !== "1")
         || (result.status === "unknown" && result.deviceStatusCode !== null)
-        || (result.status === "failed" && result.deviceStatusCode !== null && !/^[2-7]$/.test(result.deviceStatusCode))) result = { status: "unknown", deviceStatusCode: null };
+        || (result.status === "failed" && result.deviceStatusCode !== null && (typeof result.deviceStatusCode !== "string" || !/^[2-7]$/.test(result.deviceStatusCode)))) result = { status: "unknown", deviceStatusCode: null };
       code = result.status === "device_confirmed" ? "DEVICE_COMMAND_ACCEPTED" : result.status === "failed" ? "DEVICE_REJECTED" : "DEVICE_RESULT_UNKNOWN";
     } catch { /* Valid begin, but local final proof failed: report failure, no open. */ }
   } catch { return early(notExecuted("PREPARATION_FAILED", true)); }

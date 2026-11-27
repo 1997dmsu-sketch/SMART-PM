@@ -205,7 +205,7 @@
                   },
                   {
                       "path":  "cloudfunctions/checkinFaceTest/lib/validate.js",
-                      "sha256":  "2ac0a0acee9a559fd14d94d495d0b621d6f0345351d574a7b174a08ca84389e7",
+                      "sha256":  "7c4a10002ed58cc94ce6a79b337064335c45d27cb550c42756c3dbbf757564b6",
                       "purpose":  "严格入参白名单与未知字段拒绝（R06 beginTaskExecution 白名单）、SDK fileID 归属校验（R01：命名空间/对象路径/文件名三级）、device 输出逐项对齐服务端快照；STORAGE_NAMESPACE_PATTERN 唯一定义。",
                       "baselineSha256":  null
                   },
@@ -913,7 +913,7 @@
                   },
                   {
                       "path":  "tests/checkin-face-cloud-workflow.test.cjs",
-                      "sha256":  "516b06740fe63c4cb7ab8f64133b1765691671b4442a579a1381e400c8477416",
+                      "sha256":  "bb9e4707006e0d336d5d1fbb2ab3bebd84bbea29fc3b9e67956b4c41e8b9d96d",
                       "purpose":  "checkin-face 工作流测试：mock 新增 strictId 严格模式；新增 setById 载荷不含 _id 回归。",
                       "baselineSha256":  null
                   },

@@ -1357,3 +1357,17 @@ test('validateEvent 放行平台注入的 tcbContext/userInfo 字段，其余未
   assert.equal(ok.action, 'getConfig');
   assert.throws(() => validate.validateEvent({ action: 'getConfig', bogus: 1 }, 'miniprogram'), (error) => error.code === 'UNKNOWN_FIELD');
 });
+
+test('begin/report 入参校验也放行平台注入的 tcbContext/userInfo 字段', () => {
+  const base = {
+    workerToken: 'x'.repeat(32), workerId: 'worker-01',
+    taskId: 'checkin-face-test|task|app', claimId: '0123456789abcdef0123456789abcdef',
+  };
+  const begin = validate.validateBeginTaskExecutionInput({ ...base, action: 'beginTaskExecution', revision: 2, tcbContext: { envId: 'x' }, userInfo: { nickName: 'y' } });
+  assert.equal(begin.taskId, 'checkin-face-test|task|app');
+  assert.throws(() => validate.validateBeginTaskExecutionInput({ ...base, action: 'beginTaskExecution', revision: 2, bogus: 1 }), (e) => e.code === 'UNKNOWN_FIELD');
+
+  const report = validate.validateReportInput({ workerToken: 'x'.repeat(32), action: 'reportTask', taskId: 'checkin-face-test|task|app', claimId: '0123456789abcdef0123456789abcdef', revision: 1, exitCode: 5, output: { outcome: 'stopped' }, tcbContext: { envId: 'x' }, userInfo: { nickName: 'y' } });
+  assert.equal(report.exitCode, 5);
+  assert.throws(() => validate.validateReportInput({ workerToken: 'x'.repeat(32), action: 'reportTask', taskId: 'checkin-face-test|task|app', claimId: '0123456789abcdef0123456789abcdef', revision: 1, exitCode: 5, output: { outcome: 'stopped' }, bogus: 1 }), (e) => e.code === 'UNKNOWN_FIELD');
+});

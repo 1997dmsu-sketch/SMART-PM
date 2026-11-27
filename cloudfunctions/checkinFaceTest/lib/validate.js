@@ -47,15 +47,20 @@ function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+// 微信平台在真机 callFunction 时注入的保留字段：显式放行、忽略其内容、绝不读取。
+const PLATFORM_EVENT_FIELDS = Object.freeze(['tcbContext', 'userInfo']);
+
 /**
  * Reject every field outside the whitelist; forbidden client fields get a
  * dedicated error code for diagnostics without echoing their values.
+ * 平台注入的 tcbContext/userInfo 统一放行忽略（不进入任何业务读取）。
  */
 function assertAllowedFields(input, allowedFields, label, checkForbidden = true) {
   if (!isPlainObject(input)) throw new ValidationError('INVALID_PAYLOAD', `${label}格式无效`);
   const allowed = new Set(allowedFields);
   const unknown = [];
   for (const key of Object.keys(input)) {
+    if (PLATFORM_EVENT_FIELDS.includes(key)) continue;
     if (!allowed.has(key)) unknown.push(key);
   }
   if (unknown.length) {
@@ -65,9 +70,6 @@ function assertAllowedFields(input, allowedFields, label, checkForbidden = true)
   }
   return input;
 }
-
-// 微信平台在真机 callFunction 时注入的保留字段：显式放行、忽略其内容、绝不读取。
-const PLATFORM_EVENT_FIELDS = Object.freeze(['tcbContext', 'userInfo']);
 
 /** @param {'miniprogram'|'worker'} group */
 function validateEvent(event, group) {
@@ -80,7 +82,7 @@ function validateEvent(event, group) {
   const workerOwned = action === 'claimTask' || action === 'beginTaskExecution' || action === 'reportTask';
   if (group === 'worker' && !workerOwned) throw new ValidationError('ACTION_FORBIDDEN', '该操作不允许 worker 调用');
   if (group === 'miniprogram' && workerOwned) throw new ValidationError('ACTION_FORBIDDEN', '该操作不允许小程序调用');
-  return assertAllowedFields(event, [...fields, ...PLATFORM_EVENT_FIELDS], '请求');
+  return assertAllowedFields(event, fields, '请求');
 }
 
 function validateText(value, pattern, code, maxLength = 128) {

@@ -125,14 +125,14 @@ function assertNoSecrets(response) {
     }
   };
   visit(response.data);
-  for (const secret of [deviceConfig.username, deviceConfig.password, deviceConfig.certificateBase64, photo.toString("base64"), "synthetic-http-photo.jpg"])
+  for (const secret of [deviceConfig.origin, deviceConfig.username, deviceConfig.password, deviceConfig.certificateBase64, photo.toString("base64"), "synthetic-http-photo.jpg"])
     assert.ok(!response.text.includes(secret), "response contained synthetic secret/photo material");
 }
 
 test("face endpoints require login and admin role before creating device sessions", async t => {
   const fixture = await localApp(t);
   const { request, services, providers } = fixture;
-  const mutations = ["connect", "disconnect", "enroll", "retry", "verify"];
+  const mutations = ["connect", "disconnect", "enroll", "retry", "verify", "list", "delete"];
   assert.equal((await request("face/state")).status, 401);
   for (const endpoint of mutations)
     assert.equal((await request(`face/${endpoint}`, { method: "POST", data: {} })).status, 401);
@@ -149,7 +149,7 @@ test("face endpoints require login and admin role before creating device session
 test("face mutations enforce CSRF and same-origin checks before any provider work", async t => {
   const fixture = await localApp(t);
   const auth = await fixture.demoLogin();
-  for (const endpoint of ["connect", "disconnect", "enroll", "retry", "verify"]) {
+  for (const endpoint of ["connect", "disconnect", "enroll", "retry", "verify", "list", "delete"]) {
     for (const protection of [
       { csrf: false }, { csrf: "incorrect-csrf-token" },
       { origin: "https://attacker.invalid" }, { origin: null },
@@ -241,7 +241,7 @@ test("device-mode injection stays local, hides credentials/photos, and logout cl
   const connected = await fixture.request("face/connect", { method: "POST", auth, data: deviceConfig });
   assert.equal(connected.status, 200);
   assert.equal(connected.data.mode, "device");
-  assert.equal(connected.data.device.origin, deviceConfig.origin);
+  assert.equal(Object.hasOwn(connected.data.device, "origin"), false);
   const enrolled = await fixture.request("face/enroll", { method: "POST", auth, data: input() });
   assert.equal(enrolled.status, 200);
   assert.equal(enrolled.data.enrollment.status, "ready");
@@ -320,10 +320,106 @@ test("unknown face endpoints and incorrect endpoint methods return 404", async t
   for (const [path, method] of [
     ["face", "GET"], ["face/", "GET"], ["face/unknown", "GET"], ["face/unknown", "POST"],
     ["face/state", "POST"], ["face/connect", "GET"], ["face/enroll", "GET"], ["face/verify", "PUT"],
+    ["face/list", "GET"], ["face/list", "PUT"], ["face/delete", "GET"], ["face/delete", "PUT"],
   ]) {
     const response = await fixture.request(path, { auth, method, data: method === "GET" ? undefined : {} });
     assert.equal(response.status, 404, `${method} /api/${path}`);
     assertNoSecrets(response);
   }
   assert.equal(fixture.providers.length, 0);
+});
+
+test("management lists existing people and requires a scoped second confirmation before deleting", async t => {
+  const fixture = await localApp(t);
+  const auth = await fixture.demoLogin();
+  const send = (endpoint, data) => fixture.request(`face/${endpoint}`, { method: "POST", auth, data });
+  assert.equal((await send("connect", deviceConfig)).status, 200);
+  assert.equal((await send("enroll", input({ employeeNo: "MANAGE01" }))).data.enrollment.status, "ready");
+  const listed = await send("list", {});
+  assert.equal(listed.status, 200);
+  assert.equal(listed.data.total, 1);
+  assert.equal(listed.data.complete, true);
+  assert.equal(listed.data.people[0].employeeNo, "MANAGE01");
+  assert.equal(listed.data.people[0].faces.blackFD.status, "present");
+  assertNoSecrets(listed);
+  const provider = fixture.providers[0];
+  const missingConfirmation = await send("delete", { action: "confirm", employeeNo: "MANAGE01" });
+  assert.ok(missingConfirmation.status >= 400);
+  assert.ok(provider.people.has("MANAGE01"));
+  assert.ok(provider.faces.has("MANAGE01"));
+  const cancelled = await send("delete", { action: "prepare", employeeNo: "MANAGE01" });
+  assert.equal(cancelled.status, 200);
+  assert.equal(cancelled.data.employeeNo, "MANAGE01");
+  assert.equal(cancelled.data.name, "合成接口测试人员");
+  assert.equal(typeof cancelled.data.confirmationToken, "string");
+  assert.ok(provider.people.has("MANAGE01"), "prepare/cancel must not delete a person");
+  assert.ok(provider.faces.has("MANAGE01"), "prepare/cancel must not delete a face");
+  const wrongText = await send("delete", { action: "confirm", employeeNo: "MANAGE01", confirmationToken: cancelled.data.confirmationToken, confirmationText: "DELETE SOMEONEELSE" });
+  assert.ok(wrongText.status >= 400);
+  assert.ok(provider.faces.has("MANAGE01"));
+  const prepared = await send("delete", { action: "prepare", employeeNo: "MANAGE01" });
+  assert.equal(prepared.status, 200);
+  const removed = await send("delete", { action: "confirm", employeeNo: "MANAGE01", confirmationToken: prepared.data.confirmationToken, confirmationText: "DELETE MANAGE01" });
+  assert.equal(removed.status, 200);
+  assert.equal(removed.data.status, "success");
+  assert.equal(removed.data.summary.total, 1);
+  assert.equal(removed.data.summary.success, 1);
+  assert.equal(removed.data.list.total, 0);
+  assert.equal(provider.people.size, 0);
+  assert.equal(provider.faces.size, 0);
+  assertNoSecrets(removed);
+  const replay = await send("delete", { action: "confirm", employeeNo: "MANAGE01", confirmationToken: prepared.data.confirmationToken, confirmationText: "DELETE MANAGE01" });
+  assert.ok(replay.status >= 400, "a consumed confirmation cannot be replayed");
+});
+
+test("management rejects batch, wildcard, malformed ID and extra-field delete requests without mutation", async t => {
+  const fixture = await localApp(t);
+  const auth = await fixture.demoLogin();
+  const send = (endpoint, data) => fixture.request(`face/${endpoint}`, { method: "POST", auth, data });
+  assert.equal((await send("connect", deviceConfig)).status, 200);
+  assert.equal((await send("enroll", input({ employeeNo: "MANAGE02" }))).status, 200);
+  const provider = fixture.providers[0];
+  for (const data of [
+    [], [{ employeeNo: "MANAGE02" }],
+    { action: "prepare", employeeNo: ["MANAGE02"] },
+    { action: "prepare", employeeNo: "MANAGE02", all: true },
+    { action: "confirm", employeeNo: "MANAGE02", confirmed: true },
+    { action: "confirm", employeeNos: ["MANAGE02"] },
+    ...["", "*", "../MANAGE02", "MANAGE_02", " MANAGE02", "MANAGE02\n", "A".repeat(33)].map(employeeNo => ({ action: "prepare", employeeNo })),
+  ]) {
+    const response = await send("delete", data);
+    assert.equal(response.status, 400);
+    assert.ok(provider.people.has("MANAGE02"));
+    assert.ok(provider.faces.has("MANAGE02"));
+    assertNoSecrets(response);
+  }
+  for (const data of [[], { employeeNo: "MANAGE02" }, { all: true }])
+    assert.equal((await send("list", data)).status, 400);
+  const unknownStatus = await send("delete", { action: "status", id: "unknown-operation" });
+  assert.ok(unknownStatus.status >= 400);
+  assert.ok(provider.faces.has("MANAGE02"));
+});
+
+test("delete confirmations and operation status remain isolated between admin sessions", async t => {
+  const fixture = await localApp(t);
+  const first = await fixture.demoLogin();
+  const second = await fixture.demoLogin();
+  const send = (auth, endpoint, data) => fixture.request(`face/${endpoint}`, { method: "POST", auth, data });
+  for (const auth of [first, second]) {
+    assert.equal((await send(auth, "connect", deviceConfig)).status, 200);
+    assert.equal((await send(auth, "enroll", input({ employeeNo: "MANAGE03" }))).status, 200);
+    assert.equal((await send(auth, "list", {})).status, 200);
+  }
+  const prepared = await send(first, "delete", { action: "prepare", employeeNo: "MANAGE03" });
+  assert.equal(prepared.status, 200);
+  const foreign = await send(second, "delete", { action: "confirm", employeeNo: "MANAGE03", confirmationToken: prepared.data.confirmationToken, confirmationText: "DELETE MANAGE03" });
+  assert.ok(foreign.status >= 400);
+  for (const provider of fixture.providers) {
+    assert.ok(provider.people.has("MANAGE03"));
+    assert.ok(provider.faces.has("MANAGE03"));
+  }
+  assert.equal((await send(first, "disconnect", {})).status, 200);
+  const closed = await send(first, "delete", { action: "confirm", employeeNo: "MANAGE03", confirmationToken: prepared.data.confirmationToken, confirmationText: "DELETE MANAGE03" });
+  assert.ok(closed.status >= 400);
+  assert.ok(fixture.providers[1].faces.has("MANAGE03"));
 });

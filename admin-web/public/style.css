@@ -1624,3 +1624,57 @@ th input[type="checkbox"] {
     padding: 20px 16px;
   }
 }
+
+
+/* Device personnel management never displays images or connection materials. */
+.face-management {
+  margin-top: 22px;
+}
+.face-management-help,
+.face-management-warning,
+.face-delete-result {
+  margin: 0 24px 20px;
+  font-size: 12px;
+  line-height: 1.9;
+}
+.face-management-help {
+  color: #8790a0;
+}
+.face-management-warning {
+  padding: 12px 15px;
+  border-radius: 7px;
+  color: #9c6631;
+  background: #fff7e8;
+}
+.face-management table {
+  min-width: 1050px;
+  white-space: normal;
+}
+.face-management td {
+  max-width: 280px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.face-management code {
+  color: #4f627c;
+  font-size: 12px;
+}
+.face-management-note {
+  display: block;
+  margin-top: 8px;
+  color: #9c6631;
+}
+.face-delete-result {
+  padding: 16px 18px;
+  border: 1px solid #d8e3eb;
+  border-radius: 7px;
+  background: #f7fafc;
+  overflow-wrap: anywhere;
+}
+.face-delete-result p {
+  margin: 8px 0;
+}
+.face-delete-steps {
+  margin: 8px 0;
+  padding-left: 22px;
+}

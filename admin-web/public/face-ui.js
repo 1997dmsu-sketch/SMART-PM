@@ -134,6 +134,180 @@ export function renderFaceSteps(enrollment, esc) {
   }).join("")}</ol>`;
 }
 
+
+const managementEmployeeNoPattern = /^[A-Za-z0-9]{1,32}$/;
+
+export function faceLibraryStatusLabel(value, kind) {
+  const label = kind === "infraredFD" ? "红外" : "可见光";
+  const statuses = {
+    present: label + "已入库",
+    absent: label + "未入库",
+    unknown: label + "状态未确认",
+    unsupported: label + "库不可用",
+  };
+  return statuses[value?.status] || statuses.unknown;
+}
+
+export function faceDeviceValidityLabel(person) {
+  const validity = person?.Valid;
+  if (validity?.enable === false) return "长期有效（未启用有效期限制）";
+  if (validity?.enable !== true) return "有效期未确认";
+  return String(validity.beginTime || "未返回") + " 至 " + String(validity.endTime || "未返回");
+}
+
+export function faceDoorLabel(person) {
+  const doorRight = typeof person?.doorRight === "string"
+    ? person.doorRight ? "门权限 " + person.doorRight : "未分配门权限"
+    : "门权限未返回";
+  const plans = Array.isArray(person?.RightPlan) ? person.RightPlan.map((plan) =>
+    "门 " + String(plan?.doorNo ?? "未返回") + " → 计划 " + String(plan?.planTemplateNo ?? "未返回")) : [];
+  return [doorRight, ...plans].join("；");
+}
+
+function managementDeleteStatus(value) {
+  return ({
+    success: "成功", deleted: "成功", failed: "失败", "not-found": "未找到",
+    "already-absent": "已不在库", pending: "处理中", unknown: "未确认",
+  })[value] || "未确认";
+}
+
+function managementDeleteStepLabel(step) {
+  if (step.label) return step.label;
+  if (step.kind === "face") {
+    const label = step.faceLibType === "blackFD" ? "可见光人脸库"
+      : step.faceLibType === "infraredFD" ? "红外人脸库" : "人脸库";
+    return label + (step.FDID ? " " + String(step.FDID) : "");
+  }
+  if (step.kind === "person") return "人员记录";
+  if (step.kind === "progress") return "设备删除进度";
+  return "设备处理";
+}
+
+export function renderFaceManagement({ list, connected, modeMatches = true, busy = false, deletion, listError = "" }, esc) {
+  const people = Array.isArray(list?.people) ? list.people : [];
+  const complete = list?.complete === true;
+  const pending = deletion?.status === "pending";
+  const canQuery = connected && modeMatches && !busy;
+  const total = Number.isSafeInteger(list?.total) && list.total >= 0 ? list.total : "未查询";
+  const rows = people.map((person) => {
+    const idValid = typeof person.employeeNo === "string" && managementEmployeeNoPattern.test(person.employeeNo);
+    const canDelete = canQuery && complete && !pending && person.deleteAllowed === true && idValid;
+    return '<tr><td><code>' + esc(person.employeeNo ?? "未返回") + '</code></td><td>' +
+      esc(person.name || "未返回姓名") + '</td><td>' + esc(faceDoorLabel(person)) +
+      '</td><td>' + esc(faceDeviceValidityLabel(person)) + '</td><td>' +
+      esc(faceLibraryStatusLabel(person.faces?.blackFD, "blackFD")) + '</td><td>' +
+      esc(faceLibraryStatusLabel(person.faces?.infraredFD, "infraredFD")) +
+      '</td><td><button type="button" class="btn danger" data-face-delete="' +
+      esc(person.employeeNo ?? "") + '"' + (canDelete ? "" : " disabled") +
+      '>删除此人员</button>' + (!idValid ? '<small class="face-management-note">编号不符合安全格式，不可删除</small>' : "") + '</td></tr>';
+  }).join("");
+  let result = "";
+  if (deletion) {
+    const summary = deletion.summary || {};
+    const number = (value) => Number.isSafeInteger(value) && value >= 0 ? value : "未确认";
+    const steps = Array.isArray(deletion.steps) ? deletion.steps : [];
+    result = '<section class="face-delete-result" role="status"><strong>本次删除 ' +
+      esc(number(summary.total)) + ' 条：成功 ' + esc(number(summary.success)) +
+      ' / 失败 ' + esc(number(summary.failed)) + ' / 未找到 ' + esc(number(summary.notFound)) +
+      (pending || summary.pending ? ' / 处理中 ' + esc(number(summary.pending)) : "") +
+      '</strong><p>' + esc(deletion.employeeNo || "") + " · " + esc(deletion.name || "") +
+      " · " + esc(managementDeleteStatus(deletion.status)) + '</p>' +
+      (steps.length ? '<ol class="face-delete-steps">' + steps.map((step) => {
+        const device = step.device || step;
+        const code = device.statusCode === undefined ? "" : "；statusCode=" + String(device.statusCode);
+        const description = device.statusString ? "；statusString=" + String(device.statusString) : "";
+        return '<li>' + esc(managementDeleteStepLabel(step)) +
+          "：" + esc(managementDeleteStatus(step.status)) + esc(code + description) + "</li>";
+      }).join("") + "</ol>" : "") +
+      (pending ? '<p>删除仍在处理中，不能据此认定成功；后续查询不会重新发送删除请求。</p>' : "") +
+      (pending && typeof deletion.operationId === "string" && deletion.operationId
+        ? '<button type="button" class="btn" id="face-delete-follow"' + (busy ? " disabled" : "") + '>查询删除结果</button>' : "") +
+      "</section>";
+  }
+  return '<section class="panel face-management"><div class="panel-head"><div><h2>人脸登记管理</h2><span class="muted">总数 ' +
+    esc(total) + (list ? " · 本次已读取 " + people.length + " 条" : "") +
+    '</span></div><button type="button" class="btn" id="face-list"' + (canQuery ? "" : " disabled") +
+    '>查询设备列表</button></div><p class="face-management-help">仅逐条删除。删除不可逆，需重新录入才能恢复。入库状态不代表现场识别或开门已验证。</p>' +
+    result + (listError ? '<p class="face-management-warning" role="alert">' + esc(listError) + "</p>" : "") +
+    (list && !complete ? '<p class="face-management-warning" role="alert">本次列表查询未完成，暂不可删除；请重新查询。</p>' : "") +
+    (rows ? '<div class="table-wrap"><table><thead><tr><th>人员编号</th><th>姓名</th><th>门号与计划</th><th>有效期</th><th>可见光人脸</th><th>红外人脸</th><th>操作</th></tr></thead><tbody>' +
+      rows + "</tbody></table></div>" : '<div class="face-empty">' +
+      (!connected || !modeMatches ? "请先连接所选模式的设备，再查询登记列表。" :
+        pending ? "删除处理中，剩余列表尚未确认。" :
+          list && complete ? "设备未返回已登记人员。" : "尚未查询设备人员列表。") + "</div>") + "</section>";
+}
+
+
+export function restoreFacePendingDeletion(state, previous = null) {
+  if (!state?.connected) return null;
+  const pending = state.pendingDelete;
+  if (!pending || typeof pending !== "object" || Array.isArray(pending)) return previous;
+  const employeeNoValid = typeof pending.employeeNo === "string" && managementEmployeeNoPattern.test(pending.employeeNo);
+  const operationIdValid = typeof pending.operationId === "string" && /^[0-9a-f-]{36}$/.test(pending.operationId);
+  const matched = employeeNoValid && operationIdValid && previous?.employeeNo === pending.employeeNo &&
+    previous.operationId === pending.operationId ? previous : null;
+  return {
+    employeeNo: employeeNoValid ? pending.employeeNo : "未确认编号",
+    name: typeof pending.name === "string" && pending.name.length <= 128 && !/[\x00-\x1f\x7f]/.test(pending.name)
+      ? pending.name : "待确认人员",
+    status: "pending",
+    steps: Array.isArray(matched?.steps) ? matched.steps : [],
+    summary: { total: 1, success: 0, failed: 0, notFound: 0, pending: 1 },
+    ...(operationIdValid ? { operationId: pending.operationId } : {}),
+    ...(typeof pending.expiresAt === "string" && pending.expiresAt.length <= 64
+      ? { expiresAt: pending.expiresAt } : {}),
+  };
+}
+
+export async function requestFaceDelete(person, api, confirmAction, isActive = () => true) {
+  if (!person || typeof person !== "object" || Array.isArray(person) || person.deleteAllowed !== true ||
+      typeof person.employeeNo !== "string" || !managementEmployeeNoPattern.test(person.employeeNo))
+    throw Error("删除需指定一个有效的人员编号（1至32位字母数字）");
+  if (!isActive()) return null;
+  const employeeNo = person.employeeNo;
+  const prepared = await api("face/delete", { method: "POST", data: { action: "prepare", employeeNo } });
+  if (!isActive()) return null;
+  if (prepared?.employeeNo === employeeNo && prepared.status === "not-found") return prepared;
+  if (prepared?.employeeNo !== employeeNo || typeof prepared.name !== "string" || prepared.name.length > 256 ||
+      typeof prepared.confirmationToken !== "string" || !prepared.confirmationToken ||
+      prepared.confirmationToken.length > 512 || /[\x00-\x1f\x7f]/.test(prepared.confirmationToken))
+    throw Error("删除确认资料无效，请重新查询列表");
+  const confirmed = await confirmAction("确认删除这一名人员？",
+    "人员编号：" + employeeNo + "；姓名：" + prepared.name + "。删除不可逆，需重新录入才能恢复。");
+  if (confirmed !== true || !isActive()) return null;
+  const result = await api("face/delete", { method: "POST", data: {
+    action: "confirm", employeeNo, confirmationToken: prepared.confirmationToken,
+    confirmationText: "DELETE " + employeeNo,
+  } });
+  if (!result || result.employeeNo !== employeeNo || !["success", "failed", "not-found", "pending"].includes(result.status))
+    throw Error("删除结果未确认，请查询设备列表；不要重复提交删除");
+  return result;
+}
+
+export async function followFaceDeletion(initial, api, {
+  isActive = () => true, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  maxPolls = 3, onUpdate = () => {},
+} = {}) {
+  let result = initial;
+  if (!Number.isInteger(maxPolls) || maxPolls < 0 || maxPolls > 3) throw Error("删除跟进次数无效");
+  for (let index = 0; index < maxPolls && result?.status === "pending"; index++) {
+    if (typeof result.operationId !== "string" || !result.operationId ||
+        result.operationId.length > 256 || /[\x00-\x1f\x7f]/.test(result.operationId))
+      throw Error("缺少可核对的删除任务编号，请重新查询列表");
+    if (!isActive()) return result;
+    await wait(1000);
+    if (!isActive()) return result;
+    const next = await api("face/delete", { method: "POST", data: { action: "status", id: result.operationId } });
+    if (!next || next.employeeNo !== initial.employeeNo ||
+        (next.operationId !== undefined && next.operationId !== initial.operationId) ||
+        !["success", "failed", "not-found", "pending"].includes(next.status))
+      throw Error("删除跟进结果不匹配，请查询设备列表；不要重复提交删除");
+    result = next;
+    onUpdate(result);
+  }
+  return result;
+}
+
 function localDate(date) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 16);
@@ -232,13 +406,16 @@ export function mountFaceEnrollment(initialState, helpers) {
   let state = initialState;
   let busy = "";
   let error = "";
+  let directory = null;
+  let deletion = restoreFacePendingDeletion(state);
+  let listError = deletion ? "仍有删除任务等待确认结果，请查询删除结果。" : "";
   let photo = null;
   let photoVersion = 0;
   let photoLoading = false;
   const retryPhotos = new Map();
   const connection = {
     mode: state.mode === "device" ? "device" : "simulation",
-    origin: state.device?.origin || "https://192.168.1.227:443",
+    origin: "",
     username: "",
     developmentTls: false,
   };
@@ -307,7 +484,37 @@ export function mountFaceEnrollment(initialState, helpers) {
 
   async function refresh() {
     const next = await api("face/state");
-    if (alive()) state = next;
+    if (!alive()) return;
+    state = next;
+    if (!next.connected) {
+      directory = null;
+      deletion = null;
+      listError = "";
+    } else {
+      deletion = restoreFacePendingDeletion(next, deletion);
+      if (deletion?.status === "pending") {
+        directory = null;
+        listError = deletion.operationId
+          ? "仍有删除任务等待确认结果，请查询删除结果。"
+          : "删除任务标识未确认，请刷新状态；不要重复提交删除。";
+      }
+    }
+  }
+
+  function showDeletion(result) {
+    deletion = result;
+    if (result.status === "pending") {
+      directory = null;
+      listError = "删除处理中，剩余列表尚未确认。";
+    } else if (result.list && !result.refreshError) {
+      directory = result.list;
+      listError = "";
+    } else {
+      directory = null;
+      listError = typeof result.refreshError === "string"
+        ? "删除结果已返回，剩余列表查询失败：" + result.refreshError
+        : "删除结果已返回，剩余列表尚未确认，请重新查询。";
+    }
   }
 
   function enrollmentMarkup(enrollment) {
@@ -330,7 +537,7 @@ export function mountFaceEnrollment(initialState, helpers) {
       draft.library = libraries.length ? "0" : "";
     const deviceMode = state.mode === "device";
     const canEnroll = state.connected && state.mode === connection.mode && faceHasAllDayPlan(cap) && libraries.length && doors.length && !busy && !photoLoading;
-    root.innerHTML = `<div class="face-page">${head("人脸门禁", "连接设备，同步测试人员、人脸照片与门禁权限。", `<button type="button" class="btn" id="face-refresh" ${disabled()}>${icon("refresh")} 刷新状态</button>`)}<div class="face-mode-banner ${deviceMode ? "device" : "simulation"}" role="status"><strong>${deviceMode ? "现场设备模式" : "模拟模式 · 不会下发现场设备"}</strong><span>${deviceMode ? `${esc(state.device?.origin || connection.origin)} · ${state.connected ? "已连接" : "未连接"}` : "仅验证联调流程，所有结果均为模拟。"}</span>${deviceMode && (state.device?.model || state.device?.firmware) ? `<small>型号 ${esc(state.device.model || "—")} · 固件 ${esc(state.device.firmware || "—")}</small>` : ""}</div><div class="face-page-error form-error" role="alert">${esc(error)}</div>${busy ? `<div class="face-busy" role="status">${esc(busy)}。阶段：建人 → 上传人脸 → 授权门 → 查询确认；完成后显示设备返回结果。</div>` : ""}<div class="face-columns"><section class="panel"><div class="panel-head"><h2>1. 连接设备</h2><span class="face-connection ${state.connected ? "connected" : ""}">${state.connected ? "已连接" : "未连接"}</span></div><form id="face-connect-form" class="face-form" autocomplete="off"><fieldset ${disabled()}><legend class="face-sr-only">连接方式</legend><div class="face-mode-choice"><label><input type="radio" name="mode" value="simulation" ${connection.mode === "simulation" ? "checked" : ""}>模拟模式</label><label><input type="radio" name="mode" value="device" ${connection.mode === "device" ? "checked" : ""}>现场设备</label></div><div class="face-device-fields form-grid" ${connection.mode === "device" ? "" : "hidden"}><label class="field full">设备地址<input name="origin" type="url" value="${esc(connection.origin)}" placeholder="https://192.168.1.227:443" ${connection.mode === "device" ? "required" : ""}></label><label class="field">设备账号<input name="username" autocomplete="off" value="${esc(connection.username)}" ${connection.mode === "device" ? "required" : ""}></label><label class="field">设备密码<input name="password" type="password" autocomplete="new-password" ${connection.mode === "device" ? "required" : ""}></label><label class="field full">设备证书（.cer / .pem）<input name="certificate" type="file" accept=".cer,.pem"><small>证书与账号密码仅用于当前服务内存中的设备连接。</small></label><label class="face-check full"><input type="checkbox" name="developmentTls" ${connection.developmentTls ? "checked" : ""}>开发联调证书例外</label><p class="face-help full">仅在开发联调设备证书时使用此例外。连接成功后密码会清空。</p></div><p class="face-help">${connection.mode === "simulation" ? "默认使用模拟设备，可先验证人员同步、失败重试和查询流程。" : "连接后将显示现场设备地址与设备返回的人脸库、门号。"}</p><div class="face-form-actions"><button class="btn primary" type="submit">${connection.mode === "device" ? "连接现场设备" : "连接模拟设备"}</button>${state.connected ? '<button class="btn" type="button" id="face-disconnect">断开连接</button>' : ""}</div></fieldset></form></section><section class="panel"><div class="panel-head"><h2>2. 人员与人脸</h2></div><form id="face-enroll-form" class="face-form"><fieldset ${busy || !state.connected || connection.mode !== state.mode ? "disabled" : ""}><legend class="face-sr-only">测试人员信息</legend><div class="form-grid"><label class="field">测试人员编号 *<input name="employeeNo" value="${esc(draft.employeeNo)}" required autocomplete="off">${deviceMode ? "<small>现场设备人员编号使用字母和数字。</small>" : ""}</label><label class="field">显示名 *<input name="name" value="${esc(draft.name)}" required autocomplete="off"></label><label class="field">人脸库 *<select name="library" required>${libraries.length ? libraries.map((library, index) => `<option value="${index}" ${String(index) === draft.library ? "selected" : ""}>${esc(library.FDID)} · ${esc(library.faceLibType)}</option>`).join("") : '<option value="">连接后读取设备能力</option>'}</select></label><label class="field">门号 *<select name="doorNo" required>${doors.length ? doors.map((door) => `<option value="${esc(door)}" ${String(door) === draft.doorNo ? "selected" : ""}>门 ${esc(door)}</option>`).join("") : '<option value="">连接后读取设备能力</option>'}</select></label>${renderFaceAccessPeriod(cap, esc)}${renderFaceValidityFields(draft, cap, esc)}<label class="field full">JPEG 人脸照片 *<input id="face-photo" type="file" accept="image/jpeg,.jpg,.jpeg"><small>${cap.maxPhotoBytes ? `本次联调照片上限：${Math.floor(cap.maxPhotoBytes / 1024)} KB${cap.photoLimitSource === "guide-default" ? "（按接入指南设置）" : ""}。` : "连接后读取本次联调照片上限。"}在本机按比例处理为最长边不超过 960 像素的 JPEG，不裁剪照片；只随同步请求提交，不进入公共图片库。</small></label><div class="face-photo-preview full" id="face-photo-preview">${previewMarkup(photo)}</div><p class="form-error full" id="face-photo-error" role="alert"></p><label class="face-check full"><input type="checkbox" name="consent" ${draft.consent ? "checked" : ""} required>我确认此人员已同意将其照片用于本次人脸门禁测试</label></div></fieldset><div class="face-form-actions"><button type="submit" class="btn primary" id="face-enroll-submit" ${canEnroll ? "" : "disabled"}>同步人员和人脸</button></div><p class="face-help">${!state.connected ? "请先连接模拟设备或现场设备。" : connection.mode !== state.mode ? "所选模式尚未连接，请先连接该模式的设备。" : deviceMode ? "同步及查询通过后，还需在现场设备刷脸验证。" : "当前为模拟模式，同步完成不会向现场设备下发人员或照片。"}</p></form></section></div><section class="panel face-records"><div class="panel-head"><h2>3. 同步记录与阶段</h2><span class="muted">${(state.enrollments || []).length} 条</span></div>${state.enrollments?.length ? state.enrollments.map(enrollmentMarkup).join("") : '<div class="face-empty">暂无同步记录。连接后，选择一名测试人员开始联调。</div>'}</section>${footer()}</div>`;
+    root.innerHTML = `<div class="face-page">${head("人脸门禁", "连接设备，同步测试人员、人脸照片与门禁权限。", `<button type="button" class="btn" id="face-refresh" ${disabled()}>${icon("refresh")} 刷新状态</button>`)}<div class="face-mode-banner ${deviceMode ? "device" : "simulation"}" role="status"><strong>${deviceMode ? "现场设备模式" : "模拟模式 · 不会下发现场设备"}</strong><span>${deviceMode ? (state.connected ? "已连接" : "未连接") : "仅验证联调流程，所有结果均为模拟。"}</span>${deviceMode && (state.device?.model || state.device?.firmware) ? `<small>型号 ${esc(state.device.model || "—")} · 固件 ${esc(state.device.firmware || "—")}</small>` : ""}</div><div class="face-page-error form-error" role="alert">${esc(error)}</div>${busy ? `<div class="face-busy" role="status">${esc(busy)}</div>` : ""}<div class="face-columns"><section class="panel"><div class="panel-head"><h2>1. 连接设备</h2><span class="face-connection ${state.connected ? "connected" : ""}">${state.connected ? "已连接" : "未连接"}</span></div><form id="face-connect-form" class="face-form" autocomplete="off"><fieldset ${disabled()}><legend class="face-sr-only">连接方式</legend><div class="face-mode-choice"><label><input type="radio" name="mode" value="simulation" ${connection.mode === "simulation" ? "checked" : ""}>模拟模式</label><label><input type="radio" name="mode" value="device" ${connection.mode === "device" ? "checked" : ""}>现场设备</label></div><div class="face-device-fields form-grid" ${connection.mode === "device" ? "" : "hidden"}><label class="field full">设备地址<input name="origin" type="url" placeholder="https://设备地址" ${connection.mode === "device" ? "required" : ""}></label><label class="field">设备账号<input name="username" autocomplete="off" ${connection.mode === "device" ? "required" : ""}></label><label class="field">设备密码<input name="password" type="password" autocomplete="new-password" ${connection.mode === "device" ? "required" : ""}></label><label class="field full">设备证书（.cer / .pem）<input name="certificate" type="file" accept=".cer,.pem"><small>证书与账号密码仅用于当前服务内存中的设备连接。</small></label><label class="face-check full"><input type="checkbox" name="developmentTls" ${connection.developmentTls ? "checked" : ""}>开发联调证书例外</label><p class="face-help full">仅在开发联调设备证书时使用此例外。连接成功后地址、账号和密码会清空。</p></div><p class="face-help">${connection.mode === "simulation" ? "默认使用模拟设备，可先验证人员同步、失败重试和查询流程。" : "连接后仅显示设备型号、人脸库和门号，不回显连接材料。"}</p><div class="face-form-actions"><button class="btn primary" type="submit">${connection.mode === "device" ? "连接现场设备" : "连接模拟设备"}</button>${state.connected ? '<button class="btn" type="button" id="face-disconnect">断开连接</button>' : ""}</div></fieldset></form></section><section class="panel"><div class="panel-head"><h2>2. 人员与人脸</h2></div><form id="face-enroll-form" class="face-form"><fieldset ${busy || !state.connected || connection.mode !== state.mode ? "disabled" : ""}><legend class="face-sr-only">测试人员信息</legend><div class="form-grid"><label class="field">测试人员编号 *<input name="employeeNo" value="${esc(draft.employeeNo)}" required autocomplete="off">${deviceMode ? "<small>现场设备人员编号使用字母和数字。</small>" : ""}</label><label class="field">显示名 *<input name="name" value="${esc(draft.name)}" required autocomplete="off"></label><label class="field">人脸库 *<select name="library" required>${libraries.length ? libraries.map((library, index) => `<option value="${index}" ${String(index) === draft.library ? "selected" : ""}>${esc(library.FDID)} · ${esc(library.faceLibType)}</option>`).join("") : '<option value="">连接后读取设备能力</option>'}</select></label><label class="field">门号 *<select name="doorNo" required>${doors.length ? doors.map((door) => `<option value="${esc(door)}" ${String(door) === draft.doorNo ? "selected" : ""}>门 ${esc(door)}</option>`).join("") : '<option value="">连接后读取设备能力</option>'}</select></label>${renderFaceAccessPeriod(cap, esc)}${renderFaceValidityFields(draft, cap, esc)}<label class="field full">JPEG 人脸照片 *<input id="face-photo" type="file" accept="image/jpeg,.jpg,.jpeg"><small>${cap.maxPhotoBytes ? `本次联调照片上限：${Math.floor(cap.maxPhotoBytes / 1024)} KB${cap.photoLimitSource === "guide-default" ? "（按接入指南设置）" : ""}。` : "连接后读取本次联调照片上限。"}在本机按比例处理为最长边不超过 960 像素的 JPEG，不裁剪照片；只随同步请求提交，不进入公共图片库。</small></label><div class="face-photo-preview full" id="face-photo-preview">${previewMarkup(photo)}</div><p class="form-error full" id="face-photo-error" role="alert"></p><label class="face-check full"><input type="checkbox" name="consent" ${draft.consent ? "checked" : ""} required>我确认此人员已同意将其照片用于本次人脸门禁测试</label></div></fieldset><div class="face-form-actions"><button type="submit" class="btn primary" id="face-enroll-submit" ${canEnroll ? "" : "disabled"}>同步人员和人脸</button></div><p class="face-help">${!state.connected ? "请先连接模拟设备或现场设备。" : connection.mode !== state.mode ? "所选模式尚未连接，请先连接该模式的设备。" : deviceMode ? "同步及查询通过后，还需在现场设备刷脸验证。" : "当前为模拟模式，同步完成不会向现场设备下发人员或照片。"}</p></form></section></div>${renderFaceManagement({ list: directory, connected: state.connected, modeMatches: connection.mode === state.mode, busy, deletion, listError }, esc)}<section class="panel face-records"><div class="panel-head"><h2>3. 同步记录与阶段</h2><span class="muted">${(state.enrollments || []).length} 条</span></div>${state.enrollments?.length ? state.enrollments.map(enrollmentMarkup).join("") : '<div class="face-empty">暂无同步记录。连接后，选择一名测试人员开始联调。</div>'}</section>${footer()}</div>`;
     bind();
   }
 
@@ -358,12 +565,17 @@ export function mountFaceEnrollment(initialState, helpers) {
         if (!alive()) return;
         state = next;
         connection.mode = next.mode;
+        connection.origin = "";
+        connection.username = "";
+        directory = null;
+        deletion = null;
+        listError = "";
         photo = null;
         photoVersion++;
         photoLoading = false;
         retryPhotos.clear();
         draft.consent = false;
-        toast(next.mode === "device" ? `已连接现场设备 ${next.device?.origin || input.origin}` : "已连接模拟设备 · 不会下发现场设备");
+        toast(next.mode === "device" ? "已连接现场设备" : "已连接模拟设备 · 不会下发现场设备");
       });
     };
     root.querySelector("#face-disconnect")?.addEventListener("click", async () => {
@@ -377,9 +589,50 @@ export function mountFaceEnrollment(initialState, helpers) {
         photoLoading = false;
         retryPhotos.clear();
         draft.consent = false;
+        connection.origin = "";
+        connection.username = "";
+        directory = null;
+        deletion = null;
+        listError = "";
         toast("已断开设备连接");
       });
     });
+    root.querySelector("#face-list")?.addEventListener("click", () => run("正在查询设备人员与人脸库状态", async () => {
+      directory = null;
+      listError = "";
+      const next = await api("face/list", { method: "POST", data: {} });
+      if (alive()) directory = next;
+    }));
+    for (const button of root.querySelectorAll("[data-face-delete]")) {
+      button.addEventListener("click", () => {
+        const person = directory?.people?.find((row) => row.employeeNo === button.dataset.faceDelete);
+        if (!person || person.deleteAllowed !== true || directory.complete !== true ||
+            !state.connected || connection.mode !== state.mode || deletion?.status === "pending") return;
+        deletion = null;
+        run("正在核对删除确认及结果", async () => {
+          try {
+            const result = await requestFaceDelete(person, api, confirmAction, alive);
+            if (!result || !alive()) return;
+            showDeletion(result);
+            render();
+            const followed = await followFaceDeletion(result, api, {
+              isActive: alive,
+              onUpdate: (next) => { if (alive()) { showDeletion(next); render(); } },
+            });
+            if (alive()) showDeletion(followed);
+          } catch (failure) {
+            directory = null;
+            listError = "删除结果未确认，请先刷新状态恢复跟进，或查询设备列表；不要重复提交删除。";
+            throw failure;
+          }
+        });
+      });
+    }
+    root.querySelector("#face-delete-follow")?.addEventListener("click", () => run("正在查询删除结果", async () => {
+      if (!deletion || deletion.status !== "pending") return;
+      const result = await followFaceDeletion(deletion, api, { isActive: alive, maxPolls: 1 });
+      if (alive()) showDeletion(result);
+    }));
     root.querySelector("#face-photo").onchange = async (event) => {
       const file = event.target.files[0];
       const version = ++photoVersion;

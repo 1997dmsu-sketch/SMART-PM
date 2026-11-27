@@ -39,6 +39,100 @@ function normalizeLibraries(value) {
   visit(value);
   return [...found.values()];
 }
+const managementEmployeePattern = /^[A-Za-z0-9]{1,32}$/;
+const managementTypes = ["blackFD", "infraredFD"];
+function managementEmployeeNo(value) {
+  if (typeof value !== "string" || !managementEmployeePattern.test(value)) invalid("人员编号需为1至32位字母或数字");
+  return value;
+}
+function managementInput(value, keys) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) invalid("仅支持单个人员操作，参数无效");
+  return value;
+}
+const managementText = (value, max = 128) => typeof value === "string" && value.length <= max && !/[\x00-\x1f\x7f]/.test(value) ? value : null;
+function managementLibraries(libraries) {
+  if (!Array.isArray(libraries) || libraries.length > 16) invalid("设备人脸库信息无效", 502);
+  const seen = new Set();
+  return libraries.filter(library => managementTypes.includes(library?.faceLibType)).map(library => {
+    if (typeof library.FDID !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(library.FDID)) invalid("设备人脸库编号无效", 502);
+    const key = `${library.faceLibType}\0${library.FDID}`;
+    if (seen.has(key)) invalid("设备返回重复的人脸库", 502);
+    seen.add(key);
+    return { FDID: library.FDID, faceLibType: library.faceLibType };
+  });
+}
+function managementPerson(row) {
+  if (!row || typeof row !== "object" || Array.isArray(row)) invalid("设备人员记录无效", 502);
+  if (typeof row.employeeNo !== "string" || !managementEmployeePattern.test(row.employeeNo)) invalid("设备返回非法人员编号，未继续查询人脸", 502);
+  const plans = Array.isArray(row.RightPlan) ? row.RightPlan.map(plan => ({
+    doorNo: Number.isInteger(Number(plan?.doorNo)) && Number(plan.doorNo) >= 1 && Number(plan.doorNo) <= 65535 ? Number(plan.doorNo) : null,
+    planTemplateNo: managementText(plan?.planTemplateNo, 128),
+  })) : [];
+  const validity = row.Valid && typeof row.Valid === "object" && !Array.isArray(row.Valid) ? row.Valid : {};
+  return { employeeNo: row.employeeNo, name: managementText(row.name) ?? "", doorRight: managementText(row.doorRight, 256), RightPlan: plans,
+    Valid: { enable: typeof validity.enable === "boolean" ? validity.enable : null, beginTime: managementText(validity.beginTime, 64), endTime: managementText(validity.endTime, 64) } };
+}
+function managementIdentity(row) {
+  const safe = managementPerson(row);
+  return createHash("sha256").update(JSON.stringify(safe)).digest("hex");
+}
+async function managementFaceGroups(provider, employeeNo, libraries) {
+  const faces = {};
+  for (const faceLibType of managementTypes) {
+    const matches = libraries.filter(library => library.faceLibType === faceLibType);
+    const results = [];
+    for (const library of matches) {
+      let status = "unknown", recordStatus = "unknown";
+      // Management is an explicitly requested read: observe the exact endpoint instead
+      // of treating an absent legacy enrollment capability flag as a failed query.
+      try {
+          if (typeof provider.readFaceForManagement === "function") {
+            const found = await provider.readFaceForManagement({ ...library, employeeNo });
+            if (["present", "absent", "unknown"].includes(found?.status)) status = found.status;
+            if (["present", "absent", "unknown"].includes(found?.recordStatus)) recordStatus = found.recordStatus;
+          } else {
+            const found = await provider.findFaceForManagement({ ...library, employeeNo });
+            status = found === true ? "present" : found === false ? "absent" : "unknown";
+            // A legacy modeling boolean cannot prove that an unmodeled record is absent.
+            recordStatus = found === true ? "present" : "unknown";
+          }
+      } catch { /* Unknown must never be represented as absent. */ }
+      results.push({ FDID: library.FDID, status, recordStatus });
+    }
+    faces[faceLibType] = { status: !results.length ? "unsupported" : results.some(row => row.status === "present") ? "present" : results.every(row => row.status === "absent") ? "absent" : "unknown", libraries: results };
+  }
+  return faces;
+}
+function managementFacesKnown(faces) {
+  return Object.values(faces).every(group => group.libraries.every(library => ["present", "absent"].includes(library.status) && ["present", "absent"].includes(library.recordStatus)));
+}
+async function managementListRows(provider, rows, libraries) {
+  const people = [];
+  for (const row of rows) {
+    const person = managementPerson(row);
+    const faces = await managementFaceGroups(provider, person.employeeNo, libraries);
+    // This marker describes strict observed management results, not an enrollment capability.
+    const managementSearchObserved = Boolean(libraries.length && managementFacesKnown(faces));
+    people.push({ ...person, faces, managementSearchObserved, deleteAllowed: Boolean(person.name && managementSearchObserved) });
+  }
+  return { total: people.length, complete: true, people, managementSearchObserved: people.length > 0 && people.every(person => person.managementSearchObserved), queriedAt: new Date().toISOString() };
+}
+const safeManagementCode = error => /^[A-Z][A-Z0-9_]{1,79}$/.test(error?.code || "") ? error.code : "DEVICE_OPERATION_UNCONFIRMED";
+function deletionResult(employeeNo, name, status, steps = [], extra = {}) { return { employeeNo, name, status, steps, ...extra }; }
+const managementFailureStrings = ["invalid operation", "invalid xml content", "invalid xml format", "device error", "device busy", "invalid command", "reboot required", "unauthorized", "forbidden"];
+function managementFailureNode(value) {
+  return [value, value?.ResponseStatus, value?.UserInfoSearch].find(node => node && typeof node === "object" && !Array.isArray(node)
+    && (Object.hasOwn(node, "statusCode") && ![1, "1"].includes(node.statusCode)
+      || node.responseStatus === false
+      || typeof node.statusString === "string" && managementFailureStrings.includes(node.statusString.toLowerCase())));
+}
+function safeDeviceResult(response, value) {
+  const root = value?.ResponseStatus || value || {};
+  const statusCode = Number.isSafeInteger(root.statusCode) || typeof root.statusCode === "string" && /^\d{1,8}$/.test(root.statusCode) ? root.statusCode : null;
+  const knownStatusStrings = ["ok", "invalid operation", "invalid xml content", "invalid xml format", "device error", "device busy", "unknown", "no error", "not found", "invalid command", "reboot required", "unauthorized", "forbidden", "no match"];
+  const statusString = typeof root.statusString === "string" && knownStatusStrings.includes(root.statusString.toLowerCase()) ? root.statusString : root.statusString === undefined ? null : "设备返回状态（已脱敏）";
+  return { httpStatus: response.status, statusCode, statusString, ...(typeof root.subStatusCode === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(root.subStatusCode) ? { subStatusCode: root.subStatusCode } : {}) };
+}
 function normalizeLocalTime(value, label) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(value)) invalid(`${label}格式错误`);
   const normalized = value.length === 16 ? value + ":00" : value;
@@ -96,6 +190,8 @@ export function faceMultipart(person, photo) {
 
 export class HikvisionFaceProvider {
   #planTemplateNo;
+  #managementLibraries = [];
+  #managementPageSize = 1;
   constructor(client, { planTemplateNo = "1" } = {}) { this.client = client; this.#planTemplateNo = planTemplateNo; }
   async json(method, path, data) {
     return jsonResponse(await this.client.request({ method, path, body: data === undefined ? undefined : Buffer.from(JSON.stringify(data)), contentType: data === undefined ? undefined : "application/json" }));
@@ -126,6 +222,9 @@ export class HikvisionFaceProvider {
     const functions = opt(user.supportFunction);
     if (functions.length && !["get", "post", "put"].every((method) => functions.includes(method))) invalid("设备人员能力缺少查询、新增或修改", 502);
     const allDayPlan = await loadAllDayPlan(path => this.json("GET", path), this.#planTemplateNo);
+    this.#managementLibraries = managementLibraries(libraries);
+    const pageMaximum = Number(user.UserInfoSearchCond?.maxResults?.["@max"]);
+    this.#managementPageSize = Number.isSafeInteger(pageMaximum) && pageMaximum > 0 ? Math.min(30, pageMaximum) : 1;
     return {
       device: { model: xmlValue(text, "model") || "未返回型号", firmware: xmlValue(text, "firmwareVersion") || "" },
       capabilities: {
@@ -174,6 +273,171 @@ export class HikvisionFaceProvider {
     const match = (value.MatchList || []).find((row) => row.FPID === person.employeeNo);
     return !match ? false : match.isInLibrary === "yes" ? true : match.isInLibrary === "no" ? false : null;
   }
+  async #managementJson(method, path, data) {
+    const response = await this.client.request({ method, path, body: data === undefined ? undefined : Buffer.from(JSON.stringify(data)), contentType: data === undefined ? undefined : "application/json" });
+    try {
+      if (response.status < 200 || response.status >= 300) invalid(`设备查询失败（HTTP ${response.status}）`, 502);
+      let value;
+      try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(response.body)); } catch { invalid("设备未返回有效 UTF-8 JSON", 502); }
+      if (!value || typeof value !== "object" || Array.isArray(value)) invalid("设备查询响应无效", 502);
+      if (managementFailureNode(value)) invalid("设备拒绝查询", 502);
+      return value;
+    } finally { response.body.fill(0); }
+  }
+  async findManagementPerson(employeeNo) {
+    managementEmployeeNo(employeeNo);
+    const value = await this.#managementJson("POST", "/ISAPI/AccessControl/UserInfo/Search?format=json", { UserInfoSearchCond: { searchID: randomUUID(), searchResultPosition: 0, maxResults: 1, EmployeeNoList: [{ employeeNo }] } });
+    const search = value.UserInfoSearch;
+    const rows = Array.isArray(search?.UserInfo) ? search.UserInfo : search?.numOfMatches === 0 && search.UserInfo == null ? [] : null;
+    if (!rows || !Number.isSafeInteger(search?.numOfMatches) || search.numOfMatches !== rows.length || rows.length > 1 || !Number.isSafeInteger(search.totalMatches) || search.totalMatches !== rows.length) invalid("设备人员精确查询未确认", 502);
+    if (search.responseStatusStrg !== undefined && !["OK", "NO MATCH"].includes(search.responseStatusStrg) || search.responseStatusStrg === "NO MATCH" && rows.length) invalid("设备人员精确查询状态矛盾", 502);
+    if (rows.some(row => row?.employeeNo !== employeeNo)) invalid("设备返回了其他人员，已停止操作", 502);
+    if (rows.length) managementPerson(rows[0]);
+    return rows[0] || null;
+  }
+  async readFaceForManagement(person) {
+    managementEmployeeNo(person?.employeeNo);
+    const [library] = managementLibraries([person]);
+    if (!library) invalid("人脸库类型无效");
+    const value = await this.#managementJson("POST", "/ISAPI/Intelligent/FDLib/FDSearch?format=json", { searchResultPosition: 0, maxResults: 1, faceLibType: library.faceLibType, FDID: library.FDID, FPID: person.employeeNo });
+    const unknown = { status: "unknown", recordStatus: "unknown" };
+    if (value.responseStatus !== undefined && typeof value.responseStatus !== "boolean" || value.progress !== undefined && value.progress !== 100 || value.responseStatusStrg !== undefined && !["OK", "NO MATCH"].includes(value.responseStatusStrg)) return unknown;
+    if (!Number.isSafeInteger(value.numOfMatches) || value.numOfMatches < 0 || !Number.isSafeInteger(value.totalMatches) || value.totalMatches < 0) return unknown;
+    const rows = value.MatchList;
+    if (value.numOfMatches === 0 && value.totalMatches === 0 && (rows == null || Array.isArray(rows) && rows.length === 0)) return { status: "absent", recordStatus: "absent" };
+    if (!Array.isArray(rows) || rows.length !== 1 || value.numOfMatches !== 1 || value.totalMatches !== 1 || rows[0]?.FPID !== person.employeeNo || value.responseStatusStrg === "NO MATCH") return unknown;
+    return { status: rows[0].isInLibrary === "yes" ? "present" : rows[0].isInLibrary === "no" ? "absent" : "unknown", recordStatus: "present" };
+  }
+  async findFaceForManagement(person) {
+    const face = await this.readFaceForManagement(person);
+    return face.status === "present" ? true : face.status === "absent" ? false : null;
+  }
+  async list({ libraries = this.#managementLibraries } = {}) {
+    const selected = managementLibraries(libraries);
+    const rows = [], seen = new Set();
+    const searchID = randomUUID();
+    let total;
+    for (let page = 0; page < 1000; page++) {
+      const value = await this.#managementJson("POST", "/ISAPI/AccessControl/UserInfo/Search?format=json", { UserInfoSearchCond: { searchID, searchResultPosition: rows.length, maxResults: this.#managementPageSize } });
+      const search = value.UserInfoSearch;
+      const matches = Array.isArray(search?.UserInfo) ? search.UserInfo : search?.numOfMatches === 0 && search.UserInfo == null ? [] : null;
+      if (!matches || !Number.isSafeInteger(search?.totalMatches) || search.totalMatches < 0 || search.totalMatches > 1000 || !Number.isSafeInteger(search.numOfMatches) || search.numOfMatches !== matches.length || matches.length > this.#managementPageSize) invalid("设备人员分页计数无效，名单未完整确认", 502);
+      if (total === undefined) total = search.totalMatches;
+      if (total !== search.totalMatches) invalid("查询期间人员总数已变化，请重新刷新", 409);
+      for (const row of matches) {
+        const person = managementPerson(row);
+        if (seen.has(person.employeeNo)) invalid("设备分页返回重复人员，名单未完整确认", 502);
+        seen.add(person.employeeNo); rows.push(row);
+      }
+      if (rows.length > total || search.responseStatusStrg === "MORE" && rows.length >= total || search.responseStatusStrg === "NO MATCH" && (matches.length || total)) invalid("设备分页状态与计数不一致", 502);
+      if (search.responseStatusStrg !== undefined && !["OK", "MORE", "NO MATCH"].includes(search.responseStatusStrg)) invalid("设备分页状态无效", 502);
+      if (rows.length === total) return managementListRows(this, rows, selected);
+      if (!matches.length) invalid("设备分页提前结束，名单未完整确认", 502);
+    }
+    invalid("人员分页超过本次上限，名单未完整确认", 502);
+  }
+  async #deleteWire(path, data) {
+    let response;
+    try { response = await this.client.request({ method: "PUT", path, body: Buffer.from(JSON.stringify(data)), contentType: "application/json" }); }
+    catch (error) { return { ok: false, unknown: true, details: { errorCode: safeManagementCode(error) } }; }
+    try {
+      let value;
+      try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(response.body)); } catch { value = null; }
+      const rejected = managementFailureNode(value);
+      const details = safeDeviceResult(response, rejected ? { ...rejected, ResponseStatus: undefined } : value);
+      const nodes = [value, value?.ResponseStatus].filter(node => node && typeof node === "object" && !Array.isArray(node));
+      const acknowledged = !rejected && response.status >= 200 && response.status < 300 && [1, "1"].includes(details.statusCode)
+        && nodes.every(node => node.statusString === undefined || typeof node.statusString === "string" && ["ok", "no error"].includes(node.statusString.toLowerCase()))
+        && nodes.every(node => node.responseStatus === undefined || node.responseStatus === true);
+      if (rejected) details.errorCode = "DEVICE_DELETE_REJECTED";
+      else if (!acknowledged) details.errorCode = "DELETE_ACK_UNCONFIRMED";
+      return { ok: acknowledged, unknown: !acknowledged && !rejected && ![400, 401, 403, 404, 405].includes(response.status), details };
+    } finally { response.body.fill(0); }
+  }
+  async #deleteProgress() {
+    const value = await this.#managementJson("GET", "/ISAPI/AccessControl/UserInfoDetail/DeleteProcess?format=json");
+    const status = value.UserInfoDetailDeleteProcess?.status;
+    if (!["processing", "success", "failed"].includes(status)) invalid("设备未返回可确认的删除进度", 502);
+    return status;
+  }
+  async deletePerson({ employeeNo, expectedIdentity, libraries = this.#managementLibraries }) {
+    managementEmployeeNo(employeeNo);
+    const selected = managementLibraries(libraries);
+    if (!selected.length || selected.length !== libraries.length) invalid("设备人脸库未完整确认，停止删除", 409);
+    const initial = await this.findManagementPerson(employeeNo);
+    if (!initial) return deletionResult(employeeNo, "", "not-found");
+    const identity = managementIdentity(initial);
+    if (expectedIdentity !== undefined && expectedIdentity !== identity) invalid("人员信息已变化，请重新查询并确认", 409);
+    const operation = { employeeNo, name: managementPerson(initial).name, expectedIdentity: identity, libraries: selected, phase: "face", steps: [], writeAttempted: false };
+    try {
+    try { if (await this.#deleteProgress() === "processing") return deletionResult(employeeNo, operation.name, "failed", [{ kind: "progress", status: "failed", errorCode: "DEVICE_DELETE_BUSY" }]); }
+    catch { return deletionResult(employeeNo, operation.name, "failed", [{ kind: "progress", status: "failed", errorCode: "DELETE_PROGRESS_UNCONFIRMED" }]); }
+    const faces = await managementFaceGroups(this, employeeNo, selected);
+    if (!managementFacesKnown(faces)) return deletionResult(employeeNo, operation.name, "failed", [{ kind: "face", status: "failed", errorCode: "FACE_STATE_UNKNOWN" }]);
+    for (const library of selected) {
+      const current = faces[library.faceLibType].libraries.find(row => row.FDID === library.FDID);
+      const step = { kind: "face", ...library, status: "already-absent" };
+      operation.steps.push(step);
+      if (current.recordStatus === "absent") continue;
+      // Official Mingmou protocol: the fixed, single-element FPID filter cannot select a whole library.
+      operation.writeAttempted = true;
+      const response = await this.#deleteWire(`/ISAPI/Intelligent/FDLib/FDSearch/Delete?format=json&FDID=${encodeURIComponent(library.FDID)}&faceLibType=${encodeURIComponent(library.faceLibType)}`, { FPID: [{ value: employeeNo }] });
+      Object.assign(step, response.details, { status: response.ok || response.unknown ? "pending" : "failed" });
+      if (!response.ok) return deletionResult(employeeNo, operation.name, response.unknown ? "pending" : "failed", operation.steps, response.unknown ? { operation } : {});
+      let absent = false;
+      try { absent = (await this.readFaceForManagement({ ...library, employeeNo })).recordStatus === "absent"; } catch { /* keep pending */ }
+      if (!absent) return deletionResult(employeeNo, operation.name, "pending", operation.steps, { operation });
+      step.status = "success";
+    }
+    const latest = await this.findManagementPerson(employeeNo);
+    if (!latest) { operation.steps.push({ kind: "person", status: "already-absent" }); return await this.followDelete(operation); }
+    if (managementIdentity(latest) !== identity) return deletionResult(employeeNo, operation.name, "failed", [...operation.steps, { kind: "person", status: "failed", errorCode: "PERSON_CHANGED_BEFORE_DELETE" }]);
+    try { if (await this.#deleteProgress() === "processing") return deletionResult(employeeNo, operation.name, "failed", [...operation.steps, { kind: "person", status: "failed", errorCode: "DEVICE_DELETE_BUSY" }]); }
+    catch { return deletionResult(employeeNo, operation.name, "failed", [...operation.steps, { kind: "person", status: "failed", errorCode: "DELETE_PROGRESS_UNCONFIRMED" }]); }
+    operation.phase = "person";
+    operation.writeAttempted = true;
+    const response = await this.#deleteWire("/ISAPI/AccessControl/UserInfoDetail/Delete?format=json", { UserInfoDetail: { mode: "byEmployeeNo", EmployeeNoList: [{ employeeNo }] } });
+    operation.steps.push({ kind: "person", ...response.details, status: response.ok || response.unknown ? "pending" : "failed" });
+    if (!response.ok) return deletionResult(employeeNo, operation.name, response.unknown ? "pending" : "failed", operation.steps, response.unknown ? { operation } : {});
+    return await this.followDelete(operation);
+    } catch (error) {
+      operation.steps.push({ kind: "progress", status: "failed", errorCode: safeManagementCode(error) });
+      return deletionResult(employeeNo, operation.name, operation.writeAttempted ? "pending" : "failed", operation.steps, operation.writeAttempted ? { operation } : {});
+    }
+  }
+  async followDelete(operation) {
+    managementEmployeeNo(operation?.employeeNo);
+    const libraries = managementLibraries(operation.libraries);
+    let progress;
+    if (operation.phase === "person") {
+      try { progress = await this.#deleteProgress(); } catch { /* A lost progress response cannot become success. */ }
+    }
+    if (progress === "failed") {
+      operation.steps.push({ kind: "progress", status: "failed", errorCode: "DEVICE_DELETE_FAILED" });
+      return deletionResult(operation.employeeNo, operation.name, "failed", operation.steps);
+    }
+    const person = await this.findManagementPerson(operation.employeeNo);
+    const faces = await managementFaceGroups(this, operation.employeeNo, libraries);
+    const states = Object.values(faces).flatMap(group => group.libraries);
+    const allAbsent = states.length && states.every(row => row.recordStatus === "absent");
+    const result = status => deletionResult(operation.employeeNo, operation.name, status, operation.steps, status === "pending" ? { operation } : {});
+    for (const step of operation.steps) if (step.kind === "face" && step.status === "pending" && faces[step.faceLibType]?.libraries.some(row => row.FDID === step.FDID && row.recordStatus === "absent")) step.status = "success";
+    if (!person && allAbsent && (operation.phase !== "person" || progress === "success")) {
+      for (const step of operation.steps) if (step.status === "pending") step.status = "success";
+      return result("success");
+    }
+    if (person && managementIdentity(person) !== operation.expectedIdentity) { operation.steps.push({ kind: "person", status: "failed", errorCode: "PERSON_CHANGED_DURING_DELETE" }); return result("failed"); }
+    if (states.some(row => row.recordStatus === "unknown")) return result("pending");
+    if (operation.phase === "face") {
+      if (person && allAbsent) { operation.steps.push({ kind: "person", status: "failed", errorCode: "PERSON_DELETE_REQUIRES_NEW_CONFIRMATION" }); return result("failed"); }
+      return result("pending");
+    }
+    if (progress === "success" && (person || !allAbsent)) {
+      operation.steps.push({ kind: "progress", status: "failed", errorCode: "DELETE_READBACK_MISMATCH" });
+      return result("failed");
+    }
+    return result("pending");
+  }
   close() { this.client.close(); }
 }
 
@@ -188,6 +452,32 @@ export class SimulatedFaceProvider {
     Object.assign(this.people.get(person.employeeNo), { doorRight: String(person.doorNo), RightPlan: [{ doorNo: Number(person.doorNo), planTemplateNo: person.accessPlanTemplateNo }] });
   }
   async findFace(person) { return this.faces.has(person.employeeNo); }
+  async findManagementPerson(employeeNo) { managementEmployeeNo(employeeNo); return copy(this.people.get(employeeNo) || null); }
+  async findFaceForManagement(person) { managementEmployeeNo(person?.employeeNo); return person.faceLibType === "blackFD" && this.faces.has(person.employeeNo); }
+  async readFaceForManagement(person) {
+    const found = await this.findFaceForManagement(person);
+    return { status: found === true ? "present" : found === false ? "absent" : "unknown", recordStatus: found === true ? "present" : found === false ? "absent" : "unknown" };
+  }
+  async list({ libraries = [{ FDID: "SIMULATION_FD_01", faceLibType: "blackFD" }] } = {}) {
+    return managementListRows(this, [...this.people.values()].map(copy), managementLibraries(libraries));
+  }
+  async deletePerson({ employeeNo, expectedIdentity, libraries = [{ FDID: "SIMULATION_FD_01", faceLibType: "blackFD" }] }) {
+    managementEmployeeNo(employeeNo);
+    const selected = managementLibraries(libraries);
+    const person = this.people.get(employeeNo);
+    if (!person) return deletionResult(employeeNo, "", "not-found");
+    if (expectedIdentity !== undefined && managementIdentity(person) !== expectedIdentity) invalid("人员信息已变化，请重新查询并确认", 409);
+    const steps = selected.map(library => ({ kind: "face", ...library, status: library.faceLibType === "blackFD" && this.faces.has(employeeNo) ? "success" : "already-absent", statusCode: 1, statusString: "OK" }));
+    this.faces.delete(employeeNo);
+    this.people.delete(employeeNo);
+    steps.push({ kind: "person", status: "success", statusCode: 1, statusString: "OK" });
+    return deletionResult(employeeNo, managementPerson(person).name, "success", steps);
+  }
+  async followDelete(operation) {
+    managementEmployeeNo(operation?.employeeNo);
+    const absent = !this.people.has(operation.employeeNo) && !this.faces.has(operation.employeeNo);
+    return deletionResult(operation.employeeNo, operation.name, absent ? "success" : "pending", operation.steps || [], absent ? {} : { operation });
+  }
   close() { this.people.clear(); this.faces.clear(); }
 }
 
@@ -198,18 +488,27 @@ export class FaceEnrollmentService {
   #busy = false;
   #closed = false;
   #providerFactory;
+  #confirmations = new Map();
+  #deleteOperations = new Map();
+  #pendingDelete;
+  #now;
+  #confirmationTtlMs;
+  #deleteFollowTtlMs;
   #canonicalUnlimitedRows = new WeakSet();
   #observedUnlimitedCanonicalization = false;
   #state = { mode: "simulation", connected: false, device: {}, capabilities: { libraries: [], doorNumbers: [], maxPhotoBytes: FACE_PHOTO_LIMIT } };
-  constructor({ providerFactory = (config) => new HikvisionFaceProvider(new HikvisionClient(config), { planTemplateNo: config.planTemplateNo }) } = {}) { this.#providerFactory = providerFactory; }
-  state() { return copy({ ...this.#state, busy: this.#busy, enrollments: [...this.#rows.values()] }); }
-  async #exclusive(action) {
+  constructor({ providerFactory = (config) => new HikvisionFaceProvider(new HikvisionClient(config), { planTemplateNo: config.planTemplateNo }), now = Date.now, confirmationTtlMs = 120000, deleteFollowTtlMs = 600000 } = {}) {
+    this.#providerFactory = providerFactory; this.#now = now; this.#confirmationTtlMs = confirmationTtlMs; this.#deleteFollowTtlMs = deleteFollowTtlMs;
+  }
+  state() { const pending = this.#pendingDelete && this.#deleteOperations.get(this.#pendingDelete); return copy({ ...this.#state, busy: this.#busy, enrollments: [...this.#rows.values()], ...(pending ? { pendingDelete: { operationId: pending.id, employeeNo: pending.employeeNo, name: pending.name, expiresAt: new Date(pending.expires).toISOString() } } : {}) }); }
+  async #exclusive(action, { allowPendingDelete = false } = {}) {
     if (this.#closed) invalid("设备会话已关闭，请重新登录", 409);
     if (this.#busy) invalid("已有设备操作进行中，请等待完成", 409);
+    if (this.#pendingDelete && !allowPendingDelete) invalid("已有删除操作等待确认结果，请先查询删除结果", 409);
     this.#busy = true;
     try { return await action(); } finally { this.#busy = false; }
   }
-  #clear() { for (const photo of this.#photos.values()) { clearTimeout(photo.timer); photo.bytes.fill(0); } this.#photos.clear(); this.#rows.clear(); this.#canonicalUnlimitedRows = new WeakSet(); this.#observedUnlimitedCanonicalization = false; }
+  #clear() { for (const photo of this.#photos.values()) { clearTimeout(photo.timer); photo.bytes.fill(0); } this.#photos.clear(); this.#rows.clear(); this.#confirmations.clear(); this.#deleteOperations.clear(); this.#pendingDelete = undefined; this.#canonicalUnlimitedRows = new WeakSet(); this.#observedUnlimitedCanonicalization = false; }
   async connect(data) {
     await this.#exclusive(async () => {
       if (!data || !["simulation", "device"].includes(data.mode)) invalid("连接模式无效");
@@ -232,14 +531,94 @@ export class FaceEnrollmentService {
         throw error;
       }
       this.#provider?.close(); this.#clear(); this.#provider = provider;
-      this.#state = { mode: data.mode, connected: true, device: { ...copy(description.device), ...(data.mode === "device" ? { origin: new URL(data.origin).origin } : {}) }, capabilities: copy(description.capabilities) };
+      this.#state = { mode: data.mode, connected: true, device: { model: managementText(description.device?.model) || "未返回型号", firmware: managementText(description.device?.firmware) || "" }, capabilities: copy(description.capabilities) };
       this.#observedUnlimitedCanonicalization = data.mode === "device" && this.#state.device.model === "DS-K1T671BM" && this.#state.device.firmware === "V3.3.180";
     });
     return this.state();
   }
   async disconnect() {
-    await this.#exclusive(async () => { this.#provider?.close(); this.#provider = undefined; this.#clear(); this.#state = { mode: "simulation", connected: false, device: {}, capabilities: { libraries: [], doorNumbers: [], maxPhotoBytes: FACE_PHOTO_LIMIT } }; });
+    await this.#exclusive(async () => { this.#provider?.close(); this.#provider = undefined; this.#clear(); this.#state = { mode: "simulation", connected: false, device: {}, capabilities: { libraries: [], doorNumbers: [], maxPhotoBytes: FACE_PHOTO_LIMIT } }; }, { allowPendingDelete: true });
     return this.state();
+  }
+  #requireManagement() {
+    if (!this.#provider || !this.#state.connected) invalid("请先连接模拟设备或现场设备", 409);
+    if (typeof this.#provider.list !== "function") invalid("当前连接未支持登记管理", 409);
+  }
+  async #managementList() {
+    this.#requireManagement(); this.#confirmations.clear();
+    return this.#provider.list({ libraries: this.#state.capabilities.libraries });
+  }
+  async list(data = {}) {
+    managementInput(data, []);
+    return this.#exclusive(() => this.#managementList(), { allowPendingDelete: true });
+  }
+  async #managementFind(employeeNo) {
+    const row = typeof this.#provider.findManagementPerson === "function" ? await this.#provider.findManagementPerson(employeeNo) : await this.#provider.findPerson(employeeNo);
+    if (row && row.employeeNo !== employeeNo) invalid("设备返回了其他人员，已停止操作", 502);
+    if (row) managementPerson(row);
+    return row;
+  }
+  async #managementResult(result, operationId) {
+    const safe = { employeeNo: result.employeeNo, name: result.name || "", status: result.status, steps: copy(result.steps || []),
+      summary: { total: 1, success: Number(result.status === "success"), failed: Number(result.status === "failed"), notFound: Number(result.status === "not-found"), pending: Number(result.status === "pending") }, ...(operationId ? { operationId } : {}) };
+    try { safe.list = await this.#managementList(); } catch { safe.refreshError = "设备名单刷新未完成，请手动刷新确认剩余人员"; }
+    return safe;
+  }
+  async prepareDelete(data) {
+    managementInput(data, ["employeeNo"]); const employeeNo = managementEmployeeNo(data.employeeNo);
+    return this.#exclusive(async () => {
+      this.#requireManagement(); this.#confirmations.clear();
+      if (typeof this.#provider.deletePerson !== "function" || typeof this.#provider.followDelete !== "function") invalid("当前连接未支持受控删除", 409);
+      const libraries = managementLibraries(this.#state.capabilities.libraries);
+      if (!libraries.length || libraries.length !== this.#state.capabilities.libraries.length) invalid("设备人脸库未完整确认，停止删除", 409);
+      const row = await this.#managementFind(employeeNo);
+      if (!row) return this.#managementResult(deletionResult(employeeNo, "", "not-found"));
+      const person = managementPerson(row);
+      if (!person.name) invalid("设备未返回姓名，请先确认人员记录", 409);
+      const faces = await managementFaceGroups(this.#provider, employeeNo, libraries);
+      if (!managementFacesKnown(faces)) invalid("人脸状态尚未确认，请重新查询后再删除", 409);
+      const token = randomBytes(32).toString("base64url"), expires = this.#now() + this.#confirmationTtlMs;
+      this.#confirmations.set(token, { employeeNo, name: person.name, expectedIdentity: managementIdentity(row), libraries, expires, provider: this.#provider });
+      return { employeeNo, name: person.name, confirmationToken: token, expiresAt: new Date(expires).toISOString() };
+    });
+  }
+  async delete(data) {
+    managementInput(data, ["employeeNo", "confirmationToken", "confirmationText"]); const employeeNo = managementEmployeeNo(data.employeeNo);
+    return this.#exclusive(async () => {
+      this.#requireManagement();
+      const token = typeof data.confirmationToken === "string" && /^[A-Za-z0-9_-]{43}$/.test(data.confirmationToken) ? data.confirmationToken : "";
+      const confirmation = this.#confirmations.get(token); this.#confirmations.delete(token);
+      if (!confirmation || confirmation.employeeNo !== employeeNo || confirmation.provider !== this.#provider || confirmation.expires <= this.#now() || data.confirmationText !== `DELETE ${employeeNo}`) invalid("删除二次确认无效或已过期，请重新查询并确认", 409);
+      const current = await this.#managementFind(employeeNo);
+      if (!current) return this.#managementResult(deletionResult(employeeNo, confirmation.name, "not-found"));
+      if (managementIdentity(current) !== confirmation.expectedIdentity) invalid("人员信息已变化，请重新查询并确认", 409);
+      let result;
+      try { result = await this.#provider.deletePerson({ employeeNo, expectedIdentity: confirmation.expectedIdentity, libraries: confirmation.libraries }); }
+      catch (error) { result = deletionResult(employeeNo, confirmation.name, "failed", [{ kind: "person", status: "failed", errorCode: safeManagementCode(error) }]); }
+      let operationId;
+      if (result.status === "pending" && result.operation) {
+        operationId = randomUUID(); this.#pendingDelete = operationId;
+        this.#deleteOperations.set(operationId, { id: operationId, employeeNo, name: confirmation.name, operation: result.operation, expires: this.#now() + this.#deleteFollowTtlMs });
+      }
+      return this.#managementResult(result, operationId);
+    });
+  }
+  async followDelete(data) {
+    managementInput(data, ["id"]);
+    if (typeof data.id !== "string" || !/^[0-9a-f-]{36}$/.test(data.id)) invalid("删除跟进编号无效");
+    return this.#exclusive(async () => {
+      this.#requireManagement();
+      const saved = this.#deleteOperations.get(data.id);
+      if (!saved || saved.expires <= this.#now()) invalid("删除跟进已失效，请重新连接并查询名单，勿重复发送删除", 409);
+      if (saved.result) return copy(saved.result);
+      let result;
+      try { result = await this.#provider.followDelete(saved.operation); }
+      catch { result = deletionResult(saved.employeeNo, saved.name, "pending", saved.operation.steps || [], { operation: saved.operation }); }
+      if (result.status !== "pending") this.#pendingDelete = undefined;
+      const answer = await this.#managementResult(result, saved.id);
+      if (result.status !== "pending") saved.result = copy(answer);
+      return answer;
+    }, { allowPendingDelete: true });
   }
   #validate(data) {
     if (!this.#provider || !this.#state.connected) invalid("请先连接模拟设备或现场设备", 409);

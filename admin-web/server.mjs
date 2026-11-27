@@ -507,6 +507,25 @@ export async function createApp({
           const data = await body(req, 1024 * 1024);
           if (path === "/api/face/connect") return send(await face.connect(data));
           if (path === "/api/face/disconnect") return send(await face.disconnect());
+          if (path === "/api/face/list") {
+            if (!data || typeof data !== "object" || Array.isArray(data) || Object.keys(data).length)
+              fail("人员列表查询不接受批量条件或其他参数");
+            return send(await face.list());
+          }
+          if (path === "/api/face/delete") {
+            if (!data || typeof data !== "object" || Array.isArray(data))
+              fail("每次只能操作一名人员，禁止批量删除");
+            const fields = data.action === "prepare" ? ["action", "employeeNo"]
+              : data.action === "confirm" ? ["action", "employeeNo", "confirmationToken", "confirmationText"]
+              : data.action === "status" ? ["action", "id"] : null;
+            if (!fields || Object.keys(data).some((key) => !fields.includes(key)))
+              fail("删除请求格式无效，每次只能操作一名人员");
+            if (data.action === "status") return send(await face.followDelete({ id: data.id }));
+            if (typeof data.employeeNo !== "string" || !/^[A-Za-z0-9]{1,32}$/.test(data.employeeNo))
+              fail("人员编号只能包含1至32位字母或数字");
+            if (data.action === "prepare") return send(await face.prepareDelete({ employeeNo: data.employeeNo }));
+            return send(await face.delete({ employeeNo: data.employeeNo, confirmationToken: data.confirmationToken, confirmationText: data.confirmationText }));
+          }
           if (path === "/api/face/enroll") return send({ enrollment: await face.enroll(data) });
           if (path === "/api/face/retry") return send({ enrollment: await face.retry(data) });
           if (path === "/api/face/verify") return send({ enrollment: await face.verify(data) });

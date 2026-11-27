@@ -1,0 +1,10 @@
+{
+  "artifact": "SMART-PM-signed-remote-reviewed-source-2026-11-27.zip",
+  "bytes": 10263125,
+  "sha256": "b7eae756ed0c68d4f6188bcd403560cb54a7ae4c08e77cc22183b9ba4b4a4037",
+  "sourceCommit": "6fa36b5b60760d3d26fad2c95157954364e33e76",
+  "sourceVersion": "0.1.0-beta.22-signed-lease-remote-source.2",
+  "scope": "B/C limited source acceptance and offline evidence only; NO-GO unchanged",
+  "innerArchiveSha256": "170e62d7bc5d44dcef2860afbfc03416c91813f1d89bbcd352c1a997770f4e2d",
+  "members": 61
+}

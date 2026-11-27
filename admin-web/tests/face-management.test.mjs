@@ -512,7 +512,7 @@ test("global device deletion busy state stops before any face write", async () =
 
 test("a read failure after face writes preserves pending evidence and follow-up never submits the person delete", async () => {
   const { service, client } = await connected();
-  client.afterFaceDelete = () => { client.failNextPersonRead = true; };
+  client.afterFaceDelete = library => { if (library.faceLibType === "infraredFD") client.failNextPersonRead = true; };
   const pending = await service.delete(confirmation(await service.prepareDelete({ employeeNo: "EMP1" })));
   assert.equal(pending.status, "pending");
   assert.match(pending.operationId, /^[0-9a-f-]{36}$/);
@@ -525,6 +525,132 @@ test("a read failure after face writes preserves pending evidence and follow-up 
   assert.equal(puts(client).length, before);
   assert(!puts(client).some(call => call.path.includes("UserInfoDetail/Delete")));
   assert(client.people.has("EMP1"));
+  service.close();
+});
+
+for (const change of ["replaced", "removed"]) test("snapshot guard stops the first face PUT when the person is " + change + " during FDSearch", async () => {
+  const { service, client } = await connected();
+  const prepared = await service.prepareDelete({ employeeNo: "EMP1" });
+  const replacement = person("EMP1", "合成替换人员");
+  const request = client.request.bind(client);
+  let changedAt;
+  client.request = async input => {
+    const response = await request(input);
+    if (changedAt === undefined && input.method === "POST" && input.path === "/ISAPI/Intelligent/FDLib/FDSearch?format=json") {
+      if (change === "replaced") client.people.set("EMP1", replacement);
+      else client.people.delete("EMP1");
+      changedAt = client.calls.length;
+    }
+    return response;
+  };
+  const result = await service.delete(confirmation(prepared));
+  assert.notEqual(changedAt, undefined);
+  assert.equal(result.status, "failed");
+  assert(result.steps.some(step => step.errorCode === "PERSON_CHANGED_BEFORE_DELETE"));
+  assert.equal(puts(client).length, 0);
+  assert.equal(client.calls.slice(changedAt).filter(call => call.method === "PUT").length, 0);
+  if (change === "replaced") assert.equal(client.people.get("EMP1"), replacement);
+  else assert.equal(client.people.has("EMP1"), false);
+  for (const library of libraries) assert(client.faces.has(faceKey(library, "EMP1")));
+  service.close();
+});
+
+test("snapshot guard preserves a replacement person and the second library after the first face PUT", async () => {
+  const { service, client } = await connected();
+  const prepared = await service.prepareDelete({ employeeNo: "EMP1" });
+  const replacement = person("EMP1", "首库删除后的合成替换人员");
+  let changedAt;
+  client.afterFaceDelete = library => {
+    if (library.faceLibType !== "blackFD") return;
+    client.people.set("EMP1", replacement);
+    client.faces.add(faceKey(libraries[1], "EMP1"));
+    changedAt = client.calls.length;
+  };
+  const result = await service.delete(confirmation(prepared));
+  assert.notEqual(changedAt, undefined);
+  assert.equal(result.status, "failed");
+  assert(result.steps.some(step => step.errorCode === "PERSON_CHANGED_BEFORE_DELETE"));
+  assert.equal(puts(client).length, 1);
+  assert(puts(client)[0].path.includes("FDID=1&faceLibType=blackFD"));
+  assert.equal(client.calls.slice(changedAt).filter(call => call.method === "PUT").length, 0);
+  assert.equal(client.people.get("EMP1"), replacement);
+  assert.equal(client.faces.has(faceKey(libraries[0], "EMP1")), false);
+  assert(client.faces.has(faceKey(libraries[1], "EMP1")));
+  assert.equal(result.list.people[0].name, replacement.name);
+  assert.equal(result.list.people[0].faces.infraredFD.status, "present");
+  service.close();
+});
+
+test("snapshot guard stops person DELETE when DeleteProcess reads a replacement after both face PUTs", async () => {
+  const { service, client } = await connected();
+  const prepared = await service.prepareDelete({ employeeNo: "EMP1" });
+  const replacement = person("EMP1", "最终进度读取时的合成替换人员");
+  const request = client.request.bind(client);
+  let changedAt;
+  client.request = async input => {
+    const response = await request(input);
+    if (changedAt === undefined && input.method === "GET" && input.path === "/ISAPI/AccessControl/UserInfoDetail/DeleteProcess?format=json" && puts(client).length === 2) {
+      client.people.set("EMP1", replacement);
+      client.faces.add(faceKey(libraries[1], "EMP1"));
+      changedAt = client.calls.length;
+    }
+    return response;
+  };
+  const result = await service.delete(confirmation(prepared));
+  assert.notEqual(changedAt, undefined);
+  assert.equal(result.status, "failed");
+  assert(result.steps.some(step => step.errorCode === "PERSON_CHANGED_BEFORE_DELETE"));
+  assert.equal(result.steps.filter(step => step.kind === "face" && step.status === "success").length, 2);
+  assert.equal(puts(client).length, 2);
+  assert(puts(client).every(call => call.path.includes("FDSearch/Delete")));
+  assert.equal(client.calls.slice(changedAt).filter(call => call.method === "PUT").length, 0);
+  assert.equal(client.people.get("EMP1"), replacement);
+  assert(client.faces.has(faceKey(libraries[1], "EMP1")));
+  service.close();
+});
+
+test("snapshot guard read failure before the first face PUT fails without any write", async () => {
+  const { service, client } = await connected();
+  const prepared = await service.prepareDelete({ employeeNo: "EMP1" });
+  const request = client.request.bind(client);
+  let armedAt;
+  client.request = async input => {
+    const response = await request(input);
+    if (armedAt === undefined && input.method === "POST" && input.path === "/ISAPI/Intelligent/FDLib/FDSearch?format=json") {
+      client.failNextPersonRead = true;
+      armedAt = client.calls.length;
+    }
+    return response;
+  };
+  const result = await service.delete(confirmation(prepared));
+  assert.notEqual(armedAt, undefined);
+  assert.equal(result.status, "failed");
+  assert(result.steps.some(step => step.errorCode === "HIKVISION_TIMEOUT"));
+  assert.equal(result.operationId, undefined);
+  assert.equal(puts(client).length, 0);
+  assert.equal(client.calls.slice(armedAt).filter(call => call.method === "PUT").length, 0);
+  assert(client.people.has("EMP1"));
+  for (const library of libraries) assert(client.faces.has(faceKey(library, "EMP1")));
+  service.close();
+});
+
+test("snapshot guard read failure after the first face PUT stays pending and never writes again", async () => {
+  const { service, client } = await connected();
+  const prepared = await service.prepareDelete({ employeeNo: "EMP1" });
+  client.afterFaceDelete = library => { if (library.faceLibType === "blackFD") client.failNextPersonRead = true; };
+  const pending = await service.delete(confirmation(prepared));
+  assert.equal(pending.status, "pending");
+  assert.match(pending.operationId, /^[0-9a-f-]{36}$/);
+  assert.equal(pending.steps.filter(step => step.kind === "face" && step.status === "success").length, 1);
+  assert(pending.steps.some(step => step.errorCode === "HIKVISION_TIMEOUT"));
+  assert.equal(puts(client).length, 1);
+  const followed = await service.followDelete({ id: pending.operationId });
+  assert.equal(followed.status, "pending");
+  assert.equal(puts(client).length, 1);
+  assert(!puts(client).some(call => call.path.includes("UserInfoDetail/Delete")));
+  assert(client.people.has("EMP1"));
+  assert.equal(client.faces.has(faceKey(libraries[0], "EMP1")), false);
+  assert(client.faces.has(faceKey(libraries[1], "EMP1")));
   service.close();
 });
 

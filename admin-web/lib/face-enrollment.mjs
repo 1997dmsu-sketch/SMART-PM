@@ -376,6 +376,12 @@ export class HikvisionFaceProvider {
     if (!managementFacesKnown(faces)) return deletionResult(employeeNo, operation.name, "failed", [{ kind: "face", status: "failed", errorCode: "FACE_STATE_UNKNOWN" }]);
     for (const library of selected) {
       const current = faces[library.faceLibType].libraries.find(row => row.FDID === library.FDID);
+      if (current.recordStatus !== "absent") {
+        const beforeFaceWrite = await this.findManagementPerson(employeeNo);
+        if (!beforeFaceWrite || managementIdentity(beforeFaceWrite) !== identity) {
+          return deletionResult(employeeNo, operation.name, "failed", [...operation.steps, { kind: "face", ...library, status: "failed", errorCode: "PERSON_CHANGED_BEFORE_DELETE" }]);
+        }
+      }
       const step = { kind: "face", ...library, status: "already-absent" };
       operation.steps.push(step);
       if (current.recordStatus === "absent") continue;
@@ -394,6 +400,8 @@ export class HikvisionFaceProvider {
     if (managementIdentity(latest) !== identity) return deletionResult(employeeNo, operation.name, "failed", [...operation.steps, { kind: "person", status: "failed", errorCode: "PERSON_CHANGED_BEFORE_DELETE" }]);
     try { if (await this.#deleteProgress() === "processing") return deletionResult(employeeNo, operation.name, "failed", [...operation.steps, { kind: "person", status: "failed", errorCode: "DEVICE_DELETE_BUSY" }]); }
     catch { return deletionResult(employeeNo, operation.name, "failed", [...operation.steps, { kind: "person", status: "failed", errorCode: "DELETE_PROGRESS_UNCONFIRMED" }]); }
+    const beforePersonWrite = await this.findManagementPerson(employeeNo);
+    if (!beforePersonWrite || managementIdentity(beforePersonWrite) !== identity) return deletionResult(employeeNo, operation.name, "failed", [...operation.steps, { kind: "person", status: "failed", errorCode: "PERSON_CHANGED_BEFORE_DELETE" }]);
     operation.phase = "person";
     operation.writeAttempted = true;
     const response = await this.#deleteWire("/ISAPI/AccessControl/UserInfoDetail/Delete?format=json", { UserInfoDetail: { mode: "byEmployeeNo", EmployeeNoList: [{ employeeNo }] } });

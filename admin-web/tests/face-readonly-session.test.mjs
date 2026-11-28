@@ -1,6 +1,7 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { getEventListeners } from 'node:events';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import {
@@ -94,6 +95,31 @@ function success(result) {
   }
   assert.deepEqual(output.verification, { status: 'CONFIRMED', FPID: SESSION_TARGET, faceLibType: 'blackFD', FDID: '1', inLibrary: true, actualCount: 9, expectedCount: 9 });
   return output;
+}
+
+function swallowingAbort() {
+  const controller = new AbortController();
+  let calls = 0;
+  const listener = event => { calls++; event.stopImmediatePropagation(); };
+  controller.signal.addEventListener('abort', listener);
+  assert.deepEqual(getEventListeners(controller.signal, 'abort'), [listener]);
+  return { controller, listener, get calls() { return calls; } };
+}
+function assertSessionAbortListener(listeners, original) {
+  assert.equal(listeners.length, 2, 'The session must observe cancellation while HTTP is active');
+  assert.equal(listeners[0], original);
+  assert.notEqual(listeners[1], original);
+}
+function assertOnlyOriginalAbortListener(abort) {
+  assert.deepEqual(getEventListeners(abort.controller.signal, 'abort'), [abort.listener], 'Session cleanup must preserve the caller listener only');
+}
+async function assertStoppedAfterFirstPeoplePage(network) {
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(network.requests.filter(request => request.path === paths.people).map(request => request.json.UserInfoSearchCond.searchResultPosition), [0]);
+  assert.equal(network.requests.filter(request => request.path === paths.faces).length, 0);
+  assert(network.sockets.length > 0);
+  assert(network.sockets.every(socket => socket.destroyed));
+  assert.equal(network.earlyHttpRequests, 0);
 }
 
 describe('controlled readonly session preparation and review', { concurrency: false }, () => {
@@ -308,6 +334,108 @@ describe('controlled readonly brands and one-use authorization', { concurrency: 
   });
 });
 
+describe('controlled readonly cancellation cannot be hidden by earlier signal listeners', { concurrency: false }, () => {
+  test('a pre-existing stopImmediatePropagation listener cannot allow later people or face HTTP after first-page cancellation', async t => {
+    const abort = swallowingAbort();
+    let triggers = 0, activeListeners;
+    const network = networkFor(t, { onRequest: request => {
+      if (request.path === paths.people && triggers === 0) {
+        triggers++;
+        activeListeners = getEventListeners(abort.controller.signal, 'abort');
+        queueMicrotask(() => abort.controller.abort());
+      }
+      return undefined;
+    } });
+    const context = await prepared();
+    const outcome = await failure(() => executeReadonlySession(context.session, context.token, context.input, { signal: abort.controller.signal }), 'COMMAND_CANCELLED');
+    assert.equal(outcome.result.exitCode, 5);
+    assert.equal(triggers, 1); assert.equal(abort.calls, 1);
+    assertSessionAbortListener(activeListeners, abort.listener);
+    await assertStoppedAfterFirstPeoplePage(network);
+    assertOnlyOriginalAbortListener(abort);
+    await replayBurned(context, network);
+  });
+
+  for (const [label, abortPath, expectedPaths] of [
+    ['first device GET', paths.device, [paths.device]],
+    ['second description GET', paths.userCapabilities, [paths.device, paths.userCapabilities]],
+  ]) test(`a swallowed abort during the ${label} sends no later description HTTP`, async t => {
+    const abort = swallowingAbort();
+    let triggers = 0, activeListeners;
+    const network = networkFor(t, { onRequest: request => {
+      if (request.path === abortPath && triggers === 0) {
+        triggers++;
+        activeListeners = getEventListeners(abort.controller.signal, 'abort');
+        queueMicrotask(() => abort.controller.abort());
+      }
+      return undefined;
+    } });
+    const context = await prepared();
+    const outcome = await failure(() => executeReadonlySession(context.session, context.token, context.input, { signal: abort.controller.signal }), 'COMMAND_CANCELLED');
+    assert.equal(outcome.result.exitCode, 5);
+    assert.equal(triggers, 1); assert.equal(abort.calls, 1);
+    assertSessionAbortListener(activeListeners, abort.listener);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(network.requests.map(request => request.path), expectedPaths);
+    assert(network.requests.every(request => request.method === 'GET'));
+    assert(network.sockets.length > 0);
+    assert(network.sockets.every(socket => socket.destroyed));
+    assertOnlyOriginalAbortListener(abort);
+    await replayBurned(context, network);
+  });
+
+  for (const scenario of ['success', 'transport-failure', 'face-cancellation']) test(`session abort listeners are removed after ${scenario} while the original listener survives`, async t => {
+    const abort = swallowingAbort();
+    const responses = sessionResponses();
+    if (scenario === 'transport-failure') responses.set(`GET ${paths.device}`, { type: 'error' });
+    let activeListeners, triggers = 0;
+    const network = networkFor(t, { responses, onRequest: request => {
+      activeListeners ??= getEventListeners(abort.controller.signal, 'abort');
+      if (scenario === 'face-cancellation' && request.path === paths.faces && triggers === 0) {
+        triggers++;
+        queueMicrotask(() => abort.controller.abort());
+      }
+      return undefined;
+    } });
+    const context = await prepared();
+    const execute = () => executeReadonlySession(context.session, context.token, context.input, { signal: abort.controller.signal });
+    if (scenario === 'success') success(await execute());
+    else {
+      const outcome = await failure(execute, scenario === 'transport-failure' ? 'HIKVISION_TRANSPORT' : 'COMMAND_CANCELLED');
+      assert.equal(outcome.result.exitCode, 5);
+    }
+    assertSessionAbortListener(activeListeners, abort.listener);
+    await new Promise(resolve => setImmediate(resolve));
+    assertOnlyOriginalAbortListener(abort);
+    if (scenario === 'face-cancellation') {
+      assert.equal(triggers, 1); assert.equal(abort.calls, 1);
+      assert.equal(network.requests.filter(request => request.path === paths.people).length, 9);
+      assert.equal(network.requests.filter(request => request.path === paths.faces).length, 1);
+    } else {
+      assert.equal(abort.calls, 0);
+      abort.controller.abort();
+      assert.equal(abort.calls, 1);
+      assertOnlyOriginalAbortListener(abort);
+    }
+    assert(network.sockets.length > 0);
+    assert(network.sockets.every(socket => socket.destroyed));
+    await replayBurned(context, network);
+  });
+
+  test('a pre-cancelled signal with a swallowing listener burns authorization with zero HTTP and preserves that listener', async t => {
+    const abort = swallowingAbort();
+    abort.controller.abort();
+    const network = networkFor(t), context = await prepared();
+    const outcome = await failure(() => executeReadonlySession(context.session, context.token, context.input, { signal: abort.controller.signal }), 'COMMAND_CANCELLED');
+    assert.equal(outcome.result.exitCode, 5);
+    await new Promise(resolve => setImmediate(resolve));
+    zeroNetwork(network);
+    assert.equal(abort.calls, 1);
+    assertOnlyOriginalAbortListener(abort);
+    await replayBurned(context, network);
+  });
+});
+
 describe('controlled readonly real Host and SDK fail-closed checks', { concurrency: false }, () => {
   test('full pagination proves exactly nine unique people and the precise target library record', async t => {
     const network = networkFor(t), context = await prepared();
@@ -503,6 +631,60 @@ async function child({ scenario = 'success', production = false, input = session
 }
 
 describe('controlled runner integration with the same production main', { concurrency: false }, () => {
+  test('the controlled runFaceReadonly bridge honours a swallowed first-page abort and consumes its grant', async t => {
+    const abort = swallowingAbort();
+    let triggers = 0, activeListeners;
+    const network = networkFor(t, { onRequest: request => {
+      if (request.path === paths.people && triggers === 0) {
+        triggers++;
+        activeListeners = getEventListeners(abort.controller.signal, 'abort');
+        queueMicrotask(() => abort.controller.abort());
+      }
+      return undefined;
+    } });
+    const context = await prepared();
+    const runner = await createControlledReadonlyRunner({ session: context.session, authorization: context.token });
+    const outcome = await failure(() => runFaceReadonly(context.input, { runner, signal: abort.controller.signal }), 'COMMAND_CANCELLED');
+    assert.equal(outcome.result.exitCode, 5);
+    assert.equal(triggers, 1); assert.equal(abort.calls, 1);
+    assertSessionAbortListener(activeListeners, abort.listener);
+    await assertStoppedAfterFirstPeoplePage(network);
+    assertOnlyOriginalAbortListener(abort);
+    await replayBurned(context, network);
+  });
+
+  test('main with a controlled runner emits one safe cancellation line for a swallowed first-page abort', async t => {
+    const abort = swallowingAbort();
+    let triggers = 0, activeListeners;
+    const network = networkFor(t, { onRequest: request => {
+      if (request.path === paths.people && triggers === 0) {
+        triggers++;
+        activeListeners = getEventListeners(abort.controller.signal, 'abort');
+        queueMicrotask(() => abort.controller.abort());
+      }
+      return undefined;
+    } });
+    const context = await prepared();
+    const runner = await createControlledReadonlyRunner({ session: context.session, authorization: context.token });
+    const chunks = [], errors = [];
+    const sink = values => ({ write(value, done) { values.push(String(value)); queueMicrotask(() => done()); return true; } });
+    const exitCode = await main({ argv: [], stdin: Readable.from([Buffer.from(JSON.stringify(context.input))]), stdout: sink(chunks), stderr: sink(errors), signal: abort.controller.signal, runner });
+    assert.equal(exitCode, 5);
+    assert.equal(chunks.length, 1); assert.equal(errors.join(''), 'COMMAND_CANCELLED\n');
+    assert(chunks[0].endsWith('\n')); assert.equal(chunks[0].split('\n').length, 2);
+    const output = JSON.parse(chunks[0]);
+    assertSafe(output); assertSafe(errors.join(''));
+    assert.deepEqual(output.error, { code: 'COMMAND_CANCELLED' });
+    assert.equal(output.execution, 'controlled-readonly');
+    assert.equal(output.deleteAllowed, false); assert.equal(output.siteVerification, 'NOT_EXECUTED');
+    assert.deepEqual(Object.keys(output).sort(), ['protocolVersion', 'mode', 'execution', 'operation', 'outcome', 'siteVerification', 'deleteAllowed', 'error'].sort());
+    assert.equal(triggers, 1); assert.equal(abort.calls, 1);
+    assertSessionAbortListener(activeListeners, abort.listener);
+    await assertStoppedAfterFirstPeoplePage(network);
+    assertOnlyOriginalAbortListener(abort);
+    await replayBurned(context, network);
+  });
+
   test('a real guarded child calls main with a registered controlled runner and preserves the readonly request boundary', async () => {
     const result = await child();
     success({ exitCode: result.exitCode, output: result.output });

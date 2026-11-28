@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual, X509Certificate } from 'node:crypto';
+import * as events from 'node:events';
 import { types } from 'node:util';
 import { normalizeReadonlyInput, safeReadonlyResult } from './face-readonly-command.mjs';
 import { FaceReadonlyHost } from './face-readonly-host.mjs';
@@ -38,8 +39,7 @@ const configFields = ['mode', 'origin', 'username', 'password', 'certificateBase
 const optionFields = ['expectedModel', 'planTemplateNo', 'maxRequests', 'totalTimeoutMs', 'requestTimeoutMs'];
 const expectationFields = ['expectedSpkiPin', 'expectedSerialNumber', 'expectedPlanFingerprint', 'expectedCount', 'targetEmployeeNo', 'targetFDID'];
 const aborted = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted').get;
-const addListener = EventTarget.prototype.addEventListener;
-const removeListener = EventTarget.prototype.removeEventListener;
+const addAbortListener = events.addAbortListener;
 
 function fault(code) {
   return Object.assign(new Error('Controlled readonly session rejected.'), { code: knownCodes.has(code) ? code : 'READONLY_FAILURE' });
@@ -195,7 +195,7 @@ function receipt(list, state, snapshot, expectations) {
 
 /** Consume first, then validate all execution inputs; every attempt is final. */
 export async function executeReadonlySession(session, authorization, input, options = {}) {
-  let host, firstError, cancel, signal, expectedCount, observation, listening = false;
+  let host, firstError, cancel, signal, expectedCount, observation, abortSubscription;
   const trip = error => { if (!firstError) firstError = fault(safeCode(error)); };
   const ensure = () => {
     if (signal && Reflect.apply(aborted, signal, [])) trip(fault('COMMAND_CANCELLED'));
@@ -227,8 +227,10 @@ export async function executeReadonlySession(session, authorization, input, opti
     const cancellation = new Promise((_, reject) => { cancel = reject; });
     cancellation.catch(() => {});
     if (signal) {
-      Reflect.apply(addListener, signal, ['abort', abort, { once: true }]);
-      listening = true;
+      // Ordinary abort listeners can be suppressed by stopImmediatePropagation.
+      // Older Node 20 releases without this API must stop before creating a Host.
+      if (typeof addAbortListener !== 'function' || typeof Symbol.dispose !== 'symbol') throw fault('READONLY_FAILURE');
+      abortSubscription = addAbortListener(signal, abort);
     }
     ensure();
     host = new FaceReadonlyHost({ ...data.snapshot.options,
@@ -258,8 +260,8 @@ export async function executeReadonlySession(session, authorization, input, opti
   }
   finally {
     try { host?.close(); } catch (error) { trip(error); }
-    if (listening) {
-      try { Reflect.apply(removeListener, signal, ['abort', abort]); } catch (error) { trip(error); }
+    if (abortSubscription) {
+      try { abortSubscription[Symbol.dispose](); } catch (error) { trip(error); }
     }
   }
   return firstError ? failureResult(firstError, observation) : result;

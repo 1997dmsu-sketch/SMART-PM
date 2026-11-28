@@ -4,16 +4,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { types } from 'node:util';
 
-// Code-only offline adapter. Fake confirmation events are deliberately branded;
-// neither a serialized decision nor this IPC is proof of a real human identity.
+// The installed CLI never installs these ports. Real Forms code and synthetic
+// control automation share a fixed helper; neither IPC is human authentication.
 export const WINDOWS_INPUT_CODES = Object.freeze(['WINDOWS_INPUT_INVALID', 'WINDOWS_INPUT_PLATFORM',
   'WINDOWS_INPUT_USED', 'WINDOWS_INPUT_PROTOCOL', 'WINDOWS_INPUT_START', 'WINDOWS_INPUT_PROCESS',
   'WINDOWS_INPUT_TIMEOUT', 'WINDOWS_INPUT_INTERRUPTED', 'WINDOWS_INPUT_NO_DECISION', 'WINDOWS_INPUT_BINDING',
   'WINDOWS_INPUT_UTF8', 'WINDOWS_INPUT_SIZE', 'WINDOWS_INPUT_EXPECTATIONS', 'WINDOWS_INPUT_JSON',
   'WINDOWS_INPUT_LIFECYCLE', 'WINDOWS_INPUT_IO', 'WINDOWS_INPUT_RUNTIME', 'WINDOWS_INPUT_BOOTSTRAP',
-  'WINDOWS_INPUT_TOO_LARGE', 'WINDOWS_INPUT_REVIEW', 'WINDOWS_INPUT_STATE', 'WINDOWS_INPUT_FAILURE', 'WINDOWS_INPUT_INCOMPLETE']);
+  'WINDOWS_INPUT_TOO_LARGE', 'WINDOWS_INPUT_REVIEW', 'WINDOWS_INPUT_STATE', 'WINDOWS_INPUT_FAILURE', 'WINDOWS_INPUT_INCOMPLETE',
+  'WINDOWS_INPUT_CANCELLED', 'WINDOWS_INPUT_UI', 'WINDOWS_INPUT_SEED']);
 const known = new Set(WINDOWS_INPUT_CODES), adapters = new WeakMap(), events = new WeakMap();
 const helper = fileURLToPath(new URL('../../tools/hikvision-readonly-input/Invoke-WindowsReadonlyInput.ps1', import.meta.url));
+const interactiveHelper = fileURLToPath(new URL('../../tools/hikvision-readonly-interactive/Invoke-WindowsReadonlyInteractive.ps1', import.meta.url));
+const actions = new Set(['approve', 'reject', 'unchecked-approve', 'check-uncheck', 'review-cancel', 'review-close',
+  'review-none', 'capture-cancel', 'capture-close', 'double-approve']);
 const byteLength = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'byteLength').get;
 const setBytes = Uint8Array.prototype.set;
 const expectationKeys = ['expectedSpkiPin', 'expectedSerialNumber', 'expectedPlanFingerprint', 'expectedCount', 'targetEmployeeNo', 'targetFDID'];
@@ -42,12 +46,29 @@ export function createWindowsPrivateInputAdapter(options) {
   const data = fields(options, ['inputBytes', 'expectationsBytes', 'confirmationEvent'], ['inputBytes', 'expectationsBytes']);
   if (data.confirmationEvent !== undefined && !events.has(data.confirmationEvent)) throw fault('WINDOWS_INPUT_INVALID');
   const input = copy(data.inputBytes, 32768), expected = copy(data.expectationsBytes, 8192);
+  return adapterState(input, expected, { kind: 'private', event: data.confirmationEvent === undefined ? 'reject' : events.get(data.confirmationEvent) });
+}
+export function createWindowsInteractiveInputAdapter(options = {}) {
+  if (process.platform !== 'win32') throw fault('WINDOWS_INPUT_PLATFORM');
+  fields(options, []);
+  return adapterState(Buffer.alloc(0), Buffer.alloc(0), { kind: 'interactive' });
+}
+export function createSyntheticWindowsInteractiveInputAdapter(options) {
+  if (process.platform !== 'win32') throw fault('WINDOWS_INPUT_PLATFORM');
+  const data = fields(options, ['seedBytes', 'action'], ['seedBytes']);
+  const action = data.action === undefined ? 'reject' : data.action;
+  if (!actions.has(action)) throw fault('WINDOWS_INPUT_INVALID');
+  const seed = copy(data.seedBytes, 49152);
+  return adapterState(Buffer.alloc(0), Buffer.alloc(0), { kind: 'synthetic-ui', seed, action });
+}
+function adapterState(input, expected, selected) {
   const handle = Object.freeze(Object.create(null));
-  adapters.set(handle, { input, expected, event: data.confirmationEvent === undefined ? 'reject' : events.get(data.confirmationEvent),
+  adapters.set(handle, { input, expected, ...selected,
     captureId: randomBytes(16).toString('hex'), challenge: null, claimed: false, readUsed: false, reviewUsed: false,
     captureCalls: 0, reviewCalls: 0, captured: false, reviewed: false, child: null, closed: false, closing: false,
     pending: null, nextId: 0, carry: '', failureCode: null, controller: new AbortController(), processExit: null }); return handle;
 }
+export function windowsPrivateInputIsInteractive(handle) { return stateFor(handle).kind === 'interactive'; }
 export function claimWindowsPrivateInputAdapter(handle) {
   const state = stateFor(handle);
   if (state.claimed || state.closed || state.readUsed) throw fault('WINDOWS_INPUT_USED'); state.claimed = true;
@@ -62,7 +83,8 @@ function start(state) {
   const systemRoot = process.env.SystemRoot;
   if (typeof systemRoot !== 'string' || !/^[A-Za-z]:[\\/]/.test(systemRoot)) throw fault('WINDOWS_INPUT_START');
   const child = spawn(path.join(systemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
-    ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', helper], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+    ['-NoLogo', '-NoProfile', '-NonInteractive', ...(state.kind === 'private' ? [] : ['-STA']), '-File',
+      state.kind === 'private' ? helper : interactiveHelper], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
       env: { SystemRoot: systemRoot, windir: systemRoot, ...(process.env.TEMP ? { TEMP: process.env.TEMP, TMP: process.env.TEMP } : {}) } });
   state.child = child;
   state.exitPromise = new Promise(resolve => {
@@ -94,19 +116,38 @@ function request(state, op, body = {}, closing = false) {
   if (!state.child || state.closed || state.pending || (!closing && state.failureCode)) { fail(state, 'WINDOWS_INPUT_LIFECYCLE'); return Promise.reject(fault(state.failureCode)); }
   const id = ++state.nextId, wire = Buffer.from(JSON.stringify({ id, op, ...body }) + '\n');
   if (id > 4 || wire.length > 131072) { fail(state, 'WINDOWS_INPUT_SIZE'); return Promise.reject(fault(state.failureCode)); }
-  return new Promise((resolve, reject) => { const timer = setTimeout(() => kill(state, 'WINDOWS_INPUT_TIMEOUT'), closing ? 2000 : 4500);
+  const timeoutMs = closing ? 2000 : state.kind === 'interactive' ? op === 'capture' ? 250000 : 30000 : 4500;
+  return new Promise((resolve, reject) => { const timer = setTimeout(() => kill(state, 'WINDOWS_INPUT_TIMEOUT'), timeoutMs);
     state.pending = { id, resolve, reject, timer }; state.child.stdin.write(wire, error => { wire.fill(0); if (error) kill(state, 'WINDOWS_INPUT_PROCESS'); }); });
 }
 function exact(response, keys) { if (Object.keys(response).length !== keys.length || keys.some(key => !Object.hasOwn(response, key))) throw fault('WINDOWS_INPUT_PROTOCOL'); }
+function decoded(source, maximum) {
+  if (typeof source !== 'string' || source.length > Math.ceil(maximum / 3) * 4
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(source)) throw fault('WINDOWS_INPUT_PROTOCOL');
+  const bytes = Buffer.from(source, 'base64');
+  try { if (bytes.length > maximum || bytes.toString('base64') !== source) throw fault('WINDOWS_INPUT_SIZE');
+    new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); return bytes;
+  } catch (error) { bytes.fill(0); throw fault(known.has(error?.code) ? error.code : 'WINDOWS_INPUT_UTF8'); }
+}
 export async function readWindowsPrivateInput(handle) {
   const state = stateFor(handle); if (!state.claimed || state.readUsed || state.closed || state.failureCode) { fail(state, 'WINDOWS_INPUT_USED'); throw fault(state.failureCode); }
   state.readUsed = true; state.captureCalls++;
   try {
     start(state);
     const inputBase64 = state.input.toString('base64'), expectationsBase64 = state.expected.toString('base64');
-    const response = await request(state, 'capture', { captureId: state.captureId, inputBase64, expectationsBase64, event: state.event });
+    const response = await request(state, 'capture', state.kind === 'private'
+      ? { captureId: state.captureId, inputBase64, expectationsBase64, event: state.event }
+      : { captureId: state.captureId, mode: state.kind,
+        ...(state.kind === 'synthetic-ui' ? { seedBase64: state.seed.toString('base64'), action: state.action } : {}) });
     exact(response, ['id', 'ok', 'captureId', 'inputBase64', 'expectationsBase64']);
-    if (response.captureId !== state.captureId || response.inputBase64 !== inputBase64 || response.expectationsBase64 !== expectationsBase64) throw fault('WINDOWS_INPUT_BINDING');
+    if (response.captureId !== state.captureId || state.kind === 'private'
+      && (response.inputBase64 !== inputBase64 || response.expectationsBase64 !== expectationsBase64)) throw fault('WINDOWS_INPUT_BINDING');
+    if (state.kind !== 'private') {
+      let captured, expected;
+      try { captured = decoded(response.inputBase64, 32768); expected = decoded(response.expectationsBase64, 8192); }
+      catch (error) { captured?.fill(0); expected?.fill(0); throw error; }
+      state.input.fill(0); state.expected.fill(0); state.input = captured; state.expected = expected;
+    }
     let expectations;
     try { expectations = fields(JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(state.expected)), expectationKeys, expectationKeys); }
     catch { throw fault('WINDOWS_INPUT_EXPECTATIONS'); }
@@ -147,7 +188,7 @@ async function close(state) {
     }
     let timer; const ended = await Promise.race([state.exitPromise, new Promise(resolve => { timer = setTimeout(() => { kill(state, 'WINDOWS_INPUT_TIMEOUT'); resolve(null); }, 1500); })]);clearTimeout(timer);
     if (!ended || ended.exitCode !== 0 || ended.signal || state.failureCode) throw fault(state.failureCode ?? 'WINDOWS_INPUT_PROCESS');
-  } finally { state.input.fill(0); state.expected.fill(0); state.returnedBytes?.fill(0); state.captureId = null; state.challenge = null; state.carry = ''; }
+  } finally { state.input.fill(0); state.expected.fill(0); state.seed?.fill(0); state.returnedBytes?.fill(0); state.captureId = null; state.challenge = null; state.carry = ''; }
 }
 export function windowsPrivateInputFailureSignal(handle) { return stateFor(handle).controller.signal; }
 export function inspectWindowsPrivateInputAdapter(handle) {

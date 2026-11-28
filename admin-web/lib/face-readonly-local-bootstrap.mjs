@@ -11,7 +11,7 @@ import { createWindowsEvidenceStore, openWindowsEvidenceStore, checkWindowsEvide
   inspectWindowsEvidenceStore, windowsEvidenceFailureSignal } from './face-readonly-windows-evidence.mjs';
 import { WINDOWS_INPUT_CODES, claimWindowsPrivateInputAdapter, readWindowsPrivateInput,
   reviewWindowsPrivateInput, closeWindowsPrivateInput, inspectWindowsPrivateInputAdapter,
-  windowsPrivateInputFailureSignal } from './face-readonly-windows-input.mjs';
+  windowsPrivateInputFailureSignal, windowsPrivateInputIsInteractive } from './face-readonly-windows-input.mjs';
 
 // Code-only synthetic ports. These brands are not human authentication or a
 // sandbox for arbitrary trusted JavaScript. The executable never installs them.
@@ -265,7 +265,8 @@ export async function runLocalBootstrap(handle, options = {}) {
     }
     receiver = receivers.get(context.evidenceReceiver);
     if (receiver.opened) throw fault('LOCAL_EVIDENCE_EXISTS');
-    material = await step(inputs.get(context.inputSource), [], snapshot, context.options.ioTimeoutMs, 'LOCAL_IO_TIMEOUT');
+    const inputDeadlineMs = binding && windowsPrivateInputIsInteractive(binding.adapter) ? 250000 : context.options.ioTimeoutMs;
+    material = await step(inputs.get(context.inputSource), [], snapshot, inputDeadlineMs, 'LOCAL_IO_TIMEOUT');
     ensure(); transport();
     if (receiver.opened || references.has(receiver.reference)) throw fault('LOCAL_EVIDENCE_EXISTS');
     if (secretIn(receiver.reference, material.secrets)) throw fault('LOCAL_EVIDENCE_REFERENCE');

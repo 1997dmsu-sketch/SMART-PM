@@ -155,10 +155,16 @@ export async function runLocalBootstrap(handle, options = {}) {
         const value = Reflect.apply(fn, undefined, args);
         if (!types.isProxy(value) && types.isPromise(value)) {
           const descriptors = Object.getOwnPropertyDescriptors(value);
-          // Promise.prototype.then itself consults constructor/species. An own
-          // constructor or accessor must therefore be rejected before invoking it.
-          if (Object.getPrototypeOf(value) !== Promise.prototype || Reflect.ownKeys(descriptors).some(key =>
-            key === 'then' || key === 'constructor' || !Object.hasOwn(descriptors[key], 'value'))) throw fault('LOCAL_FAILURE');
+          // Native then consults constructor/species: do not invoke it on an
+          // altered prototype or own constructor. For the remaining native
+          // Promises, observe both settlements before rejecting their shape.
+          // Never read an overridden .then; both no-ops return undefined so
+          // the observer's derived Promise cannot assimilate a private value.
+          if (Object.getPrototypeOf(value) !== Promise.prototype || Object.hasOwn(descriptors, 'constructor')) throw fault('LOCAL_FAILURE');
+          if (Reflect.ownKeys(descriptors).some(key => key === 'then' || !Object.hasOwn(descriptors[key], 'value'))) {
+            Reflect.apply(then, value, [() => {}, () => {}]);
+            throw fault('LOCAL_FAILURE');
+          }
           Reflect.apply(then, value, [accept, fail]);
         } else accept(value);
       } catch (error) { fail(error); }

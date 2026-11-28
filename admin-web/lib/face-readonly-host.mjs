@@ -55,13 +55,17 @@ export class FaceReadonlyHost {
   #capabilities = { libraries: [], doorNumbers: [] };
 
   constructor(options = {}) {
-    const data = fields(options, ["planTemplateNo", "expectedModel", "maxRequests", "totalTimeoutMs", "requestTimeoutMs"], "READONLY_OPTIONS");
+    const data = fields(options, ["planTemplateNo", "expectedModel", "maxRequests", "totalTimeoutMs", "requestTimeoutMs", "expectedSerialNumber", "expectedPlanFingerprint", "expectedPeopleCount"], "READONLY_OPTIONS");
     const selected = { planTemplateNo: "1", expectedModel: "DS-K1T671BM", maxRequests: 256, totalTimeoutMs: 120000, requestTimeoutMs: 5000, ...data };
     if (typeof selected.planTemplateNo !== "string" || !/^[1-9]\d*$/.test(selected.planTemplateNo) || !Number.isSafeInteger(Number(selected.planTemplateNo))
       || !cleanText(selected.expectedModel, 128) || !bounded(selected.maxRequests, 1, 256)
-      || !bounded(selected.totalTimeoutMs, 1, 120000) || !bounded(selected.requestTimeoutMs, 1, 5000)) throw fault("READONLY_OPTIONS");
+      || !bounded(selected.totalTimeoutMs, 1, 120000) || !bounded(selected.requestTimeoutMs, 1, 5000)
+      || selected.expectedSerialNumber !== undefined && !cleanText(selected.expectedSerialNumber, 128)
+      || selected.expectedPlanFingerprint !== undefined && (typeof selected.expectedPlanFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(selected.expectedPlanFingerprint))
+      || selected.expectedPeopleCount !== undefined && !bounded(selected.expectedPeopleCount, 1, 1000)) throw fault("READONLY_OPTIONS");
     this.#options = Object.freeze(selected);
-    this.#policy = new FaceReadonlyPolicy({ planTemplateNo: selected.planTemplateNo, maxRequests: selected.maxRequests });
+    this.#policy = new FaceReadonlyPolicy({ planTemplateNo: selected.planTemplateNo, maxRequests: selected.maxRequests,
+      expectedSerialNumber: selected.expectedSerialNumber, expectedPeopleCount: selected.expectedPeopleCount });
   }
 
   #dispose() {
@@ -169,6 +173,7 @@ export class FaceReadonlyHost {
       if (state.device.model !== this.#options.expectedModel) throw fault("READONLY_MODEL");
       this.#device = { model: this.#options.expectedModel, firmware: typeof state.device.firmware === "string" && /^[A-Za-z0-9 ._-]{0,64}$/.test(state.device.firmware) ? state.device.firmware : "" };
       const caps = state.capabilities;
+      if (this.#options.expectedPlanFingerprint !== undefined && caps.allDayPlan.fingerprint !== this.#options.expectedPlanFingerprint) throw fault("READONLY_PLAN_MISMATCH");
       this.#capabilities = {
         libraries: caps.libraries.filter(row => ["blackFD", "infraredFD"].includes(row.faceLibType)).map(row => ({ FDID: row.FDID, faceLibType: row.faceLibType })),
         doorNumbers: caps.doorNumbers.filter(value => Number.isSafeInteger(value) && value >= 1 && value <= 65535),
@@ -192,7 +197,8 @@ export class FaceReadonlyHost {
   }
   state(...extra) {
     if (extra.length) throw this.#trip(fault("READONLY_INPUT"));
-    return structuredClone({ mode: "device", connected: !this.#errorCode && !this.#closed && ["READY", "LISTING"].includes(this.#status), device: this.#device, capabilities: this.#capabilities, busy: this.#busy, enrollments: [], readonly: { status: this.#status, blocked: Boolean(this.#errorCode), errorCode: this.#errorCode ?? null, logicalRequests: this.#requests } });
+    return structuredClone({ mode: "device", connected: !this.#errorCode && !this.#closed && ["READY", "LISTING"].includes(this.#status), device: this.#device, capabilities: this.#capabilities, busy: this.#busy, enrollments: [], readonly: { status: this.#status, blocked: Boolean(this.#errorCode), errorCode: this.#errorCode ?? null, logicalRequests: this.#requests,
+      ...(this.#errorCode === "READONLY_COUNT_MISMATCH" ? { countMismatch: this.#policy.countMismatch() } : {}) } });
   }
   close(...extra) {
     if (extra.length) throw this.#trip(fault("READONLY_INPUT"));

@@ -3,6 +3,7 @@ import { READONLY_POLICY_CODES } from './face-readonly-policy.mjs';
 
 export const MAX_INPUT_BYTES = 32768;
 const runners = new WeakSet();
+const controlledRunners = new WeakSet();
 const defaults = Object.freeze({ expectedModel: 'DS-K1T671BM', planTemplateNo: '1', maxRequests: 256, totalTimeoutMs: 120000, requestTimeoutMs: 5000 });
 const knownCodes = new Set([
   ...READONLY_POLICY_CODES,
@@ -198,6 +199,21 @@ function safeResult(list, state, input) {
     readonly: { status: 'COMPLETE', blocked: false, errorCode: null, logicalRequests: state.readonly.logicalRequests } } };
 }
 
+// Shared projection only: this export does not authorize or start a session.
+export { safeResult as safeReadonlyResult };
+
+/** Code-only controlled capability; the executable entry never supplies it. */
+export async function createControlledReadonlyRunner(options = {}) {
+  let data;
+  try { data = fields(options, ['session', 'authorization'], ['session', 'authorization']); }
+  catch { throw stop('COMMAND_RUNNER_INVALID'); }
+  const { executeReadonlySession } = await import('./face-readonly-session.mjs');
+  const runner = (input, executionOptions) => executeReadonlySession(data.session, data.authorization, input, executionOptions);
+  runners.add(runner);
+  controlledRunners.add(runner);
+  return Object.freeze(runner);
+}
+
 /** Code-only fixture capability. No transport, host, provider or request injection. */
 export function createOfflineReadonlyRunner(options = {}) {
   let isTransportInstalled;
@@ -245,6 +261,9 @@ export async function runFaceReadonly(input, { runner, signal } = {}) {
   if (runner === undefined) return readonlyFailure('LIVE_EXECUTION_LOCKED');
   if (!runners.has(runner)) return readonlyFailure('COMMAND_RUNNER_INVALID');
   try {
+    // Controlled attempts consume their grant before validation/cancellation.
+    // Keep the legacy offline preflight ordering unchanged.
+    if (controlledRunners.has(runner)) return await runner(input, { signal });
     const normalized = normalizeReadonlyInput(input);
     if (signal?.aborted) throw stop('COMMAND_CANCELLED');
     return await runner(normalized, { signal });

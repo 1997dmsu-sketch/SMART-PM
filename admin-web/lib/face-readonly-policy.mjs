@@ -27,6 +27,7 @@ export const READONLY_POLICY_CODES = Object.freeze([
   "READONLY_PAGINATION", "READONLY_PATH", "READONLY_PHASE", "READONLY_POLICY", "READONLY_REDIRECT",
   "READONLY_REFERENCE", "READONLY_REQUEST", "READONLY_REQUEST_BODY", "READONLY_RESPONSE_SHAPE",
   "READONLY_SEQUENCE", "READONLY_SIZE",
+  "READONLY_IDENTITY", "READONLY_PLAN_MISMATCH", "READONLY_COUNT_MISMATCH",
 ]);
 const policyErrors = new WeakMap();
 function failure(code) {
@@ -115,11 +116,12 @@ function rejectErrors(value) {
   };
   visit(value, 0);
 }
-function xml(text, root) {
+function xml(text, root, expectedSerialNumber) {
   check(!/<!DOCTYPE|<!ENTITY|&|<\s*(?:[\w-]+:)?ResponseStatus\b/i.test(text), "READONLY_DEVICE_ERROR");
   const source = text.replace(/^\s*<\?xml\s[^?]*\?>/, "").trim();
   const stack = [], doors = [];
   let roots = 0, rootName, cursor = 0;
+  let serialTag, serialText, serialCount = 0;
   const tokens = /<[^>]*>/g;
   for (const token of source.matchAll(tokens)) {
     const between = source.slice(cursor, token.index);
@@ -127,10 +129,19 @@ function xml(text, root) {
     const tag = /^<(\/)?([A-Za-z_][\w.:-]*)(\s[^<>]*?)?\s*(\/?)>$/.exec(token[0]);
     check(tag);
     const [, closing, name, rawAttributes = "", selfClosing] = tag;
+    if (serialTag !== undefined) {
+      check(closing && name === serialTag && stack.length === 2, "READONLY_IDENTITY");
+      serialText = between;
+      serialTag = undefined;
+    }
     if (closing) {
       check(!rawAttributes.trim() && !selfClosing && stack.pop() === name);
     } else {
       if (!stack.length) { roots++; rootName = name.split(":").at(-1); }
+      if (expectedSerialNumber !== undefined && name.split(":").at(-1) === "serialNumber") {
+        check(stack.length === 1 && rootName === "DeviceInfo" && !selfClosing && ++serialCount === 1, "READONLY_IDENTITY");
+        serialTag = name;
+      }
       const attributes = new Map();
       let remaining = rawAttributes;
       while (remaining.trim()) {
@@ -145,6 +156,7 @@ function xml(text, root) {
     cursor = token.index + token[0].length;
   }
   check(roots === 1 && stack.length === 0 && source.slice(cursor).trim() === "" && (root === undefined || rootName === root));
+  if (expectedSerialNumber !== undefined) check(serialCount === 1 && serialText === expectedSerialNumber, "READONLY_IDENTITY");
   for (const match of text.matchAll(/<(?:[\w-]+:)?statusCode\b[^>]*>\s*([^<]*)</gi)) check(match[1].trim() === "1", "READONLY_DEVICE_ERROR");
   for (const match of text.matchAll(/<(?:[\w-]+:)?statusString\b[^>]*>\s*([^<]*)</gi)) check(!knownError(match[1].trim()), "READONLY_DEVICE_ERROR");
   check(!/<(?:[\w-]+:)?responseStatus\b[^>]*>\s*(?:false|0)\s*</i.test(text), "READONLY_DEVICE_ERROR");
@@ -174,15 +186,22 @@ export class FaceReadonlyPolicy {
   #people = new Set();
   #pagesComplete = false;
   #faces = new Set();
+  #expectedSerialNumber;
+  #expectedPeopleCount;
+  #countMismatch;
 
   constructor(options = {}) {
     try {
       check(object(options), "READONLY_CONFIGURATION");
-      const { planTemplateNo = "1", maxRequests = 256 } = options;
+      const { planTemplateNo = "1", maxRequests = 256, expectedSerialNumber, expectedPeopleCount } = options;
       check(positiveId(planTemplateNo), "READONLY_CONFIGURATION");
       check(Number.isSafeInteger(maxRequests) && maxRequests > 0 && maxRequests <= 256, "READONLY_CONFIGURATION");
+      check(expectedSerialNumber === undefined || typeof expectedSerialNumber === "string" && expectedSerialNumber.length > 0 && expectedSerialNumber.length <= 128 && !/[\x00-\x1f\x7f]/.test(expectedSerialNumber), "READONLY_CONFIGURATION");
+      check(expectedPeopleCount === undefined || Number.isSafeInteger(expectedPeopleCount) && expectedPeopleCount >= 1 && expectedPeopleCount <= 1000, "READONLY_CONFIGURATION");
       this.#template = String(planTemplateNo);
       this.#maxRequests = maxRequests;
+      this.#expectedSerialNumber = expectedSerialNumber;
+      this.#expectedPeopleCount = expectedPeopleCount;
     } catch { throw failure("READONLY_CONFIGURATION"); }
   }
 
@@ -253,7 +272,7 @@ export class FaceReadonlyPolicy {
       check(!response.redirected && response.location === undefined && !Object.entries(response.headers || {}).some(([key]) => key.toLowerCase() === "location"), "READONLY_REDIRECT");
       if (this.#phase === "describe" && ["device", "door"].includes(this.#stage)) {
         const text = decode(response.body, 1048576);
-        const doors = xml(text, this.#stage === "device" ? "DeviceInfo" : undefined);
+        const doors = xml(text, this.#stage === "device" ? "DeviceInfo" : undefined, this.#stage === "device" ? this.#expectedSerialNumber : undefined);
         if (this.#stage === "door") {
           check(doors.length === 1);
           const minimumValue = doors[0].get("min"), maximumValue = doors[0].get("max");
@@ -379,6 +398,10 @@ export class FaceReadonlyPolicy {
     check(new Set(ids).size === ids.length && ids.every(id => !this.#people.has(id)), "READONLY_DUPLICATE");
     const count = this.#people.size + ids.length;
     check(count <= search.totalMatches && !(search.responseStatusStrg === "MORE" && count >= search.totalMatches) && !(search.responseStatusStrg === "NO MATCH" && (ids.length || search.totalMatches)) && !(count < search.totalMatches && ids.length === 0), "READONLY_PAGINATION");
+    if (this.#expectedPeopleCount !== undefined && search.totalMatches !== this.#expectedPeopleCount) {
+      this.#countMismatch = Object.freeze({ actualCount: search.totalMatches, expectedCount: this.#expectedPeopleCount });
+      throw failure("READONLY_COUNT_MISMATCH");
+    }
     this.#searchID ??= condition.searchID;
     this.#total ??= search.totalMatches;
     for (const id of ids) this.#people.add(id);
@@ -412,5 +435,9 @@ export class FaceReadonlyPolicy {
 
   audit() {
     return Object.freeze({ phase: this.#phase, requests: this.#requests, observed: this.#observed, people: this.#people.size, libraries: this.#libraries.size, faceQueries: this.#faces.size });
+  }
+
+  countMismatch() {
+    return this.#countMismatch ? { ...this.#countMismatch } : undefined;
   }
 }

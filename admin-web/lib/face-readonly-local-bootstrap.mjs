@@ -9,6 +9,9 @@ import { randomUUID } from 'node:crypto';
 import { createWindowsEvidenceStore, openWindowsEvidenceStore, checkWindowsEvidenceStore,
   writeWindowsEvidenceStore, sealWindowsEvidenceStore, closeWindowsEvidenceStore,
   inspectWindowsEvidenceStore, windowsEvidenceFailureSignal } from './face-readonly-windows-evidence.mjs';
+import { WINDOWS_INPUT_CODES, claimWindowsPrivateInputAdapter, readWindowsPrivateInput,
+  reviewWindowsPrivateInput, closeWindowsPrivateInput, inspectWindowsPrivateInputAdapter,
+  windowsPrivateInputFailureSignal } from './face-readonly-windows-input.mjs';
 
 // Code-only synthetic ports. These brands are not human authentication or a
 // sandbox for arbitrary trusted JavaScript. The executable never installs them.
@@ -18,7 +21,7 @@ export const LOCAL_BOOTSTRAP_CODES = Object.freeze([
   'LOCAL_APPROVAL_EXPIRED', 'LOCAL_IO_TIMEOUT', 'LOCAL_APPROVAL_TIMEOUT', 'LOCAL_EVIDENCE_INVALID',
   'LOCAL_EVIDENCE_EXISTS', 'LOCAL_EVIDENCE_REFERENCE', 'LOCAL_EVIDENCE_FAILURE', 'LOCAL_OUTPUT_INVALID', 'LOCAL_FAILURE',
 ]);
-const known = new Set([...LOCAL_BOOTSTRAP_CODES, ...SESSION_CODES, ...READONLY_POLICY_CODES,
+const known = new Set([...LOCAL_BOOTSTRAP_CODES, ...SESSION_CODES, ...READONLY_POLICY_CODES, ...WINDOWS_INPUT_CODES,
   'LIVE_EXECUTION_LOCKED', 'COMMAND_CANCELLED', 'COMMAND_INPUT_INVALID', 'COMMAND_PROTOCOL_INVALID', 'COMMAND_OUTPUT_FAILED',
   'INPUT_TOO_LARGE', 'INPUT_UTF8_INVALID', 'INPUT_JSON_INVALID', 'INPUT_DUPLICATE_KEY', 'INPUT_INTERRUPTED', 'INPUT_TIMEOUT',
   'READONLY_INPUT', 'READONLY_OPTIONS', 'READONLY_OPERATION_DENIED', 'READONLY_LIFECYCLE', 'READONLY_BUSY',
@@ -29,8 +32,10 @@ const known = new Set([...LOCAL_BOOTSTRAP_CODES, ...SESSION_CODES, ...READONLY_P
 const inputErrors = new Set(['LOCAL_INPUT_INVALID', 'LOCAL_OPTIONS_INVALID', 'COMMAND_INPUT_INVALID',
   'INPUT_TOO_LARGE', 'INPUT_UTF8_INVALID', 'INPUT_JSON_INVALID', 'INPUT_DUPLICATE_KEY', 'INPUT_INTERRUPTED', 'INPUT_TIMEOUT',
   'SESSION_INPUT_INVALID', 'SESSION_EXPECTATIONS_INVALID', 'SESSION_CERTIFICATE_INVALID']);
+for (const code of ['WINDOWS_INPUT_INVALID', 'WINDOWS_INPUT_UTF8', 'WINDOWS_INPUT_SIZE', 'WINDOWS_INPUT_TOO_LARGE', 'WINDOWS_INPUT_EXPECTATIONS', 'WINDOWS_INPUT_JSON']) inputErrors.add(code);
 const rejected = new Set(['LOCAL_APPROVAL_INVALID', 'LOCAL_APPROVAL_DENIED', 'LOCAL_APPROVAL_USED', 'LOCAL_APPROVAL_EXPIRED']);
 const contexts = new WeakMap(), inputs = new WeakMap(), approvals = new WeakMap(), receivers = new WeakMap(), tickets = new WeakMap();
+const privateInputs = new WeakMap(), privateApprovals = new WeakMap();
 const references = new Set();
 const then = Promise.prototype.then, aborted = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted').get;
 const byteLength = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'byteLength').get;
@@ -104,6 +109,25 @@ export function createSyntheticApprovalSource(options = {}) {
   const data = fields(options, ['request'], [], 'LOCAL_PORT_INVALID');
   const handle = opaque(); approvals.set(handle, data.request === undefined ? (_view, control) => control.reject() : callback(data.request)); return handle;
 }
+export function createWindowsPrivateInputPorts(options) {
+  const data = fields(options, ['adapter'], ['adapter'], 'LOCAL_PORT_INVALID');
+  claimWindowsPrivateInputAdapter(data.adapter);
+  const binding = { adapter: data.adapter, context: null, view: null, reference: null };
+  const inputSource = opaque(), approvalSource = opaque();
+  inputs.set(inputSource, () => readWindowsPrivateInput(binding.adapter)); privateInputs.set(inputSource, binding);
+  approvals.set(approvalSource, async (view, control) => {
+    if (!binding.context || binding.view !== view || binding.reference === null) throw fault('WINDOWS_INPUT_BINDING');
+    const viewBytes = Buffer.from(JSON.stringify(view)); let decision;
+    try { decision = await reviewWindowsPrivateInput(binding.adapter, { viewBytes, reference: binding.reference }); }
+    finally { viewBytes.fill(0); }
+    if (binding.view !== view) throw fault('WINDOWS_INPUT_BINDING');
+    if (decision === 'approve') return control.approve(view);
+    if (decision === 'reject') return control.reject(view);
+    if (decision === 'cancel') throw fault('COMMAND_CANCELLED');
+    throw fault('WINDOWS_INPUT_NO_DECISION');
+  }); privateApprovals.set(approvalSource, binding);
+  return Object.freeze({ inputSource, approvalSource });
+}
 export function createSyntheticEvidenceReceiver(options = {}) {
   const data = fields(options, ['reference', 'onPhase'], [], 'LOCAL_PORT_INVALID');
   const reference = data.reference === undefined ? `LOCAL_EVIDENCE_${++nextReference}` : data.reference;
@@ -134,16 +158,20 @@ export function createOfflineLocalBootstrap(options) {
   const data = fields(options, ['inputSource', 'approvalSource', 'evidenceReceiver', 'isTransportInstalled', 'options'],
     ['inputSource', 'approvalSource', 'evidenceReceiver', 'isTransportInstalled'], 'LOCAL_PORT_INVALID');
   if (!inputs.has(data.inputSource) || !approvals.has(data.approvalSource) || !receivers.has(data.evidenceReceiver)) throw fault('LOCAL_PORT_INVALID');
+  const binding = privateInputs.get(data.inputSource), approvalBinding = privateApprovals.get(data.approvalSource);
+  if ((binding || approvalBinding) && (!binding || binding !== approvalBinding || binding.context)) throw fault('WINDOWS_INPUT_BINDING');
   callback(data.isTransportInstalled);
   const selected = { approvalTimeoutMs: 30000, ioTimeoutMs: 5000,
     ...fields(data.options === undefined ? {} : data.options, ['approvalTimeoutMs', 'ioTimeoutMs'], [], 'LOCAL_OPTIONS_INVALID') };
   if (!Number.isSafeInteger(selected.approvalTimeoutMs) || selected.approvalTimeoutMs < 1 || selected.approvalTimeoutMs > 30000
     || !Number.isSafeInteger(selected.ioTimeoutMs) || selected.ioTimeoutMs < 1 || selected.ioTimeoutMs > 5000) throw fault('LOCAL_OPTIONS_INVALID');
-  const handle = opaque(); contexts.set(handle, Object.freeze({ ...data, options: Object.freeze(selected), state: { used: false }, locked: false })); return handle;
+  const handle = opaque(); contexts.set(handle, Object.freeze({ ...data, options: Object.freeze(selected), state: { used: false }, locked: false }));
+  if (binding) binding.context = handle;
+  return handle;
 }
 
 export async function runLocalBootstrap(handle, options = {}) {
-  let context, receiver, signal, subscription, nativeSubscription, cancel, mainExitCode = null, mainResult, firstError, approvalLive = false, issued = false;
+  let context, receiver, signal, subscription, nativeSubscription, privateSubscription, binding, cancel, mainExitCode = null, mainResult, firstError, approvalLive = false, issued = false;
   let finalized = false, approvalDeadline, material, observedMain = false, allRecords = false, ownsReceiver = false;
   const controller = new AbortController();
   const cancellation = new Promise((_, reject) => { cancel = reject; }); cancellation.catch(() => {});
@@ -222,12 +250,19 @@ export async function runLocalBootstrap(handle, options = {}) {
     if (state.used) throw fault('LOCAL_CONTEXT_USED');
     state.used = true;
     if (context.locked) throw fault('LIVE_EXECUTION_LOCKED');
+    binding = privateInputs.get(context.inputSource);
+    if (binding && binding.context !== handle) throw fault('WINDOWS_INPUT_BINDING');
     ({ signal } = fields(options, ['signal'], [], 'LOCAL_OPTIONS_INVALID')); signalValid(signal);
     if (signal) {
       if (typeof addAbortListener !== 'function' || typeof Symbol.dispose !== 'symbol') throw fault('LOCAL_FAILURE');
       subscription = addAbortListener(signal, () => stop(fault('COMMAND_CANCELLED')));
     }
     ensure(); transport();
+    if (binding) {
+      privateSubscription = addAbortListener(windowsPrivateInputFailureSignal(binding.adapter), () => {
+        stop(fault(inspectWindowsPrivateInputAdapter(binding.adapter).failureCode));
+      });
+    }
     receiver = receivers.get(context.evidenceReceiver);
     if (receiver.opened) throw fault('LOCAL_EVIDENCE_EXISTS');
     material = await step(inputs.get(context.inputSource), [], snapshot, context.options.ioTimeoutMs, 'LOCAL_IO_TIMEOUT');
@@ -238,6 +273,7 @@ export async function runLocalBootstrap(handle, options = {}) {
     if (receiver.native) nativeSubscription = addAbortListener(windowsEvidenceFailureSignal(receiver.native), () => stop(fault('LOCAL_EVIDENCE_FAILURE')));
     await phase('open'); receiver.ready = true;
     ensure(); transport();
+    if (binding) { binding.view = material.view; binding.reference = receiver.reference; }
     approvalLive = true; approvalDeadline = performance.now() + context.options.approvalTimeoutMs;
     const decide = decision => candidate => {
       if (finalized) throw fault('LOCAL_APPROVAL_EXPIRED');
@@ -296,11 +332,18 @@ export async function runLocalBootstrap(handle, options = {}) {
   } catch (error) { stop(error); }
   finally {
     approvalLive = false; controller.abort();
+    if (binding) {
+      // The private helper owns a bounded close/exit deadline. Business I/O
+      // timeouts must not let this function return before that cleanup settles.
+      try { await closeWindowsPrivateInput(binding.adapter); } catch (error) { trip(error); }
+      binding.view = null; binding.reference = null;
+    }
     if (ownsReceiver && !receiver.closed) {
       try { await phase('close', undefined, true); receiver.closed = true; } catch (error) { trip(error); }
     }
     if (subscription) { try { subscription[Symbol.dispose](); } catch (error) { trip(error); } }
     if (nativeSubscription) { try { nativeSubscription[Symbol.dispose](); } catch (error) { trip(error); } }
+    if (privateSubscription) { try { privateSubscription[Symbol.dispose](); } catch (error) { trip(error); } }
     finalized = true;
     if (ownsReceiver) receiver.incomplete = !(allRecords && receiver.sealed && receiver.closed);
   }

@@ -61,11 +61,37 @@ async function writeLine(sink, value, watcher) {
   try {
     if (!sink || typeof sink.write !== 'function' || watcher.failed()) return false;
     const pending = new Promise((resolve, reject) => {
-      let settled = false;
-      const done = error => { if (settled) return; settled = true; error ? reject(error) : resolve(); };
-      let returned;
-      try { returned = sink.write(value, done); } catch { done(fault('COMMAND_OUTPUT_FAILED')); return; }
-      if (returned && typeof returned.then === 'function') returned.then(() => done(), () => done(fault('COMMAND_OUTPUT_FAILED')));
+      let settled = false, invoking = true, callbackSeen = false, callbackError;
+      let hasPromise = false, promiseDone = false, promiseFailed = false;
+      const finish = () => {
+        if (settled || invoking) return;
+        if (callbackError || promiseFailed) { settled = true; reject(fault('COMMAND_OUTPUT_FAILED')); }
+        else if (hasPromise ? promiseDone : callbackSeen) { settled = true; resolve(); }
+      };
+      const done = error => {
+        callbackSeen = true;
+        if (error && !callbackError) callbackError = error;
+        finish();
+      };
+      try {
+        const returned = sink.write(value, done);
+        const then = returned?.then;
+        if (typeof then === 'function') {
+          hasPromise = true;
+          Reflect.apply(then, returned, [
+            () => { promiseDone = true; finish(); },
+            () => { promiseFailed = true; finish(); },
+          ]);
+        }
+      } catch {
+        settled = true;
+        reject(fault('COMMAND_OUTPUT_FAILED'));
+        return;
+      }
+      // A synchronous callback is provisional until write/then registration
+      // returns normally. An observed throw must dominate that earlier signal.
+      invoking = false;
+      finish();
       // Arity cannot tell whether a writer supports callbacks. Await the
       // callback/promise, with a fixed deadline even for a broken sink.
     });

@@ -136,6 +136,52 @@ describe('face-readonly CLI bounded parsing and hard production lock', { concurr
     assertNoTransport(result);
   });
 
+  test('help synchronous success callback with a normal return still succeeds without stdin or transport', async () => {
+    const result = await child({ scenario: 'help-sync-callback-return' });
+    assertEnvelope(result, { exitCode: 0, help: true });
+    assert.equal(result.report.counters.inputReads, 0);
+    assert.equal(result.report.counters.stdoutWrites, 1);
+    assert.equal(result.report.counters.stderrWrites, 0);
+    assert.equal(result.report.network.runnerCalls, 0);
+    assertNoTransport(result);
+  });
+
+  test('help promise-only fulfillment still succeeds without stdin or transport', async () => {
+    const result = await child({ scenario: 'help-promise-only-fulfill' });
+    assertEnvelope(result, { exitCode: 0, help: true });
+    assert.equal(result.report.counters.inputReads, 0);
+    assert.equal(result.report.counters.stdoutWrites, 1);
+    assert.equal(result.report.counters.stderrWrites, 0);
+    assert.equal(result.report.network.runnerCalls, 0);
+    assertNoTransport(result);
+  });
+
+  test('help synchronous success callback followed by delayed returned promise rejection stops without stdin or transport', async () => {
+    const result = await child({ scenario: 'help-sync-callback-promise-reject-undefined' });
+    assert.equal(result.exitCode, 5);
+    assert.equal(result.stderr, 'COMMAND_OUTPUT_FAILED\n');
+    assert.equal(singleLine(result.stdout).outcome, 'help');
+    assert.equal(result.report.counters.inputReads, 0);
+    assert.equal(result.report.counters.stdoutWrites, 1);
+    assert.equal(result.report.counters.stderrWrites, 1);
+    assert.equal(result.report.network.runnerCalls, 0);
+    assertNoTransport(result);
+  });
+
+  test('help synchronous success callback followed by throw stops without stdin or transport', async () => {
+    for (const scenario of ['help-sync-callback-throw-error', 'help-sync-callback-throw-null', 'help-sync-callback-throw-undefined']) {
+      const result = await child({ scenario });
+      assert.equal(result.exitCode, 5, scenario);
+      assert.equal(result.stderr, 'COMMAND_OUTPUT_FAILED\n', scenario);
+      assert.equal(singleLine(result.stdout).outcome, 'help');
+      assert.equal(result.report.counters.inputReads, 0);
+      assert.equal(result.report.counters.stdoutWrites, 1);
+      assert.equal(result.report.counters.stderrWrites, 1);
+      assert.equal(result.report.network.runnerCalls, 0);
+      assertNoTransport(result);
+    }
+  });
+
   test('unknown flags are rejected before stdin and never echoed', async () => {
     const result = await child({ scenario: 'arguments-poison' });
     assertEnvelope(result, { exitCode: 2, code: 'UNSUPPORTED_ARGUMENTS' });
@@ -423,6 +469,25 @@ describe('face-readonly CLI synthetic child integration through the real Host an
     assert.equal(result.stdout, '');
     assert.equal(result.stderr, 'COMMAND_OUTPUT_FAILED\n');
     assert.equal(result.report.counters.stdoutWrites, 1);
+  });
+
+  test('completed real Host and SDK stdout synchronous success callback followed by throw stops after exactly 15 requests', async () => {
+    for (const scenario of ['stdout-sync-callback-throw-error', 'stdout-sync-callback-throw-null', 'stdout-sync-callback-throw-undefined']) {
+      const result = await child({ scenario });
+      assert.equal(result.exitCode, 5, scenario);
+      assert.equal(result.stderr, 'COMMAND_OUTPUT_FAILED\n', scenario);
+      const output = singleLine(result.stdout);
+      assert.equal(output.outcome, 'synthetic-readonly-completed');
+      assert.equal(output.complete, true);
+      assert.equal(output.readonly.logicalRequests, 15);
+      assert.equal(result.report.counters.stdoutWrites, 1);
+      assert.equal(result.report.counters.stderrWrites, 1);
+      assert.equal(result.report.network.httpRequests, 15);
+      assert.equal(result.report.network.httpsCalls, 15);
+      assert.equal(result.report.network.tlsConnections, 15);
+      assert.equal(result.report.network.requests.length, 15);
+      assert.equal(result.report.network.allSocketsDestroyed, true);
+    }
   });
 
   test('a stderr write failure returns a stopped result and never retries the broken stream', async () => {

@@ -5,6 +5,10 @@ import { MAX_INPUT_BYTES, parseReadonlyInput, createControlledReadonlyRunner } f
 import { prepareReadonlySession, reviewReadonlySession, authorizeReadonlySession, SESSION_CODES } from './face-readonly-session.mjs';
 import { READONLY_POLICY_CODES } from './face-readonly-policy.mjs';
 import { main } from '../face-readonly.mjs';
+import { randomUUID } from 'node:crypto';
+import { createWindowsEvidenceStore, openWindowsEvidenceStore, checkWindowsEvidenceStore,
+  writeWindowsEvidenceStore, sealWindowsEvidenceStore, closeWindowsEvidenceStore,
+  inspectWindowsEvidenceStore, windowsEvidenceFailureSignal } from './face-readonly-windows-evidence.mjs';
 
 // Code-only synthetic ports. These brands are not human authentication or a
 // sandbox for arbitrary trusted JavaScript. The executable never installs them.
@@ -107,11 +111,24 @@ export function createSyntheticEvidenceReceiver(options = {}) {
   const handle = opaque(); receivers.set(handle, { reference, publicReference: undefined, hook: data.onPhase === undefined ? () => undefined : callback(data.onPhase),
     opened: false, ready: false, sealed: false, closed: false, incomplete: false, records: [], phases: [] }); return handle;
 }
+export function createWindowsEvidenceReceiver(options) {
+  const data = fields(options, ['baseDirectory', 'reference'], ['baseDirectory'], 'LOCAL_PORT_INVALID');
+  const reference = data.reference === undefined ? `WINDOWS_EVIDENCE_${randomUUID().replaceAll('-', '')}` : data.reference;
+  let native;
+  try { native = createWindowsEvidenceStore({ baseDirectory: data.baseDirectory, reference }); }
+  catch { throw fault('LOCAL_EVIDENCE_INVALID'); }
+  const handle = opaque(); receivers.set(handle, { reference, publicReference: undefined, native,
+    opened: false, ready: false, sealed: false, closed: false, incomplete: false, records: [], phases: [] }); return handle;
+}
 export function inspectSyntheticEvidenceReceiver(handle) {
   const state = receivers.get(handle); if (!state) throw fault('LOCAL_PORT_INVALID');
   return structuredClone({ ...(state.publicReference === undefined ? {} : { reference: state.publicReference }),
     opened: state.opened, ready: state.ready, sealed: state.sealed, closed: state.closed, incomplete: state.incomplete,
     records: state.records, phases: state.phases });
+}
+export function inspectWindowsEvidenceReceiver(handle) {
+  const state = receivers.get(handle); if (!state?.native) throw fault('LOCAL_PORT_INVALID');
+  return { ...inspectSyntheticEvidenceReceiver(handle), native: inspectWindowsEvidenceStore(state.native) };
 }
 export function createOfflineLocalBootstrap(options) {
   const data = fields(options, ['inputSource', 'approvalSource', 'evidenceReceiver', 'isTransportInstalled', 'options'],
@@ -126,7 +143,7 @@ export function createOfflineLocalBootstrap(options) {
 }
 
 export async function runLocalBootstrap(handle, options = {}) {
-  let context, receiver, signal, subscription, cancel, mainExitCode = null, mainResult, firstError, approvalLive = false, issued = false;
+  let context, receiver, signal, subscription, nativeSubscription, cancel, mainExitCode = null, mainResult, firstError, approvalLive = false, issued = false;
   let finalized = false, approvalDeadline, material, observedMain = false, allRecords = false, ownsReceiver = false;
   const controller = new AbortController();
   const cancellation = new Promise((_, reject) => { cancel = reject; }); cancellation.catch(() => {});
@@ -170,10 +187,18 @@ export async function runLocalBootstrap(handle, options = {}) {
       } catch (error) { fail(error); }
     });
   }
-  async function phase(name, role, finishing = false) {
+  async function phase(name, role, finishing = false, text) {
     const item = Object.freeze({ phase: name, ...(role === undefined ? {} : { role }), reference: receiver.reference });
     receiver.phases.push({ phase: name, ...(role === undefined ? {} : { role }) });
-    await step(receiver.hook, [item], value => { if (value !== undefined) throw fault('LOCAL_EVIDENCE_INVALID'); },
+    const action = receiver.native ? () => {
+      if (name === 'open') return openWindowsEvidenceStore(receiver.native);
+      if (name === 'check') return checkWindowsEvidenceStore(receiver.native);
+      if (name === 'write') return writeWindowsEvidenceStore(receiver.native, role, text);
+      if (name === 'seal') return sealWindowsEvidenceStore(receiver.native);
+      if (name === 'close') return closeWindowsEvidenceStore(receiver.native);
+      throw fault('LOCAL_EVIDENCE_INVALID');
+    } : receiver.hook;
+    await step(action, [item], value => { if (value !== undefined) throw fault('LOCAL_EVIDENCE_INVALID'); },
       context.options.ioTimeoutMs, 'LOCAL_IO_TIMEOUT', { finishing, errorCode: 'LOCAL_EVIDENCE_FAILURE' });
   }
   const snapshot = value => {
@@ -210,6 +235,7 @@ export async function runLocalBootstrap(handle, options = {}) {
     if (receiver.opened || references.has(receiver.reference)) throw fault('LOCAL_EVIDENCE_EXISTS');
     if (secretIn(receiver.reference, material.secrets)) throw fault('LOCAL_EVIDENCE_REFERENCE');
     references.add(receiver.reference); receiver.opened = true; ownsReceiver = true; receiver.publicReference = receiver.reference;
+    if (receiver.native) nativeSubscription = addAbortListener(windowsEvidenceFailureSignal(receiver.native), () => stop(fault('LOCAL_EVIDENCE_FAILURE')));
     await phase('open'); receiver.ready = true;
     ensure(); transport();
     approvalLive = true; approvalDeadline = performance.now() + context.options.approvalTimeoutMs;
@@ -230,6 +256,7 @@ export async function runLocalBootstrap(handle, options = {}) {
     }, context.options.approvalTimeoutMs, 'LOCAL_APPROVAL_TIMEOUT');
     approvalLive = false; ensure(); transport();
     if (tickets.get(ticket).decision !== 'approve') throw fault('LOCAL_APPROVAL_DENIED');
+    if (receiver.native) { await phase('check'); ensure(); transport(); }
     const authorization = authorizeReadonlySession(material.session, material.view);
     const runner = await createControlledReadonlyRunner({ session: material.session, authorization });
     ensure(); transport();
@@ -263,7 +290,7 @@ export async function runLocalBootstrap(handle, options = {}) {
     observedMain = true;
     for (const [role, text] of [['stdout', stdout], ['stderr', stderr], ['main-exit', `${mainExitCode}\n`]]) {
       if (receiver.records.some(record => record.role === role)) throw fault('LOCAL_EVIDENCE_EXISTS');
-      await phase('write', role, true); receiver.records.push({ role, text });
+      await phase('write', role, true, text); receiver.records.push({ role, text });
     }
     await phase('seal', undefined, true); receiver.sealed = true; allRecords = true;
   } catch (error) { stop(error); }
@@ -273,6 +300,7 @@ export async function runLocalBootstrap(handle, options = {}) {
       try { await phase('close', undefined, true); receiver.closed = true; } catch (error) { trip(error); }
     }
     if (subscription) { try { subscription[Symbol.dispose](); } catch (error) { trip(error); } }
+    if (nativeSubscription) { try { nativeSubscription[Symbol.dispose](); } catch (error) { trip(error); } }
     finalized = true;
     if (ownsReceiver) receiver.incomplete = !(allRecords && receiver.sealed && receiver.closed);
   }

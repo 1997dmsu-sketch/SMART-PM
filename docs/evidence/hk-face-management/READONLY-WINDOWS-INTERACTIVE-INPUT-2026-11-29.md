@@ -20,13 +20,13 @@
 
 真实输入表单计时 240000ms，Node capture 与 bootstrap 独立预算 250000ms；确认页计时 25000ms，原有 approval 总上限 30000ms。合成控件模式沿用短 I/O/请求预算。close 仍有 2000ms ACK＋1500ms退出等待，finally 不被业务短 I/O 超时截断。异常环境若未观察到退出，不保证进程必已结束，也不把空 processExit 写为 0。
 
-本次 60 项实际驱动同套 Windows Forms 控件与 Click/CheckedChanged/关闭路径，使用隐藏的合成窗口及明确白名单动作；不是单独解码 helper 或仅 JS 假批准对象。它仍然是程序驱动，不是现场真人输入、阅读、点击或 Windows 身份认证的证据。
+新增 60 项测试中，仅交互用例实际驱动同套 Windows Forms 控件与 Click/CheckedChanged/关闭路径；工厂/品牌等用例不启动采集。交互用例使用隐藏的合成窗口及明确白名单动作，不是单独解码 helper 或仅 JS 假批准对象；它们仍然是程序驱动，不是现场真人输入、阅读、点击或 Windows 身份认证的证据。
 
 ## 实测计数及首次结果
 
 | 阶段 | tests/pass/fail/skipped | 退出码 | 说明 |
 | --- | --- | --- | --- |
-| 新增定向 | 60/60/0/0 | 0 | Windows Forms 合成控件实际执行 |
+| 新增定向 | 60/60/0/0 | 0 | 包含工厂/品牌等非交互用例及合成控件交互用例 |
 | admin-final | 918/918/0/0 | 0 | 实际完成 |
 | tenant-final | 6/6/0/0 | 0 | 实际完成 |
 | root-final | 297/297/0/0 | 0 | 实际完成 |
